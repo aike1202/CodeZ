@@ -34,12 +34,6 @@ export const IPC_CHANNELS = {
   SESSION_SAVE: 'session:save',
   SESSION_DELETE: 'session:delete',
 
-  // Project Memory
-  PROJECT_MEMORY_GET: 'project-memory:get',
-  PROJECT_MEMORY_LIST: 'project-memory:list',
-  PROJECT_MEMORY_CREATE: 'project-memory:create',
-  PROJECT_MEMORY_SAVE: 'project-memory:save',
-  PROJECT_MEMORY_DELETE: 'project-memory:delete',
 
   // Tasks
   TASK_GET_BY_PROJECT: 'task:get-by-project',

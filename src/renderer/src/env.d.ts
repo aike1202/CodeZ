@@ -54,13 +54,7 @@ declare global {
         onOutput: (callback: (workspaceId: string, data: string) => void) => () => void
         onExit: (callback: (workspaceId: string) => void) => () => void
       }
-      projectMemory: {
-        get: (rootPath: string) => Promise<{ path: string; content: string } | null>
-        list: (rootPath: string) => Promise<Array<{name: string, path: string}>>
-        create: (rootPath: string, filename: string) => Promise<string | null>
-        save: (rootPath: string, filePath: string, content: string) => Promise<void>
-        delete: (rootPath: string, filePath: string) => Promise<void>
-      }
+
       task: {
         list: (workspaceId: string) => Promise<any>
         get: (taskId: string) => Promise<any>

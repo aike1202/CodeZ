@@ -33,7 +33,6 @@ export interface ChatAreaProps {
   handleSendMessage: (message: string, modelName: string) => Promise<void>
   handleOpenRecentProject: (project: any) => Promise<void>
   setCurrentView: (view: 'home' | 'chat' | 'settings') => void
-  onOpenProjectMemory?: () => void
 }
 
 export default function ChatArea({
@@ -51,8 +50,7 @@ export default function ChatArea({
   handleDiffClick,
   handleSendMessage,
   handleOpenRecentProject,
-  setCurrentView,
-  onOpenProjectMemory
+  setCurrentView
 }: ChatAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const prevSessionIdRef = useRef<string | null>(null)
@@ -260,7 +258,6 @@ export default function ChatArea({
         <PromptArea
           onSend={handleSendMessage}
           placeholder={activeSessionId ? "随心输入..." : "开始新的对话..."}
-          onOpenProjectMemory={onOpenProjectMemory}
           onOpenSettings={() => setCurrentView('settings')}
           workspace={workspace}
         />

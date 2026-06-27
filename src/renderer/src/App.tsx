@@ -10,7 +10,6 @@ import TaskHistoryModal from './components/modals/TaskHistoryModal'
 import Flex from './components/ui/Flex'
 import Stack from './components/ui/Stack'
 import FilePreviewPanel from './components/FilePreviewPanel'
-import ProjectMemoryPanel from './components/ProjectMemoryPanel'
 import ChatArea from './components/chat/ChatArea'
 import { parseSlashCommand } from './commands/SlashCommandParser'
 import './styles.css'
@@ -199,13 +198,6 @@ export default function App(): React.ReactElement {
     }
   }, [recentProjects])
 
-  /* ---------- open project memory ---------- */
-  const handleOpenProjectMemory = useCallback(async () => {
-    setProjectMemoryPanelOpen(true)
-    setPreviewPath(null)
-    setPreviewDiff(null)
-  }, [])
-
   /* ---------- select a session ---------- */
   const handleSelectSession = useCallback((sessionId: string) => {
     if (sessionId.endsWith('__new')) {
@@ -285,23 +277,12 @@ export default function App(): React.ReactElement {
       // 获取模型名
       const model = modelName || activeProv.models[0]?.name || 'gpt-4o'
 
-      // 加载项目记忆
-      let projectMemorySystemPrompt = ''
-      try {
-        const memory = await window.api.projectMemory.get(ws.rootPath)
-        if (memory && memory.content && memory.content.trim() !== '') {
-          projectMemorySystemPrompt = `\n\n${memory.content}\n\n请在开发或回答问题时严格遵循上述已有的项目约束和偏好。`
-        }
-      } catch (e) {
-        console.warn('Failed to load project memory', e)
-      }
-
       // 构建消息历史
       const currentMsgs = useChatStore.getState().messages
       const chatMessages: Array<any> = [
         {
           role: 'system',
-          content: `你是一个 AI 编程助手，运行在 MyAgent 桌面应用中。当前项目: ${ws.name}（${ws.projectType}）。请用中文回复，保持简洁专业。${projectMemorySystemPrompt}`
+          content: `你是一个 AI 编程助手，运行在 MyAgent 桌面应用中。当前项目: ${ws.name}（${ws.projectType}）。请用中文回复，保持简洁专业。`
         },
         ...currentMsgs
           .filter((m) => !m.streaming) // 排除正在流式接收的消息
@@ -418,9 +399,8 @@ export default function App(): React.ReactElement {
 
   // 模态框状态
   const [taskModalOpen, setTaskModalOpen] = useState(false)
-  const [projectMemoryPanelOpen, setProjectMemoryPanelOpen] = useState(false)
 
-  const panelOpen = previewPath !== null || previewDiff !== null || projectMemoryPanelOpen
+  const panelOpen = previewPath !== null || previewDiff !== null
 
   // 当 workspace 变动且为空时，关闭终端窗口
   useEffect(() => {
@@ -609,34 +589,24 @@ export default function App(): React.ReactElement {
             handleSendMessage={handleSendMessage}
             handleOpenRecentProject={handleOpenRecentProject}
             setCurrentView={setCurrentView}
-            onOpenProjectMemory={handleOpenProjectMemory}
           />
 
           {/* 右侧文件与 Diff 预览面板 */}
           {panelOpen && (
-            projectMemoryPanelOpen ? (
-              <ProjectMemoryPanel
-                workspace={workspace}
-                panelWidth={previewPanelWidth}
-                onMouseDownResize={handlePreviewMouseDown}
-                onClose={() => setProjectMemoryPanelOpen(false)}
-              />
-            ) : (
-              <FilePreviewPanel
-                previewPath={previewPath}
-                previewDiff={previewDiff}
-                previewLoading={previewLoading}
-                previewContent={previewContent}
-                messages={messages}
-                previewPanelWidth={previewPanelWidth}
-                onMouseDownResize={handlePreviewMouseDown}
-                onClose={() => {
-                  setPreviewPath(null)
-                  setPreviewDiff(null)
-                }}
-                onFileClick={handleFileClick}
-              />
-            )
+            <FilePreviewPanel
+              previewPath={previewPath}
+              previewDiff={previewDiff}
+              previewLoading={previewLoading}
+              previewContent={previewContent}
+              messages={messages}
+              previewPanelWidth={previewPanelWidth}
+              onMouseDownResize={handlePreviewMouseDown}
+              onClose={() => {
+                setPreviewPath(null)
+                setPreviewDiff(null)
+              }}
+              onFileClick={handleFileClick}
+            />
           )}
 
         </Flex>

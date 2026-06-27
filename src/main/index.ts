@@ -6,7 +6,6 @@ import { registerProviderIpc } from './ipc/provider.handlers'
 import { registerChatIpc } from './ipc/chat.handlers'
 import { registerSessionIpc } from './ipc/session.handlers'
 import { registerTerminalIpc } from './ipc/terminal.handlers'
-import { registerProjectMemoryIpc } from './ipc/project-memory.handlers'
 import { registerTaskIpc } from './ipc/task.handlers'
 import { TerminalService } from './services/TerminalService'
 
@@ -75,7 +74,6 @@ app.whenReady().then(() => {
   registerChatIpc()
   registerSessionIpc()
   registerTerminalIpc()
-  registerProjectMemoryIpc()
   registerTaskIpc()
 
   // 监听来自前端渲染进程的自定义标题栏指令

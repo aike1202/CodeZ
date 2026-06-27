@@ -38,6 +38,3 @@ export type {
   SessionData
 } from './session'
 
-export type {
-  ProjectMemory
-} from './project-memory'

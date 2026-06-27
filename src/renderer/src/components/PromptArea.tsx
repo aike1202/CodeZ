@@ -20,11 +20,10 @@ interface PromptAreaProps {
   onSend: (message: string, modelName: string) => void
   placeholder?: string
   onOpenSettings?: () => void
-  onOpenProjectMemory?: () => void
   workspace?: WorkspaceInfo | null
 }
 
-export default function PromptArea({ onSend, placeholder, onOpenSettings, onOpenProjectMemory, workspace }: PromptAreaProps): React.ReactElement {
+export default function PromptArea({ onSend, placeholder, onOpenSettings, workspace }: PromptAreaProps): React.ReactElement {
   const [text, setText] = useState('')
   const [dropdownOpen, setDropdownOpen] = useState(false)
 
@@ -133,11 +132,6 @@ export default function PromptArea({ onSend, placeholder, onOpenSettings, onOpen
           <Stack gap={2}>
             {/* 输入框上方的功能扩展栏 */}
             <Flex align="center" gap={3} className="prompt-top-toolbar">
-              {onOpenProjectMemory && (
-                <Button variant="ghost" size="none" onClick={() => onOpenProjectMemory()} title="项目记忆" className="text-gray-500 hover:text-gray-800 flex items-center gap-1 text-xs px-2 py-1 rounded">
-                  <IconGear /> <span>项目记忆</span>
-                </Button>
-              )}
             </Flex>
 
             <textarea

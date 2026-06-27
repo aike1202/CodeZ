@@ -150,18 +150,7 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.SESSION_DELETE, sessionId)
   },
 
-  projectMemory: {
-    get: (rootPath: string): Promise<{ path: string; content: string } | null> =>
-      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_MEMORY_GET, rootPath),
-    list: (rootPath: string): Promise<Array<{name: string, path: string}>> =>
-      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_MEMORY_LIST, rootPath),
-    create: (rootPath: string, filename: string): Promise<string | null> =>
-      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_MEMORY_CREATE, rootPath, filename),
-    save: (rootPath: string, filePath: string, content: string): Promise<void> =>
-      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_MEMORY_SAVE, rootPath, filePath, content),
-    delete: (rootPath: string, filePath: string): Promise<void> =>
-      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_MEMORY_DELETE, rootPath, filePath)
-  },
+
 
   task: {
     getByProject: (projectId: string): Promise<any[]> =>
