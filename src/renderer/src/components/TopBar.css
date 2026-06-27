@@ -1,0 +1,100 @@
+/* TopBar styles isolation */
+
+.topbar-ide-separator {
+  height: 12px;
+  width: 1px;
+  background-color: var(--border-light, #e5e7eb);
+  margin: 0 4px;
+}
+
+.topbar-ide-dropdown-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted, #9ca3af);
+  transition: color 0.2s ease;
+  border: none;
+  background: transparent;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.topbar-ide-dropdown-btn:hover {
+  color: var(--primary, #3b82f6);
+}
+
+.topbar-ide-dropdown-arrow {
+  font-size: 10px;
+}
+
+.topbar-ide-dropdown-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 998;
+}
+
+.topbar-ide-dropdown-card {
+  position: absolute;
+  left: 0;
+  top: 110%;
+  width: 192px; /* w-48 */
+  padding: 6px 0;
+  z-index: 999;
+  font-size: 14px;
+  color: var(--text-main, #374151);
+  font-family: var(--font-sans, system-ui, sans-serif);
+}
+
+.topbar-ide-dropdown-title {
+  padding: 4px 12px;
+  font-size: 11px;
+  color: var(--text-muted, #9ca3af);
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border-light, #f9fafb);
+  margin-bottom: 4px;
+}
+
+.topbar-ide-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.topbar-ide-item:hover {
+  background-color: var(--bg-hover, #f9fafb);
+}
+
+.topbar-ide-item.selected {
+  color: var(--primary, #3b82f6);
+  font-weight: 600;
+  background-color: rgba(59, 130, 246, 0.05);
+}
+
+.topbar-ide-check {
+  font-size: 12px;
+  color: var(--primary, #3b82f6);
+  font-weight: 700;
+}
+
+.topbar-action-btn-active {
+  background-color: var(--bg-active, #dbeafe) !important;
+  color: var(--primary, #1d4ed8) !important;
+}
+
+.topbar-action-btn-active:hover {
+  background-color: var(--bg-active-hover, #bfdbfe) !important;
+}
+
+.topbar-action-btn-normal {
+  color: var(--text-muted, #4b5563);
+}
+
+.topbar-action-btn-normal:hover {
+  background-color: var(--bg-hover, #f3f4f6);
+}
+
+.topbar-window-control-close-btn:hover {
+  background-color: #ef4444 !important;
+  color: #ffffff !important;
+}

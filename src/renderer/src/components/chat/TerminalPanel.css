@@ -1,0 +1,226 @@
+/* TerminalPanel.css */
+
+.terminal-panel {
+  background-color: #f8f9fa;
+  border-top: 1px solid #e5e7eb; /* border-gray-200 */
+  box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06); /* shadow-inner */
+  position: relative;
+  user-select: text;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-drag-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  cursor: row-resize;
+  z-index: 30;
+  transition: background-color 0.2s;
+}
+
+.terminal-drag-bar:hover {
+  background-color: rgba(59, 130, 246, 0.8); /* hover:bg-blue-500/80 */
+}
+
+.terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 16px;
+  background-color: #f0f2f5;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 11px;
+  color: #6b7280; /* text-gray-500 */
+  user-select: none;
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+.terminal-header-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.terminal-header-title {
+  font-weight: bold;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #9ca3af; /* text-gray-400 */
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+.terminal-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  padding-right: 8px;
+  border-right: 1px solid #d1d5db; /* border-gray-300 */
+  max-width: 400px;
+}
+
+.terminal-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+  max-width: 120px;
+  flex-shrink: 0;
+  color: #6b7280;
+}
+
+.terminal-tab:hover {
+  background-color: #e5e7eb; /* hover:bg-gray-200 */
+}
+
+.terminal-tab--active {
+  background-color: #ffffff;
+  color: #1f2937; /* text-gray-800 */
+  font-weight: 500;
+  border: 1px solid #d1d5db;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); /* shadow-sm */
+}
+
+.terminal-tab-close-btn {
+  padding: 2px;
+  border-radius: 9999px;
+  color: #9ca3af;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.terminal-tab-close-btn:hover {
+  background-color: #d1d5db; /* hover:bg-gray-300 */
+  color: #374151; /* hover:text-gray-700 */
+}
+
+.terminal-add-tab-btn {
+  padding: 4px;
+  border-radius: 4px;
+  color: #4b5563; /* text-gray-600 */
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+  flex-shrink: 0;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.terminal-add-tab-btn:hover {
+  background-color: #e5e7eb; /* hover:bg-gray-200 */
+  color: #111827; /* hover:text-gray-800 */
+}
+
+.terminal-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  margin-left: 16px;
+}
+
+.terminal-action-btn {
+  color: #6b7280;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.terminal-action-btn:hover {
+  color: #111827; /* hover:text-gray-800 */
+}
+
+.terminal-close-panel-btn {
+  color: #9ca3af;
+  font-weight: bold;
+  cursor: pointer;
+  transition: color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.terminal-close-panel-btn:hover {
+  color: #ef4444; /* hover:text-red-600 */
+}
+
+.terminal-instances-container {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  height: 100%;
+}
+
+.terminal-instance-mount {
+  height: 100%;
+  width: 100%;
+  padding: 8px;
+  text-align: left;
+}
+
+.terminal-instance-mount.block {
+  display: block;
+}
+
+.terminal-instance-mount.hidden {
+  display: none;
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .terminal-panel {
+    background-color: #1e1e1e;
+    border-top-color: #2d2d2d;
+  }
+  .terminal-header {
+    background-color: #252526;
+    border-bottom-color: #2d2d2d;
+    color: #a1a1aa;
+  }
+  .terminal-tab {
+    color: #a1a1aa;
+  }
+  .terminal-tab:hover {
+    background-color: #2d2d2d;
+  }
+  .terminal-tab--active {
+    background-color: #1e1e1e;
+    color: #e4e4e7;
+    border-color: #2d2d2d;
+  }
+  .terminal-tab-close-btn:hover {
+    background-color: #3f3f46;
+    color: #f4f4f5;
+  }
+  .terminal-add-tab-btn {
+    color: #a1a1aa;
+  }
+  .terminal-add-tab-btn:hover {
+    background-color: #2d2d2d;
+    color: #f4f4f5;
+  }
+  .terminal-action-btn {
+    color: #a1a1aa;
+  }
+  .terminal-action-btn:hover {
+    color: #e4e4e7;
+  }
+  .terminal-close-panel-btn:hover {
+    color: #f87171;
+  }
+}

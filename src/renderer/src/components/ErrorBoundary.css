@@ -1,0 +1,87 @@
+.error-boundary-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  width: 100%;
+  background-color: var(--bg-app-fallback, #f8f9fa);
+  padding: 24px;
+  font-family: var(--font-sans, system-ui, -apple-system, sans-serif);
+}
+
+.error-boundary-card {
+  max-width: 42rem;
+  width: 100%;
+  border: 1px solid var(--border-danger-light, #fee2e2);
+  padding: 32px;
+  box-shadow: var(--shadow-lg, 0 10px 15px -3px rgba(0, 0, 0, 0.1));
+}
+
+.error-boundary-header {
+  color: var(--text-danger, #ef4444);
+  margin-bottom: 16px;
+}
+
+.error-warning-icon {
+  width: 32px;
+  height: 32px;
+  margin-right: 12px;
+}
+
+.error-title {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.error-desc {
+  color: var(--text-muted, #4b5563);
+  margin-bottom: 24px;
+  font-size: 14.5px;
+  line-height: 1.625;
+}
+
+.error-details-box {
+  background-color: var(--bg-danger-light, #fef2f2);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 24px;
+  overflow-x: auto;
+  border: 1px solid var(--border-danger-light, #fee2e2);
+}
+
+.error-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-danger-dark, #991b1b);
+  margin-bottom: 8px;
+}
+
+.error-message {
+  font-size: 14px;
+  color: var(--text-danger, #b91c1c);
+  word-break: break-all;
+  white-space: pre-wrap;
+  font-family: var(--font-mono, monospace);
+}
+
+.error-stack-wrapper {
+  margin-top: 16px;
+}
+
+.error-stack-trace {
+  font-size: 12px;
+  color: var(--text-danger-muted, #be123c);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  line-height: 1.625;
+  margin: 0;
+  font-family: var(--font-mono, monospace);
+}
+
+.error-reload-btn {
+  padding: 8px 24px;
+  border-radius: 8px;
+  font-weight: 500;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}

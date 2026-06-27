@@ -1,0 +1,361 @@
+.sidebar-container {
+  flex-shrink: 0;
+  height: 100vh;
+  background-color: var(--bg-sidebar, #f8f9fa);
+  border-right: 1px solid var(--border-light, #e5e7eb);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  font-size: 14px;
+  color: var(--text-main, #1f2937);
+  font-family: var(--font-sans, system-ui, sans-serif);
+  position: relative;
+}
+
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 10;
+  transition: background-color 0.2s ease;
+}
+
+.sidebar-resizer:hover {
+  background-color: var(--primary, #3b82f6);
+}
+
+.sidebar-resizer:active {
+  background-color: var(--primary-hover, #1d4ed8);
+}
+
+.sidebar-action-list {
+  padding: 12px;
+}
+
+.sidebar-action-btn {
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  color: var(--text-main, #374151);
+  display: block;
+}
+
+.sidebar-action-btn:hover {
+  background-color: var(--bg-hover, rgba(229, 231, 235, 0.5));
+}
+
+.sidebar-action-icon {
+  color: var(--text-muted, #6b7280);
+}
+
+.sidebar-project-section {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+  margin-top: 8px;
+}
+
+.sidebar-section-header {
+  padding: 0 12px;
+  margin-bottom: 8px;
+}
+
+.sidebar-section-title {
+  font-size: 12px;
+  color: var(--text-muted, #9ca3af);
+  font-weight: 500;
+  letter-spacing: 0.05em;
+}
+
+.sidebar-section-actions {
+  color: var(--text-muted, #9ca3af);
+  flex-shrink: 0;
+}
+
+.sidebar-empty-tip {
+  font-size: 12px;
+  color: var(--text-muted, #9ca3af);
+  padding: 16px 12px;
+  text-align: center;
+}
+
+.sidebar-project-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar-project-row {
+  position: relative;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.sidebar-project-row.active {
+  background-color: var(--bg-active, rgba(229, 231, 235, 0.8));
+  font-weight: 500;
+  color: var(--text-main, #111827);
+}
+
+.sidebar-project-row.inactive {
+  color: var(--text-muted, #4b5563);
+}
+
+.sidebar-project-row.inactive:hover {
+  background-color: var(--bg-hover, rgba(229, 231, 235, 0.5));
+}
+
+.sidebar-project-left {
+  overflow: hidden;
+  width: 100%;
+}
+
+.sidebar-project-chevron {
+  color: var(--text-muted, #9ca3af);
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.sidebar-project-folder {
+  color: var(--text-muted, #9ca3af);
+  flex-shrink: 0;
+}
+
+.sidebar-project-hover-actions {
+  padding-right: 4px;
+  position: absolute;
+  right: 4px;
+  padding-left: 8px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sidebar-project-row.active .sidebar-project-hover-actions {
+  opacity: 1;
+  background-color: var(--bg-active, rgba(229, 231, 235, 0.8));
+}
+
+.sidebar-project-row.inactive .sidebar-project-hover-actions {
+  opacity: 0;
+}
+
+.sidebar-project-row.inactive:hover .sidebar-project-hover-actions {
+  opacity: 1;
+  background-color: var(--bg-hover, #ebedef);
+}
+
+.sidebar-project-action-btn {
+  padding: 4px;
+  border-radius: 4px;
+  color: var(--text-muted, #6b7280);
+  transition: all 0.2s ease;
+}
+
+.sidebar-project-action-btn:hover {
+  background-color: var(--bg-hover-heavy, #d1d5db);
+  color: var(--text-main, #111827);
+}
+
+.sidebar-project-more-btn {
+  padding: 4px;
+  border-radius: 4px;
+  color: var(--text-muted, #6b7280);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.sidebar-project-more-btn:hover {
+  background-color: var(--bg-hover-heavy, #d1d5db);
+  color: var(--text-main, #111827);
+}
+
+.sidebar-sessions-container {
+  margin-left: 16px;
+  border-left: 1px solid var(--border-light, rgba(229, 231, 235, 0.7));
+}
+
+.sidebar-session-item {
+  position: relative;
+  padding: 6px 4px 6px 20px;
+  font-size: 13px;
+  cursor: pointer;
+  border-top-right-radius: 6px;
+  border-bottom-right-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.sidebar-session-item.active {
+  background-color: var(--bg-active, rgba(229, 231, 235, 0.8));
+  color: var(--text-main, #111827);
+  font-weight: 500;
+}
+
+.sidebar-session-item.inactive {
+  color: var(--text-muted, #6b7280);
+}
+
+.sidebar-session-item.inactive:hover {
+  background-color: var(--bg-hover-light, rgba(229, 231, 235, 0.4));
+  color: var(--text-main, #374151);
+}
+
+.sidebar-session-icon {
+  color: var(--text-muted, #9ca3af);
+  flex-shrink: 0;
+}
+
+.sidebar-session-summary {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-session-time {
+  font-size: 11px;
+  color: var(--text-muted, #9ca3af);
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
+.sidebar-session-actions-box {
+  display: none;
+  margin-left: 4px;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.sidebar-session-item:hover .sidebar-session-actions-box {
+  display: flex;
+}
+
+.sidebar-session-action-btn-archive {
+  padding: 4px;
+  border-radius: 4px;
+  color: var(--text-muted, #6b7280);
+  transition: all 0.2s ease;
+}
+
+.sidebar-session-action-btn-archive:hover {
+  background-color: var(--bg-hover-heavy, #d1d5db);
+  color: var(--text-main, #111827);
+}
+
+.sidebar-session-action-btn-delete {
+  padding: 4px;
+  border-radius: 4px;
+  color: var(--text-muted, #6b7280);
+  transition: all 0.2s ease;
+}
+
+.sidebar-session-action-btn-delete:hover {
+  background-color: var(--bg-hover-heavy, #d1d5db);
+  color: var(--text-danger, #dc2626);
+}
+
+.sidebar-session-confirm-bar {
+  position: absolute;
+  inset-y: 0;
+  right: 0;
+  padding: 0 8px;
+  z-index: 10;
+  border-top-right-radius: 6px;
+  border-bottom-right-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sidebar-session-item.active .sidebar-session-confirm-bar {
+  background-color: rgba(229, 231, 235, 0.95);
+}
+
+.sidebar-session-item.inactive .sidebar-session-confirm-bar {
+  background-color: rgba(243, 244, 246, 0.95);
+}
+
+.sidebar-session-confirm-text {
+  font-size: 11px;
+  color: var(--text-main, #4b5563);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.sidebar-session-confirm-btn-yes {
+  padding: 2px;
+  border-radius: 4px;
+  color: var(--text-success, #16a34a);
+  transition: background-color 0.2s ease;
+}
+
+.sidebar-session-confirm-btn-yes:hover {
+  background-color: var(--bg-hover-heavy, #d1d5db);
+}
+
+.sidebar-session-confirm-btn-no {
+  padding: 2px;
+  border-radius: 4px;
+  color: var(--text-danger, #ef4444);
+  transition: background-color 0.2s ease;
+}
+
+.sidebar-session-confirm-btn-no:hover {
+  background-color: var(--bg-hover-heavy, #d1d5db);
+}
+
+.sidebar-archived-toggle {
+  padding-left: 16px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  font-size: 12px;
+  color: var(--text-muted, #9ca3af);
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.sidebar-archived-toggle:hover {
+  color: var(--text-main, #4b5563);
+}
+
+.sidebar-archived-toggle-arrow {
+  display: inline-block;
+  transition: transform 0.2s ease;
+}
+
+.sidebar-session-summary-archived {
+  text-decoration: line-through;
+  text-decoration-color: var(--border-hover, #d1d5db);
+}
+
+.sidebar-footer {
+  padding: 12px;
+}
+
+.sidebar-footer-settings-btn {
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  color: var(--text-main, #374151);
+  display: block;
+}
+
+.sidebar-footer-settings-btn:hover {
+  background-color: var(--bg-hover, rgba(229, 231, 235, 0.5));
+}

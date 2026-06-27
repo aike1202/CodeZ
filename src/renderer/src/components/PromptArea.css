@@ -1,0 +1,299 @@
+/* PromptArea.css */
+
+.prompt-area-container {
+  width: 100%;
+  padding-bottom: 32px;
+  padding-top: 16px;
+  background-image: linear-gradient(to top, #fcfcfc, transparent);
+}
+
+.prompt-area-inner {
+  max-width: 48rem; /* max-w-3xl */
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 16px;
+  padding-right: 16px;
+  position: relative;
+}
+
+.prompt-card {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--border-gray-100, #f3f4f6);
+  padding: 12px;
+  position: relative;
+  z-index: 20;
+}
+
+.prompt-top-toolbar {
+  margin: -12px -12px 8px -12px;
+  padding: 6px 12px;
+  background-color: #f3f4f6; /* 稍微深一点的背景（浅色模式） */
+  border-bottom: 1px solid #e5e7eb;
+  border-top-left-radius: 8px; /* 对应 card 的圆角 */
+  border-top-right-radius: 8px;
+}
+
+.prompt-textarea {
+  width: 100%;
+  background-color: transparent;
+  resize: none;
+  outline: none;
+  font-size: 15px;
+  color: inherit;
+  padding: 4px;
+  min-height: 44px;
+  border: none;
+}
+
+.prompt-textarea::placeholder {
+  color: #9ca3af; /* placeholder-gray-400 */
+}
+
+.prompt-actions-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #9ca3af;
+}
+
+.prompt-plus-btn {
+  padding: 4px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.prompt-plus-btn:hover {
+  background-color: #f3f4f6; /* hover:bg-gray-100 */
+}
+
+.prompt-approve-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  transition: color 0.2s;
+}
+
+.prompt-approve-btn:hover {
+  color: #4b5563; /* hover:text-gray-600 */
+}
+
+.prompt-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  position: relative;
+}
+
+.prompt-gear-btn {
+  padding: 6px;
+  color: #9ca3af;
+  border-radius: 4px;
+  transition: color 0.2s, background-color 0.2s;
+}
+
+.prompt-gear-btn:hover {
+  color: #4b5563;
+  background-color: #f3f4f6;
+}
+
+.prompt-model-selector-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #6b7280; /* text-gray-500 */
+  padding: 4px 8px;
+  border-radius: 4px;
+  max-width: 220px;
+  transition: color 0.2s, background-color 0.2s;
+}
+
+.prompt-model-selector-btn:hover {
+  color: #1f2937; /* hover:text-gray-800 */
+  background-color: #f3f4f6;
+}
+
+.prompt-model-selector-btn .truncate {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.prompt-dropdown-card {
+  position: absolute;
+  right: 0;
+  bottom: 120%;
+  margin-bottom: 4px;
+  width: 256px; /* w-64 */
+  padding-top: 6px;
+  padding-bottom: 6px;
+  z-index: 50;
+  font-size: 14px;
+}
+
+.prompt-dropdown-header {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #9ca3af;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.prompt-dropdown-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: #9ca3af;
+  text-align: center;
+}
+
+.prompt-dropdown-provider {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  cursor: pointer;
+  color: #374151; /* text-gray-700 */
+  transition: background-color 0.2s;
+}
+
+.prompt-dropdown-provider:hover {
+  background-color: #f9fafb; /* hover:bg-gray-50 */
+}
+
+.prompt-dropdown-provider.is-active {
+  color: #2563eb; /* text-blue-600 */
+  font-weight: 500;
+}
+
+.prompt-check-mark {
+  font-size: 10px;
+  color: #60a5fa; /* text-blue-400 */
+}
+
+.prompt-dropdown-model-list {
+  margin-left: 16px;
+  border-left: 1px solid #f3f4f6; /* border-gray-100 */
+}
+
+.prompt-dropdown-model-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #6b7280; /* text-gray-500 */
+  transition: background-color 0.2s;
+}
+
+.prompt-dropdown-model-item:hover {
+  background-color: #f9fafb;
+}
+
+.prompt-dropdown-model-item.is-selected {
+  color: #2563eb;
+  font-weight: 500;
+}
+
+.prompt-model-context-tokens {
+  font-size: 10px;
+  color: #9ca3af;
+}
+
+.prompt-dropdown-divider {
+  height: 1px;
+  background-color: #f3f4f6;
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+
+.prompt-dropdown-settings-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  color: #2563eb;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.prompt-dropdown-settings-action:hover {
+  background-color: #f9fafb;
+}
+
+.prompt-send-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); /* shadow-sm */
+}
+
+.prompt-send-btn.is-streaming {
+  color: #ffffff;
+}
+
+/* Dark mode overrides */
+@media (prefers-color-scheme: dark) {
+  .prompt-area-container {
+    background-image: linear-gradient(to top, #1c1c1c, transparent);
+  }
+  .prompt-card {
+    border-color: #27272a; /* border-zinc-800 */
+  }
+  .prompt-top-toolbar {
+    background-color: #27272a; /* 稍微深一点的背景（深色模式） */
+    border-bottom-color: #3f3f46;
+  }
+  .prompt-plus-btn:hover {
+    background-color: rgba(63, 63, 70, 0.5);
+  }
+  .prompt-approve-btn:hover {
+    color: #e4e4e7;
+  }
+  .prompt-gear-btn:hover {
+    color: #e4e4e7;
+    background-color: rgba(63, 63, 70, 0.5);
+  }
+  .prompt-model-selector-btn {
+    color: #a1a1aa;
+  }
+  .prompt-model-selector-btn:hover {
+    color: #f4f4f5;
+    background-color: rgba(63, 63, 70, 0.5);
+  }
+  .prompt-dropdown-provider {
+    color: #d4d4d8;
+  }
+  .prompt-dropdown-provider:hover {
+    background-color: rgba(63, 63, 70, 0.3);
+  }
+  .prompt-dropdown-provider.is-active {
+    color: #3b82f6;
+  }
+  .prompt-dropdown-model-list {
+    border-left-color: #27272a;
+  }
+  .prompt-dropdown-model-item {
+    color: #a1a1aa;
+  }
+  .prompt-dropdown-model-item:hover {
+    background-color: rgba(63, 63, 70, 0.3);
+  }
+  .prompt-dropdown-model-item.is-selected {
+    color: #3b82f6;
+  }
+  .prompt-dropdown-divider {
+    background-color: #27272a;
+  }
+  .prompt-dropdown-settings-action {
+    color: #3b82f6;
+  }
+  .prompt-dropdown-settings-action:hover {
+    background-color: rgba(63, 63, 70, 0.3);
+  }
+}

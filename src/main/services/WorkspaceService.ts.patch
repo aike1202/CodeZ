@@ -1,0 +1,13 @@
+--- src/main/services/WorkspaceService.ts
++++ src/main/services/WorkspaceService.ts
+@@ -58,6 +58,10 @@
+     this.rootPath = path.resolve(rootPath)
+   }
+ 
++  getCurrentWorkspace(): string {
++    return this.rootPath
++  }
++
+   validatePath(filePath: string): string {
+     return normalizePath(this.rootPath, filePath)
+   }

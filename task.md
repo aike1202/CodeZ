@@ -1,0 +1,13 @@
+- [ ] 阶段一：创建共享工具函数 (Shared Utilities)
+  - [x] T1: 创建 [parseArgs.ts](file:///f:/MyProjectF/MyAgent/src/renderer/src/utils/parseArgs.ts) 并迁移 `parseArgs` 函数
+- [ ] 阶段二：简化 Tool 级日志组件中的 `parseArgs` 重复定义 (De-duplicate parseArgs)
+  - [x] T2: 重构 [ToolCallLog.tsx](file:///f:/MyProjectF/MyAgent/src/renderer/src/components/chat/ToolCallLog.tsx) 引入共享的 `parseArgs`
+  - [x] T3: 重构 [ExecutionLog.tsx](file:///f:/MyProjectF/MyAgent/src/renderer/src/components/chat/ExecutionLog.tsx) 引入共享的 `parseArgs`
+- [ ] 阶段三：增强 `FilePreviewPanel` 独立性 (Decouple Preview Panel)
+  - [x] T4: 重构 [FilePreviewPanel.tsx](file:///f:/MyProjectF/MyAgent/src/renderer/src/components/FilePreviewPanel.tsx) 承载自身流式与 Reload 逻辑
+- [ ] 阶段四：开发 `ChatArea` 核心组件 (Extract ChatArea)
+  - [ ] T5: 创建 [ChatArea.tsx](file:///f:/MyProjectF/MyAgent/src/renderer/src/components/chat/ChatArea.tsx) 承载核心聊天面板与逻辑
+- [ ] 阶段五：重构并极简化 `App.tsx` (Simplify App.tsx)
+  - [ ] T6: 修改 [App.tsx](file:///f:/MyProjectF/MyAgent/src/renderer/src/App.tsx) 引入 `<ChatArea>` 并移出无用状态与方法
+- [ ] 阶段六：编译与构建验证 (Build & Test Verification)
+  - [ ] T7: 运行 `npm run typecheck` 与 `npm run build`

@@ -1,0 +1,495 @@
+@import "tailwindcss";
+
+/* ============================================
+   全局设计令牌
+   ============================================ */
+@theme {
+  --color-bg-app: var(--bg-app);
+  --color-bg-panel: var(--bg-panel);
+  --color-bg-sidebar: var(--bg-sidebar);
+  --color-bg-hover: var(--bg-hover);
+  --color-bg-active: var(--bg-active);
+  --color-bg-input: var(--bg-input);
+  
+  --color-text-main: var(--text-main);
+  --color-text-muted: var(--text-muted);
+  --color-text-light: var(--text-light);
+  --color-text-active: var(--text-active);
+  
+  --color-border: var(--border-color);
+  --color-border-light: var(--border-light);
+  --color-border-active: var(--border-active);
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 16px;
+}
+
+@layer base {
+  :root {
+    /* 默认浅色主题变量 */
+    --bg-app: #fcfcfc;
+    --bg-panel: #ffffff;
+    --bg-sidebar: #f8f9fa;
+    --bg-hover: #ebedef;
+    --bg-active: #e2e4e7;
+    --bg-input: #ffffff;
+    
+    --text-main: #1f2328;
+    --text-muted: #666666;
+    --text-light: #9c9c9c;
+    --text-active: #0969da;
+    
+    --border-color: #ebecf0;
+    --border-light: #f1f2f4;
+    --border-active: #0969da;
+  }
+  
+  /* 当应用加上 dark class 或是跟随系统主题切换时对应的深色变量 */
+  .dark {
+    --bg-app: #1c1c1c;
+    --bg-panel: #232323;
+    --bg-sidebar: #222222;
+    --bg-hover: #2b2b2b;
+    --bg-active: #3b3b3b;
+    --bg-input: #1c1c1c;
+    
+    --text-main: #e1e4e8;
+    --text-muted: #959da5;
+    --text-light: #6a737d;
+    --text-active: #ffffff;
+    
+    --border-color: #3c3c3c;
+    --border-light: #2b2b2b;
+    --border-active: #8b949e;
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  body, html {
+    height: 100vh;
+    width: 100vw;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background-color: #fcfcfc;
+    color: #1f2328;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  #root {
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+  }
+
+  button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    color: inherit;
+  }
+  button:disabled { cursor: not-allowed; }
+  textarea { font-family: inherit; }
+  
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--text-light);
+    opacity: 1; /* For Firefox */
+  }
+}
+
+/* ============================================
+   文件链接（对话中可点击的文件路径）
+   ============================================ */
+.file-link {
+  color: #2563eb;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: #93c5fd;
+  text-underline-offset: 2px;
+  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+  font-size: 0.85em;
+  background: #eff6ff;
+  padding: 1px 4px;
+  border-radius: 3px;
+  word-break: break-all;
+  transition: color 0.15s, text-decoration-color 0.15s;
+}
+.file-link:hover {
+  color: #1d4ed8;
+  text-decoration-color: #2563eb;
+  background: #dbeafe;
+}
+
+/* ============================================
+   流式输出闪烁光标
+   ============================================ */
+.streaming-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.1em;
+  background: #2563eb;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  animation: blink 1s step-end infinite;
+}
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+/* ============================================
+   TopBar 自定义标题栏
+   ============================================ */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 44px;
+  padding: 0 12px;
+  background: white;
+  border-bottom: 1px solid #ebecf0;
+  flex-shrink: 0;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.topbar-left,
+.topbar-center,
+.topbar-right {
+  -webkit-app-region: no-drag;
+}
+.topbar-left { display: flex; align-items: center; gap: 12px; }
+.topbar-center { flex: 1; display: flex; justify-content: center; max-width: 420px; margin: 0 auto; }
+.topbar-right { display: flex; align-items: center; gap: 4px; }
+
+.logo-btn {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 0.9rem; font-weight: 600; color: #1f2328;
+  padding: 4px 8px; border-radius: 6px; transition: background 0.15s;
+}
+.logo-btn:hover { background: #ebedef; }
+
+.logo-icon {
+  width: 22px; height: 22px; border-radius: 4px;
+  background: #1f2328; color: white;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.75rem; font-weight: 700;
+}
+
+.project-indicator {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 0.8rem; color: #666;
+  padding: 4px 10px; border-radius: 6px; border: 1px solid #ebecf0;
+  transition: background 0.15s;
+}
+.project-indicator:hover { background: #ebedef; }
+
+.global-search {
+  width: 100%; max-width: 320px;
+  padding: 6px 12px; border-radius: 6px; border: 1px solid #ebecf0;
+  font-size: 0.8rem; background: #f8f9fa; color: #1f2328; outline: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+.global-search:focus { background: white; border-color: #94a3b8; }
+.global-search::placeholder { color: #9c9c9c; }
+
+.user-menu-btn {
+  width: 28px; height: 28px; border-radius: 9999px; background: #f8f9fa;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.75rem; font-weight: 600; transition: background 0.15s;
+}
+.user-menu-btn:hover { background: #ebedef; }
+
+.window-controls { display: flex; align-items: center; gap: 2px; margin-left: 8px; padding-left: 8px; border-left: 1px solid #ebecf0; }
+.window-control-btn {
+  width: 28px; height: 28px; border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  color: #666; transition: background 0.15s, color 0.15s;
+}
+.window-control-btn:hover { background: #ebedef; color: #1f2328; }
+.window-control-btn.close:hover { background: #e11d48; color: white; }
+
+/* ============================================
+   自定义滚动条
+   ============================================ */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* ============================================
+   Markdown 渲染样式
+   ============================================ */
+.markdown-body {
+  line-height: 1.6;
+  font-size: 14.5px;
+}
+
+.markdown-body p {
+  margin-bottom: 0.75rem;
+}
+
+.markdown-body p:last-child {
+  margin-bottom: 0;
+}
+
+/* 行内代码 */
+.inline-code {
+  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+  font-size: 0.88em;
+  background-color: #f1f2f4;
+  color: #c7254e;
+  padding: 2px 5px;
+  border-radius: 4px;
+  word-break: break-word;
+}
+.dark .inline-code {
+  background-color: #2b2b2b;
+  color: #e06c75;
+}
+
+/* 引用块 */
+.blockquote-block {
+  border-l-width: 3px;
+  border-left-style: solid;
+  border-left-color: #d4d4d8;
+  padding-left: 12px;
+  margin: 10px 0;
+  color: #666666;
+  font-style: italic;
+}
+.dark .blockquote-block {
+  border-left-color: #4b5563;
+  color: #9ca3af;
+}
+
+/* 列表项 */
+.list-item-ul {
+  list-style-type: disc;
+  margin-left: 20px;
+  margin-bottom: 4px;
+}
+.list-item-ol {
+  list-style-type: decimal;
+  margin-left: 20px;
+  margin-bottom: 4px;
+}
+
+/* 精美代码卡片 */
+.code-block-wrapper {
+  margin: 12px 0;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #e4e4e7;
+  background-color: #fafafa;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+.dark .code-block-wrapper {
+  border: 1px solid #27272a;
+  background-color: #18181b;
+}
+
+.code-block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background-color: #f4f4f5;
+  border-bottom: 1px solid #e4e4e7;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  color: #71717a;
+}
+.dark .code-block-header {
+  background-color: #202023;
+  border-bottom: 1px solid #27272a;
+  color: #a1a1aa;
+}
+
+.copy-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: transparent;
+  color: #71717a;
+  transition: all 0.15s ease;
+  font-size: 11px;
+}
+.copy-btn:hover {
+  background-color: #e4e4e7;
+  color: #18181b;
+}
+.dark .copy-btn:hover {
+  background-color: #27272a;
+  color: #f4f4f5;
+}
+
+.code-block-pre {
+  margin: 0;
+  padding: 12px;
+  overflow-x: auto;
+  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #27272a;
+}
+.dark .code-block-pre {
+  color: #e4e4e7;
+}
+
+/* ============================================
+   Codex 时间线（Timeline）样式
+   ============================================ */
+.timeline-container {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* 动词配色 */
+.timeline-verb-analyzed { color: #059669; font-weight: 500; }
+.dark .timeline-verb-analyzed { color: #34d399; }
+
+.timeline-verb-analyzing { color: #3b82f6; font-weight: 500; }
+.dark .timeline-verb-analyzing { color: #60a5fa; }
+
+.timeline-verb-searched { color: #2563eb; font-weight: 500; }
+.dark .timeline-verb-searched { color: #60a5fa; }
+
+.timeline-verb-thought { color: #d97706; font-weight: 500; }
+.dark .timeline-verb-thought { color: #fbbf24; }
+
+.timeline-verb-terminal { color: #8b5cf6; font-weight: 500; }
+.dark .timeline-verb-terminal { color: #a78bfa; }
+
+.timeline-verb-edited, .timeline-verb-editing { color: #ea580c; font-weight: 500; }
+.dark .timeline-verb-edited, .dark .timeline-verb-editing { color: #f97316; }
+
+.timeline-verb-created, .timeline-verb-creating { color: #0d9488; font-weight: 500; }
+.dark .timeline-verb-created, .dark .timeline-verb-creating { color: #2dd4bf; }
+
+/* 图标特定配色 */
+.icon-react { color: #00d8ff; }
+.icon-ts { color: #3178c6; }
+.icon-js { color: #f7df1e; }
+.icon-css { color: #264de4; }
+.icon-html { color: #e34f26; }
+.icon-json { color: #8b949e; }
+.icon-md { color: #41b883; }
+
+/* 整体微旋转动画 */
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.spin-slow {
+  animation: spin-slow 1.5s linear infinite;
+}
+
+/* ============================================
+   PrismJS 语法高亮自定义主题 (微调优雅配色)
+   ============================================ */
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: #71717a;
+  font-style: italic;
+}
+
+.token.punctuation {
+  color: #52525b;
+}
+
+.token.property,
+.token.tag,
+.token.boolean,
+.token.number,
+.token.constant,
+.token.symbol,
+.token.deleted {
+  color: #ea580c;
+}
+
+.token.selector,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin,
+.token.inserted {
+  color: #15803d;
+}
+
+.token.operator,
+.token.entity,
+.token.url,
+.language-css .token.string,
+.style .token.string {
+  color: #1d4ed8;
+}
+
+.token.atrule,
+.token.attr-value,
+.token.keyword {
+  color: #6d28d9;
+  font-weight: 500;
+}
+
+.token.function,
+.token.class-name {
+  color: #b91c1c;
+}
+
+.token.regex,
+.token.important,
+.token.variable {
+  color: #c2410c;
+}
+
+/* Dark Mode 适配 */
+.dark .token.punctuation {
+  color: #a1a1aa;
+}
+.dark .token.property,
+.dark .token.tag,
+.dark .token.boolean,
+.dark .token.number,
+.dark .token.constant,
+.dark .token.symbol {
+  color: #fbbf24;
+}
+.dark .token.selector,
+.dark .token.attr-name,
+.dark .token.string,
+.dark .token.char,
+.dark .token.builtin {
+  color: #34d399;
+}
+.dark .token.operator,
+.dark .token.entity,
+.dark .token.url {
+  color: #60a5fa;
+}
+.dark .token.atrule,
+.dark .token.attr-value,
+.dark .token.keyword {
+  color: #a78bfa;
+}
+.dark .token.function,
+.dark .token.class-name {
+  color: #f472b6;
+}
+.dark .token.regex,
+.dark .token.important,
+.dark .token.variable {
+  color: #fb923c;
+}
+
+

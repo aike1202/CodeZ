@@ -1,0 +1,104 @@
+/* ThinkingBlock.css */
+
+.thinking-loading-wrapper {
+  color: #9ca3af; /* text-gray-400 */
+  font-size: 13px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.thinking-dot-container {
+  display: flex;
+  height: 12px; /* h-3 */
+  width: 12px; /* w-3 */
+  position: relative;
+}
+
+.thinking-dot-ping {
+  animation: thinking-ping 1s cubic-bezier(0, 0, 0.2, 1) infinite;
+  position: absolute;
+  display: inline-flex;
+  height: 100%;
+  width: 100%;
+  border-radius: 9999px;
+  background-color: #9ca3af; /* bg-gray-400 */
+  opacity: 0.75;
+}
+
+@keyframes thinking-ping {
+  75%, 100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+.thinking-dot-core {
+  position: relative;
+  display: inline-flex;
+  border-radius: 9999px;
+  height: 12px;
+  width: 12px;
+  background-color: #d1d5db; /* bg-gray-300 */
+}
+
+.thinking-block {
+  margin-bottom: 12px;
+}
+
+.thinking-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #9ca3af;
+  font-size: 13px;
+  transition: color 0.2s;
+  cursor: pointer;
+  user-select: none;
+  margin-bottom: 6px;
+  background-color: rgba(243, 244, 246, 0.5); /* bg-gray-100/50 */
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.thinking-toggle-btn:hover {
+  color: #4b5563; /* hover:text-gray-600 */
+}
+
+.thinking-chevron {
+  transition: transform 0.2s ease;
+}
+
+.thinking-chevron.is-expanded {
+  transform: rotate(90deg);
+}
+
+.thinking-content {
+  border-left: 3px solid #e5e7eb; /* border-gray-200 */
+  margin-left: 3px;
+  padding-left: 16px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  color: #6b7280; /* text-gray-500 */
+  font-size: 13.5px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.625;
+  font-weight: 400;
+  position: relative;
+}
+
+/* Dark mode overrides if needed */
+@media (prefers-color-scheme: dark) {
+  .thinking-toggle-btn {
+    background-color: rgba(63, 63, 70, 0.3);
+  }
+  .thinking-toggle-btn:hover {
+    color: #e4e4e7;
+  }
+  .thinking-content {
+    border-left-color: #3f3f46;
+    color: #a1a1aa;
+  }
+}
