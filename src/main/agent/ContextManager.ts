@@ -1,4 +1,7 @@
 import type { ChatMessage } from '../../shared/types/provider'
+import * as path from 'path'
+import * as fs from 'fs/promises'
+import { app } from 'electron'
 
 export interface TrimOptions {
   /** 单条 tool 输出的最大字符数，超出将被截断。默认 3000 */
@@ -7,6 +10,24 @@ export interface TrimOptions {
   maxTotalMessages?: number
   /** 保留最近 N 轮对话不被裁剪。默认 3 */
   keepRecentRounds?: number
+}
+
+export interface GoalSnapshot {
+  originalPrompt: string
+  keyRequirements: string[]
+}
+
+export interface TaskPlan {
+  currentStep: string
+  completedSteps: string[]
+  pendingSteps: string[]
+}
+
+export interface ResumeState {
+  goal: GoalSnapshot
+  plan: TaskPlan
+  contextFiles: string[]
+  lastTrimmedAt?: number
 }
 
 const DEFAULT_MAX_TOOL_OUTPUT = 3000
@@ -20,6 +41,8 @@ const DEFAULT_KEEP_RECENT_ROUNDS = 3
  * 1. 锚定首条 System Prompt 永不删除
  * 2. 截断过长的 tool 输出内容
  * 3. 按消息总数上限裁剪最旧的对话轮次（保证 assistant+tool 成组删除）
+ * 
+ * 附带 ResumeState 管理，在 Token 超限或长会话时浓缩保存任务蓝图。
  */
 export class ContextManager {
   /**
@@ -141,5 +164,28 @@ export class ContextManager {
     final.push(...protectedMessages)
 
     return final
+  }
+
+  /**
+   * 存储任务核心状态
+   */
+  static async saveResumeState(sessionId: string, state: ResumeState): Promise<void> {
+    const dir = path.join(app.getPath('userData'), 'agent-sessions')
+    await fs.mkdir(dir, { recursive: true })
+    const file = path.join(dir, `${sessionId}.json`)
+    await fs.writeFile(file, JSON.stringify(state, null, 2), 'utf-8')
+  }
+
+  /**
+   * 加载任务核心状态
+   */
+  static async loadResumeState(sessionId: string): Promise<ResumeState | null> {
+    const file = path.join(app.getPath('userData'), 'agent-sessions', `${sessionId}.json`)
+    try {
+      const data = await fs.readFile(file, 'utf-8')
+      return JSON.parse(data) as ResumeState
+    } catch {
+      return null
+    }
   }
 }

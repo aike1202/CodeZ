@@ -10,6 +10,7 @@ export interface ProjectSnapshot {
   entrypoints: string[]
   recommendedFiles: string[]
   tree: string
+  docsTree: string
   fromCache: boolean
   updatedAt: string
 }

@@ -100,6 +100,7 @@ export class AnthropicProvider implements IChatProvider {
       let currentToolCallId = ''
       let currentToolCallName = ''
       let currentToolCallArgs = ''
+      let finalStopReason: import('../../../shared/types/provider').AgentStopReason = 'unknown'
 
       while (true) {
         const { done, value } = await reader.read()
@@ -131,6 +132,13 @@ export class AnthropicProvider implements IChatProvider {
                   currentToolCallName = json.content_block.name
                   currentToolCallArgs = ''
                 }
+              } else if (currentEvent === 'message_delta') {
+                const stopReason = json.delta?.stop_reason
+                if (stopReason) {
+                  if (stopReason === 'end_turn' || stopReason === 'stop_sequence') finalStopReason = 'stop'
+                  else if (stopReason === 'max_tokens') finalStopReason = 'length'
+                  else if (stopReason === 'tool_use') finalStopReason = 'tool_calls'
+                }
               } else if (currentEvent === 'content_block_delta') {
                 if (json.delta?.type === 'text_delta') {
                   const text = json.delta.text
@@ -160,7 +168,7 @@ export class AnthropicProvider implements IChatProvider {
         }
       }
 
-      callbacks.onDone(fullContent)
+      callbacks.onDone(fullContent, finalStopReason)
     } catch (error) {
       if (!signal.aborted) {
         const msg = error instanceof Error ? error.message : String(error)

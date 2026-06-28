@@ -181,6 +181,42 @@ export class EditTransactionService {
     this.transactions.delete(txId)
   }
 
+  /**
+   * 生成事务内所有修改文件的 Diff
+   */
+  async getDiff(txId: string): Promise<Array<{ path: string; diff: string }>> {
+    const tx = this.transactions.get(txId)
+    if (!tx) return []
+
+    const { exec } = require('child_process')
+    const { promisify } = require('util')
+    const execAsync = promisify(exec)
+
+    const diffs: Array<{ path: string; diff: string }> = []
+
+    for (const [originalPath, backupPath] of tx.backedUpFiles) {
+      try {
+        let diffOutput = ''
+        if (backupPath === '') {
+          // Newly created file
+          const cmd = process.platform === 'win32' 
+            ? `git diff --no-index NUL "${originalPath}"` 
+            : `git diff --no-index /dev/null "${originalPath}"`
+          const result = await execAsync(cmd).catch((e: any) => e)
+          diffOutput = result.stdout || ''
+        } else {
+          const result = await execAsync(`git diff --no-index "${backupPath}" "${originalPath}"`).catch((e: any) => e)
+          diffOutput = result.stdout || ''
+        }
+        diffs.push({ path: originalPath, diff: diffOutput })
+      } catch (err: any) {
+        console.error(`[EditTransaction] Failed to generate diff for ${originalPath}:`, err.message)
+      }
+    }
+
+    return diffs
+  }
+
   /** 获取指定事务 */
   getTransaction(txId: string): TransactionState | undefined {
     return this.transactions.get(txId)

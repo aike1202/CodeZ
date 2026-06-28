@@ -1,4 +1,4 @@
-# 10 目标保持、上下文压缩与关键信息防丢失
+# 07 目标保持、上下文压缩与关键信息防丢失
 
 ## 1. 用户需求
 
@@ -258,7 +258,7 @@ type ResumeState = {
 保存在：
 
 ```text
-docs/docsv2/
+docsv2/
 ```
 
 即当前目录，用于用户确认和后续实现依据。
@@ -294,11 +294,11 @@ docs/docsv2/
 
 ```json
 {
-  "goal": "整理 docs/docsv2 并作为后续 CodeZ 优化依据",
+  "goal": "整理 docsv2 并作为后续 CodeZ 优化依据",
   "phase": "需求整理",
   "currentStep": "补充上下文压缩防丢失机制",
   "decisions": ["第一轮不做 Swarm", "先做单 Agent 闭环"],
-  "pendingValidation": ["检查 docs/docsv2 完整性", "用户确认后再改源码"]
+  "pendingValidation": ["检查 docsv2 完整性", "用户确认后再改源码"]
 }
 ```
 
@@ -310,7 +310,7 @@ docs/docsv2/
 用户说“继续”
 → 读取 .continue/index.md
 → 读取 current task state
-→ 读取 docs/docsv2 对应阶段
+→ 读取 docsv2 对应阶段
 → 恢复 plan
 → 明确下一步
 → 再开始工具调用或代码修改
@@ -371,7 +371,7 @@ docs/docsv2/
 场景：
 
 ```text
-用户要求整理 docs/docsv2，做一半后上下文被压缩，然后用户说“继续”。
+用户要求整理 docsv2，做一半后上下文被压缩，然后用户说“继续”。
 ```
 
 期望：

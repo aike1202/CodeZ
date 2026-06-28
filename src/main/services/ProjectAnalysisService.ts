@@ -160,6 +160,8 @@ export class ProjectAnalysisService {
     }
     const tree = treeParts.join('\n\n')
 
+    const docsTree = await this.buildDocsTree()
+
     const snapshot: ProjectSnapshot = {
       rootName: path.basename(this.rootPath),
       rootPath: this.rootPath,
@@ -172,6 +174,7 @@ export class ProjectAnalysisService {
       entrypoints,
       recommendedFiles,
       tree,
+      docsTree,
       fromCache: false,
       updatedAt: new Date().toISOString(),
     }
@@ -499,6 +502,34 @@ export class ProjectAnalysisService {
       lines.push('[TRUNCATED] tree output limit reached')
     }
     return lines.join('\n')
+  }
+
+  private async buildDocsTree(): Promise<string> {
+    const lines: string[] = ['[Documentation Files]']
+    let count = 0
+    const visit = async (directory: string): Promise<void> => {
+      if (count >= 100) return
+      const entries = await fs.readdir(directory, { withFileTypes: true }).catch(() => [])
+      for (const entry of entries) {
+        if (count >= 100) break
+        const fullPath = path.join(directory, entry.name)
+        if (entry.isDirectory()) {
+          if (!shouldIgnoreName(entry.name)) {
+            await visit(fullPath)
+          }
+        } else if (entry.isFile()) {
+          const lowerName = entry.name.toLowerCase()
+          if (lowerName.endsWith('.md') || lowerName.endsWith('.mdx')) {
+            lines.push(toPosixPath(path.relative(this.rootPath, fullPath)))
+            count++
+          }
+        }
+      }
+    }
+
+    await visit(this.rootPath)
+    if (count >= 100) lines.push('[TRUNCATED] docs tree limit reached')
+    return lines.length > 1 ? lines.join('\n') : '[No markdown files found]'
   }
 
   private async walkFiles(startDir: string, onFile: (absolutePath: string) => Promise<void>): Promise<void> {

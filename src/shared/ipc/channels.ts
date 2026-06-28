@@ -24,6 +24,9 @@ export const IPC_CHANNELS = {
   CHAT_STREAM_STOP: 'chat:stream:stop',
   CHAT_ACCEPT_FILE: 'chat:accept-file',
   CHAT_REJECT_FILE: 'chat:reject-file',
+  CHAT_REQUEST_APPROVAL: 'chat:request-approval',
+  CHAT_APPROVAL_RESPONSE: 'chat:approval-response',
+  CHAT_GET_DIFF: 'chat:get-diff',
   
   // Tool Logs
   CHAT_STREAM_TOOL_START: 'chat:stream:tool-start',

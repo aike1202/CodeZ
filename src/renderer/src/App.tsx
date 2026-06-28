@@ -206,7 +206,8 @@ export default function App(): React.ReactElement {
 
     selectSession(sessionId)
 
-    // 鏅鸿兘鑱斿姩锛氬鏋滃綋鍓嶆病鏈夋墦寮€椤圭洰锛屾垨鑰呮墦寮€鐨勯」鐩笉鍖归厤璇ヤ細璇濈殑椤圭洰ID锛岃嚜鍔ㄥ府鐢ㄦ埛鍒囨崲/鍔犺浇璇ラ」鐩?    const session = useChatStore.getState().sessions.find((s) => s.id === sessionId)
+    // 智能联动：如果当前没有打开项目，或者打开的项目不匹配该会话的项目ID，自动帮用户切换/加载该项目
+    const session = useChatStore.getState().sessions.find((s) => s.id === sessionId)
     if (session && session.projectId) {
       const currentWs = useWorkspaceStore.getState().workspace
       if (!currentWs || currentWs.id !== session.projectId) {

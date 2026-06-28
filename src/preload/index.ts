@@ -74,6 +74,7 @@ const api = {
         onError: (error: string) => void
         onToolStart?: (toolCallId: string, name: string, args: string, thoughtSignature?: string) => void
         onToolEnd?: (toolCallId: string, result: string) => void
+        onPermissionRequest?: (request: any) => void
       }
     ): (() => void) => {
       let activeStreamId: string | null = null
@@ -101,6 +102,15 @@ const api = {
         if (streamId !== activeStreamId) return
         callbacks.onToolEnd?.(toolCallId, result)
       }
+      const approvalHandler = (_event: unknown, streamId: string, request: any) => {
+        if (streamId !== activeStreamId) return
+        if (callbacks.onPermissionRequest) {
+          callbacks.onPermissionRequest(request)
+        } else {
+          console.warn('Auto-approving permission request because UI has not implemented onPermissionRequest:', request)
+          ipcRenderer.invoke(`${IPC_CHANNELS.CHAT_APPROVAL_RESPONSE}:${request.id}`, true).catch(console.error)
+        }
+      }
 
       const cleanup = () => {
         if (activeStreamId) {
@@ -111,6 +121,7 @@ const api = {
         ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_ERROR, errorHandler)
         ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_TOOL_START, toolStartHandler)
         ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_TOOL_END, toolEndHandler)
+        ipcRenderer.removeListener(IPC_CHANNELS.CHAT_REQUEST_APPROVAL, approvalHandler)
       }
 
       ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_CHUNK, chunkHandler)
@@ -118,6 +129,7 @@ const api = {
       ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_ERROR, errorHandler)
       ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_TOOL_START, toolStartHandler)
       ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_TOOL_END, toolEndHandler)
+      ipcRenderer.on(IPC_CHANNELS.CHAT_REQUEST_APPROVAL, approvalHandler)
 
       // 发起请求
       ipcRenderer.invoke(IPC_CHANNELS.CHAT_STREAM_START, { providerId, model, messages })
@@ -133,10 +145,13 @@ const api = {
     },
 
     acceptFile: (txId: string, filePath: string): Promise<boolean> =>
-      ipcRenderer.invoke('chat:accept-file', txId, filePath),
+      ipcRenderer.invoke(IPC_CHANNELS.CHAT_ACCEPT_FILE, txId, filePath),
 
     rejectFile: (txId: string, filePath: string): Promise<boolean> =>
-      ipcRenderer.invoke('chat:reject-file', txId, filePath)
+      ipcRenderer.invoke(IPC_CHANNELS.CHAT_REJECT_FILE, txId, filePath),
+      
+    respondToApproval: (requestId: string, approved: boolean): Promise<void> =>
+      ipcRenderer.invoke(`${IPC_CHANNELS.CHAT_APPROVAL_RESPONSE}:${requestId}`, approved)
   },
 
   session: {

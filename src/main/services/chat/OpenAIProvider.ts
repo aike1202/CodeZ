@@ -131,6 +131,7 @@ export class OpenAIProvider implements IChatProvider {
       const decoder = new TextDecoder()
       let buffer = ''
       const thinkParserState: ThinkParserState = { inThinkTag: false, streamBuffer: '' }
+      let finalStopReason: import('../../../shared/types/provider').AgentStopReason = 'unknown'
 
       while (true) {
         const { done, value } = await reader.read()
@@ -151,6 +152,14 @@ export class OpenAIProvider implements IChatProvider {
 
           try {
             const json = JSON.parse(dataStr)
+
+            const finishReason = json?.choices?.[0]?.finish_reason
+            if (finishReason) {
+              if (finishReason === 'stop') finalStopReason = 'stop'
+              else if (finishReason === 'length') finalStopReason = 'length'
+              else if (finishReason === 'tool_calls' || finishReason === 'function_call') finalStopReason = 'tool_calls'
+              else if (finishReason === 'content_filter') finalStopReason = 'content_filter'
+            }
 
             const delta = json?.choices?.[0]?.delta?.content
             const reasoningDelta = json?.choices?.[0]?.delta?.reasoning_content
@@ -204,7 +213,7 @@ export class OpenAIProvider implements IChatProvider {
           callbacks.onChunk(thinkParserState.streamBuffer, '')
         }
       }
-      callbacks.onDone(fullContent)
+      callbacks.onDone(fullContent, finalStopReason)
     } catch (error) {
       if (!signal.aborted) {
         const msg = error instanceof Error ? error.message : String(error)

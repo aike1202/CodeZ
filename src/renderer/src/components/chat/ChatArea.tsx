@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef } from 'react'
 import type { WorkspaceInfo } from '@shared/types/workspace'
 import HomePage from '../../pages/HomePage'
 import PromptArea from '../PromptArea'
@@ -121,7 +121,7 @@ export default function ChatArea({
       const chatMessages: Array<any> = [
         {
           role: 'system',
-          content: `你是一个 AI 编程助手，运行在 Codez 桌面应用中。当前项目：{ws.name}（{ws.projectType}）。请用中文回复，保持简洁专业。`
+          content: `你是一个 AI 编程助手，运行在 Codez 桌面应用中。当前项目：${ws.name}（${ws.projectType}）。请用中文回复，保持简洁专业。`
         },
         ...currentMsgs
           .filter((m) => !m.streaming)

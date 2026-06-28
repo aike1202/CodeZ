@@ -1,4 +1,4 @@
-import type { ChatMessage, ToolDefinition, ThinkingConfig } from '../../../shared/types/provider'
+import type { ChatMessage, ToolDefinition, ThinkingConfig, AgentStopReason } from '../../../shared/types/provider'
 
 export interface ChatRequestConfig {
   baseUrl: string
@@ -12,7 +12,7 @@ export interface ChatRequestConfig {
 
 export interface StreamCallbacks {
   onChunk: (delta: string, reasoningDelta?: string, toolCalls?: any[], thoughtSignature?: string) => void
-  onDone: (fullContent: string, txId?: string) => void
+  onDone: (fullContent: string, stopReason?: AgentStopReason, txId?: string) => void
   onError: (error: string) => void
 }
 

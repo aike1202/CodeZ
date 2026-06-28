@@ -102,6 +102,14 @@ export interface ToolDefinition {
   }
 }
 
+export type AgentStopReason = 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'error' | 'unknown'
+
+export interface ToolResult {
+  ok: boolean
+  data?: any
+  error?: string
+}
+
 /** 流式 chunk */
 export interface ChatStreamChunk {
   /** 本次增量文本 */

@@ -131,6 +131,7 @@ export class GeminiProvider implements IChatProvider {
       const decoder = new TextDecoder()
       let buffer = ''
       let toolCallIndex = 0
+      let finalStopReason: import('../../../shared/types/provider').AgentStopReason = 'unknown'
 
       while (true) {
         const { done, value } = await reader.read()
@@ -148,9 +149,15 @@ export class GeminiProvider implements IChatProvider {
           if (dataStr === '[DONE]') continue
 
           try {
-
-
             const json = JSON.parse(dataStr)
+            
+            const finishReason = json?.candidates?.[0]?.finishReason
+            if (finishReason) {
+              if (finishReason === 'STOP') finalStopReason = 'stop'
+              else if (finishReason === 'MAX_TOKENS') finalStopReason = 'length'
+              else if (finishReason === 'SAFETY') finalStopReason = 'content_filter'
+            }
+
             const parts = json?.candidates?.[0]?.content?.parts
             if (!parts) continue
 
@@ -184,7 +191,7 @@ export class GeminiProvider implements IChatProvider {
         }
       }
 
-      callbacks.onDone(fullContent)
+      callbacks.onDone(fullContent, finalStopReason)
     } catch (error) {
       if (!signal.aborted) {
         const msg = error instanceof Error ? error.message : String(error)
