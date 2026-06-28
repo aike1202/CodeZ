@@ -36,7 +36,7 @@ export default function MessageBody({
 
           if (!match) {
             return (
-              <div key={idx} className="pl-1">
+              <div key={idx} className="msg-line-pl">
                 {parseInline(line, onFileClick, showCursor)}
               </div>
             )
@@ -137,7 +137,7 @@ export default function MessageBody({
   }
 
   return (
-    <div className="markdown-body text-left">
+    <div className="markdown-body">
       {blocks.map((block, idx) => {
         const isLastBlock = idx === blocks.length - 1
 

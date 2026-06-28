@@ -25,6 +25,21 @@ import {
 } from '../svg-icons'
 import './ExecutionLog.css'
 
+const VERB_TRANSLATIONS: Record<string, string> = {
+  Thought: '思考',
+  Analyzing: '正在读取',
+  Analyzed: '已读取',
+  Explored: '已浏览',
+  Exploring: '正在浏览',
+  Searched: '已搜索',
+  Searching: '正在搜索',
+  Terminal: '运行命令',
+  Edited: '已修改',
+  Editing: '正在修改',
+  Created: '已创建',
+  Creating: '正在创建'
+}
+
 export default function ExecutionLog({
   timeline,
   reasoning,
@@ -155,7 +170,7 @@ export default function ExecutionLog({
   }
 
   return (
-    <div className="mb-4 timeline-container">
+    <div className="timeline-container">
       <button
         type="button"
         className="timeline-header-btn"
@@ -218,9 +233,13 @@ export default function ExecutionLog({
                             className={`timeline-verb-text timeline-verb-${item.verb.toLowerCase()}`}
                             title={item.toolName ? `调用工具: ${item.toolName}` : undefined}
                           >
-                            {item.verb}
+                            {VERB_TRANSLATIONS[item.verb] || item.verb}
                           </span>
-                          {isFileItem ? (
+                          {item.verb === 'Searched' || item.verb === 'Searching' ? (
+                            <span className="timeline-target-link" style={{ textDecoration: 'none', cursor: 'default' }}>
+                              查找 {item.target}
+                            </span>
+                          ) : isFileItem ? (
                             <span
                               className="timeline-target-link"
                               onClick={(e) => {
@@ -329,7 +348,16 @@ export default function ExecutionLog({
                               }}
                               title={item.type === 'edit' ? '点击查看修改 Diff' : isSnapshotItem ? '点击在右侧打开项目快照预览' : `点击在右侧打开预览 ${item.realPath || item.target}`}
                             >
-                              {item.target}
+                              {(() => {
+                                const fileName = item.target.split(/[/\\]/).pop() || item.target
+                                const dirPath = item.target.substring(0, item.target.length - fileName.length)
+                                return (
+                                  <>
+                                    <span className="timeline-target-filename">{fileName}</span>
+                                    {dirPath && <span className="timeline-target-dir">{dirPath}</span>}
+                                  </>
+                                )
+                              })()}
                             </span>
                           ) : item.type === 'command' ? (
                             <>

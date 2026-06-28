@@ -6,6 +6,7 @@ import Flex from '../components/ui/Flex'
 import Stack from '../components/ui/Stack'
 import Card from '../components/ui/Card'
 import TrashPanel from '../components/TrashPanel'
+import SettingsSkillsTab from '../components/SettingsSkillsTab'
 import './SettingsPage.css'
 
 interface Props {
@@ -168,6 +169,10 @@ export default function SettingsPage({ onBack }: Props): React.ReactElement {
 
     if (activeGlobalMenu === 'trash') {
       return <TrashPanel />
+    }
+
+    if (activeGlobalMenu === 'skills') {
+      return <SettingsSkillsTab />
     }
 
     // 其它通用的占位面板区域

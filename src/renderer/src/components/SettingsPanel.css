@@ -25,6 +25,13 @@
   gap: 12px;
 }
 
+.settings-panel-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-main);
+  margin: 0;
+}
+
 .settings-status-tag {
   font-size: 11px;
   background-color: rgba(16, 185, 129, 0.2); /* bg-green-500/20 */
@@ -127,21 +134,23 @@
 
 .settings-model-input {
   font-size: 13px;
+  padding: 6px 0 !important;
 }
 
 .settings-model-tokens-wrapper {
   width: 128px;
   display: flex;
   align-items: center;
-  justify-content: end;
-  gap: 4px;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .settings-tokens-input {
-  width: 64px;
+  width: 50px;
   font-size: 13px;
   text-align: right;
-  color: var(--text-light, #4b5563);
+  color: var(--text-main);
+  padding: 6px 0 !important;
 }
 
 .settings-tokens-unit {
@@ -203,3 +212,29 @@
 .settings-test-result.is-error {
   color: #ef4444; /* text-red-500 */
 }
+
+/* Custom form utilities to replace Tailwind classes */
+.settings-form-container {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.settings-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+/* Hide spin-button in number input */
+.settings-tokens-input::-webkit-outer-spin-button,
+.settings-tokens-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.settings-tokens-input {
+  -moz-appearance: textfield;
+}
+

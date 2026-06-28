@@ -11,6 +11,7 @@ import IconChevronDown from './icons/IconChevronDown'
 import IconGear from './icons/IconGear'
 import IconStop from './icons/IconStop'
 import IconSend from './icons/IconSend'
+import IconPackage from './icons/IconPackage'
 import { builtinCommands } from '../commands/SlashCommandParser'
 import './PromptArea.css'
 
@@ -26,6 +27,7 @@ interface PromptAreaProps {
 export default function PromptArea({ onSend, placeholder, onOpenSettings, workspace }: PromptAreaProps): React.ReactElement {
   const [text, setText] = useState('')
   const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [dynamicSkills, setDynamicSkills] = useState<any[]>([])
 
   const providers = useProviderStore((s) => s.providers)
   const activeProviderId = useProviderStore((s) => s.activeProviderId)
@@ -47,21 +49,66 @@ export default function PromptArea({ onSend, placeholder, onOpenSettings, worksp
   }, [activeProviderId])
 
   useEffect(() => {
+    if (workspace) {
+      window.api.skill.getAll(workspace.rootPath).then(setDynamicSkills).catch(() => {})
+    } else {
+      setDynamicSkills([])
+    }
+  }, [workspace])
+
+  const activeCommandMatch = text.match(/^\/([a-zA-Z0-9_-]+)\s*/)
+  const activeCommandName = activeCommandMatch ? activeCommandMatch[1] : null
+  const matchedSkill = activeCommandName
+    ? dynamicSkills.find(s => s.id.replace(/^(global|workspace)-/, '').toLowerCase() === activeCommandName.toLowerCase())
+    : null
+
+  const textareaValue = matchedSkill ? text.replace(/^\/[a-zA-Z0-9_-]+\s*/, '') : text
+
+  useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`
     }
-  }, [text])
+  }, [textareaValue])
 
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
 
+  useEffect(() => {
+    const handleInsert = (e: Event) => {
+      const cmd = (e as CustomEvent).detail
+      setText(cmd)
+      textareaRef.current?.focus()
+    }
+    window.addEventListener('insert-command', handleInsert)
+    return () => window.removeEventListener('insert-command', handleInsert)
+  }, [])
+
   const showSlashMenu = text.startsWith('/') && !text.includes(' ')
+
   const filteredCommands = showSlashMenu
     ? builtinCommands.filter(c => {
         const search = text.substring(1).toLowerCase()
-        return c.name.includes(search) || c.aliases?.some(a => a.includes(search))
+        return c.name.toLowerCase().includes(search) || c.aliases?.some((a: string) => a.toLowerCase().includes(search))
       })
     : []
+
+  const filteredSkills = showSlashMenu
+    ? dynamicSkills.map(s => ({
+        id: s.id,
+        name: s.id.replace(/^(global|workspace)-/, ''), // display name
+        displayName: s.name,
+        description: s.description,
+        triggers: s.triggers
+      })).filter(c => {
+        const search = text.substring(1).toLowerCase()
+        return c.name.toLowerCase().includes(search) || c.triggers?.some((a: string) => a.toLowerCase().includes(search))
+      })
+    : []
+
+  const totalItems = [
+    ...filteredCommands.map(c => ({ ...c, type: 'command' as const })),
+    ...filteredSkills.map(s => ({ ...s, type: 'skill' as const }))
+  ]
 
   useEffect(() => {
     setSlashSelectedIndex(0)
@@ -74,20 +121,26 @@ export default function PromptArea({ onSend, placeholder, onOpenSettings, worksp
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (showSlashMenu && filteredCommands.length > 0) {
+    if (e.key === 'Backspace' && matchedSkill && text === `/${activeCommandName} `) {
+      e.preventDefault()
+      setText('')
+      return
+    }
+
+    if (showSlashMenu && totalItems.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        setSlashSelectedIndex((prev) => (prev + 1) % filteredCommands.length)
+        setSlashSelectedIndex((prev) => (prev + 1) % totalItems.length)
         return
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault()
-        setSlashSelectedIndex((prev) => (prev - 1 + filteredCommands.length) % filteredCommands.length)
+        setSlashSelectedIndex((prev) => (prev - 1 + totalItems.length) % totalItems.length)
         return
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault()
-        const selected = filteredCommands[slashSelectedIndex]
+        const selected = totalItems[slashSelectedIndex]
         if (selected) {
           setText(`/${selected.name} `)
         }
@@ -108,24 +161,62 @@ export default function PromptArea({ onSend, placeholder, onOpenSettings, worksp
   return (
     <div className="prompt-area-container">
       <div className="prompt-area-inner relative">
-        {showSlashMenu && filteredCommands.length > 0 && (
-          <div className="absolute bottom-full mb-2 left-0 w-[450px] max-h-64 overflow-y-auto bg-white dark:bg-[#252526] border border-gray-200 dark:border-zinc-700 rounded-lg shadow-xl z-50 flex flex-col p-1.5">
-            {filteredCommands.map((cmd, idx) => (
-              <div
-                key={cmd.name}
-                className={`flex flex-col gap-0.5 px-3 py-2 rounded cursor-pointer ${idx === slashSelectedIndex ? 'bg-blue-50 dark:bg-blue-900/40' : 'hover:bg-gray-50 dark:hover:bg-zinc-800'}`}
-                onClick={() => {
-                  setText(`/${cmd.name} `)
-                  textareaRef.current?.focus()
-                }}
-                onMouseEnter={() => setSlashSelectedIndex(idx)}
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-blue-600 dark:text-blue-400 font-mono text-sm font-semibold">/{cmd.name}</span>
-                </div>
-                <span className="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">{cmd.description}</span>
-              </div>
-            ))}
+        {showSlashMenu && totalItems.length > 0 && (
+          <div className="prompt-slash-menu">
+            {filteredCommands.length > 0 && (
+              <>
+                <div className="prompt-slash-section-header">命令</div>
+                {filteredCommands.map((cmd) => {
+                  const globalIdx = totalItems.findIndex(item => item.type === 'command' && item.name === cmd.name)
+                  return (
+                    <div
+                      key={cmd.name}
+                      className={`prompt-slash-item ${globalIdx === slashSelectedIndex ? 'is-selected' : ''}`}
+                      onClick={() => {
+                        setText(`/${cmd.name} `)
+                        textareaRef.current?.focus()
+                      }}
+                      onMouseEnter={() => setSlashSelectedIndex(globalIdx)}
+                    >
+                      <div className="prompt-slash-item-content">
+                        <span className="prompt-slash-title">/{cmd.name}</span>
+                        <span className="prompt-slash-desc">{cmd.description}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </>
+            )}
+
+            {filteredSkills.length > 0 && (
+              <>
+                <div className="prompt-slash-section-header">技能</div>
+                {filteredSkills.map((skill) => {
+                  const globalIdx = totalItems.findIndex(item => item.type === 'skill' && item.id === skill.id)
+                  return (
+                    <div
+                      key={skill.id}
+                      className={`prompt-slash-item ${globalIdx === slashSelectedIndex ? 'is-selected' : ''}`}
+                      onClick={() => {
+                        setText(`/${skill.name} `)
+                        textareaRef.current?.focus()
+                      }}
+                      onMouseEnter={() => setSlashSelectedIndex(globalIdx)}
+                    >
+                      <div className="prompt-slash-item-content">
+                        <span className="prompt-slash-skill-title">{skill.name}</span>
+                        <span className="prompt-slash-desc">{skill.description || skill.displayName}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </>
+            )}
+
+            <div className="prompt-slash-menu-footer">
+              <span className="prompt-slash-footer-icon">ⓘ</span>
+              <span>输入内容以搜索命令或者技能</span>
+            </div>
           </div>
         )}
         <Card variant="default" rounded="lg" className="prompt-card">
@@ -134,16 +225,43 @@ export default function PromptArea({ onSend, placeholder, onOpenSettings, worksp
             <Flex align="center" gap={3} className="prompt-top-toolbar">
             </Flex>
 
-            <textarea
-              ref={textareaRef}
-              rows={1}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={placeholder || '随心输入...'}
-              className="prompt-textarea"
-              style={{ maxHeight: '200px' }}
-            />
+            <Flex align="start" className="prompt-input-wrapper w-full">
+              {matchedSkill && (
+                <div 
+                  className="prompt-skill-chip"
+                  title="已激活技能工作流"
+                >
+                  <IconPackage className="prompt-skill-chip-icon" />
+                  <span className="prompt-skill-chip-text">{activeCommandName}</span>
+                  <button 
+                    type="button" 
+                    className="prompt-skill-chip-close"
+                    onClick={() => {
+                      const rest = text.replace(/^\/[a-zA-Z0-9_-]+\s*/, '')
+                      setText(rest)
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+              <textarea
+                ref={textareaRef}
+                rows={1}
+                value={matchedSkill ? text.replace(/^\/[a-zA-Z0-9_-]+\s*/, '') : text}
+                onChange={(e) => {
+                  if (matchedSkill) {
+                    setText(`/${activeCommandName} ${e.target.value}`)
+                  } else {
+                    setText(e.target.value)
+                  }
+                }}
+                onKeyDown={handleKeyDown}
+                placeholder={placeholder || '随心输入...'}
+                className="prompt-textarea"
+                style={{ maxHeight: '200px' }}
+              />
+            </Flex>
 
             <Flex align="center" justify="between" className="pt-2">
               <Flex align="center" gap={3} className="prompt-actions-left">

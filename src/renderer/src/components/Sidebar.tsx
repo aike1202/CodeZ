@@ -36,6 +36,7 @@ interface SidebarProps {
   onShowInExplorer?: (projectId: string) => void
   onRenameProject?: (projectId: string, newName: string) => void
   onRemoveProject?: (projectId: string) => void
+  onOpenSettings?: () => void
 }
 
 export default function Sidebar({
@@ -53,7 +54,8 @@ export default function Sidebar({
   maxSidebarWidth = 600,
   onShowInExplorer,
   onRenameProject,
-  onRemoveProject
+  onRemoveProject,
+  onOpenSettings
 }: SidebarProps): React.ReactElement {
   const [menuOpenForId, setMenuOpenForId] = useState<string | null>(null)
   const [confirmState, setConfirmState] = useState<{ sessionId: string; action: 'archive' | 'unarchive' | 'delete' | 'restore' | 'forceDelete' } | null>(null)
@@ -469,7 +471,7 @@ export default function Sidebar({
       </Stack>
 
       <div className="sidebar-footer">
-        <Button variant="ghost" size="none" className="sidebar-footer-settings-btn">
+        <Button variant="ghost" size="none" className="sidebar-footer-settings-btn" onClick={onOpenSettings}>
           <Flex align="center" gap={3}>
             <span className="sidebar-action-icon"><Gear /></span><span>设置</span>
           </Flex>
@@ -484,9 +486,9 @@ export default function Sidebar({
 
           return createPortal(
             <>
-              <div className="fixed inset-0 z-[9998] cursor-default" onClick={(e) => { e.stopPropagation(); setMenuOpenForId(null) }}></div>
+              <div className="sidebar-context-overlay" onClick={(e) => { e.stopPropagation(); setMenuOpenForId(null) }}></div>
               <div
-                className="fixed bg-white border border-gray-100 shadow-xl rounded-lg py-1 z-[9999] text-sm font-normal w-48"
+                className="sidebar-context-menu"
                 style={{ top: menuPosition.top, left: menuPosition.left }}
               >
                 {[
@@ -496,7 +498,7 @@ export default function Sidebar({
                       onShowInExplorer?.(targetProject.id)
                       setMenuOpenForId(null)
                     },
-                    className: 'text-gray-700 hover:bg-gray-100'
+                    className: 'sidebar-context-item'
                   },
                   {
                     label: '重命名项目',
@@ -507,7 +509,7 @@ export default function Sidebar({
                       }
                       setMenuOpenForId(null)
                     },
-                    className: 'text-gray-700 hover:bg-gray-100'
+                    className: 'sidebar-context-item'
                   },
                   {
                     isDivider: true
@@ -520,11 +522,11 @@ export default function Sidebar({
                       }
                       setMenuOpenForId(null)
                     },
-                    className: 'text-red-600 hover:bg-red-50'
+                    className: 'sidebar-context-item-danger'
                   }
                 ].map((item, idx) => {
                   if (item.isDivider) {
-                    return <div key={idx} className="h-px bg-gray-100 my-1" />
+                    return <div key={idx} className="sidebar-context-divider" />
                   }
                   return (
                     <div
@@ -533,7 +535,7 @@ export default function Sidebar({
                         e.stopPropagation()
                         item.onClick?.()
                       }}
-                      className={`px-3 py-1.5 flex items-center gap-2 cursor-pointer ${item.className}`}
+                      className={item.className}
                     >
                       {item.label}
                     </div>

@@ -11,7 +11,6 @@ import Flex from './components/ui/Flex'
 import Stack from './components/ui/Stack'
 import FilePreviewPanel from './components/FilePreviewPanel'
 import ChatArea from './components/chat/ChatArea'
-import { parseSlashCommand } from './commands/SlashCommandParser'
 import './styles.css'
 import './App.css'
 
@@ -57,15 +56,7 @@ export default function App(): React.ReactElement {
   const loadSessions = useChatStore((s) => s.loadSessions)
   const createSession = useChatStore((s) => s.createSession)
   const selectSession = useChatStore((s) => s.selectSession)
-  const addUserMessage = useChatStore((s) => s.addUserMessage)
-  const startStreamingReply = useChatStore((s) => s.startStreamingReply)
-  const appendStreamChunk = useChatStore((s) => s.appendStreamChunk)
-  const finishStreaming = useChatStore((s) => s.finishStreaming)
-  const setStreamCleanup = useChatStore((s) => s.setStreamCleanup)
-  const persistCurrentSession = useChatStore((s) => s.persistCurrentSession)
-  const startToolCall = useChatStore((s) => s.startToolCall)
-  const finishToolCall = useChatStore((s) => s.finishToolCall)
-  const appendReasoningTimelineChunk = useChatStore((s) => s.appendReasoningTimelineChunk)
+
   const archiveSession = useChatStore((s) => s.archiveSession)
   const deleteSession = useChatStore((s) => s.deleteSession)
   const restoreSession = useChatStore((s) => s.restoreSession)
@@ -121,8 +112,7 @@ export default function App(): React.ReactElement {
       const updated = await window.api.workspace.getRecentProjects()
       store.setRecentProjects(updated)
 
-      // 自动创建新会话
-      createSession(ws.id)
+      // 鑷姩鍒涘缓鏂颁細璇?      createSession(ws.id)
     } catch (error) {
       console.error('Failed to open workspace:', error)
     } finally {
@@ -216,8 +206,7 @@ export default function App(): React.ReactElement {
 
     selectSession(sessionId)
 
-    // 智能联动：如果当前没有打开项目，或者打开的项目不匹配该会话的项目ID，自动帮用户切换/加载该项目
-    const session = useChatStore.getState().sessions.find((s) => s.id === sessionId)
+    // 鏅鸿兘鑱斿姩锛氬鏋滃綋鍓嶆病鏈夋墦寮€椤圭洰锛屾垨鑰呮墦寮€鐨勯」鐩笉鍖归厤璇ヤ細璇濈殑椤圭洰ID锛岃嚜鍔ㄥ府鐢ㄦ埛鍒囨崲/鍔犺浇璇ラ」鐩?    const session = useChatStore.getState().sessions.find((s) => s.id === sessionId)
     if (session && session.projectId) {
       const currentWs = useWorkspaceStore.getState().workspace
       if (!currentWs || currentWs.id !== session.projectId) {
@@ -228,154 +217,6 @@ export default function App(): React.ReactElement {
       }
     }
   }, [createSession, selectSession, recentProjects, handleOpenRecentProject])
-
-  /* ---------- send message (REAL streaming) ---------- */
-  const handleSendMessage = useCallback(
-    async (message: string, modelName: string) => {
-      const ws = useWorkspaceStore.getState().workspace
-      if (!ws) {
-        alert('请先选择或打开一个项目工作区才能发送消息！')
-        return
-      }
-
-      // 检查是否有活跃 Provider
-      const provState = useProviderStore.getState()
-      const activeProv = provState.providers.find((p) => p.id === provState.activeProviderId)
-      if (!activeProv) {
-        // 无 Provider，回退到旧版模拟响应
-        const userMsg = addUserMessage(message)
-        const agentId = startStreamingReply()
-        const simText = `请先配置模型 Provider 才能进行 AI 对话。\n\n点击输入框左侧齿轮图标打开设置，添加一个 OpenAI-compatible Provider（如 OpenAI、Ollama、DeepSeek 等）。\n\n配置完成后，输入消息即可获得 AI 实时流式回复。`
-
-        let i = 0
-        const interval = setInterval(() => {
-          if (i < simText.length) {
-            appendStreamChunk(agentId, simText[i])
-            i++
-          } else {
-            clearInterval(interval)
-            finishStreaming(agentId)
-            persistCurrentSession()
-          }
-        }, 15)
-        setStreamCleanup(() => () => clearInterval(interval))
-        return
-      }
-
-      // 没有活跃 session？创建一个
-      let sid = useChatStore.getState().activeSessionId
-      if (!sid) {
-        sid = createSession(ws.id)
-      }
-
-      // 添加用户消息
-      addUserMessage(message)
-
-      // 启动助手流式消息
-      const agentId = startStreamingReply()
-
-      // 获取模型名
-      const model = modelName || activeProv.models[0]?.name || 'gpt-4o'
-
-      // 构建消息历史
-      const currentMsgs = useChatStore.getState().messages
-      const chatMessages: Array<any> = [
-        {
-          role: 'system',
-          content: `你是一个 AI 编程助手，运行在 MyAgent 桌面应用中。当前项目: ${ws.name}（${ws.projectType}）。请用中文回复，保持简洁专业。`
-        },
-        ...currentMsgs
-          .filter((m) => !m.streaming) // 排除正在流式接收的消息
-          .slice(-40) // 限制向主进程传递的初始上下文长度
-          .flatMap((m, index, arr) => {
-            const isLastMessage = index === arr.length - 1
-            const mapped: Array<{ role: 'system' | 'user' | 'assistant' | 'tool'; content: string; tool_calls?: any[]; tool_call_id?: string; name?: string; thought_signature?: string; provider_specific_fields?: any }> = []
-            if (m.role === 'user') {
-              let c = m.content
-              if (isLastMessage) {
-                const { isCommand, processedMessage } = parseSlashCommand(c)
-                if (isCommand) {
-                  c = processedMessage
-                }
-              }
-              mapped.push({ role: 'user', content: c })
-            } else {
-              // agent message
-              const assistantMsg: any = { role: 'assistant', content: m.content || '' }
-              if (m.toolCalls && m.toolCalls.length > 0) {
-                const finalSig = m.toolCalls[m.toolCalls.length - 1].thoughtSignature || 'skip_thought_signature_validator'
-                assistantMsg.tool_calls = m.toolCalls.map(tc => ({
-                  id: tc.id,
-                  type: 'function',
-                  function: { name: tc.name, arguments: tc.args },
-                  thought_signature: tc.thoughtSignature || finalSig
-                }))
-                // Send the final signature of the turn
-                assistantMsg.thought_signature = finalSig
-                assistantMsg.provider_specific_fields = { thought_signature: finalSig }
-              }
-              mapped.push(assistantMsg)
-              
-              if (m.toolCalls && m.toolCalls.length > 0) {
-                for (const tc of m.toolCalls) {
-                  if (tc.status === 'success' || tc.status === 'error') {
-                    mapped.push({
-                      role: 'tool',
-                      tool_call_id: tc.id,
-                      name: tc.name,
-                      content: tc.result || ''
-                    })
-                  }
-                }
-              }
-            }
-            return mapped
-          })
-      ]
-
-      // 发起真实流式请求
-      const cleanup = window.api.chat.stream(
-        activeProv.id,
-        model,
-        chatMessages,
-        {
-          onChunk: (delta: string, reasoningDelta?: string) => {
-            appendStreamChunk(agentId, delta, reasoningDelta)
-            appendReasoningTimelineChunk(agentId, reasoningDelta || '')
-          },
-          onDone: (fullContent: string, txId?: string) => {
-            finishStreaming(agentId)
-            if (txId) {
-              useChatStore.getState().setTransactionId(agentId, txId)
-            }
-            persistCurrentSession()
-            setStreamCleanup(null)
-          },
-          onError: (error: string) => {
-            // 在消息中追加错误提示
-            appendStreamChunk(agentId, `\n\n错误：${error}`)
-            finishStreaming(agentId)
-            persistCurrentSession()
-            setStreamCleanup(null)
-          },
-          onToolStart: (toolCallId: string, name: string, args: string, thoughtSignature?: string) => {
-            startToolCall(agentId, {
-              id: toolCallId || genId(),
-              name,
-              args,
-              thoughtSignature
-            })
-          },
-          onToolEnd: (toolCallId: string, result: string) => {
-            finishToolCall(agentId, toolCallId, result)
-          }
-        }
-      )
-
-      setStreamCleanup(cleanup)
-    },
-    [addUserMessage, startStreamingReply, appendStreamChunk, finishStreaming, persistCurrentSession, setStreamCleanup, createSession, startToolCall, finishToolCall, appendReasoningTimelineChunk]
-  )
 
   /* ---------- file preview panel ---------- */
   const [previewPath, setPreviewPath] = useState<string | null>(null)
@@ -402,20 +243,20 @@ export default function App(): React.ReactElement {
 
   const panelOpen = previewPath !== null || previewDiff !== null
 
-  // 当 workspace 变动且为空时，关闭终端窗口
+  // 褰?workspace 鍙樺姩涓斾负绌烘椂锛屽叧闂粓绔獥鍙?
   useEffect(() => {
     if (!workspace) {
       setTerminalOpen(false)
     }
   }, [workspace])
 
-  // 限制侧边栏最大宽度，保证中间聊天区宽度至少为 300px
+  // 闄愬埗渚ц竟鏍忔渶澶у搴︼紝淇濊瘉涓棿鑱婂ぉ鍖哄搴﹁嚦灏戜负 300px
   const maxSidebarWidth = useMemo(() => {
     const totalWidth = typeof window !== 'undefined' ? window.innerWidth : 1200
     return Math.max(200, totalWidth - 300 - (panelOpen ? previewPanelWidth : 0))
   }, [panelOpen, previewPanelWidth])
 
-  // 当窗口大小改变或区域大小改变时，自动约束宽度，防止超出窗口导致标题栏等截断
+  // 褰撶獥鍙ｅぇ灏忔敼鍙樻垨鍖哄煙澶у皬鏀瑰彉鏃讹紝鑷姩绾︽潫瀹藉害锛岄槻姝㈣秴鍑虹獥鍙ｅ鑷存爣棰樻爮绛夋埅鏂?
   useEffect(() => {
     const handleResize = () => {
       const totalWidth = window.innerWidth
@@ -448,7 +289,7 @@ export default function App(): React.ReactElement {
   }, [panelOpen, sidebarWidth, previewPanelWidth])
 
   const handleFileClick = useCallback(async (filePath: string, virtualContent?: string) => {
-    setPreviewDiff(null) // 清空 Diff 状态以防混淆
+    setPreviewDiff(null) // 娓呯┖ Diff 鐘舵€佷互闃叉贩娣?
     const ws = useWorkspaceStore.getState().workspace
     if (!ws) return
 
@@ -474,7 +315,7 @@ export default function App(): React.ReactElement {
     } catch {
       setPreviewContent({
         path: cleanPath,
-        content: `无法读取文件：${cleanPath}`,
+        content: `鏃犳硶璇诲彇鏂囦欢锛?{cleanPath}`,
         truncated: false,
         totalLines: 0
       })
@@ -492,8 +333,7 @@ export default function App(): React.ReactElement {
       codeContent?: string
     }
   ) => {
-    setPreviewPath(null) // 关闭普通文件预览
-    setPreviewContent(null)
+    setPreviewPath(null) // 鍏抽棴鏅€氭枃浠堕瑙?    setPreviewContent(null)
     setPreviewDiff({
       filePath,
       ...editInfo
@@ -501,7 +341,7 @@ export default function App(): React.ReactElement {
   }, [])
 
 
-  // 右侧预览面板拖拽调宽
+  // 鍙充晶棰勮闈㈡澘鎷栨嫿璋冨
   const handlePreviewMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;
@@ -529,7 +369,7 @@ export default function App(): React.ReactElement {
   const hasMessages = messages.length > 0
   const sideTitle = previewPath || (previewDiff ? `Diff: ${previewDiff.filePath}` : '')
 
-  // 设置页全屏渲染
+  // 璁剧疆椤靛叏灞忔覆鏌?
   if (currentView === 'settings') {
     return (
       <div className="settings-view-wrapper">
@@ -541,7 +381,7 @@ export default function App(): React.ReactElement {
   return (
     <Flex className="app-main-layout">
 
-      {/* ====== 左侧边栏 ====== */}
+      {/* ====== 宸︿晶杈规爮 ====== */}
       <Sidebar
         projects={sidebarProjects}
         activeSessionId={activeSessionId}
@@ -558,9 +398,10 @@ export default function App(): React.ReactElement {
         onShowInExplorer={handleShowInExplorer}
         onRenameProject={handleRenameProject}
         onRemoveProject={handleRemoveProject}
+        onOpenSettings={() => setCurrentView('settings')}
       />
 
-      {/* ====== 右侧主区域 ====== */}
+      {/* ====== 鍙充晶涓诲尯鍩?====== */}
       <Stack className="app-main-content">
 
         <TopBar
@@ -571,7 +412,7 @@ export default function App(): React.ReactElement {
           hasWorkspace={!!workspace}
         />
 
-        {/* 中间：对话 + 可选右侧预览 */}
+        {/* 涓棿锛氬璇?+ 鍙€夊彸渚ч瑙?*/}
         <Flex className="app-content-flex">
           <ChatArea
             messages={messages}
@@ -586,12 +427,11 @@ export default function App(): React.ReactElement {
             panelOpen={panelOpen}
             handleFileClick={handleFileClick}
             handleDiffClick={handleDiffClick}
-            handleSendMessage={handleSendMessage}
             handleOpenRecentProject={handleOpenRecentProject}
             setCurrentView={setCurrentView}
           />
 
-          {/* 右侧文件与 Diff 预览面板 */}
+          {/* 鍙充晶鏂囦欢涓?Diff 棰勮闈㈡澘 */}
           {panelOpen && (
             <FilePreviewPanel
               previewPath={previewPath}
@@ -612,7 +452,7 @@ export default function App(): React.ReactElement {
         </Flex>
       </Stack>
 
-      {/* 模态框 */}
+      {/* 妯℃€佹 */}
       {taskModalOpen && workspace && (
         <TaskHistoryModal
           workspaceId={workspace.id}
@@ -622,4 +462,7 @@ export default function App(): React.ReactElement {
     </Flex>
   )
 }
+
+
+
 

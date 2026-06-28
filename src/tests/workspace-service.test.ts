@@ -8,7 +8,7 @@ describe('WorkspaceService', () => {
   let tmpDir: string
 
   async function setup(): Promise<void> {
-    tmpDir = path.join(os.tmpdir(), `myagent-test-${Date.now()}`)
+    tmpDir = path.join(os.tmpdir(), `codez-test-${Date.now()}`)
     await fs.mkdir(tmpDir, { recursive: true })
     await fs.writeFile(path.join(tmpDir, 'package.json'), '{"name":"test"}')
     await fs.writeFile(path.join(tmpDir, 'index.ts'), 'console.log("hello")')
@@ -76,7 +76,7 @@ describe('WorkspaceService', () => {
   })
 
   it('detectProjectType 应返回 unknown 对空目录', async () => {
-    const emptyDir = path.join(os.tmpdir(), `myagent-test-empty-${Date.now()}`)
+    const emptyDir = path.join(os.tmpdir(), `codez-test-empty-${Date.now()}`)
     await fs.mkdir(emptyDir, { recursive: true })
     try {
       const service = new WorkspaceService(emptyDir)

@@ -40,7 +40,7 @@ export default function HomePage({
     <Flex className="homepage-container">
       <div className="homepage-center-wrapper">
         <h1 className="homepage-welcome-title">
-          欢迎使用 MyAgent
+          欢迎使用 Codez
         </h1>
         
         {recentProjects.length > 0 ? (

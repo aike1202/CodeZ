@@ -62,6 +62,17 @@ declare global {
         save: (task: any) => Promise<void>
         delete: (id: string) => Promise<any>
       }
+      theme: {
+        get: () => Promise<{ shouldUseDarkColors: boolean; themeSource: 'system' | 'light' | 'dark' }>
+        set: (source: 'system' | 'light' | 'dark') => Promise<{ shouldUseDarkColors: boolean; themeSource: 'system' | 'light' | 'dark' }>
+        onUpdated: (callback: (info: { shouldUseDarkColors: boolean; themeSource: 'system' | 'light' | 'dark' }) => void) => () => void
+      }
+      skill: {
+        getAll: (workspaceRoot: string | null) => Promise<any[]>
+        toggle: (workspaceRoot: string | null, id: string, enabled: boolean) => Promise<void>
+        checkExternal: () => Promise<{ hasUpdates: boolean; totalCount: number; sources: { sourceName: string; count: number }[] }>
+        importExternal: (sourceName?: string, customPath?: string, forceOverwrite?: boolean) => Promise<boolean>
+      }
     }
   }
 }

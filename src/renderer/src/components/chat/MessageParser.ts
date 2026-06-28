@@ -1,5 +1,6 @@
 import React from 'react'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
+import IconPackage from '../icons/IconPackage'
 
 /* ---------- file path regex ---------- */
 const EXTENSIONS = ['tsx', 'jsx', 'scss', 'less', 'json', 'html', 'yaml', 'toml', 'svelte', 'java', 'cpp', 'css', 'xml', 'svg', 'yml', 'vue', 'ini', 'cfg', 'bat', 'ps1', 'ts', 'js', 'rs', 'go', 'py', 'sh', 'md', 'c', 'h']
@@ -47,10 +48,16 @@ export function parseInline(
       fileMatch = FILE_PATH_RE.exec(remaining)
     }
 
+    const COMMAND_RE = /(\/[a-zA-Z0-9_-]+)/g
+    COMMAND_RE.lastIndex = 0
+    const cmdMatch = COMMAND_RE.exec(remaining)
+    const cmdIdx = cmdMatch ? cmdMatch.index : -1
+
     const indices = [
       { type: 'bold', index: boldIdx },
       { type: 'code', index: codeIdx },
-      { type: 'file', index: fileIdx, match: fileMatch }
+      { type: 'file', index: fileIdx, match: fileMatch },
+      { type: 'cmd', index: cmdIdx, match: cmdMatch }
     ].filter((item) => item.index !== -1)
 
     if (indices.length === 0) {
@@ -106,6 +113,24 @@ export function parseInline(
             title: `点击预览 ${matchText}`
           },
           matchText
+        )
+      )
+      remaining = remaining.slice(matchText.length)
+    } else if (first.type === 'cmd' && first.match) {
+      const matchText = first.match[0]
+      nodes.push(
+        React.createElement(
+          'span',
+          {
+            key: `cmd-link-${keyIdx++}`,
+            className: 'cmd-inline-link',
+            onClick: () => {
+              window.dispatchEvent(new CustomEvent('insert-command', { detail: `${matchText} ` }))
+            },
+            title: `点击在输入框中调用 ${matchText}`
+          },
+          React.createElement(IconPackage, { className: 'cmd-inline-link-icon' }),
+          matchText.substring(1)
         )
       )
       remaining = remaining.slice(matchText.length)

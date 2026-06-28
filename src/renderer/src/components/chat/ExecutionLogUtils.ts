@@ -36,7 +36,7 @@ export interface UnifiedTimelineItem {
   type: 'reasoning' | 'tool' | 'command' | 'edit' | 'text'
   timestamp: number
   status: 'running' | 'success' | 'error'
-  verb: 'Thought' | 'Analyzed' | 'Analyzing' | 'Explored' | 'Searched' | 'Terminal' | 'Edited' | 'Created' | 'Editing' | 'Creating'
+  verb: 'Thought' | 'Analyzed' | 'Analyzing' | 'Explored' | 'Exploring' | 'Searched' | 'Searching' | 'Terminal' | 'Edited' | 'Created' | 'Editing' | 'Creating'
   target: string
   detail?: string
   args?: string

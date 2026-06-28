@@ -94,7 +94,7 @@ export class ProjectAnalysisService {
 
   constructor(rootPath: string, cacheDir?: string) {
     this.rootPath = path.resolve(rootPath)
-    const userDataPath = cacheDir || app?.getPath?.('userData') || path.join(this.rootPath, '.myagent-cache')
+    const userDataPath = cacheDir || app?.getPath?.('userData') || path.join(this.rootPath, '.codez-cache')
     this.cacheFilePath = path.join(userDataPath, SNAPSHOT_CACHE_FILE)
   }
 

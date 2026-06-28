@@ -8,7 +8,7 @@ export class WriteToFileTool extends Tool {
   }
 
   get description() {
-    return 'Creates a new file or completely overwrites an existing file with new content. Use this to create new code files or when replacing the entire file content is easier than partial edits.'
+    return 'Creates a brand new file. For modifying or updating existing files, NEVER use this tool; instead, always use "replace_file_content" for targeted, partial edits.'
   }
 
   get parameters_schema() {

@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { APP_NAME, APP_SUBTITLE, CURRENT_PHASE, APP_VERSION } from '@shared/constants/app'
 
 describe('App 共享常量', () => {
-  it('APP_NAME 应为 MyAgent', () => {
-    expect(APP_NAME).toBe('MyAgent')
+  it('APP_NAME 应为 Codez', () => {
+    expect(APP_NAME).toBe('Codez')
   })
 
   it('APP_SUBTITLE 应为 Agent Coding Desktop', () => {

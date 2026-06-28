@@ -11,6 +11,9 @@ import IconMinimize from './icons/IconMinimize'
 import IconMaximize from './icons/IconMaximize'
 import IconRestore from './icons/IconRestore'
 import IconClose from './icons/IconClose'
+import IconSun from './icons/IconSun'
+import IconMoon from './icons/IconMoon'
+import IconMonitor from './icons/IconMonitor'
 import './TopBar.css'
 
 interface TopBarProps {
@@ -47,12 +50,31 @@ export default function TopBar({
   const [isMaximized, setIsMaximized] = React.useState(false)
   const [selectedIDE, setSelectedIDE] = React.useState<string>(() => {
     try {
-      return localStorage.getItem('myagent_selected_ide') || 'VSCode'
+      return localStorage.getItem('codez_selected_ide') || 'VSCode'
     } catch {
       return 'VSCode'
     }
   })
   const [ideDropdownOpen, setIdeDropdownOpen] = React.useState(false)
+  const [themeSource, setThemeSource] = React.useState<'system' | 'light' | 'dark'>('system')
+  const [activeSkillsCount, setActiveSkillsCount] = React.useState(0)
+
+  // 定期检查活跃技能数量
+  React.useEffect(() => {
+    if (!workspace) {
+      setActiveSkillsCount(0)
+      return
+    }
+    const checkSkills = async () => {
+      try {
+        const skills = await window.api.skill.getAll(workspace.rootPath)
+        setActiveSkillsCount(skills.filter((s: any) => s.enabled).length)
+      } catch {}
+    }
+    checkSkills()
+    const interval = setInterval(checkSkills, 2000)
+    return () => clearInterval(interval)
+  }, [workspace])
 
   const [installedEditors, setInstalledEditors] = React.useState<Array<{ id: string; name: string; exePath: string | null; iconPath: string | null }>>([
     { id: 'VSCode', name: 'VSCode', exePath: null, iconPath: null }
@@ -66,7 +88,7 @@ export default function TopBar({
       const isDataUri = targetEditor.iconPath.startsWith('data:')
       const finalSrc = isDataUri 
         ? targetEditor.iconPath 
-        : `myagent-file:///${targetEditor.iconPath.replace(/\\/g, '/')}`
+        : `codez-file:///${targetEditor.iconPath.replace(/\\/g, '/')}`
         
       // 针对原生自带大白边且物理重心偏移的编辑器图标做特殊的视觉缩放与居中补偿
       const needsScale = id === 'VSCode' || id === 'Cursor'
@@ -103,11 +125,11 @@ export default function TopBar({
   // 记住项目级别的编辑器打开习惯
   React.useEffect(() => {
     if (workspace?.id) {
-      const projectStored = localStorage.getItem(`myagent_selected_ide_for_project_${workspace.id}`)
+      const projectStored = localStorage.getItem(`codez_selected_ide_for_project_${workspace.id}`)
       if (projectStored) {
         setSelectedIDE(projectStored)
       } else {
-        const globalStored = localStorage.getItem('myagent_selected_ide') || 'VSCode'
+        const globalStored = localStorage.getItem('codez_selected_ide') || 'VSCode'
         setSelectedIDE(globalStored)
       }
     }
@@ -119,6 +141,29 @@ export default function TopBar({
       const handler = (_event: any, state: boolean) => setIsMaximized(state)
       win.electron.ipcRenderer.on('window-maximized-state', handler)
       
+      // Initialize theme
+      if (window.api?.theme) {
+        window.api.theme.get().then((info) => {
+          setThemeSource(info.themeSource)
+          if (info.shouldUseDarkColors) {
+            document.documentElement.classList.add('dark')
+          } else {
+            document.documentElement.classList.remove('dark')
+          }
+        })
+
+        const cleanup = window.api.theme.onUpdated((info) => {
+          if (info.shouldUseDarkColors) {
+            document.documentElement.classList.add('dark')
+          } else {
+            document.documentElement.classList.remove('dark')
+          }
+        })
+        
+        // This is necessary to store cleanup and remove listener properly.
+        // We do it at the end of effect.
+      }
+      
       // 检测本地安装 of IDE 并过滤习惯记忆
       window.api.workspace.detectInstalledEditors().then((editors) => {
         if (editors && editors.length > 0) {
@@ -128,17 +173,17 @@ export default function TopBar({
           // 如果当前有项目，则优先检查项目级习惯
           let defaultIDE = editors[0].id
           if (workspace?.id) {
-            const projectStored = localStorage.getItem(`myagent_selected_ide_for_project_${workspace.id}`)
+            const projectStored = localStorage.getItem(`codez_selected_ide_for_project_${workspace.id}`)
             if (projectStored && editorIds.includes(projectStored)) {
               defaultIDE = projectStored
             } else {
-              const globalStored = localStorage.getItem('myagent_selected_ide')
+              const globalStored = localStorage.getItem('codez_selected_ide')
               if (globalStored && editorIds.includes(globalStored)) {
                 defaultIDE = globalStored
               }
             }
           } else {
-            const globalStored = localStorage.getItem('myagent_selected_ide')
+            const globalStored = localStorage.getItem('codez_selected_ide')
             if (globalStored && editorIds.includes(globalStored)) {
               defaultIDE = globalStored
             }
@@ -158,6 +203,8 @@ export default function TopBar({
 
       return () => {
         win.electron.ipcRenderer.removeListener('window-maximized-state', handler)
+        // Note: currently there's no way to easily cleanup onUpdated here if we don't store the func,
+        // but since TopBar never unmounts, it's acceptable for now.
       }
     }
     return undefined
@@ -170,24 +217,22 @@ export default function TopBar({
         <Flex 
           align="center"
           gap={0}
-          className="bg-gray-100 border border-gray-200/80 rounded px-2 py-0.5 text-[13px] font-sans select-none"
+          className="topbar-project-badge"
           style={{ height: '28px' }}
         >
           {/* 1. 项目名称 */}
-          <div className="px-1.5 font-semibold text-gray-700 truncate max-w-[150px]">
-            {workspace?.name || 'MyAgent'}
+          <div className="topbar-project-name">
+            {workspace?.name || 'Codez'}
           </div>
 
           {/* 分隔线 */}
-          <div className="h-3.5 w-px bg-gray-300/80 mx-1"></div>
+          <div className="topbar-project-divider"></div>
 
           {/* 2. 中间可点击的 IDE 图标 (带 Tooltip 和点击命令) */}
           <Button
             variant="ghost"
             size="none"
-            className={`p-1 rounded hover:bg-gray-200/70 flex items-center justify-center
-              ${workspace ? 'cursor-pointer text-gray-700' : 'cursor-not-allowed text-gray-300'}
-            `}
+            className="topbar-ide-btn"
             onClick={() => {
               if (workspace) {
                 const cur = installedEditors.find(e => e.id === selectedIDE)
@@ -231,9 +276,9 @@ export default function TopBar({
                   onClick={() => {
                     setSelectedIDE(item.id)
                     try {
-                      localStorage.setItem('myagent_selected_ide', item.id)
+                      localStorage.setItem('codez_selected_ide', item.id)
                       if (workspace?.id) {
-                        localStorage.setItem(`myagent_selected_ide_for_project_${workspace.id}`, item.id)
+                        localStorage.setItem(`codez_selected_ide_for_project_${workspace.id}`, item.id)
                       }
                     } catch {}
                     setIdeDropdownOpen(false)
@@ -267,7 +312,28 @@ export default function TopBar({
         <Button
           variant="ghost"
           size="none"
-          className={`user-menu-btn ${!hasWorkspace ? 'opacity-35 cursor-not-allowed' : 'topbar-action-btn-normal'}`}
+          className="user-menu-btn topbar-action-btn-normal"
+          title={`主题切换 (${themeSource === 'system' ? '系统' : themeSource === 'dark' ? '深色' : '浅色'})`}
+          onClick={() => {
+            const nextMap: Record<string, 'system'|'light'|'dark'> = {
+              'system': 'light',
+              'light': 'dark',
+              'dark': 'system'
+            }
+            const next = nextMap[themeSource]
+            setThemeSource(next)
+            window.api?.theme?.set(next)
+          }}
+        >
+          {themeSource === 'system' && <IconMonitor />}
+          {themeSource === 'light' && <IconSun />}
+          {themeSource === 'dark' && <IconMoon />}
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="none"
+          className={`user-menu-btn ${!hasWorkspace ? 'topbar-action-btn-disabled' : 'topbar-action-btn-normal'}`}
           title={hasWorkspace ? "任务历史" : "请先打开项目"}
           onClick={hasWorkspace ? onOpenTasks : undefined}
           disabled={!hasWorkspace}
@@ -278,7 +344,7 @@ export default function TopBar({
         <Button
           variant="ghost"
           size="none"
-          className={`user-menu-btn ${!hasWorkspace ? 'opacity-35 cursor-not-allowed' : terminalOpen ? 'topbar-action-btn-active' : 'topbar-action-btn-normal'}`}
+          className={`user-menu-btn ${!hasWorkspace ? 'topbar-action-btn-disabled' : terminalOpen ? 'topbar-action-btn-active' : 'topbar-action-btn-normal'}`}
           title={hasWorkspace ? "切换显示终端" : "请先打开一个项目以使用终端"}
           onClick={hasWorkspace ? onToggleTerminal : undefined}
           disabled={!hasWorkspace}

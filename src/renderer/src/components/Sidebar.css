@@ -99,9 +99,16 @@
 }
 
 .sidebar-project-row.active {
-  background-color: var(--bg-active, rgba(229, 231, 235, 0.8));
-  font-weight: 500;
-  color: var(--text-main, #111827);
+  font-weight: 600;
+  color: var(--primary-color, #1677ff);
+}
+.sidebar-project-row.active .sidebar-project-folder,
+.sidebar-project-row.active .sidebar-project-chevron {
+  color: var(--primary-color, #1677ff);
+}
+
+.sidebar-project-row.active:hover {
+  background-color: var(--bg-hover, rgba(229, 231, 235, 0.5));
 }
 
 .sidebar-project-row.inactive {
@@ -141,7 +148,7 @@
 
 .sidebar-project-row.active .sidebar-project-hover-actions {
   opacity: 1;
-  background-color: var(--bg-active, rgba(229, 231, 235, 0.8));
+  background-color: var(--bg-sidebar, #f8f9fa);
 }
 
 .sidebar-project-row.inactive .sidebar-project-hover-actions {
@@ -190,11 +197,11 @@
 
 .sidebar-session-item {
   position: relative;
-  padding: 6px 4px 6px 20px;
+  padding: 6px 10px;
+  margin: 2px 8px 2px 12px;
   font-size: 13px;
   cursor: pointer;
-  border-top-right-radius: 6px;
-  border-bottom-right-radius: 6px;
+  border-radius: 6px;
   transition: all 0.2s ease;
 }
 
@@ -359,3 +366,62 @@
 .sidebar-footer-settings-btn:hover {
   background-color: var(--bg-hover, rgba(229, 231, 235, 0.5));
 }
+
+/* Sidebar Context Menu Portal */
+.sidebar-context-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  cursor: default;
+}
+
+.sidebar-context-menu {
+  position: fixed;
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  border-radius: 8px;
+  padding: 4px 0;
+  z-index: 9999;
+  font-size: 14px;
+  font-weight: 400;
+  width: 192px;
+  color: var(--text-main);
+}
+
+.sidebar-context-item {
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: background-color 0.15s;
+}
+
+.sidebar-context-item:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-main);
+}
+
+.sidebar-context-item-danger {
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--color-error);
+  transition: background-color 0.15s;
+}
+
+.sidebar-context-item-danger:hover {
+  background-color: rgba(255, 77, 79, 0.08);
+  color: var(--color-error-hover);
+}
+
+.sidebar-context-divider {
+  height: 1px;
+  background-color: var(--border-light);
+  margin: 4px 0;
+}
+

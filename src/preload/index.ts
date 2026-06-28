@@ -70,7 +70,7 @@ const api = {
       messages: ChatMessage[],
       callbacks: {
         onChunk: (delta: string, reasoningDelta?: string) => void
-        onDone: (fullContent: string) => void
+        onDone: (fullContent: string, txId?: string) => void
         onError: (error: string) => void
         onToolStart?: (toolCallId: string, name: string, args: string, thoughtSignature?: string) => void
         onToolEnd?: (toolCallId: string, result: string) => void
@@ -83,10 +83,10 @@ const api = {
         if (streamId !== activeStreamId) return
         callbacks.onChunk(delta, reasoningDelta)
       }
-      const endHandler = (_event: unknown, streamId: string, fullContent: string) => {
+      const endHandler = (_event: unknown, streamId: string, fullContent: string, txId?: string) => {
         if (streamId !== activeStreamId) return
         cleanup()
-        callbacks.onDone(fullContent)
+        callbacks.onDone(fullContent, txId)
       }
       const errorHandler = (_event: unknown, streamId: string, error: string) => {
         if (streamId !== activeStreamId) return
@@ -195,6 +195,29 @@ const api = {
         ipcRenderer.removeListener('terminal:exit', handler)
       }
     }
+  },
+
+  theme: {
+    get: (): Promise<{ shouldUseDarkColors: boolean; themeSource: 'system' | 'light' | 'dark' }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.THEME_GET),
+    set: (source: 'system' | 'light' | 'dark'): Promise<{ shouldUseDarkColors: boolean; themeSource: 'system' | 'light' | 'dark' }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.THEME_SET, source),
+    onUpdated: (callback: (info: { shouldUseDarkColors: boolean; themeSource: 'system' | 'light' | 'dark' }) => void): (() => void) => {
+      const handler = (_event: unknown, info: any) => callback(info)
+      ipcRenderer.on('theme:updated', handler)
+      return () => ipcRenderer.removeListener('theme:updated', handler)
+    }
+  },
+
+  skill: {
+    getAll: (workspaceRoot: string | null): Promise<any[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SKILL_GET_ALL, workspaceRoot),
+    toggle: (workspaceRoot: string | null, id: string, enabled: boolean): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SKILL_TOGGLE, id, enabled),
+    checkExternal: (): Promise<{ hasUpdates: boolean, totalCount: number, sources: { sourceName: string, count: number }[] }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SKILL_CHECK_EXTERNAL),
+    importExternal: (sourceName?: string, customPath?: string, forceOverwrite?: boolean): Promise<boolean> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SKILL_IMPORT_EXTERNAL, sourceName, customPath, forceOverwrite)
   }
 }
 

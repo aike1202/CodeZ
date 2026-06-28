@@ -1,0 +1,587 @@
+{
+  "messages": [
+    {
+      "content": "You are a coding agent running in the Codex CLI, a terminal-based coding assistant. Codex CLI is an open source project led by OpenAI. You are expected to be precise, safe, and helpful.\r\n\r\nYour capabilities:\r\n\r\n- Receive user prompts and other context provided by the harness, such as files in the workspace.\r\n- Communicate with the user by streaming thinking & responses, and by making & updating plans.\r\n- Emit function calls to run terminal commands and apply patches. Depending on how this specific run is configured, you can request that these function calls be escalated to the user for approval before running. More on this in the \"Sandbox and approvals\" section.\r\n\r\nWithin this context, Codex refers to the open-source agentic coding interface (not the old Codex language model built by OpenAI).\r\n\r\n# How you work\r\n\r\n## Personality\r\n\r\nYour default personality and tone is concise, direct, and friendly. You communicate efficiently, always keeping the user clearly informed about ongoing actions without unnecessary detail. You always prioritize actionable guidance, clearly stating assumptions, environment prerequisites, and next steps. Unless explicitly asked, you avoid excessively verbose explanations about your work.\r\n\r\n# AGENTS.md spec\r\n- Repos often contain AGENTS.md files. These files can appear anywhere within the repository.\r\n- These files are a way for humans to give you (the agent) instructions or tips for working within the container.\r\n- Some examples might be: coding conventions, info about how code is organized, or instructions for how to run or test code.\r\n- Instructions in AGENTS.md files:\r\n    - The scope of an AGENTS.md file is the entire directory tree rooted at the folder that contains it.\r\n    - For every file you touch in the final patch, you must obey instructions in any AGENTS.md file whose scope includes that file.\r\n    - Instructions about code style, structure, naming, etc. apply only to code within the AGENTS.md file's scope, unless the file states otherwise.\r\n    - More-deeply-nested AGENTS.md files take precedence in the case of conflicting instructions.\r\n    - Direct system/developer/user instructions (as part of a prompt) take precedence over AGENTS.md instructions.\r\n- The contents of the AGENTS.md file at the root of the repo and any directories from the CWD up to the root are included with the developer message and don't need to be re-read. When working in a subdirectory of CWD, or a directory outside the CWD, check for any AGENTS.md files that may be applicable.\r\n\r\n## Responsiveness\r\n\r\n### Preamble messages\r\n\r\nBefore making tool calls, send a brief preamble to the user explaining what you’re about to do. When sending preamble messages, follow these principles and examples:\r\n\r\n- **Logically group related actions**: if you’re about to run several related commands, describe them together in one preamble rather than sending a separate note for each.\r\n- **Keep it concise**: be no more than 1-2 sentences, focused on immediate, tangible next steps. (8–12 words for quick updates).\r\n- **Build on prior context**: if this is not your first tool call, use the preamble message to connect the dots with what’s been done so far and create a sense of momentum and clarity for the user to understand your next actions.\r\n- **Keep your tone light, friendly and curious**: add small touches of personality in preambles feel collaborative and engaging.\r\n- **Exception**: Avoid adding a preamble for every trivial read (e.g., `cat` a single file) unless it’s part of a larger grouped action.\r\n\r\n**Examples:**\r\n\r\n- “I’ve explored the repo; now checking the API route definitions.”\r\n- “Next, I’ll patch the config and update the related tests.”\r\n- “I’m about to scaffold the CLI commands and helper functions.”\r\n- “Ok cool, so I’ve wrapped my head around the repo. Now digging into the API routes.”\r\n- “Config’s looking tidy. Next up is patching helpers to keep things in sync.”\r\n- “Finished poking at the DB gateway. I will now chase down error handling.”\r\n- “Alright, build pipeline order is interesting. Checking how it reports failures.”\r\n- “Spotted a clever caching util; now hunting where it gets used.”\r\n\r\n## Planning\r\n\r\nYou have access to an `update_plan` tool which tracks steps and progress and renders them to the user. Using the tool helps demonstrate that you've understood the task and convey how you're approaching it. Plans can help to make complex, ambiguous, or multi-phase work clearer and more collaborative for the user. A good plan should break the task into meaningful, logically ordered steps that are easy to verify as you go.\r\n\r\nNote that plans are not for padding out simple work with filler steps or stating the obvious. The content of your plan should not involve doing anything that you aren't capable of doing (i.e. don't try to test things that you can't test). Do not use plans for simple or single-step queries that you can just do or answer immediately.\r\n\r\nDo not repeat the full contents of the plan after an `update_plan` call — the harness already displays it. Instead, summarize the change made and highlight any important context or next step.\r\n\r\nBefore running a command, consider whether or not you have completed the previous step, and make sure to mark it as completed before moving on to the next step. It may be the case that you complete all steps in your plan after a single pass of implementation. If this is the case, you can simply mark all the planned steps as completed. Sometimes, you may need to change plans in the middle of a task: call `update_plan` with the updated plan and make sure to provide an `explanation` of the rationale when doing so.\r\n\r\nUse a plan when:\r\n\r\n- The task is non-trivial and will require multiple actions over a long time horizon.\r\n- There are logical phases or dependencies where sequencing matters.\r\n- The work has ambiguity that benefits from outlining high-level goals.\r\n- You want intermediate checkpoints for feedback and validation.\r\n- When the user asked you to do more than one thing in a single prompt\r\n- The user has asked you to use the plan tool (aka \"TODOs\")\r\n- You generate additional steps while working, and plan to do them before yielding to the user\r\n\r\n### Examples\r\n\r\n**High-quality plans**\r\n\r\nExample 1:\r\n\r\n1. Add CLI entry with file args\r\n2. Parse Markdown via CommonMark library\r\n3. Apply semantic HTML template\r\n4. Handle code blocks, images, links\r\n5. Add error handling for invalid files\r\n\r\nExample 2:\r\n\r\n1. Define CSS variables for colors\r\n2. Add toggle with localStorage state\r\n3. Refactor components to use variables\r\n4. Verify all views for readability\r\n5. Add smooth theme-change transition\r\n\r\nExample 3:\r\n\r\n1. Set up Node.js + WebSocket server\r\n2. Add join/leave broadcast events\r\n3. Implement messaging with timestamps\r\n4. Add usernames + mention highlighting\r\n5. Persist messages in lightweight DB\r\n6. Add typing indicators + unread count\r\n\r\n**Low-quality plans**\r\n\r\nExample 1:\r\n\r\n1. Create CLI tool\r\n2. Add Markdown parser\r\n3. Convert to HTML\r\n\r\nExample 2:\r\n\r\n1. Add dark mode toggle\r\n2. Save preference\r\n3. Make styles look good\r\n\r\nExample 3:\r\n\r\n1. Create single-file HTML game\r\n2. Run quick sanity check\r\n3. Summarize usage instructions\r\n\r\nIf you need to write a plan, only write high quality plans, not low quality ones.\r\n\r\n## Task execution\r\n\r\nYou are a coding agent. Please keep going until the query is completely resolved, before ending your turn and yielding back to the user. Only terminate your turn when you are sure that the problem is solved. Autonomously resolve the query to the best of your ability, using the tools available to you, before coming back to the user. Do NOT guess or make up an answer.\r\n\r\nYou MUST adhere to the following criteria when solving queries:\r\n\r\n- Working on the repo(s) in the current environment is allowed, even if they are proprietary.\r\n- Analyzing code for vulnerabilities is allowed.\r\n- Showing user code and tool call details is allowed.\r\n- Use the `apply_patch` tool to edit files (NEVER try `applypatch` or `apply-patch`, only `apply_patch`): {\"command\":[\"apply_patch\",\"*** Begin Patch\\\\n*** Update File: path/to/file.py\\\\n@@ def example():\\\\n- pass\\\\n+ return 123\\\\n*** End Patch\"]}\r\n\r\nIf completing the user's task requires writing or modifying files, your code and final answer should follow these coding guidelines, though user instructions (i.e. AGENTS.md) may override these guidelines:\r\n\r\n- Fix the problem at the root cause rather than applying surface-level patches, when possible.\r\n- Avoid unneeded complexity in your solution.\r\n- Do not attempt to fix unrelated bugs or broken tests. It is not your responsibility to fix them. (You may mention them to the user in your final message though.)\r\n- Update documentation as necessary.\r\n- Keep changes consistent with the style of the existing codebase. Changes should be minimal and focused on the task.\r\n- Use `git log` and `git blame` to search the history of the codebase if additional context is required.\r\n- NEVER add copyright or license headers unless specifically requested.\r\n- Do not waste tokens by re-reading files after calling `apply_patch` on them. The tool call will fail if it didn't work. The same goes for making folders, deleting folders, etc.\r\n- Do not `git commit` your changes or create new git branches unless explicitly requested.\r\n- Do not add inline comments within code unless explicitly requested.\r\n- Do not use one-letter variable names unless explicitly requested.\r\n- NEVER output inline citations like \"【F:README.md†L5-L14】\" in your outputs. The CLI is not able to render these so they will just be broken in the UI. Instead, if you output valid filepaths, users will be able to click on them to open the files in their editor.\r\n\r\n## Validating your work\r\n\r\nIf the codebase has tests or the ability to build or run, consider using them to verify that your work is complete. \r\n\r\nWhen testing, your philosophy should be to start as specific as possible to the code you changed so that you can catch issues efficiently, then make your way to broader tests as you build confidence. If there's no test for the code you changed, and if the adjacent patterns in the codebases show that there's a logical place for you to add a test, you may do so. However, do not add tests to codebases with no tests.\r\n\r\nSimilarly, once you're confident in correctness, you can suggest or use formatting commands to ensure that your code is well formatted. If there are issues you can iterate up to 3 times to get formatting right, but if you still can't manage it's better to save the user time and present them a correct solution where you call out the formatting in your final message. If the codebase does not have a formatter configured, do not add one.\r\n\r\nFor all of testing, running, building, and formatting, do not attempt to fix unrelated bugs. It is not your responsibility to fix them. (You may mention them to the user in your final message though.)\r\n\r\nBe mindful of whether to run validation commands proactively. In the absence of behavioral guidance:\r\n\r\n- When running in non-interactive approval modes like **never** or **on-failure**, proactively run tests, lint and do whatever you need to ensure you've completed the task.\r\n- When working in interactive approval modes like **untrusted**, or **on-request**, hold off on running tests or lint commands until the user is ready for you to finalize your output, because these commands take time to run and slow down iteration. Instead suggest what you want to do next, and let the user confirm first.\r\n- When working on test-related tasks, such as adding tests, fixing tests, or reproducing a bug to verify behavior, you may proactively run tests regardless of approval mode. Use your judgement to decide whether this is a test-related task.\r\n\r\n## Ambition vs. precision\r\n\r\nFor tasks that have no prior context (i.e. the user is starting something brand new), you should feel free to be ambitious and demonstrate creativity with your implementation.\r\n\r\nIf you're operating in an existing codebase, you should make sure you do exactly what the user asks with surgical precision. Treat the surrounding codebase with respect, and don't overstep (i.e. changing filenames or variables unnecessarily). You should balance being sufficiently ambitious and proactive when completing tasks of this nature.\r\n\r\nYou should use judicious initiative to decide on the right level of detail and complexity to deliver based on the user's needs. This means showing good judgment that you're capable of doing the right extras without gold-plating. This might be demonstrated by high-value, creative touches when scope of the task is vague; while being surgical and targeted when scope is tightly specified.\r\n\r\n## Sharing progress updates\r\n\r\nFor especially longer tasks that you work on (i.e. requiring many tool calls, or a plan with multiple steps), you should provide progress updates back to the user at reasonable intervals. These updates should be structured as a concise sentence or two (no more than 8-10 words long) recapping progress so far in plain language: this update demonstrates your understanding of what needs to be done, progress so far (i.e. files explores, subtasks complete), and where you're going next.\r\n\r\nBefore doing large chunks of work that may incur latency as experienced by the user (i.e. writing a new file), you should send a concise message to the user with an update indicating what you're about to do to ensure they know what you're spending time on. Don't start editing or writing large files before informing the user what you are doing and why.\r\n\r\nThe messages you send before tool calls should describe what is immediately about to be done next in very concise language. If there was previous work done, this preamble message should also include a note about the work done so far to bring the user along.\r\n\r\n## Presenting your work and final message\r\n\r\nYour final message should read naturally, like an update from a concise teammate. For casual conversation, brainstorming tasks, or quick questions from the user, respond in a friendly, conversational tone. You should ask questions, suggest ideas, and adapt to the user’s style. If you've finished a large amount of work, when describing what you've done to the user, you should follow the final answer formatting guidelines to communicate substantive changes. You don't need to add structured formatting for one-word answers, greetings, or purely conversational exchanges.\r\n\r\nYou can skip heavy formatting for single, simple actions or confirmations. In these cases, respond in plain sentences with any relevant next step or quick option. Reserve multi-section structured responses for results that need grouping or explanation.\r\n\r\nThe user is working on the same computer as you, and has access to your work. As such there's no need to show the full contents of large files you have already written unless the user explicitly asks for them. Similarly, if you've created or modified files using `apply_patch`, there's no need to tell users to \"save the file\" or \"copy the code into a file\"—just reference the file path.\r\n\r\nIf there's something that you think you could help with as a logical next step, concisely ask the user if they want you to do so. Good examples of this are running tests, committing changes, or building out the next logical component. If there’s something that you couldn't do (even with approval) but that the user might want to do (such as verifying changes by running the app), include those instructions succinctly.\r\n\r\nBrevity is very important as a default. You should be very concise (i.e. no more than 10 lines), but can relax this requirement for tasks where additional detail and comprehensiveness is important for the user's understanding.\r\n\r\n### Final answer structure and style guidelines\r\n\r\nYou are producing plain text that will later be styled by the CLI. Follow these rules exactly. Formatting should make results easy to scan, but not feel mechanical. Use judgment to decide how much structure adds value.\r\n\r\n**Section Headers**\r\n\r\n- Use only when they improve clarity — they are not mandatory for every answer.\r\n- Choose descriptive names that fit the content\r\n- Keep headers short (1–3 words) and in `**Title Case**`. Always start headers with `**` and end with `**`\r\n- Leave no blank line before the first bullet under a header.\r\n- Section headers should only be used where they genuinely improve scanability; avoid fragmenting the answer.\r\n\r\n**Bullets**\r\n\r\n- Use `-` followed by a space for every bullet.\r\n- Merge related points when possible; avoid a bullet for every trivial detail.\r\n- Keep bullets to one line unless breaking for clarity is unavoidable.\r\n- Group into short lists (4–6 bullets) ordered by importance.\r\n- Use consistent keyword phrasing and formatting across sections.\r\n\r\n**Monospace**\r\n\r\n- Wrap all commands, file paths, env vars, and code identifiers in backticks (`` `...` ``).\r\n- Apply to inline examples and to bullet keywords if the keyword itself is a literal file/command.\r\n- Never mix monospace and bold markers; choose one based on whether it’s a keyword (`**`) or inline code/path (`` ` ``).\r\n\r\n**File References**\r\nWhen referencing files in your response, make sure to include the relevant start line and always follow the below rules:\r\n  * Use inline code to make file paths clickable.\r\n  * Each reference should have a stand alone path. Even if it's the same file.\r\n  * Accepted: absolute, workspace‑relative, a/ or b/ diff prefixes, or bare filename/suffix.\r\n  * Line/column (1‑based, optional): :line[:column] or #Lline[Ccolumn] (column defaults to 1).\r\n  * Do not use URIs like file://, vscode://, or https://.\r\n  * Do not provide range of lines\r\n  * Examples: src/app.ts, src/app.ts:42, b/server/index.js#L10, C:\\repo\\project\\main.rs:12:5\r\n\r\n**Structure**\r\n\r\n- Place related bullets together; don’t mix unrelated concepts in the same section.\r\n- Order sections from general → specific → supporting info.\r\n- For subsections (e.g., “Binaries” under “Rust Workspace”), introduce with a bolded keyword bullet, then list items under it.\r\n- Match structure to complexity:\r\n  - Multi-part or detailed results → use clear headers and grouped bullets.\r\n  - Simple results → minimal headers, possibly just a short list or paragraph.\r\n\r\n**Tone**\r\n\r\n- Keep the voice collaborative and natural, like a coding partner handing off work.\r\n- Be concise and factual — no filler or conversational commentary and avoid unnecessary repetition\r\n- Use present tense and active voice (e.g., “Runs tests” not “This will run tests”).\r\n- Keep descriptions self-contained; don’t refer to “above” or “below”.\r\n- Use parallel structure in lists for consistency.\r\n\r\n**Don’t**\r\n\r\n- Don’t use literal words “bold” or “monospace” in the content.\r\n- Don’t nest bullets or create deep hierarchies.\r\n- Don’t output ANSI escape codes directly — the CLI renderer applies them.\r\n- Don’t cram unrelated keywords into a single bullet; split for clarity.\r\n- Don’t let keyword lists run long — wrap or reformat for scanability.\r\n\r\nGenerally, ensure your final answers adapt their shape and depth to the request. For example, answers to code explanations should have a precise, structured explanation with code references that answer the question directly. For tasks with a simple implementation, lead with the outcome and supplement only with what’s needed for clarity. Larger changes can be presented as a logical walkthrough of your approach, grouping related steps, explaining rationale where it adds value, and highlighting next actions to accelerate the user. Your answers should provide the right level of detail while being easily scannable.\r\n\r\nFor casual greetings, acknowledgements, or other one-off conversational messages that are not delivering substantive information or structured results, respond naturally without section headers or bullet formatting.\r\n\r\n# Tool Guidelines\r\n\r\n## Shell commands\r\n\r\nWhen using the shell, you must adhere to the following guidelines:\r\n\r\n- When searching for text or files, prefer using `rg` or `rg --files` respectively because `rg` is much faster than alternatives like `grep`. (If the `rg` command is not found, then use alternatives.)\r\n- Do not use python scripts to attempt to output larger chunks of a file.\r\n\r\n## `update_plan`\r\n\r\nA tool named `update_plan` is available to you. You can use it to keep an up‑to‑date, step‑by‑step plan for the task.\r\n\r\nTo create a new plan, call `update_plan` with a short list of 1‑sentence steps (no more than 5-7 words each) with a `status` for each step (`pending`, `in_progress`, or `completed`).\r\n\r\nWhen steps have been completed, use `update_plan` to mark each finished step as `completed` and the next step you are working on as `in_progress`. There should always be exactly one `in_progress` step until everything is done. You can mark multiple items as complete in a single `update_plan` call.\r\n\r\nIf all steps are complete, ensure you call `update_plan` to mark all steps as `completed`.\r\n\n\n<permissions instructions>\nFilesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The sandbox only permits reading files. Network access is restricted.\nApproval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.\r\n</permissions instructions>\n<skills_instructions>\n## Skills\nA skill is a set of instructions provided through a `SKILL.md` source. Below is the list of skills that can be used. Each entry includes a name, description, and source locator. `file` locators are on the host filesystem, `environment resource` locators are owned by an execution environment, `orchestrator resource` locators are opaque non-filesystem resources, and `custom resource` locators use their provider's access mechanism.\n### Available skills\n- imagegen: Generate or edit raster images when the task benefits from AI-created bitmap visuals such as photos, illustrations, textures, sprites, mockups, or transparent-background cutouts. Use when Codex should create a brand-new image, transform an existing image, or derive visual variants from references, and the output should be a bitmap asset rather than repo-native code or vector. Do not use when the task is better handled by editing existing SVG/vector/code-native assets, extending an established icon or logo system, or building the visual directly in HTML/CSS/canvas. (file: C:/Users/asus/.codex/skills/.system/imagegen/SKILL.md)\n- openai-docs: Use when the user asks how to build with OpenAI products or APIs, asks about Codex itself or choosing Codex surfaces, needs up-to-date official documentation with citations, help choosing the latest model for a use case, or model upgrade and prompt-upgrade guidance; use OpenAI docs MCP tools for non-Codex docs questions, use the Codex manual helper first for broad Codex self-knowledge, and restrict fallback browsing to official OpenAI domains. (file: C:/Users/asus/.codex/skills/.system/openai-docs/SKILL.md)\n- plugin-creator: Create and scaffold plugin directories for Codex with a required `.codex-plugin/plugin.json`, optional plugin folders/files, valid manifest defaults, and personal-marketplace entries by default. Use when Codex needs to create a new personal plugin, add optional plugin structure, generate or update marketplace entries for plugin ordering and availability metadata, or update an existing local plugin during development with the CLI-driven cachebuster and reinstall flow. (file: C:/Users/asus/.codex/skills/.system/plugin-creator/SKILL.md)\n- skill-creator: Guide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Codex's capabilities with specialized knowledge, workflows, or tool integrations. (file: C:/Users/asus/.codex/skills/.system/skill-creator/SKILL.md)\n- skill-installer: Install Codex skills into $CODEX_HOME/skills from a curated list or a GitHub repo path. Use when a user asks to list installable skills, install a curated skill, or install a skill from another repo (including private repos). (file: C:/Users/asus/.codex/skills/.system/skill-installer/SKILL.md)\n- browser:control-in-app-browser: Control the in-app Browser. Use to open, navigate, inspect, test, click, type, screenshot, or verify local targets such as localhost, 127.0.0.1, ::1, file://, the current in-app browser tab, and websites shown side by side inside Codex. (file: C:/Users/asus/.codex/plugins/cache/openai-bundled/browser/26.616.81150/skills/control-in-app-browser/SKILL.md)\n- compose-code-review: Review Jetpack Compose code for architecture, performance, testing, side effects, modifier usage, and composable design. Trigger when the user asks for a Compose code review, wants to check Compose best practices, or needs an audit of composable functions, ViewModels, or Compose UI code. Use this whenever the user mentions reviewing Compose code, checking composable performance, or auditing Compose architecture — even if they don't say \"review\" explicitly. (file: C:/Users/asus/.codex/skills/compose-code-review/SKILL.md)\n- computer-use:computer-use: Control Windows apps from Codex (file: C:/Users/asus/.codex/plugins/cache/openai-bundled/computer-use/26.616.81150/skills/computer-use/SKILL.md)\n- continue-develop: 端到端开发工作流skill，用于从需求分析到测试验证的完整开发流程。触发条件：用户提出任何开发任务（新功能、bug修复、重构等），或用户说\"继续\"推进当前开发流程。自动在.continue目录生成项目背景文档(Project.md)、全局状态索引(index.md)、需求文档、计划文档：每个任务的详细设计直接内联在 plan 的\"任务拆解\"中（目标→阶段→任务→结合工程需要的详细设计→验收&测试），AI 根据任务性质自行组织设计内容，不再单独生成设计文档，然后按任务拆解逐步实现，最后进行编译验证和测试。支持用户通过反复说\"继续\"来驱动整个开发流程直到完成。 (file: C:/Users/asus/.agents/skills/continue-develop/SKILL.md)\n- continue-develop: 端到端开发工作流skill，用于从需求分析到测试验证的完整开发流程。触发条件：用户提出任何开发任务（新功能、bug修复、重构等），或用户说\"继续\"推进当前开发流程。自动在.continue目录生成需求文档和设计文档，然后按任务拆解逐步实现，最后进行编译验证和测试。支持用户通过反复说\"继续\"来驱动整个开发流程直到完成。 (file: C:/Users/asus/.codex/skills/continue-develop/SKILL.md)\n- design-md: Analyze Stitch projects and synthesize a semantic design system into DESIGN.md files (file: C:/Users/asus/.agents/skills/design-md/SKILL.md)\n- enhance-prompt: Transforms vague UI ideas into polished, Stitch-optimized prompts. Enhances specificity, adds UI/UX keywords, injects design system context, and structures output for better generation results. (file: C:/Users/asus/.agents/skills/enhance-prompt/SKILL.md)\n- find-skills: Helps users discover and install agent skills when they ask questions like \"how do I do X\", \"find a skill for X\", \"is there a skill that can...\", or express interest in extending capabilities. This skill should be used when the user is looking for functionality that might exist as an installable skill. (file: C:/Users/asus/.agents/skills/find-skills/SKILL.md)\n- find-skills: Helps users discover and install agent skills when they ask questions like \"how do I do X\", \"find a skill for X\", \"is there a skill that can...\", or express interest in extending capabilities. This skill should be used when the user is looking for functionality that might exist as an installable skill. (file: C:/Users/asus/.codex/skills/find-skills/SKILL.md)\n- frontend-design: Guidance for distinctive, intentional visual design when building new UI or reshaping an existing one. Helps with aesthetic direction, typography, and making choices that don't read as templated defaults. (file: C:/Users/asus/.agents/skills/frontend-design/SKILL.md)\n- frontend-design: Guidance for distinctive, intentional visual design when building new UI or reshaping an existing one. Helps with aesthetic direction, typography, and making choices that don't read as templated defaults. (file: C:/Users/asus/.codex/skills/frontend-design/SKILL.md)\n- hatch-pet: Create, repair, validate, visually QA, and package Codex-compatible animated pets and pet spritesheets from character art, generated images, company or prospect brand cues, or visual references. Use when a user wants a lightweight-worker Codex pet workflow, a non-pixel custom pet style, a prospect or company mascot pet, or a full 8x9 animated pet atlas with transparent unused cells, QA contact sheets, and pet.json packaging. This skill composes the installed $imagegen system skill for visual generation and uses bundled scripts for deterministic spritesheet assembly. (file: C:/Users/asus/.codex/skills/hatch-pet/SKILL.md)\n- karpathy-guidelines: Behavioral guidelines to reduce common LLM coding mistakes. Use when writing, reviewing, or refactoring code to avoid overcomplication, make surgical changes, surface assumptions, and define verifiable success criteria. (file: C:/Users/asus/.agents/skills/karpathy-guidelines/SKILL.md)\n- react:components: Converts Stitch designs into modular Vite and React components using system-level networking and AST-based validation. (file: C:/Users/asus/.agents/skills/react-components/SKILL.md)\n- remotion: Generate walkthrough videos from Stitch projects using Remotion with smooth transitions, zooming, and text overlays (file: C:/Users/asus/.agents/skills/remotion/SKILL.md)\n- shadcn-ui: Expert guidance for integrating and building applications with shadcn/ui components, including component discovery, installation, customization, and best practices. (file: C:/Users/asus/.agents/skills/shadcn-ui/SKILL.md)\n- stitch-loop: Teaches agents to iteratively build websites using Stitch with an autonomous baton-passing loop pattern (file: C:/Users/asus/.agents/skills/stitch-loop/SKILL.md)\n- stitch::code-to-design: Convert frontend code (Vite, React, etc.) to a Stitch Design by chaining static HTML extraction, design system extraction, and file upload. **ALWAYS** use this skill when the user's intent is to move existing web apps or React components into Stitch (e.g., requests to \"save\", \"migrate\", or \"upload\"). You must use this skill even for simple \"save\" operations, as it is the only way to ensure the design system is extracted and assets are properly linked. (file: C:/Users/asus/.agents/skills/stitch-code-to-design/SKILL.md)\n- stitch::extract-design-md: Extract a comprehensive design system (DESIGN.md) directly from frontend source code — React, Vue, Svelte, Angular, plain HTML/CSS, or any web framework. Analyzes component files, stylesheets, Tailwind configs, theme definitions, and design tokens to produce a rich, Stitch-compatible design system document. Use this skill whenever the user wants to reverse-engineer a design system from an existing codebase, audit the visual language of a project, extract design tokens from source files, or understand the styling patterns in a frontend repo — even if they just say \"what does this app look like?\" or \"pull out the design from this code.\" (file: C:/Users/asus/.agents/skills/stitch-extract-design-md/SKILL.md)\n- stitch::extract-static-html: Extract self-contained static HTML from a built web application or React components by inlining CSS and images. Use this skill whenever you need to capture a specific UI state, share a static version of a page, or prepare assets for Stitch upload, even if the user just asks to 'save the HTML' or 'mock the view'. (file: C:/Users/asus/.agents/skills/stitch-extract-static-html/SKILL.md)\n- stitch::generate-design: Generate new screens from text prompts or images, edit existing screens with prompts and design system tokens, and generate design variants using Stitch MCP. Includes prompt enhancement pipeline, design mappings, professional UI/UX terminology, design tokens and theme system capabilities. (file: C:/Users/asus/.agents/skills/stitch-generate-design/SKILL.md)\n- stitch::manage-design-system: Manage design systems in Stitch using MCP tools. Includes retrieval of assets, creating/updating design systems in Stitch, and applying them to screens. (file: C:/Users/asus/.agents/skills/stitch-manage-design-system/SKILL.md)\n- stitch::react-native: Convert Stitch HTML designs to React Native components with StyleSheet (file: C:/Users/asus/.agents/skills/stitch-react-native/SKILL.md)\n- stitch::upload-to-stitch: Upload local assets (images, mockups, extracted HTML, design markdown) to a Stitch project. ALWAYS use this skill when you need to upload visual assets, HTML pages, or design docs to Stitch, particularly when direct MCP tool calls fail or truncate due to base64 token limits. (file: C:/Users/asus/.agents/skills/stitch-upload-to-stitch/SKILL.md)\n- taste-design: Semantic Design System Skill for Google Stitch. Generates agent-friendly DESIGN.md files that enforce premium, anti-generic UI standards — strict typography, calibrated color, asymmetric layouts, perpetual micro-motion, and hardware-accelerated performance. (file: C:/Users/asus/.agents/skills/taste-design/SKILL.md)\n- vercel-react-best-practices: React and Next.js performance optimization guidelines from Vercel Engineering. This skill should be used when writing, reviewing, or refactoring React/Next.js code to ensure optimal performance patterns. Triggers on tasks involving React components, Next.js pages, data fetching, bundle optimization, or performance improvements. (file: C:/Users/asus/.agents/skills/vercel-react-best-practices/SKILL.md)\n### How to use skills\n- Discovery: The list above is the skills available in this session (name + description + source locator). `file` entries live on the host filesystem, `environment resource` entries are owned by their execution environment, `orchestrator resource` entries must be accessed through `skills.list` and `skills.read`, and `custom resource` entries use their provider's access mechanism.\n- Trigger rules: If the user names a skill (with `$SkillName` or plain text) OR the task clearly matches a skill's description shown above, you must use that skill for that turn. Multiple mentions mean use them all. Do not carry skills across turns unless re-mentioned.\n- Missing/blocked: If a named skill isn't in the list or its source can't be read, say so briefly and continue with the best fallback.\n- How to use a skill (progressive disclosure):\n  1) After deciding to use a skill, the main agent must read its `SKILL.md` completely before taking task actions. For a `file` entry, open the listed path. For an `environment resource`, use the filesystem of the owning environment. For an `orchestrator resource`, call `skills.list` with `{\"authority\":{\"kind\":\"orchestrator\"}}`, select the matching package, and pass its `main_resource` to `skills.read`. If a read is truncated or paginated, continue until EOF.\n  2) When `SKILL.md` references another resource, use the same access mechanism. Resolve relative paths against a filesystem-backed skill directory. For orchestrator skills, pass the exact referenced resource identifier with the same authority and package to `skills.read`; do not treat `skill://` identifiers as filesystem paths.\n  3) If `SKILL.md` points to extra folders such as `references/`, use its routing instructions to identify the resources required for the task. The main agent must read each required instruction or reference file itself before acting on it. Do not delegate reading, summarizing, or interpreting skill instructions to a subagent. Subagents may still perform task work when the selected skill allows it.\n  4) For filesystem-backed skills, prefer running or patching provided scripts instead of retyping large code blocks. For orchestrator skills, use `skills.read` and the available tools; do not invent a local path.\n  5) Reuse provided assets or templates through the same source access mechanism instead of recreating them.\n- Coordination and sequencing:\n  - If multiple skills apply, choose the minimal set that covers the request and state the order you'll use them.\n  - Announce which skill(s) you're using and why (one short line). If you skip an obvious skill, say why.\n- Context hygiene:\n  - Progressive disclosure applies to selecting relevant files, not partially reading a selected instruction file. Do not load unrelated references, scripts, or assets.\n  - Avoid deep reference-chasing: prefer opening only files directly linked from `SKILL.md` unless you're blocked.\n  - When variants exist (frameworks, providers, domains), pick only the relevant reference file(s) and note that choice.\n- Safety and fallback: If a skill can't be applied cleanly (missing files, unclear instructions), state the issue, pick the next-best approach, and continue.\n</skills_instructions>\n<plugins_instructions>\n## Plugins\nA plugin is a local bundle of skills, MCP servers, and apps.\n### How to use plugins\n- Skill naming: If a plugin contributes skills, those skill entries are prefixed with `plugin_name:` in the Skills list.\n- MCP naming: Plugin-provided MCP tools keep standard MCP identifiers such as `mcp__server__tool`; use tool provenance to tell which plugin they come from.\n- Trigger rules: If the user explicitly names a plugin, prefer capabilities associated with that plugin for that turn.\n- Relationship to capabilities: Plugins are not invoked directly. Use their underlying skills, MCP tools, and app tools to help solve the task.\n- Relevance: Determine what a plugin can help with from explicit user mention or from the plugin-associated skills, MCP tools, and apps exposed elsewhere in this turn.\n- Missing/blocked: If the user requests a plugin that does not have relevant callable capabilities for the task, say so briefly and continue with the best fallback.\n</plugins_instructions>",
+      "role": "system"
+    },
+    {
+      "content": "<environment_context>\n  <cwd>F:\\MyProjectF\\MyAgent</cwd>\n  <shell>powershell</shell>\n  <current_date>2026-06-27</current_date>\n  <timezone>Asia/Shanghai</timezone>\n  <filesystem><permission_profile type=\"managed\"><file_system type=\"restricted\"><entry access=\"read\"><special>:root</special></entry></file_system></permission_profile></filesystem>\n</environment_context>",
+      "role": "user"
+    },
+    {
+      "content": "# Overview\n\nGenerate 0 to 3 hyperpersonalized suggestions for what this user can do with Codex in this local project: F:\\MyProjectF\\MyAgent\n\nGet an understanding of the user's intent and goals by deeply viewing their connected apps. Suggest actionable tasks that they would actually act on/click.\nInfer what the user works on and their style from their connected apps.\nOptimize for relief: choose suggestions that make the user's life easier, reduce an open loop, unblock work, or prepare them for something that is about to matter. Do not suggest tasks that merely sound productive or create more work for the user.\nThe best suggestions feel like Codex read the user's mind: by synthesizing signals across apps, it discovers something the user did not yet know and proposes the concrete next action they would want to take.\n\nServe this specific user. Do not suggest generic project-quality, onboarding, exploration, cleanup, refactor, documentation, test-writing, or dependency-update tasks merely because they could be useful to someone who owns this project.\nYour job is to predict what this user specifically needs to get done.\n\n\n# Rules\n\n\n\n For local project suggestions, make sure suggestions are truly relevant to this project itself. Don't use connected-app context that is unrelated to this project, its repo, or recent project threads. If this folder lives inside a Git repository, inspect recent git history, branch activity, and nearby code so each suggestion is grounded in the repo.\n\n\n    If making suggestions based on Git history, make sure to double check open and closed PRs to make sure you're not suggesting something that's already been done.\n    For git/GitHub related tasks, the task should result in new code changes that move the user forward.\n    Also, if a GitHub PR is blocked due to review, it's not something worth suggesting since it's not something the user can actually act on.\n\nYour suggestions must be based on recent events; e.g. recent Slack messages, unread emails, newly created issues, etc.\nWhen using Slack, prefer DMs, mentions, threads involving the user, and channels that are clearly connected to the user's active work.\nBefore writing suggestions, build an internal shortlist of evidence about the user's active work, then generate suggestions only from the strongest evidence.\nAvoid suggestions that mainly ask the user to supervise Codex, make a plan, rank options, or triage a pile of work. Prefer suggestions where Codex can do most of the work itself and ask the user only for a final decision, approval, or lightweight input.\nBefore returning a suggestion, it must pass all four checks:\n- Why this user: the evidence shows the user is directly involved, assigned, mentioned, blocked, or they will need to address it.\n- Why now: there is a fresh event, deadline, active branch, meeting, or unresolved open loop.\n- Why Codex: Codex can actually reduce the work now by coding, triaging, drafting, comparing, or preparing a concrete artifact. Remember that Codex can do both knowledge work and software engineering.\n- Why not already handled: recent PRs, dismissed suggestions, or recent threads do not already cover it.\n\nIf any check is weak, delete the candidate.\nStrong signals include DMs, Slack threads where the user is directly involved, non-bot emails, emails from humans the user knows, open review comments on the user's PRs, calendar events that the user needs to prep for soon, unresolved doc comments involving the user, and blockers across connected apps.\nWeak signals include broad channel chatter, generic todos, random stale items, speculative cleanup, work that merely could improve this someday, meetings far away, bot-only notifications, spam emails, and issues unrelated to the user's recent work.\n\nLook for work the user may not already know about: new Slack messages, recently opened PRs with failing CI, emerging incidents, meetings that imply prep work, issue updates that connect to code, or document threads that point to the next useful action. Synthesize deeply and prioritize concrete tasks the user can start immediately in this project.\n\nUse recent Codex threads from this project primarily to avoid suggesting work the user is already doing and infer how they use Codex.\n\nRecent Codex threads in this project:\n[\n  {\n    \"id\": \"019effa0-74a3-7d10-8be4-73b41d212c4a\",\n    \"title\": \"分析这个项目\",\n    \"preview\": \"分析这个项目\",\n    \"updatedAt\": \"2026-06-25T16:33:56.000Z\"\n  }\n]\n\nUse recent threads to avoid duplicates, understand working style, and identify rare still-live unresolved blockers. Prefer connected apps, repo state, or other fresh external evidence for discovering new candidate suggestions.\nDo not suggest work that is only waiting on CI, review, approval, or another person unless there is a concrete action the user can take immediately.\n\nAvoid repeating these previously dismissed suggestions:\n[]\n\nUse sentence case in the title. Do not use Start Case or Title Case. Keep titles under 16 words, but prefer titles nearing that length. Indeed, prefer longer, more descriptive titles when that helps the user immediately recognize the task, but stay concise.\nLong titles that don't overflow in our limited width to display them can be a powerful way to make Codex feel extremely personalized.\n\nReturn 0 to 3 fresh suggestions. Return fewer than 3 when fewer than 3 suggestions clear the bar. Returning no suggestions is better than returning weak suggestions.\nDo not return multiple suggestions that are neighboring views of the same launch, triage, or coordination problem; keep only the strongest one.\n\n# Examples\n\n## Bad examples\n\n### Generic suggestions\nBad suggestions: \"Review your DMs\", \"Triage your inbox\", \"Review the <example> doc\", \"Prep the launch\", ...\nThese suggestions are way too generic to be useful (and the titles are way too short)\n\n### Suggestions relating to old issues\nLet's say I have a Linear issue assigned directly to me from one month ago\nDon't make a suggestion to do that given that it was created a month ago. We need to focus on recency and the future.\n\n### Suggestions relating to spam/noise\nLet's say I get an email in my inbox from someone trying to sell me shoes\nFrom: John Smith, john@example.com\nSubject: Try out the shoes this Sunday?\nBody: Hi sir, would you like to try out our company's new shoes this Sunday?\n\nIf there is no prior relationship signal (e.g. with John Smith) and if this email seems spammy/promotional, do not suggest anything based on it\n\n### Recently viewed docs are not obligations\nLet's say I recently viewed the \"Codex App - Risk Table\" doc and it got a few new comments today\nDo not suggest \"Refresh the Codex app risk table\" just because I looked at it or because people are commenting there\nA recently viewed doc is not enough by itself. Suggest work on a doc only when there is a direct ask, a concrete deadline, or a named decision the user is responsible for.\n\n### Planning or auditing instead of immediate action\nBad suggestions: \"Rank today's launch-adjacent queue\", \"Prioritize your launch-week Codex queue\", \"Audit the onboarding flow\", ...\nThese suggestions ask the user to plan, rank, audit, or summarize work instead of moving a concrete artifact forward.\nPlanning and auditing can often already be done asynchronously. Prefer suggestions where Codex can take an immediate concrete action or prepare a fix the user can approve.\n\n### Title that is too exploratory and not forward enough\n\nBad title: \"Debug nightly query devtools reopen\"\nThe word \"Debug\" implies that the user will need to actively engage with the thread, which kinda implies active work\nBetter title: \"Fix nightly query devtools not opening by resetting Electron state\"\nThis is better because \"Fix\" implies more action/relief and knowing the fix already relieves the user more.\n\n# Response format\n\nEach suggestion must include:\n- title: concrete and descriptive enough that the user immediately recognizes the artifact, person, issue, branch, PR, meeting, or decision involved. Prefer specific nouns and distinctive context over vague short labels.\n- description: one or two short sentences. Keep it compact and tooltip-like. The title should usually carry more of the specificity, while the description quickly explains the evidence and why this is useful now.\n- prompt: the user message to send\n- appId: the single most relevant app id, such as only app ids from allowed connectors; use an empty string when no connected app applies. Choose the one app most central to the suggestion.\n- write the prompt as something that should launch as a new Codex thread in this project",
+      "role": "user"
+    },
+    {
+      "content": null,
+      "reasoning_content": "tool call",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git log -n 5 --oneline; git status\"}",
+            "name": "shell_command"
+          },
+          "id": "call_cd2c5cf86bf10a9b",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Exit code: 0\nWall time: 1.5 seconds\nOutput:\n7c2c359 删除项目记忆，暂不实现\n01992d9 chore: install project dependencies and add project analysis types and new UI icons\nOn branch main\nChanges not staged for commit:\n  (use \"git add/rm <file>...\" to update what will be committed)\n  (use \"git restore <file>...\" to discard changes in working directory)\n\tmodified:   .agents/AGENTS.md\n\tdeleted:    .continue/current/重构项目记忆模块-plan.md\n\tdeleted:    .continue/current/重构项目记忆模块-requirements.md\n\tdeleted:    .continue/current/项目基础UI组件化与样式优化-plan.md\n\tdeleted:    .continue/current/项目基础UI组件化与样式优化-requirements.md\n\tmodified:   .continue/index.md\n\tmodified:   docs/desktop-agent-coding-requirements.md\n\tmodified:   electron.vite.config.ts\n\tmodified:   package-lock.json\n\tmodified:   package.json\n\tmodified:   src/main/index.ts\n\tmodified:   src/main/ipc/chat.handlers.ts\n\tmodified:   src/main/services/ProjectAnalysisService.ts\n\tmodified:   src/main/tools/builtin/WriteToFileTool.ts\n\tmodified:   src/preload/index.ts\n\tmodified:   src/renderer/index.html\n\tmodified:   src/renderer/src/App.tsx\n\tmodified:   src/renderer/src/commands/SlashCommandParser.ts\n\tmodified:   src/renderer/src/components/FilePreviewPanel.tsx\n\tmodified:   src/renderer/src/components/Icons.tsx\n\tmodified:   src/renderer/src/components/PromptArea.css\n\tmodified:   src/renderer/src/components/PromptArea.tsx\n\tmodified:   src/renderer/src/components/SettingsPanel.css\n\tmodified:   src/renderer/src/components/SettingsPanel.tsx\n\tmodified:   src/renderer/src/components/Sidebar.css\n\tmodified:   src/renderer/src/components/Sidebar.tsx\n\tmodified:   src/renderer/src/components/TopBar.css\n\tmodified:   src/renderer/src/components/TopBar.tsx\n\tmodified:   src/renderer/src/components/TrashPanel.css\n\tmodified:   src/renderer/src/components/TrashPanel.tsx\n\tmodified:   src/renderer/src/components/chat/ChatArea.tsx\n\tmodified:   src/renderer/src/components/chat/ExecutionLog.css\n\tmodified:   src/renderer/src/components/chat/ExecutionLog.tsx\n\tmodified:   src/renderer/src/components/chat/ExecutionLogDetail.tsx\n\tmodified:   src/renderer/src/components/chat/ExecutionLogUtils.ts\n\tmodified:   src/renderer/src/components/chat/MessageBody.css\n\tmodified:   src/renderer/src/components/chat/MessageBody.tsx\n\tmodified:   src/renderer/src/components/chat/MessageParser.ts\n\tmodified:   src/renderer/src/components/ui/Button.css\n\tmodified:   src/renderer/src/components/ui/Button.tsx\n\tmodified:   src/renderer/src/components/ui/Input.css\n\tmodified:   src/renderer/src/components/ui/Input.tsx\n\tmodified:   src/renderer/src/components/ui/Select.css\n\tmodified:   src/renderer/src/components/ui/Select.tsx\n\tmodified:   src/renderer/src/env.d.ts\n\tmodified:   src/renderer/src/pages/HomePage.tsx\n\tmodified:   src/renderer/src/pages/SettingsPage.tsx\n\tmodified:   src/renderer/src/styles.css\n\tmodified:   src/shared/constants/app.ts\n\tmodified:   src/shared/ipc/channels.ts\n\tmodified:   src/shared/types/index.ts\n\tmodified:   src/tests/project-analysis-service.test.ts\n\tmodified:   src/tests/smoke.test.ts\n\tmodified:   src/tests/workspace-service.test.ts\n\nUntracked files:\n  (use \"git add <file>...\" to include in what will be committed)\n\t.agents/image-1.png\n\t.agents/image-2.png\n\t.agents/image.png\n\t.claude/\n\t.codez-cache/\n\t.continue/archive/iteration-1/重构项目记忆模块-plan.md\n\t.continue/archive/iteration-1/重构项目记忆模块-requirements.md\n\t.continue/archive/iteration-1/项目基础UI组件化与样式优化-plan.md\n\t.continue/archive/iteration-1/项目基础UI组件化与样式优化-requirements.md\n\t.continue/archive/iteration-2/阶段8体验优化-plan.md\n\t.continue/archive/iteration-2/阶段8体验优化-requirements.md\n\t.continue/current/Skills系统-plan.md\n\t.continue/current/Skills系统-requirements.md\n\t.npmrc\n\tdist-app/\n\tdocs/architecture/\n\tscripts/create_ico.js\n\tscripts/create_icon.js\n\tscripts/import-external-skills.js\n\tsrc/main/ipc/skill.handlers.ts\n\tsrc/main/ipc/theme.handlers.ts\n\tsrc/main/services/SkillManager.ts\n\tsrc/renderer/src/components/SettingsSkillsTab.css\n\tsrc/renderer/src/components/SettingsSkillsTab.tsx\n\tsrc/renderer/src/components/icons/IconDownload.tsx\n\tsrc/renderer/src/components/icons/IconFolderOpen.tsx\n\tsrc/renderer/src/components/icons/IconMonitor.tsx\n\tsrc/renderer/src/components/icons/IconMoon.tsx\n\tsrc/renderer/src/components/icons/IconPackage.tsx\n\tsrc/renderer/src/components/icons/IconRefreshCw.tsx\n\tsrc/renderer/src/components/icons/IconSun.tsx\n\tsrc/renderer/src/components/icons/IconZap.tsx\n\tsrc/shared/types/skill.ts\n\nno changes added to commit (use \"git add\" and/or \"git commit -a\")\nwarning: unable to access 'C:\\Users\\asus/.config/git/ignore': Permission denied\nwarning: unable to access 'C:\\Users\\asus/.config/git/ignore': Permission denied\n",
+      "role": "tool",
+      "tool_call_id": "call_cd2c5cf86bf10a9b"
+    },
+    {
+      "content": null,
+      "reasoning_content": "tool call",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"type .continue\\\\current\\\\Skills系统-plan.md .continue\\\\current\\\\Skills系统-requirements.md\"}",
+            "name": "shell_command"
+          },
+          "id": "call_3b03df2afc3fc32f",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Exit code: 1\nWall time: 1.7 seconds\nOutput:\nGet-Content : 找不到接受实际参数“.continue\\current\\Skills系统-requirements.md”的位置形式参数。\r\n所在位置 行:2 字符: 1\r\n+ type .continue\\current\\Skills系统-plan.md .continue\\current\\Skills系统-re ...\r\n+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : InvalidArgument: (:) [Get-Content]，ParameterBindingException\r\n    + FullyQualifiedErrorId : PositionalParameterNotFound,Microsoft.PowerShell.Commands.GetContentCommand\r\n \r\n",
+      "role": "tool",
+      "tool_call_id": "call_3b03df2afc3fc32f"
+    },
+    {
+      "content": null,
+      "reasoning_content": "tool call",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"Get-Content .continue\\\\current\\\\Skills系统-plan.md, .continue\\\\current\\\\Skills系统-requirements.md\"}",
+            "name": "shell_command"
+          },
+          "id": "call_75ea7be133f4f65e",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Exit code: 0\nWall time: 1.4 seconds\nOutput:\n# 馃摑 寮€鍙戣鍒?- Skills绯荤粺\r\n\r\n> 鍏宠仈闇€姹傦細Skills绯荤粺-requirements.md\r\n> 杩唬锛歩teration-3\r\n> 褰撳墠闃舵锛氬疄鐜?\r\n## 鎶€鏈柟妗?瑙勮寖骞跺畬鍠?`SkillManager` 鐨勫閮ㄦ妧鑳芥簮瀵煎叆涓庢鏌ユ満鍒讹紝缁熷悎鍓嶅悗绔被鍨嬫帴鍙ｃ€?\r\n## 鏋舵瀯璁捐\r\n- **绫诲瀷灞?*锛氬湪 `src/shared/types/skill.ts` 瀹氫箟 `ExternalSkillCheckResult` 涓?`ExternalSourceCheck`銆?- **涓昏繘绋?*锛歚SkillManager` 瀹炵幇 `checkExternalSkills` 涓?`importExternalSkills` 鐨勫悗绔€昏緫锛屾墦閫?Electron 杩涚▼閫氫俊銆?- **娓叉煋灞?*锛歚SettingsSkillsTab` 灞曠ず妫€娴嬬粨鏋滐紝鏀寔鐐瑰嚮瀵煎叆锛屽懠鍑?Slash Command銆?\r\n## 浠诲姟鎷嗚В\r\n| 浠诲姟ID | 浠诲姟鎻忚堪 | 鐘舵€?| 澶嶆潅搴?| 棰勮鏂囦欢 | 瀹屾垚鏃堕棿 |\r\n|--------|----------|------|--------|----------|----------|\r\n| T1     | 淇 Skill 绯荤粺鐨勭紪璇戞姤閿欙紝瀵归綈骞跺鍑?`ExternalSkillCheckResult` 绫诲瀷瀹氫箟 | 鉁?宸插畬鎴?| 浣?| `src/shared/types/skill.ts`, `src/main/services/SkillManager.ts` | 2026-06-27 19:32 |\r\n| T2     | 杩愯缂栬瘧楠岃瘉涓庢祴璇曞伐浣滄祦锛岀‘淇濈郴缁熼浂鎶ラ敊闆惰鍛婅窇閫?| 鉁?宸插畬鎴?| 浣?| - | 2026-06-27 19:33 |\r\n\r\n## 姝ラ鐘舵€?| 闃舵 | 鐘舵€?| 寮€濮嬫椂闂?| 瀹屾垚鏃堕棿 |\r\n|------|------|----------|----------|\r\n| 闇€姹傚垎鏋?| 鉁?宸插畬鎴?| 2026-06-27 17:41 | 2026-06-27 17:41 |\r\n| 璁″垝/璁捐 | 鉁?宸插畬鎴?| 2026-06-27 17:45 | 2026-06-27 17:45 |\r\n| 瀹炵幇 | 鉁?宸插畬鎴?| 2026-06-27 17:45 | 2026-06-27 19:33 |\r\n| 缂栬瘧楠岃瘉 | 鈴?寰呭紑濮?| - | - |\r\n| 娴嬭瘯 | 鈴?寰呭紑濮?| - | - |\r\n| 瀹屾垚 | 鈴?寰呭紑濮?| - | - |\r\n\r\n## 杩涘害缁熻\r\n- **鎬讳换鍔℃暟**锛?\r\n- **宸插畬鎴?*锛?\r\n- **瀹屾垚鐧惧垎姣?*锛?00%\r\n# 馃搵 闇€姹傛枃妗?- Skills 绯荤粺 (闃舵 9A)\r\n\r\n> 杩唬锛歩teration-3\r\n> 鍒涘缓鏃堕棿锛?026-06-27 17:41\r\n> 鏈€鍚庢洿鏂帮細2026-06-27 17:41\r\n> 瀛樻斁浣嶇疆锛?continue/current/Skills绯荤粺-requirements.md\r\n\r\n## 闇€姹傛杩?\r\n**涓€鍙ヨ瘽鎻忚堪**锛氬疄鐜板彲鎵╁睍鐨?Skills 鎶€鑳芥祦绯荤粺锛岃 Agent 鑳藉鏍规嵁鐢ㄦ埛杈撳叆鑷姩鍔犺浇骞跺簲鐢ㄧ壒瀹氬満鏅殑涓撲笟宸ヤ綔娴侊紙濡?Code Review銆乁I 浼樺寲绛夛級銆?\r\n**涓氬姟鑳屾櫙**锛氶殢鐫€椤圭洰鑳藉姏鐨勪笉鏂鍔狅紝濡傛灉鎵€鏈夌殑绯荤粺鎻愮ず璇嶅拰涓撲笟棰嗗煙鐭ヨ瘑閮藉爢鐮屽湪鍏ㄥ眬鎻愮ず璇嶄腑锛屼細瀵艰嚧涓婁笅鏂囩垎鐐搞€丩LM 瀹规槗鍒嗗績浠ュ強 token 娴垂銆傛垜浠渶瑕佷竴濂楁彃浠跺寲鏈哄埗锛岄€氳繃 `.skills/` 鐩綍鎸傝浇鐗瑰畾鍦烘櫙鐨?Prompt 妯℃澘鍜屽伐鍏锋潈闄愰厤缃€?\r\n**棰勬湡浠峰€?*锛?1. **闅旂涓婁笅鏂?*锛氶拡瀵逛笉鍚屼换鍔℃彁渚涘畾鍒跺寲銆佹瀬绠€鐨?System Prompt銆?2. **鑳藉姏鎵╁睍**锛氬紑鍙戣€呭彲浠ュ儚鍐?Markdown 涓€鏍疯交鏄撴墿鍏?Agent 鐨勮兘鍔涳紝涓嶉渶瑕佷慨鏀规牳蹇冪殑 `AgentRunner` 閫昏緫銆?3. **鏉冮檺鏀舵嫝**锛氬湪鎵ц濡?`Code Review` 杩欑被鍙鎶€鑳芥椂锛屽彲浠ヤ弗鏍奸檺鍒跺畠涓嶅叿澶?`write_file` 鏉冮檺銆?\r\n## 鍔熻兘闇€姹?\r\n### 鏍稿績鍔熻兘锛堝繀椤诲疄鐜帮級\r\n\r\n- [ ] **F1**: **Skill 鍏冩暟鎹В鏋愪笌绠＄悊**\r\n  - 杈撳叆锛氬伐浣滃尯 `.skills/` 鐩綍涓嬬殑 `SKILL.md` 鏂囦欢銆?  - 澶勭悊锛氭敮鎸佹壂鎻忕洰褰曪紝璇诲彇骞惰В鏋?`SKILL.md` 涓殑 YAML Frontmatter锛堝寘鍚?`name`, `description`, `triggers` 绛夊瓧娈碉級浠ュ強姝ｆ枃鐨?Prompt 妯℃澘銆?  - 杈撳嚭锛氬湪涓昏繘绋嬬淮鎶や竴寮犲彲渚涙煡璇㈢殑鍙敤 Skills 鍒楄〃銆?\r\n- [ ] **F2**: **Skill 鍖归厤涓庢敞鍏ユ満鍒?*\r\n  - 杈撳叆锛氱敤鎴风殑浠诲姟璇锋眰鏂囨湰锛堝 \"review 鍒氭墠鐨勪唬鐮?锛変互鍙婂凡鍚敤鐨?Skills銆?  - 澶勭悊锛氬湪杩涘叆 `AgentRunner` 鍓嶏紝绯荤粺鑳介€氳繃鑷劧璇█鍖归厤鎴栫敤鎴锋樉寮忚Е鍙戦攣瀹氱洰鏍?Skill銆?  - 杈撳嚭锛氭彁鍙栫洰鏍?Skill 鐨?markdown 姝ｆ枃锛屼綔涓洪澶栫殑 `System Prompt` 闄勫姞鍒版湰娆′細璇濅笂涓嬫枃涓€?\r\n- [ ] **F3**: **鍓嶇璁剧疆/绠＄悊 UI**\r\n  - 杈撳叆锛氫富杩涚▼杩斿洖鐨勫凡鍙戠幇 Skills 鍒楄〃鏁版嵁銆?  - 澶勭悊锛氬湪鐜版湁鐣岄潰锛堜緥濡傛柊寤轰竴涓嫭绔嬬殑 Skills 绠＄悊闈㈡澘鎴栬瀺鍏?Settings 涓級灞曠ず姣忎釜 Skill 鐨勫悕绉般€佹弿杩板強鍚敤寮€鍏炽€?  - 杈撳嚭锛氱敤鎴峰彲鐩磋鍦板紑鍚€佸叧闂壒瀹氱殑宸ヤ綔娴侊紝骞朵笖璁剧疆鑳藉鎸佷箙鍖栥€?\r\n- [ ] **F4**: **鍩虹 API 妗ユ帴**\r\n  - 杈撳叆锛氭覆鏌撹繘绋嬭姹傘€?  - 澶勭悊锛氭柊澧?`skill.handlers.ts`锛屾毚闇?IPC 鎺ュ彛濡?`api.skill.getSkills()`, `api.skill.enableSkill()`, `api.skill.disableSkill()` 绛夈€?  - 杈撳嚭锛氫緵鍓嶇鐩存帴璋冪敤鐨勫畬鏁?TypeScript 绫诲瀷鎺ュ彛銆?\r\n### 鎵╁睍鍔熻兘锛堝彲閫夊疄鐜帮級\r\n\r\n- [ ] **E1**: **宸ュ叿鏉冮檺澹版槑涓庢嫤鎴?*\r\n  - 鏀寔鍦?`SKILL.md` 鐨?YAML 澶翠腑瀹氫箟 `permissions`锛堝鍙厑璁?`read_file`锛夈€?  - 鍦?`AgentRunner` 鎴?`ToolManager` 灞傞潰杩涜鎷︽埅锛氬鏋滃惎鐢ㄤ簡璇?Skill锛屽垯闅愬紡绂佺敤瓒呭嚭鐧藉悕鍗曠殑鍗遍櫓宸ュ叿銆?\r\n## 闈炲姛鑳介渶姹?\r\n### 鎬ц兘瑕佹眰\r\n- 鎵弿瑙ｆ瀽 `.skills/` 鐩綍鑰楁椂 < 100ms锛屼笖搴斿綋鍦ㄥ簲鐢ㄥ惎鍔ㄦ椂鎴栬€呯洰褰曞彉鍔ㄦ椂缂撳瓨锛屼笉鍦ㄦ瘡娆″璇濇椂閲嶆柊瑙ｆ瀽纾佺洏銆?\r\n### 鍏煎鎬ц姹?- `SKILL.md` 鏍煎紡闇€瑕佸吋瀹规櫘閫?Markdown锛屽嵆鍓嶇鍜岀郴缁熷叾瀹冪紪杈戝櫒鍙互姝ｅ父鏌ョ湅锛屼笉浼氬洜涓哄鏉傜殑瑙ｆ瀽閫昏緫宕╂簝銆?\r\n### 瀹夊叏瑕佹眰\r\n- 鐢ㄦ埛閰嶇疆鍜岀涓夋柟 Skill 涓嶈兘閫冮€稿嚭鎸囧畾鐨?`.skills/` 鐩綍銆?- 淇濊瘉姝ｅ垯琛ㄨ揪寮忔垨 yaml 瑙ｆ瀽涓嶄細寮曞彂涓ラ噸鐨勬€ц兘闃诲鎴栨嫆缁濇湇鍔★紙DoS锛夋紡娲炪€?\r\n## 绾︽潫鏉′欢\r\n\r\n### 鎶€鏈爤闄愬埗\r\n- **瑙ｆ瀽搴?*锛氶渶瑕佷娇鐢ㄨ交閲忕骇鐨?frontmatter 瑙ｆ瀽鏂规锛屽彲浠ョ洿鎺ヤ娇鐢ㄦ鍒欒〃杈惧紡鎻愬彇 `---` 鍖呰９鐨勫唴瀹癸紝閬垮厤寮曞叆杩囬噸渚濊禆銆?- **鐘舵€佺鐞?*锛氬墠绔娇鐢ㄧ洰鍓嶇殑 Zustand 杩涜 Skill 鐘舵€佺淮鎶ゃ€?\r\n### 鍏朵粬绾︽潫\r\n- 璇ユā鍧楀簲浣滀负鎵╁睍绯荤粺锛圗xtension Layer锛夌嫭绔嬩簬鏍稿績娴佺▼涔嬪銆傚鏋滅鐢ㄤ簡鎵€鏈?Skill锛屽師鏈夌殑 Agent Coding Loop 蹇呴』浠嶇劧瀹岀編杩愯銆?\r\n## 楠屾敹鏍囧噯\r\n\r\n### 鍔熻兘楠屾敹\r\n- [ ] **AC1**: 鍒涘缓涓€涓祴璇曠敤鐨?`.skills/test-skill/SKILL.md` 鍚庯紝閲嶅惎搴旂敤鑳藉湪 UI 闈㈡澘鐪嬪埌璇ユ妧鑳藉苟鍙惎鐢ㄣ€?- [ ] **AC2**: 鍚敤璇ユ妧鑳藉苟杈撳叆鍖归厤璇嶅悗锛屾姄鍙栧悗绔棩蹇楃‘璁?`AgentRunner` 鏀跺埌浜嗘潵鑷簬璇?`SKILL.md` 鍐呮枃鐨勯檮鍔?Prompt銆?- [ ] **AC3**: 绂佺敤璇ユ妧鑳藉悗锛屽啀娆¤緭鍏ョ浉鍚岀殑鎻愮ず锛岄檮鍔?Prompt 涓嶅啀琚敞鍏ャ€?\r\n### 璐ㄩ噺楠屾敹\r\n- [ ] **Q1**: `src/shared/types/skill.ts` 瀹氫箟涓ュ瘑锛屾病鏈変换浣?`any` 绫诲瀷娉勯湶銆?- [ ] **Q2**: 淇濊瘉 `ToolManager` 鍘熸湁娴嬭瘯閫氳繃涓旀灦鏋勪笉鍙楀奖鍝嶃€?\r\n## 鐩稿叧璧勬簮\r\n\r\n### 绀轰緥浠ｇ爜\r\n```typescript\r\n// 棰勬湡鐨勮В鏋愯緭鍑虹粨鏋?export interface SkillDefinition {\r\n  id: string; // e.g. \"code-review\"\r\n  name: string;\r\n  description: string;\r\n  triggers: string[];\r\n  content: string; // The markdown body to inject\r\n  enabled: boolean;\r\n}\r\n```\r\n",
+      "role": "tool",
+      "tool_call_id": "call_75ea7be133f4f65e"
+    },
+    {
+      "content": null,
+      "reasoning_content": "tool call",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"Get-Content package.json | Select-String -Pattern \\\"scripts\\\" -Context 0, 15\"}",
+            "name": "shell_command"
+          },
+          "id": "call_a19e0b614c6f5132",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Exit code: 0\nWall time: 1.5 seconds\nOutput:\n\r\n>   \"scripts\": {\r\n      \"dev\": \"electron-vite dev\",\r\n      \"typecheck\": \"tsc --noEmit\",\r\n      \"test\": \"vitest run\",\r\n      \"build\": \"electron-vite build\",\r\n      \"package\": \"npm run build && electron-builder build --win --publish never\"\r\n    },\r\n    \"dependencies\": {\r\n      \"@electron-toolkit/preload\": \"^3.0.1\",\r\n      \"@electron-toolkit/utils\": \"^3.0.0\",\r\n      \"@xterm/addon-fit\": \"^0.11.0\",\r\n      \"@xterm/xterm\": \"^6.0.0\",\r\n      \"node-pty\": \"^1.1.0\",\r\n      \"prismjs\": \"^1.30.0\",\r\n      \"react\": \"^18.3.1\",\r\n      \"react-dom\": \"^18.3.1\",\r\n\r\n\r\n",
+      "role": "tool",
+      "tool_call_id": "call_a19e0b614c6f5132"
+    },
+    {
+      "content": null,
+      "reasoning_content": "tool call",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"npm run typecheck\"}",
+            "name": "shell_command"
+          },
+          "id": "call_bb0e85a6a2546d8c",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Exit code: 1\nWall time: 1.4 seconds\nOutput:\nnpm : 无法加载文件 D:\\Program Files\\nodejs\\npm.ps1，因为在此系统上禁止运行脚本。有关详细信息，请参阅 https:/go.microsoft.com/fwlink/?LinkID=135170 中的 \r\nabout_Execution_Policies。\r\n所在位置 行:2 字符: 1\r\n+ npm run typecheck\r\n+ ~~~\r\n    + CategoryInfo          : SecurityError: (:) []，PSSecurityException\r\n    + FullyQualifiedErrorId : UnauthorizedAccess\r\n",
+      "role": "tool",
+      "tool_call_id": "call_bb0e85a6a2546d8c"
+    }
+  ],
+  "model": "gemini-3.1-pro-high",
+  "parallel_tool_calls": false,
+  "stream": true,
+  "stream_options": {
+    "include_usage": true
+  },
+  "thinking": {
+    "type": "disabled"
+  },
+  "tool_choice": "auto",
+  "tools": [
+    {
+      "function": {
+        "description": "Runs a Powershell command (Windows) and returns its output.\n\nExamples of valid command strings:\n\n- ls -a (show hidden): \"Get-ChildItem -Force\"\n- recursive find by name: \"Get-ChildItem -Recurse -Filter *.py\"\n- recursive grep: \"Get-ChildItem -Path C:\\\\myrepo -Recurse | Select-String -Pattern 'TODO' -CaseSensitive\"\n- ps aux | grep python: \"Get-Process | Where-Object { $_.ProcessName -like '*python*' }\"\n- setting an env var: \"$env:FOO='bar'; echo $env:FOO\"\n- running an inline Python script: \"@'\\\\nprint('Hello, world!')\\\\n'@ | python -\"\n\nWindows safety rules:\n- Do not compose destructive filesystem commands across shells. Do not enumerate paths in PowerShell and then pass them to `cmd /c`, batch builtins, or another shell for deletion or moving. Use one shell end-to-end, prefer native PowerShell cmdlets such as `Remove-Item` / `Move-Item` with `-LiteralPath`, and avoid string-built shell commands for file operations.\n- Before any recursive delete or move on Windows, verify the resolved absolute target paths stay within the intended workspace or explicitly named target directory. Never issue a recursive delete or move against a computed path if the final target has not been checked.\n- When using `Start-Process` to launch a background helper or service, pass `-WindowStyle Hidden` unless the user explicitly asked for a visible interactive window. Use visible windows only for interactive tools the user needs to see or control.",
+        "name": "shell_command",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "command": {
+              "description": "Shell script to run in the user's default shell.",
+              "type": "string"
+            },
+            "justification": {
+              "description": "User-facing approval question for `require_escalated`; omit otherwise.",
+              "type": "string"
+            },
+            "login": {
+              "description": "True runs with login shell semantics; false disables them. Defaults to true.",
+              "type": "boolean"
+            },
+            "prefix_rule": {
+              "description": "Reusable approval prefix for `cmd`, only with `sandbox_permissions: \"require_escalated\"`; for example [\"git\", \"pull\"].",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "sandbox_permissions": {
+              "description": "Per-command sandbox override. Defaults to `use_default`; use `require_escalated` for unsandboxed execution.",
+              "enum": [
+                "use_default",
+                "require_escalated"
+              ],
+              "type": "string"
+            },
+            "timeout_ms": {
+              "description": "Maximum command runtime. Defaults to 10000 ms.",
+              "type": "number"
+            },
+            "workdir": {
+              "description": "Working directory for the command. Defaults to the turn cwd.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command"
+          ],
+          "type": "object"
+        },
+        "strict": false
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Lists resources provided by MCP servers. Resources allow servers to share data that provides context to language models, such as files, database schemas, or application-specific information. Prefer resources over web search when possible.",
+        "name": "list_mcp_resources",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "description": "Opaque cursor from a previous list_mcp_resources call; omit for the first page.",
+              "type": "string"
+            },
+            "server": {
+              "description": "MCP server name. Omit to list resources from every configured server.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "strict": false
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Lists resource templates provided by MCP servers. Parameterized resource templates allow servers to share data that takes parameters and provides context to language models, such as files, database schemas, or application-specific information. Prefer resource templates over web search when possible.",
+        "name": "list_mcp_resource_templates",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "description": "Opaque cursor from a previous list_mcp_resource_templates call; omit for the first page.",
+              "type": "string"
+            },
+            "server": {
+              "description": "MCP server name. Omit to list resource templates from every configured server.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "strict": false
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Read a specific resource from an MCP server given the server name and resource URI.",
+        "name": "read_mcp_resource",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "server": {
+              "description": "MCP server name exactly as configured. Must match the 'server' field returned by list_mcp_resources.",
+              "type": "string"
+            },
+            "uri": {
+              "description": "Resource URI to read. Must be one of the URIs returned by list_mcp_resources.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "server",
+            "uri"
+          ],
+          "type": "object"
+        },
+        "strict": false
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Updates the task plan.\nProvide an optional explanation and a list of plan items, each with a step and status.\nAt most one step can be in_progress at a time.\n",
+        "name": "update_plan",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "explanation": {
+              "description": "Optional explanation for this plan update.",
+              "type": "string"
+            },
+            "plan": {
+              "description": "The list of steps",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "status": {
+                    "description": "Step status.",
+                    "enum": [
+                      "pending",
+                      "in_progress",
+                      "completed"
+                    ],
+                    "type": "string"
+                  },
+                  "step": {
+                    "description": "Task step text.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "step",
+                  "status"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "plan"
+          ],
+          "type": "object"
+        },
+        "strict": false
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Request user input for one to three short questions and wait for the response. Set autoResolutionMs, from 60000 to 240000 milliseconds, only when the question is useful but non-blocking and continuing with best judgment is acceptable if the user does not answer; omit it when explicit user input is required. This tool is only available in Plan mode.",
+        "name": "request_user_input",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "autoResolutionMs": {
+              "description": "Optional auto-resolution window in milliseconds, from 60000 to 240000. Include this only when the question is useful but non-blocking and continuing with best judgment is acceptable if the user does not answer; omit it when explicit user input is required before continuing. Use 60000 for lightly helpful context and up to 240000 when the answer would materially unblock better work.",
+              "type": "number"
+            },
+            "questions": {
+              "description": "Questions to show the user. Prefer 1 and do not exceed 3",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "header": {
+                    "description": "Short header label shown in the UI (12 or fewer chars).",
+                    "type": "string"
+                  },
+                  "id": {
+                    "description": "Stable identifier for mapping answers (snake_case).",
+                    "type": "string"
+                  },
+                  "options": {
+                    "description": "Provide 2-3 mutually exclusive choices. Put the recommended option first and suffix its label with \"(Recommended)\". Do not include an \"Other\" option in this list; the client will add a free-form \"Other\" option automatically.",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "description": {
+                          "description": "One short sentence explaining impact/tradeoff if selected.",
+                          "type": "string"
+                        },
+                        "label": {
+                          "description": "User-facing label (1-5 words).",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "description"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "question": {
+                    "description": "Single-sentence prompt shown to the user.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "header",
+                  "question",
+                  "options"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "questions"
+          ],
+          "type": "object"
+        },
+        "strict": false
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk.",
+        "name": "view_image",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "description": "Local filesystem path to an image file.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
+        },
+        "strict": false
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Close an agent and any open descendants when they are no longer needed, and return the target agent's previous status before shutdown was requested. Completed agents remain open and count toward the concurrency limit until closed. Don't keep agents open for too long if they are not needed anymore.",
+        "name": "multi_agent_v1__close_agent",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "target": {
+              "description": "Agent id to close (from spawn_agent).",
+              "type": "string"
+            }
+          },
+          "required": [
+            "target"
+          ],
+          "type": "object"
+        },
+        "strict": false
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Resume a previously closed agent by id so it can receive send_input and wait_agent calls.",
+        "name": "multi_agent_v1__resume_agent",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "description": "Agent id to resume.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "strict": false
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Send a message to an existing agent. Use interrupt=true to redirect work immediately. You should reuse the agent by send_input if you believe your assigned task is highly dependent on the context of a previous task.",
+        "name": "multi_agent_v1__send_input",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "interrupt": {
+              "description": "True interrupts the current task and handles this message immediately; false or omitted queues it.",
+              "type": "boolean"
+            },
+            "items": {
+              "description": "Structured input items. Use this to pass explicit mentions (for example app:// connector paths).",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "image_url": {
+                    "description": "Image URL when type is image.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "Display name when type is skill or mention.",
+                    "type": "string"
+                  },
+                  "path": {
+                    "description": "Path when type is local_image/skill, or structured mention target such as app://<connector-id> or plugin://<plugin-name>@<marketplace-name> when type is mention.",
+                    "type": "string"
+                  },
+                  "text": {
+                    "description": "Text content when type is text.",
+                    "type": "string"
+                  },
+                  "type": {
+                    "description": "Input item type: text, image, local_image, skill, or mention.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "message": {
+              "description": "Legacy plain-text message to send to the agent. Use either message or items.",
+              "type": "string"
+            },
+            "target": {
+              "description": "Agent id to message (from spawn_agent).",
+              "type": "string"
+            }
+          },
+          "required": [
+            "target"
+          ],
+          "type": "object"
+        },
+        "strict": false
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "\n        \n        Available model overrides (optional; inherited parent model is preferred):\n- `gemini-3.1-pro-high`: claude-opus-4-6-thinking Reasoning efforts: low, medium (default), high, xhigh.\n- `gemini-3-5-flash-high`: gemini-3-5-flash-high Reasoning efforts: low, medium (default), high, xhigh.\n- `claude-opus-4-6-thinking`: claude-opus-4-6-thinking Reasoning efforts: low, medium (default), high, xhigh.\n        Spawn a sub-agent for a well-scoped task. Returns the spawned agent id plus the user-facing nickname when available. Spawned agents inherit your current model by default. Omit `model` to use that preferred default; set `model` only when an explicit override is needed.\nThis spawn_agent tool provides you access to sub-agents that inherit your current model by default. Do not set the `model` field unless the user explicitly asks for a different model or there is a clear task-specific reason. You should follow the rules and guidelines below to use this tool.\n\nDo not spawn sub-agents unless the user explicitly asks for sub-agents, delegation, or parallel agent work.\nAgent-role guidance below only helps choose which agent to use after spawning is already authorized; it never authorizes spawning by itself.\n\n### Designing delegated subtasks\n- Subtasks must be concrete, well-defined, and self-contained.\n- Delegated subtasks must materially advance the main task.\n- Do not duplicate work between the main rollout and delegated subtasks.\n- Avoid issuing multiple delegate calls on the same unresolved thread unless the new delegated task is genuinely different and necessary.\n- Narrow the delegated ask to the concrete output you need next.\n- For coding tasks, prefer delegating concrete code-change worker subtasks over read-only explorer analysis when the subagent can make a bounded patch in a clear write scope.\n- When delegating coding work, instruct the submodel to edit files directly in its forked workspace and list the file paths it changed in the final answer.\n- For code-edit subtasks, decompose work so each delegated task has a disjoint write set.\n\n### After you delegate\n- Call wait_agent very sparingly. Only call wait_agent when you need the result immediately for the next critical-path step and you are blocked until it returns.\n- Do not redo delegated subagent tasks yourself; focus on integrating results or tackling non-overlapping work.\n- While the subagent is running in the background, do meaningful non-overlapping work immediately.\n- Do not repeatedly wait by reflex.\n- When a delegated coding task returns, quickly review the uploaded changes, then integrate or refine them.\n\n### Parallel delegation patterns\n- Run multiple independent information-seeking subtasks in parallel when you have distinct questions that can be answered independently.\n- Split implementation into disjoint codebase slices and spawn multiple agents for them in parallel when the write scopes do not overlap.\n- Delegate verification only when it can run in parallel with ongoing implementation and is likely to catch a concrete risk before final integration.\n- The key is to find opportunities to spawn multiple independent subtasks in parallel within the same round, while ensuring each subtask is well-defined, self-contained, and materially advances the main task.",
+        "name": "multi_agent_v1__spawn_agent",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "agent_type": {
+              "description": "Optional type name for the new agent. If omitted, `default` is used.\nAvailable roles:\ndefault: {\nDefault agent.\n}\nexplorer: {\nUse `explorer` for specific codebase questions.\nExplorers are fast and authoritative.\nThey must be used to ask specific, well-scoped questions on the codebase.\nRules:\n- In order to avoid redundant work, you should avoid exploring the same problem that explorers have already covered. Typically, you should trust the explorer results without additional verification. You are still allowed to inspect the code yourself to gain the needed context!\n- You are encouraged to spawn up multiple explorers in parallel when you have multiple distinct questions to ask about the codebase that can be answered independently. This allows you to get more information faster without waiting for one question to finish before asking the next. While waiting for the explorer results, you can continue working on other local tasks that do not depend on those results. This parallelism is a key advantage of delegation, so use it whenever you have multiple questions to ask.\n- Reuse existing explorers for related questions.\n}\nworker: {\nUse for execution and production work.\nTypical tasks:\n- Implement part of a feature\n- Fix tests or bugs\n- Split large refactors into independent chunks\nRules:\n- Explicitly assign **ownership** of the task (files / responsibility). When the subtask involves code changes, you should clearly specify which files or modules the worker is responsible for. This helps avoid merge conflicts and ensures accountability. For example, you can say \"Worker 1 is responsible for updating the authentication module, while Worker 2 will handle the database layer.\" By defining clear ownership, you can delegate more effectively and reduce coordination overhead.\n- Always tell workers they are **not alone in the codebase**, and they should not revert the edits made by others, and they should adjust their implementation to accommodate the changes made by others. This is important because there may be multiple workers making changes in parallel, and they need to be aware of each other's work to avoid conflicts and ensure a cohesive final product.\n}",
+              "type": "string"
+            },
+            "fork_context": {
+              "description": "True forks the current thread history into the new agent; false or omitted starts with only the initial prompt.",
+              "type": "boolean"
+            },
+            "items": {
+              "description": "Structured input items. Use this to pass explicit mentions (for example app:// connector paths).",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "image_url": {
+                    "description": "Image URL when type is image.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "Display name when type is skill or mention.",
+                    "type": "string"
+                  },
+                  "path": {
+                    "description": "Path when type is local_image/skill, or structured mention target such as app://<connector-id> or plugin://<plugin-name>@<marketplace-name> when type is mention.",
+                    "type": "string"
+                  },
+                  "text": {
+                    "description": "Text content when type is text.",
+                    "type": "string"
+                  },
+                  "type": {
+                    "description": "Input item type: text, image, local_image, skill, or mention.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "message": {
+              "description": "Initial plain-text task for the new agent. Use either message or items.",
+              "type": "string"
+            },
+            "model": {
+              "description": "Model override for the new agent. Omit unless an explicit override is needed.",
+              "type": "string"
+            },
+            "reasoning_effort": {
+              "description": "Reasoning effort override for the new agent. Omit to inherit the parent effort.",
+              "type": "string"
+            },
+            "service_tier": {
+              "description": "Service tier override for the new agent. Omit unless explicitly requested.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "strict": false
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Wait for agents to reach a final status. Completed statuses may include the agent's final message. Returns empty status when timed out. Once the agent reaches a final status, a notification message will be received containing the same completed status.",
+        "name": "multi_agent_v1__wait_agent",
+        "parameters": {
+          "additionalProperties": false,
+          "properties": {
+            "targets": {
+              "description": "Agent ids to wait on. Pass multiple ids to wait for whichever finishes first.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "timeout_ms": {
+              "description": "Timeout in milliseconds. Defaults to 30000, min 10000, max 3600000. Prefer longer waits (minutes) to avoid busy polling.",
+              "type": "number"
+            }
+          },
+          "required": [
+            "targets"
+          ],
+          "type": "object"
+        },
+        "strict": false
+      },
+      "type": "function"
+    }
+  ]
+}

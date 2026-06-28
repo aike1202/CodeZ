@@ -95,7 +95,7 @@ export default function SettingsPanel({
       <div className="settings-panel-inner">
         <div className="settings-panel-header">
           <div className="settings-panel-header-title-area">
-            <h2 className="text-xl font-semibold text-text-main">{isNew ? '新建 Provider' : name}</h2>
+          <h2 className="settings-panel-title">{isNew ? '新建 Provider' : name}</h2>
             {!isNew && (
               <>
                 <span className="settings-status-tag">已启用</span>
@@ -103,17 +103,17 @@ export default function SettingsPanel({
             )}
           </div>
           {!isNew && onDelete && (
-            <Button variant="ghost" size="none" className="settings-trash-btn" onClick={onDelete} title="删除该提供商">
+            <Button type="text" danger size="none" className="settings-trash-btn" onClick={onDelete} title="删除该提供商">
               <IconTrash />
             </Button>
           )}
         </div>
 
-        <div className="space-y-6">
+        <div className="settings-form-container">
           {/* 名称，如果是新建则显示 */}
           {isNew && (
             <div>
-              <label className="block text-[13px] font-medium text-text-muted mb-2">提供商名称</label>
+              <label className="settings-label">提供商名称</label>
               <Input
                 placeholder="例如: DeepSeek"
                 value={name}
@@ -124,7 +124,7 @@ export default function SettingsPanel({
 
           {/* Base URL */}
           <div>
-            <label className="block text-[13px] font-medium text-text-muted mb-2">Base URL</label>
+            <label className="settings-label">Base URL</label>
             <Input
               placeholder="https://api.openai.com/v1"
               value={baseUrl}
@@ -134,7 +134,7 @@ export default function SettingsPanel({
 
           {/* API 格式 */}
           <div>
-            <label className="block text-[13px] font-medium text-text-muted mb-2">API 格式 (协议)</label>
+            <label className="settings-label">API 格式 (协议)</label>
             <Select
               value={apiFormat}
               onChange={(e) => setApiFormat(e.target.value as ApiFormat)}
@@ -149,7 +149,7 @@ export default function SettingsPanel({
 
           {/* API Key */}
           <div>
-            <label className="block text-[13px] font-medium text-text-muted mb-2">
+            <label className="settings-label">
               API Key {initialData.apiKeyMasked ? '(已设置，留空保留原有)' : ''}
             </label>
             <div className="settings-apikey-wrapper">
@@ -160,7 +160,7 @@ export default function SettingsPanel({
                 onChange={(e) => setApiKey(e.target.value)}
               />
               <Button 
-                variant="ghost"
+                type="text"
                 size="none"
                 className="settings-eye-btn" 
                 onClick={() => setShowKey(!showKey)}
@@ -172,7 +172,7 @@ export default function SettingsPanel({
 
           {/* Thinking 配置 */}
           <div>
-            <label className="block text-[13px] font-medium text-text-muted mb-2">思考输出</label>
+            <label className="settings-label">思考输出</label>
             <div className="settings-thinking-box">
               <label className="settings-checkbox-label">
                 <input
@@ -205,7 +205,7 @@ export default function SettingsPanel({
 
           {/* 模型列表 */}
           <div>
-            <label className="block text-[13px] font-medium text-text-muted mb-2">模型列表</label>
+            <label className="settings-label">模型列表</label>
             <div className="settings-models-box">
               {models.map((m, idx) => m ? (
                 <div key={m.id || idx} className="settings-model-row">
@@ -228,7 +228,7 @@ export default function SettingsPanel({
                       onChange={(e) => updateModel(idx, 'maxContextTokens', parseInt(e.target.value) || 0)}
                     />
                     <span className="settings-tokens-unit">万</span>
-                    <Button variant="danger" size="none" className="settings-remove-model-btn" onClick={() => removeModel(idx)}>
+                    <Button type="text" danger size="none" className="settings-remove-model-btn" onClick={() => removeModel(idx)}>
                       <IconClose />
                     </Button>
                   </div>
@@ -236,7 +236,7 @@ export default function SettingsPanel({
               ) : null)}
               <div className="settings-add-model-wrapper">
                 <Button 
-                  variant="ghost"
+                  type="text"
                   size="none"
                   className="settings-add-model-btn" 
                   onClick={addModel}
@@ -252,7 +252,7 @@ export default function SettingsPanel({
           <div className="settings-actions-footer">
             <div className="settings-actions-footer-inner">
               <Button
-                variant={canSave ? 'dark' : 'secondary'}
+                type="primary"
                 size="md"
                 disabled={!canSave || saveStatus === 'saving'}
                 onClick={handleSave}
@@ -263,7 +263,7 @@ export default function SettingsPanel({
               {!isNew && (
                 <>
                   <Button 
-                    variant="secondary"
+                    type="default"
                     size="md"
                     onClick={onTest}
                   >

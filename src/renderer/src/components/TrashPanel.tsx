@@ -49,7 +49,7 @@ export default function TrashPanel(): React.ReactElement {
   return (
     <Stack className="trash-panel-container">
       <div className="trash-panel-header">
-        <h1 className="text-xl font-bold text-text-main mb-2">最近删除</h1>
+        <h1 className="trash-panel-title">最近删除</h1>
         <p className="trash-panel-desc">
           最近删除的会话将在这里保留 3 天。过期后将被彻底清除。您可以选择手动恢复或彻底删除。
         </p>

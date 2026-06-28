@@ -5,7 +5,7 @@ import * as os from 'os'
 import { ProjectAnalysisService } from '../main/services/ProjectAnalysisService'
 
 async function setupProject(): Promise<string> {
-  const root = path.join(os.tmpdir(), `myagent-project-analysis-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+  const root = path.join(os.tmpdir(), `codez-project-analysis-${Date.now()}-${Math.random().toString(36).slice(2)}`)
   await fs.mkdir(path.join(root, 'src', 'main'), { recursive: true })
   await fs.mkdir(path.join(root, 'src', 'preload'), { recursive: true })
   await fs.mkdir(path.join(root, 'src', 'renderer', 'src'), { recursive: true })

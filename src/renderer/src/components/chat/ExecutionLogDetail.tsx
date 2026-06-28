@@ -106,7 +106,7 @@ export default function ExecutionLogDetail({
                 )}
               </div>
               {parsed.scripts && typeof parsed.scripts === 'object' && Object.keys(parsed.scripts).length > 0 && (
-                <div className="mt-1.5 pt-1.5 border-t border-gray-100 dark:border-zinc-800/80">
+                <div className="exe-log-divider">
                   <div className="exe-log-snapshot-sub-title">项目内置脚本</div>
                   <div className="exe-log-snapshot-scripts">
                     {Object.entries(parsed.scripts).map(([key, cmd]) => (
@@ -119,7 +119,7 @@ export default function ExecutionLogDetail({
                 </div>
               )}
               {parsed.tree && typeof parsed.tree === 'string' && (
-                <div className="mt-1.5 pt-1.5 border-t border-gray-100 dark:border-zinc-800/80">
+                <div className="exe-log-divider">
                   <div className="exe-log-snapshot-sub-title">项目目录结构 (Depth: 3)</div>
                   <div className="exe-log-tree-box">
                     {parsed.tree.split('\n').map((line: string, idx: number) => {

@@ -38,5 +38,15 @@ export const IPC_CHANNELS = {
   // Tasks
   TASK_GET_BY_PROJECT: 'task:get-by-project',
   TASK_SAVE: 'task:save',
-  TASK_DELETE: 'task:delete'
+  TASK_DELETE: 'task:delete',
+
+  // Theme
+  THEME_GET: 'theme:get',
+  THEME_SET: 'theme:set',
+
+  // Skills
+  SKILL_GET_ALL: 'skill:get-all',
+  SKILL_TOGGLE: 'skill:toggle',
+  SKILL_CHECK_EXTERNAL: 'skill:check-external',
+  SKILL_IMPORT_EXTERNAL: 'skill:import-external'
 } as const

@@ -1,3 +1,5 @@
+import type { SkillDefinition } from '@shared/types/skill'
+
 export interface SlashCommand {
   name: string
   aliases?: string[]
@@ -9,10 +11,22 @@ export interface SlashCommand {
 }
 
 export const builtinCommands: SlashCommand[] = [
-  // 未来可以在此处轻松扩展更多的 Slash Commands，比如 /skill, /mcp 等
+  {
+    name: 'goal',
+    description: '查看、设置、替换、暂停、恢复或清除当前会话目标。',
+    process: (args) => `/goal ${args}`
+  },
+  {
+    name: 'compact',
+    description: '压缩当前对话，可附加摘要要求。',
+    process: (args) => `/compact ${args}`
+  }
 ]
 
-export function parseSlashCommand(message: string): { isCommand: boolean; processedMessage: string; commandName?: string } {
+export function parseSlashCommand(
+  message: string,
+  dynamicSkills: SkillDefinition[] = []
+): { isCommand: boolean; processedMessage: string; commandName?: string } {
   if (!message.trim().startsWith('/')) {
     return { isCommand: false, processedMessage: message }
   }
@@ -28,6 +42,19 @@ export function parseSlashCommand(message: string): { isCommand: boolean; proces
       isCommand: true,
       commandName: cmdName,
       processedMessage: command.process(args)
+    }
+  }
+
+  const skill = dynamicSkills.find(s => 
+    s.id.toLowerCase() === cmdName || 
+    s.id.replace(/^(global|workspace)-/, '').toLowerCase() === cmdName ||
+    s.triggers?.includes(cmdName)
+  )
+  if (skill) {
+    return {
+      isCommand: true,
+      commandName: cmdName,
+      processedMessage: `【本次请求强制应用工作流：${skill.name}】\n\n指令要求如下：\n${skill.content}\n\n当前任务参数/问题：\n${args}`
     }
   }
 

@@ -64,6 +64,8 @@
 - 安全策略集中维护在 `14-security-privacy.md`。
 - 具体实现开始后，可继续新增：
   - `docs/architecture/`
+    - [01-skills-system.md](./architecture/01-skills-system.md) (阶段9A Skills 架构设计)
+    - [02-skills-ui-design.md](./architecture/02-skills-ui-design.md) (阶段9A Skills UI/UX 交互设计)
   - `docs/api/`
   - `docs/testing/`
   - `docs/user-guide/`

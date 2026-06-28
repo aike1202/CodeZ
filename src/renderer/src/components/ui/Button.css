@@ -1,106 +1,232 @@
-.btn {
+/* 基础按钮样式 */
+.cz-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-weight: 500;
-  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-  transition-duration: 150ms;
+  white-space: nowrap;
+  text-align: center;
+  background-image: none;
+  background-color: transparent;
+  border: 1px solid transparent;
   cursor: pointer;
-  border: none;
-  background: none;
-}
-
-.btn:focus-visible {
+  transition: all 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
+  user-select: none;
+  touch-action: manipulation;
+  color: var(--text-main);
   outline: none;
+  position: relative;
 }
 
-.btn:disabled {
-  pointer-events: none;
+.cz-btn:disabled {
+  cursor: not-allowed;
   opacity: 0.5;
+  pointer-events: none;
 }
 
-.btn-icon-wrapper {
+/* 按钮尺寸 */
+.cz-btn-size-small {
+  height: 24px;
+  padding: 0 7px;
+  font-size: 12px;
+  border-radius: 4px;
+  gap: 4px;
+}
+
+.cz-btn-size-middle {
+  height: 32px;
+  padding: 4px 15px;
+  font-size: 14px;
+  border-radius: 6px;
+  gap: 6px;
+}
+
+.cz-btn-size-large {
+  height: 40px;
+  padding: 6.5px 15px;
+  font-size: 16px;
+  border-radius: 8px;
+  gap: 8px;
+}
+
+.cz-btn-size-none {
+  padding: 0;
+  height: auto;
+  border-radius: 0;
+}
+
+/* 按钮类型 */
+/* Default (Secondary) */
+.cz-btn-default {
+  background-color: var(--bg-panel);
+  border-color: var(--border-color);
+  color: var(--text-main);
+}
+.cz-btn-default:hover {
+  color: var(--primary-hover);
+  border-color: var(--primary-hover);
+  background-color: var(--bg-hover);
+}
+.cz-btn-default:active {
+  color: var(--primary-active);
+  border-color: var(--primary-active);
+  background-color: var(--bg-active);
+}
+
+/* Primary */
+.cz-btn-primary {
+  color: #fff;
+  background-color: var(--primary-color);
+  border-color: var(--primary-color);
+  box-shadow: 0 2px 0 rgba(5, 145, 255, 0.1);
+}
+.cz-btn-primary:hover {
+  background-color: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+.cz-btn-primary:active {
+  background-color: var(--primary-active);
+  border-color: var(--primary-active);
+}
+
+/* Dashed */
+.cz-btn-dashed {
+  background-color: var(--bg-panel);
+  border-color: var(--border-color);
+  border-style: dashed;
+  color: var(--text-main);
+}
+.cz-btn-dashed:hover {
+  color: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+.cz-btn-dashed:active {
+  color: var(--primary-active);
+  border-color: var(--primary-active);
+}
+
+/* Text */
+.cz-btn-text {
+  color: var(--text-muted);
+}
+.cz-btn-text:hover {
+  color: var(--text-main);
+  background-color: var(--bg-hover);
+}
+.cz-btn-text:active {
+  background-color: var(--bg-active);
+}
+
+/* Link */
+.cz-btn-link {
+  color: var(--primary-color);
+}
+.cz-btn-link:hover {
+  color: var(--primary-hover);
+}
+.cz-btn-link:active {
+  color: var(--primary-active);
+}
+
+/* Danger 状态叠加 */
+.cz-btn-danger.cz-btn-default {
+  color: var(--color-error);
+  border-color: var(--color-error);
+}
+.cz-btn-danger.cz-btn-default:hover {
+  color: var(--color-error-hover);
+  border-color: var(--color-error-hover);
+  background-color: var(--bg-hover);
+}
+.cz-btn-danger.cz-btn-default:active {
+  color: var(--color-error-active);
+  border-color: var(--color-error-active);
+}
+
+.cz-btn-danger.cz-btn-primary {
+  background-color: var(--color-error);
+  border-color: var(--color-error);
+}
+.cz-btn-danger.cz-btn-primary:hover {
+  background-color: var(--color-error-hover);
+  border-color: var(--color-error-hover);
+}
+.cz-btn-danger.cz-btn-primary:active {
+  background-color: var(--color-error-active);
+  border-color: var(--color-error-active);
+}
+
+.cz-btn-danger.cz-btn-text {
+  color: var(--color-error);
+}
+.cz-btn-danger.cz-btn-text:hover {
+  background-color: #ff4d4f12;
+  color: var(--color-error-hover);
+}
+.cz-btn-danger.cz-btn-text:active {
+  background-color: #ff4d4f24;
+  color: var(--color-error-active);
+}
+
+/* Legacy UI Variants Compatibility */
+.cz-btn-icon-only {
+  padding: 4px;
+  color: var(--text-muted);
+  border-radius: 6px;
+}
+.cz-btn-icon-only:hover {
+  color: var(--text-main);
+  background-color: var(--bg-hover);
+}
+
+.cz-btn-dark {
+  background-color: var(--text-main);
+  color: var(--bg-app);
+}
+.cz-btn-dark:hover {
+  opacity: 0.9;
+}
+
+/* Loading Spinner Animation */
+.cz-btn-loading-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 6px;
+}
+
+.cz-btn-spin {
+  animation: cz-spin 1s linear infinite;
+  width: 14px;
+  height: 14px;
+}
+
+.cz-btn-spin-circle {
+  opacity: 0.25;
+}
+
+.cz-btn-spin-path {
+  opacity: 0.75;
+}
+
+@keyframes cz-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.cz-btn-icon-wrapper {
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
-/* Variants */
-.btn-primary {
-  background-color: #2563eb;
-  color: #ffffff;
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  border: 1px solid transparent;
-}
-.btn-primary:hover {
-  background-color: #1d4ed8;
+.cz-btn-label {
+  display: inline-flex;
+  align-items: center;
+  color: inherit;
 }
 
-.btn-secondary {
-  background-color: var(--bg-hover);
-  color: var(--text-main);
-  border: 1px solid var(--border-color);
-}
-.btn-secondary:hover {
-  background-color: var(--bg-active);
-}
-
-.btn-ghost {
-  color: var(--text-muted);
-}
-.btn-ghost:hover {
-  color: var(--text-main);
-  background-color: var(--bg-hover);
-}
-
-.btn-icon {
-  padding: 4px;
-  color: #9ca3af;
-  border-radius: 6px;
-}
-.btn-icon:hover {
-  color: #4b5563;
-  background-color: rgba(229, 231, 235, 0.5);
-}
-
-.btn-dark {
-  background-color: var(--text-main);
-  color: var(--bg-app);
-  border: 1px solid transparent;
-}
-.btn-dark:hover {
-  opacity: 0.9;
-}
-
-.btn-danger {
-  color: #dc2626;
-  border-radius: 8px;
-}
-.btn-danger:hover {
-  background-color: #fef2f2;
-}
-
-/* Sizes */
-.btn-sm {
-  padding: 6px 12px;
-  font-size: 12px;
-  border-radius: 6px;
-  gap: 6px;
-}
-.btn-md {
-  padding: 8px 16px;
-  font-size: 13px;
-  border-radius: 8px;
-  gap: 8px;
-}
-.btn-lg {
-  padding: 10px 20px;
-  font-size: 14px;
-  border-radius: 8px;
-  gap: 8px;
-}
-.btn-none {
-  padding: 0;
-  border-radius: 0;
-}

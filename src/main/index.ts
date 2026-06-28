@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, ipcMain } from 'electron'
+import { app, BrowserWindow, shell, ipcMain, globalShortcut } from 'electron'
 import { join } from 'path'
 import { electronApp, is } from '@electron-toolkit/utils'
 import { registerWorkspaceIpc } from './ipc/workspace.handlers'
@@ -7,6 +7,8 @@ import { registerChatIpc } from './ipc/chat.handlers'
 import { registerSessionIpc } from './ipc/session.handlers'
 import { registerTerminalIpc } from './ipc/terminal.handlers'
 import { registerTaskIpc } from './ipc/task.handlers'
+import { registerThemeIpc } from './ipc/theme.handlers'
+import { registerSkillIpc } from './ipc/skill.handlers'
 import { TerminalService } from './services/TerminalService'
 
 let mainWindow: BrowserWindow | null = null
@@ -21,6 +23,7 @@ function createWindow(): void {
     
     // 隐藏系统原生标题栏及边框
     frame: false,
+    title: 'CodeZ',
     titleBarStyle: 'hidden',
     
     webPreferences: {
@@ -67,7 +70,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
-  electronApp.setAppUserModelId('com.myagent.desktop')
+  electronApp.setAppUserModelId('com.codez.desktop')
 
   registerWorkspaceIpc()
   registerProviderIpc()
@@ -75,6 +78,8 @@ app.whenReady().then(() => {
   registerSessionIpc()
   registerTerminalIpc()
   registerTaskIpc()
+  registerThemeIpc()
+  registerSkillIpc()
 
   // 监听来自前端渲染进程的自定义标题栏指令
   ipcMain.on('window-control', (_, action) => {
@@ -94,6 +99,20 @@ app.whenReady().then(() => {
       createWindow()
     }
   })
+
+  // 注册全局快捷键 CmdOrCtrl+Shift+Space
+  globalShortcut.register('CommandOrControl+Shift+Space', () => {
+    if (!mainWindow) return
+    if (mainWindow.isVisible()) {
+      if (mainWindow.isFocused()) {
+        mainWindow.hide()
+      } else {
+        mainWindow.focus()
+      }
+    } else {
+      mainWindow.show()
+    }
+  })
 })
 
 app.on('window-all-closed', () => {
@@ -105,4 +124,15 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   TerminalService.killAll()
+  globalShortcut.unregisterAll()
+})
+
+// 捕获未处理异常
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception in Main Process:', error)
+  // 可以选择将其记录到日志文件或给渲染进程发送消息
+})
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason)
 })

@@ -1,5 +1,13 @@
 /* MessageBody.css */
 
+.markdown-body {
+  text-align: left;
+}
+
+.msg-line-pl {
+  padding-left: 4px;
+}
+
 .msg-bold {
   font-weight: 600;
   color: #111827; /* text-gray-900 */
@@ -157,3 +165,43 @@
     color: #d4d4d8;
   }
 }
+
+.cmd-inline-link {
+  color: var(--primary-color, #1677ff);
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  text-decoration: none;
+  transition: opacity 0.2s;
+  background-color: var(--bg-hover, rgba(22, 119, 255, 0.08));
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border-light, rgba(22, 119, 255, 0.15));
+}
+
+.cmd-inline-link:hover {
+  opacity: 0.8;
+  background-color: var(--bg-hover, rgba(22, 119, 255, 0.12));
+}
+
+@media (prefers-color-scheme: dark) {
+  .cmd-inline-link {
+    color: #40a9ff;
+    background-color: rgba(22, 119, 255, 0.15);
+    border-color: rgba(22, 119, 255, 0.25);
+  }
+  .cmd-inline-link:hover {
+    background-color: rgba(22, 119, 255, 0.22);
+  }
+}
+
+.cmd-inline-link-icon {
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+  flex-shrink: 0;
+  display: inline-block;
+}
+

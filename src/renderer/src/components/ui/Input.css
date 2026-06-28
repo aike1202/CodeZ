@@ -1,40 +1,69 @@
-.input-field {
+.cz-input {
+  box-sizing: border-box;
   font-size: 14px;
   color: var(--text-main);
-  outline: 2px solid transparent;
-  outline-offset: 2px;
-  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-  transition-duration: 150ms;
+  outline: none;
+  transition: all 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
+  font-family: inherit;
 }
 
-.input-default {
+.cz-input-default {
   width: 100%;
   background-color: var(--bg-input);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 10px 16px;
 }
 
-.input-default:focus {
-  border-color: var(--border-active);
+.cz-input-default:hover {
+  border-color: var(--primary-hover);
 }
 
-.input-default:disabled {
+.cz-input-default:focus {
+  border-color: var(--primary-active);
+  box-shadow: 0 0 0 2px var(--primary-outline);
+}
+
+.cz-input-default:disabled {
   opacity: 0.5;
   background-color: var(--bg-hover);
+  cursor: not-allowed;
 }
 
-.input-borderless {
+.cz-input-borderless {
   width: 100%;
   background-color: transparent;
   border: none;
+  padding: 4px 0;
 }
 
-.input-error {
-  border-color: #ef4444;
+/* Sizes */
+.cz-input-size-small {
+  padding: 4px 11px;
+  font-size: 12px;
+  border-radius: 4px;
 }
 
-.input-error:focus {
-  border-color: #ef4444;
+.cz-input-size-middle {
+  padding: 6.5px 11px;
+  font-size: 14px;
+  border-radius: 6px;
+}
+
+.cz-input-size-large {
+  padding: 10px 11px;
+  font-size: 16px;
+  border-radius: 8px;
+}
+
+/* Error status */
+.cz-input-error.cz-input-default {
+  border-color: var(--color-error);
+}
+
+.cz-input-error.cz-input-default:hover {
+  border-color: var(--color-error-hover);
+}
+
+.cz-input-error.cz-input-default:focus {
+  border-color: var(--color-error-active);
+  box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.1);
 }

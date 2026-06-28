@@ -158,7 +158,7 @@ export function FilePreviewViewer({
       <div className="preview-toolbar">
         <span className="preview-language-label">{language === 'text' ? 'TXT' : language}</span>
         <Button
-          type="button"
+          htmlType="button"
           variant="ghost"
           size="none"
           onClick={handleCopy}

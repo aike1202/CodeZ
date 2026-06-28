@@ -1,4 +1,4 @@
-export const APP_NAME = 'MyAgent'
+export const APP_NAME = 'Codez'
 
 export const APP_SUBTITLE = 'Agent Coding Desktop'
 

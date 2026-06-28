@@ -38,3 +38,6 @@ export type {
   SessionData
 } from './session'
 
+export type {
+  SkillDefinition
+} from './skill'

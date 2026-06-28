@@ -1,5 +1,6 @@
 .timeline-container {
   font-family: var(--font-sans, sans-serif);
+  margin-bottom: 16px;
 }
 
 .timeline-header-btn {
@@ -229,6 +230,12 @@
 
 .spin-slow {
   animation: spin 2s linear infinite;
+}
+
+.exe-log-divider {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-light, #e5e7eb);
 }
 
 @keyframes spin {
@@ -749,4 +756,34 @@
   min-width: 0;
   position: relative;
 }
+
+.timeline-target-filename {
+  font-weight: 500;
+  color: var(--text-main, #374151);
+  transition: color 0.15s ease;
+}
+
+.timeline-target-link:hover .timeline-target-filename {
+  color: var(--primary, #3b82f6);
+}
+
+.timeline-target-dir {
+  color: var(--text-muted, #8c8c8c);
+  font-size: 11px;
+  margin-left: 6px;
+  font-weight: normal;
+}
+
+@media (prefers-color-scheme: dark) {
+  .timeline-target-filename {
+    color: #e4e4e7;
+  }
+  .timeline-target-link:hover .timeline-target-filename {
+    color: #40a9ff;
+  }
+  .timeline-target-dir {
+    color: #71717a;
+  }
+}
+
 
