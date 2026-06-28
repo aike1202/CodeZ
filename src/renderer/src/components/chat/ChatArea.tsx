@@ -9,6 +9,7 @@ import PermissionApprovalWidget from './PermissionApprovalWidget'
 import TerminalPanel from './TerminalPanel'
 import Flex from '../ui/Flex'
 import Stack from '../ui/Stack'
+import { ChatAreaLayout } from './ChatAreaLayout'
 import { parseArgs } from '../../utils/parseArgs'
 import { parseSlashCommand } from '../../commands/SlashCommandParser'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
@@ -78,8 +79,13 @@ export default function ChatArea({
   const setDiffEntries = useChatStore((s) => s.setDiffEntries)
 
   const handleResolvePermission = React.useCallback(async (msgId: string, requestId: string, approved: boolean) => {
-    await window.api.chat.respondToApproval(requestId, approved)
-    resolvePermissionRequest(msgId, requestId, approved)
+    try {
+      await window.api.chat.respondToApproval(requestId, approved)
+    } catch (error) {
+      console.warn('Failed to send approval response to backend (handler may be expired):', error)
+    } finally {
+      resolvePermissionRequest(msgId, requestId, approved)
+    }
   }, [resolvePermissionRequest])
 
   const handleSendMessage = React.useCallback(
@@ -261,298 +267,289 @@ export default function ChatArea({
   const hasMessages = messages.length > 0
 
   return (
-    <Stack className={`app-chat-column ${panelOpen ? 'app-chat-column--border' : ''}`}>
-      <Stack ref={containerRef} align="center" className="app-chat-scroll-area">
-        {(() => {
-          const lastStreamingMsgId = messages.reduceRight<string | null>((acc, m) => {
-            if (acc) return acc
-            if (m.role === 'agent' && m.streaming) return m.id
-            return null
-          }, null)
+    <ChatAreaLayout
+      containerRef={containerRef}
+      panelOpen={panelOpen}
+      messageArea={
+        hasMessages ? (
+          <Stack gap={6} className="app-message-list">
+            {messages.map((msg) => {
+              const lastStreamingMsgId = messages.reduceRight<string | null>((acc, m) => {
+                if (acc) return acc
+                if (m.role === 'agent' && m.streaming) return m.id
+                return null
+              }, null)
 
-          return hasMessages ? (
-            <Stack gap={6} className="app-message-list">
-              {messages.map((msg) =>
-                msg.role === 'user' ? (
-                  <Flex key={msg.id} justify="end" className="w-full">
-                    <div className="user-message-bubble">
-                      <MessageBody content={msg.content} onFileClick={handleFileClick} />
-                    </div>
+              return msg.role === 'user' ? (
+                <Flex key={msg.id} justify="end" className="w-full">
+                  <div className="user-message-bubble">
+                    <MessageBody content={msg.content} onFileClick={handleFileClick} />
+                  </div>
+                </Flex>
+              ) : (
+                <Flex key={msg.id} justify="start" className="w-full max-w-3xl">
+                  <Flex align="center" justify="center" className="agent-avatar">
+                    AI
                   </Flex>
-                ) : (
-                  <Flex key={msg.id} justify="start" className="w-full max-w-3xl">
-                    <Flex align="center" justify="center" className="agent-avatar">
-                      AI
-                    </Flex>
-                    <div className="agent-message-content">
-                      {(() => {
-                        if (!msg.executionTimeline || msg.executionTimeline.length === 0) {
-                          return (
-                            <>
-                              <ExecutionLog timeline={[]} reasoning={msg.reasoningContent} agentStates={msg.agentStates} onFileClick={handleFileClick} onDiffClick={handleDiffClick} streaming={msg.streaming && msg.id === lastStreamingMsgId} />
-                              <MessageBody content={msg.content} streaming={msg.streaming && msg.id === lastStreamingMsgId} reasoning={msg.reasoningContent} onFileClick={handleFileClick} />
-                            </>
-                          )
-                        }
-
-                        const executionTimeline = msg.executionTimeline || []
-
-                        // Find the last non-text node (i.e. last tool call)
-                        let lastNonTextIdx = -1
-                        for (let i = executionTimeline.length - 1; i >= 0; i--) {
-                          if (executionTimeline[i].type !== 'text') {
-                            lastNonTextIdx = i
-                            break
-                          }
-                        }
-
-                        const isStreaming = msg.streaming && msg.id === lastStreamingMsgId;
-                        let timelineForLog: any[] = [];
-                        let finalContent = '';
-
-                        if (isStreaming) {
-                          timelineForLog = executionTimeline;
-                          finalContent = '';
-                        } else {
-                          timelineForLog = lastNonTextIdx === -1 ? [] : executionTimeline.slice(0, lastNonTextIdx + 1);
-                           timelineForLog = timelineForLog.filter((item: any) => item.type !== 'text');
-
-                           const finalTextItems = lastNonTextIdx === -1 ? executionTimeline : executionTimeline.slice(lastNonTextIdx + 1);
-                           finalContent = finalTextItems
-                             .filter((item: any) => item.type === 'text')
-                             .map((item: any) => (item as any).content)
-                             .join('')
-                             .trimStart();
-                         }
-
-                        const hasToolsOrAgentStates = timelineForLog.length > 0 || (msg.agentStates && msg.agentStates.length > 0) || !!msg.reasoningContent
-
+                  <div className="agent-message-content">
+                    {(() => {
+                      if (!msg.executionTimeline || msg.executionTimeline.length === 0) {
                         return (
                           <>
-                            {hasToolsOrAgentStates && (
-                              <div className="app-spacer">
-                                <ExecutionLog
-                                  timeline={timelineForLog}
-                                  reasoning={msg.reasoningContent}
-                                  agentStates={msg.agentStates}
-                                  onFileClick={handleFileClick}
-                                  onDiffClick={handleDiffClick}
-                                  streaming={isStreaming && !finalContent}
-                                />
-                              </div>
-                            )}
-                            {finalContent && (
-                              <div className={hasToolsOrAgentStates ? "mt-4" : ""}>
-                                <MessageBody
-                                  content={finalContent}
-                                  streaming={false}
-                                  onFileClick={handleFileClick}
-                                />
-                              </div>
-                            )}
+                            <ExecutionLog timeline={[]} reasoning={msg.reasoningContent} agentStates={msg.agentStates} onFileClick={handleFileClick} onDiffClick={handleDiffClick} streaming={msg.streaming && msg.id === lastStreamingMsgId} />
+                            <MessageBody content={msg.content} streaming={msg.streaming && msg.id === lastStreamingMsgId} reasoning={msg.reasoningContent} onFileClick={handleFileClick} />
                           </>
                         )
-                      })()}
-                      {(() => {
-                        if (!msg.txId) return null;
+                      }
 
-                        const tools = msg.toolCalls || (msg.executionTimeline || [])
-                          .filter((t: any) => t.type === 'tool')
-                          .map((t: any) => (t as any).toolCall)
-                          .filter(Boolean);
-
-                        const editTools = tools.filter((tc: any) =>
-                          tc.name === 'write_to_file' ||
-                          tc.name === 'replace_file_content' ||
-                          tc.name === 'multi_replace_file_content' ||
-                          tc.name === 'apply_patch'
-                        );
-
-                        if (editTools.length === 0) return null;
-
-                        let diffByPath: Record<string, string> = {};
-                        try {
-                          diffByPath = (msg.diffEntries || []).reduce((acc: Record<string, string>, item: any) => {
-                            if (item?.path && item?.diff) acc[item.path] = item.diff;
-                            return acc;
-                          }, {});
-                        } catch {
-                          diffByPath = {};
+                      const executionTimeline = msg.executionTimeline || []
+                      let lastNonTextIdx = -1
+                      for (let i = executionTimeline.length - 1; i >= 0; i--) {
+                        if (executionTimeline[i].type !== 'text') {
+                          lastNonTextIdx = i
+                          break
                         }
+                      }
 
-                        const edits = editTools.map((tc: any) => {
-                          let filePath = '';
-                          let additions = '+0';
-                          let deletions = '-0';
-                          try {
-                            const argsObj = parseArgs(tc.args);
-                            filePath = argsObj.targetFile || argsObj.TargetFile || argsObj.filePath || argsObj.path || '';
+                      const isStreaming = msg.streaming && msg.id === lastStreamingMsgId;
+                      let timelineForLog: any[] = [];
+                      let finalContent = '';
 
-                            const matchingDiff = Object.entries(diffByPath).find(([diffPath]) => {
-                              if (!filePath) return false;
-                              const normalize = (p: string) => p.replace(/\\/g, '/').toLowerCase();
-                              const fileNorm = normalize(filePath);
-                              const diffNorm = normalize(diffPath);
-                              return fileNorm === diffNorm || diffNorm.endsWith(fileNorm) || fileNorm.endsWith(diffNorm);
-                            })?.[1];
+                      if (isStreaming) {
+                        timelineForLog = executionTimeline;
+                        finalContent = '';
+                      } else {
+                        timelineForLog = lastNonTextIdx === -1 ? [] : executionTimeline.slice(0, lastNonTextIdx + 1);
+                        timelineForLog = timelineForLog.filter((item: any) => item.type !== 'text');
 
-                            if (matchingDiff) {
-                              const added = matchingDiff.split('\n').filter((line) => line.startsWith('+') && !line.startsWith('+++')).length;
-                              const removed = matchingDiff.split('\n').filter((line) => line.startsWith('-') && !line.startsWith('---')).length;
-                              additions = `+${added}`;
-                              deletions = `-${removed}`;
-                            } else if (tc.name === 'write_to_file') {
-                              const codeContent = argsObj.codeContent || argsObj.code_content || '';
-                              additions = `+${codeContent.split('\n').length}`;
-                            } else if (tc.name === 'replace_file_content') {
-                              additions = `+${(argsObj.replacementContent || '').split('\n').length}`;
-                              deletions = `-${(argsObj.targetContent || '').split('\n').length}`;
-                            } else if (tc.name === 'apply_patch') {
-                              if (Array.isArray(argsObj.edits)) {
-                                let totalAdds = 0;
-                                let totalDels = 0;
-                                argsObj.edits.forEach((edit: any) => {
-                                  totalAdds += String(edit.replacementContent || '').split('\n').length;
-                                  totalDels += String(edit.targetContent || '').split('\n').length;
-                                });
-                                additions = `+${totalAdds}`;
-                                deletions = `-${totalDels}`;
-                              } else if (typeof argsObj.newContent === 'string') {
-                                additions = `+${argsObj.newContent.split('\n').length}`;
-                              }
-                            } else if (tc.name === 'multi_replace_file_content') {
-                              const chunks = Array.isArray(argsObj.ReplacementChunks) ? argsObj.ReplacementChunks : (Array.isArray(argsObj.replacementChunks) ? argsObj.replacementChunks : []);
+                        const finalTextItems = lastNonTextIdx === -1 ? executionTimeline : executionTimeline.slice(lastNonTextIdx + 1);
+                        finalContent = finalTextItems
+                          .filter((item: any) => item.type === 'text')
+                          .map((item: any) => (item as any).content)
+                          .join('')
+                          .trimStart();
+                      }
+
+                      const hasToolsOrAgentStates = timelineForLog.length > 0 || (msg.agentStates && msg.agentStates.length > 0) || !!msg.reasoningContent
+
+                      return (
+                        <>
+                          {hasToolsOrAgentStates && (
+                            <div className="app-spacer">
+                              <ExecutionLog
+                                timeline={timelineForLog}
+                                reasoning={msg.reasoningContent}
+                                agentStates={msg.agentStates}
+                                onFileClick={handleFileClick}
+                                onDiffClick={handleDiffClick}
+                                streaming={isStreaming && !finalContent}
+                              />
+                            </div>
+                          )}
+                          {finalContent && (
+                            <div className={hasToolsOrAgentStates ? "mt-4" : ""}>
+                              <MessageBody
+                                content={finalContent}
+                                streaming={false}
+                                onFileClick={handleFileClick}
+                              />
+                            </div>
+                          )}
+                        </>
+                      )
+                    })()}
+                    {(() => {
+                      if (!msg.txId) return null;
+
+                      const tools = msg.toolCalls || (msg.executionTimeline || [])
+                        .filter((t: any) => t.type === 'tool')
+                        .map((t: any) => (t as any).toolCall)
+                        .filter(Boolean);
+
+                      const editTools = tools.filter((tc: any) =>
+                        tc.name === 'write_to_file' ||
+                        tc.name === 'replace_file_content' ||
+                        tc.name === 'multi_replace_file_content' ||
+                        tc.name === 'apply_patch'
+                      );
+
+                      if (editTools.length === 0) return null;
+
+                      let diffByPath: Record<string, string> = {};
+                      try {
+                        diffByPath = (msg.diffEntries || []).reduce((acc: Record<string, string>, item: any) => {
+                          if (item?.path && item?.diff) acc[item.path] = item.diff;
+                          return acc;
+                        }, {});
+                      } catch {
+                        diffByPath = {};
+                      }
+
+                      const edits = editTools.map((tc: any) => {
+                        let filePath = '';
+                        let additions = '+0';
+                        let deletions = '-0';
+                        try {
+                          const argsObj = parseArgs(tc.args);
+                          filePath = argsObj.targetFile || argsObj.TargetFile || argsObj.filePath || argsObj.path || '';
+
+                          const matchingDiff = Object.entries(diffByPath).find(([diffPath]) => {
+                            if (!filePath) return false;
+                            const normalize = (p: string) => p.replace(/\\/g, '/').toLowerCase();
+                            const fileNorm = normalize(filePath);
+                            const diffNorm = normalize(diffPath);
+                            return fileNorm === diffNorm || diffNorm.endsWith(fileNorm) || fileNorm.endsWith(diffNorm);
+                          })?.[1];
+
+                          if (matchingDiff) {
+                            const added = matchingDiff.split('\n').filter((line) => line.startsWith('+') && !line.startsWith('+++')).length;
+                            const removed = matchingDiff.split('\n').filter((line) => line.startsWith('-') && !line.startsWith('---')).length;
+                            additions = `+${added}`;
+                            deletions = `-${removed}`;
+                          } else if (tc.name === 'write_to_file') {
+                            const codeContent = argsObj.codeContent || argsObj.code_content || '';
+                            additions = `+${codeContent.split('\n').length}`;
+                          } else if (tc.name === 'replace_file_content') {
+                            additions = `+${(argsObj.replacementContent || '').split('\n').length}`;
+                            deletions = `-${(argsObj.targetContent || '').split('\n').length}`;
+                          } else if (tc.name === 'apply_patch') {
+                            if (Array.isArray(argsObj.edits)) {
                               let totalAdds = 0;
                               let totalDels = 0;
-                              chunks.forEach((chunk: any) => {
-                                const add = chunk.ReplacementContent || chunk.replacementContent || '';
-                                const del = chunk.TargetContent || chunk.targetContent || '';
-                                totalAdds += add.split('\n').length;
-                                totalDels += del.split('\n').length;
+                              argsObj.edits.forEach((edit: any) => {
+                                totalAdds += String(edit.replacementContent || '').split('\n').length;
+                                totalDels += String(edit.targetContent || '').split('\n').length;
                               });
                               additions = `+${totalAdds}`;
                               deletions = `-${totalDels}`;
+                            } else if (typeof argsObj.newContent === 'string') {
+                              additions = `+${argsObj.newContent.split('\n').length}`;
                             }
-                          } catch (err) {
-                            console.error('Failed to parse edit args in ChatArea:', err);
+                          } else if (tc.name === 'multi_replace_file_content') {
+                            const chunks = Array.isArray(argsObj.ReplacementChunks) ? argsObj.ReplacementChunks : (Array.isArray(argsObj.replacementChunks) ? argsObj.replacementChunks : []);
+                            let totalAdds = 0;
+                            let totalDels = 0;
+                            chunks.forEach((chunk: any) => {
+                              const add = chunk.ReplacementContent || chunk.replacementContent || '';
+                              const del = chunk.TargetContent || chunk.targetContent || '';
+                              totalAdds += add.split('\n').length;
+                              totalDels += del.split('\n').length;
+                            });
+                            additions = `+${totalAdds}`;
+                            deletions = `-${totalDels}`;
                           }
-                          return { filePath, additions, deletions };
-                        }).filter((e: any) => e.filePath);
+                        } catch (err) {
+                          console.error('Failed to parse edit args in ChatArea:', err);
+                        }
+                        return { filePath, additions, deletions };
+                      }).filter((e: any) => e.filePath);
 
-                        if (edits.length === 0) return null;
+                      if (edits.length === 0) return null;
 
-                        return (
-                          <EditApprovalWidget
-                            msgId={msg.id}
-                            txId={msg.txId}
-                            edits={edits}
-                            editStatuses={msg.editStatuses}
-                            onDiffClick={(filePath) => {
-                              const normalize = (p: string) => p.replace(/\\/g, '/').toLowerCase();
-                              const targetNorm = normalize(filePath);
-                              const tc = tools.find((t: any) => {
-                                if (t.name !== 'write_to_file' && t.name !== 'replace_file_content' && t.name !== 'multi_replace_file_content' && t.name !== 'apply_patch') return false;
-                                try {
-                                  const argsObj = parseArgs(t.args);
-                                  const fileArg = argsObj.targetFile || argsObj.TargetFile || argsObj.filePath || argsObj.path;
-                                  if (typeof fileArg === 'string') {
-                                    const fileNorm = normalize(fileArg);
-                                    return fileNorm === targetNorm || targetNorm.endsWith(fileNorm) || fileNorm.endsWith(targetNorm);
-                                  }
-                                } catch {
-                                  // ignore
+                      return (
+                        <EditApprovalWidget
+                          msgId={msg.id}
+                          txId={msg.txId}
+                          edits={edits}
+                          editStatuses={msg.editStatuses}
+                          onDiffClick={(filePath) => {
+                            const normalize = (p: string) => p.replace(/\\/g, '/').toLowerCase();
+                            const targetNorm = normalize(filePath);
+                            const tc = tools.find((t: any) => {
+                              if (t.name !== 'write_to_file' && t.name !== 'replace_file_content' && t.name !== 'multi_replace_file_content' && t.name !== 'apply_patch') return false;
+                              try {
+                                const argsObj = parseArgs(t.args);
+                                const fileArg = argsObj.targetFile || argsObj.TargetFile || argsObj.filePath || argsObj.path;
+                                if (typeof fileArg === 'string') {
+                                  const fileNorm = normalize(fileArg);
+                                  return fileNorm === targetNorm || targetNorm.endsWith(fileNorm) || fileNorm.endsWith(targetNorm);
                                 }
-                                return false;
-                              });
+                              } catch {
+                              }
+                              return false;
+                            });
 
-                              if (tc) {
-                                try {
-                                  const argsObj = parseArgs(tc.args);
-                                  if (tc.name === 'write_to_file') {
-                                    handleDiffClick(filePath, {
-                                      type: 'write',
-                                      codeContent: argsObj.codeContent || argsObj.code_content || ''
-                                    });
-                                  } else if (tc.name === 'replace_file_content') {
-                                    handleDiffClick(filePath, {
-                                      type: 'replace',
-                                      targetContent: argsObj.targetContent || '',
-                                      replacementContent: argsObj.replacementContent || ''
-                                    });
-                                  } else if (tc.name === 'apply_patch') {
-                                    if (Array.isArray(argsObj.edits) && argsObj.edits.length > 0) {
-                                      const targetContent = argsObj.edits.map((edit: any, i: number) => `--- Edit ${i + 1} ---\n${edit.targetContent || ''}`).join('\n\n');
-                                      const replacementContent = argsObj.edits.map((edit: any, i: number) => `--- Edit ${i + 1} ---\n${edit.replacementContent || ''}`).join('\n\n');
-                                      handleDiffClick(filePath, {
-                                        type: 'replace',
-                                        targetContent,
-                                        replacementContent
-                                      });
-                                    } else {
-                                      handleDiffClick(filePath, {
-                                        type: 'write',
-                                        codeContent: argsObj.newContent || ''
-                                      });
-                                    }
-                                  } else if (tc.name === 'multi_replace_file_content') {
-                                    const chunks = Array.isArray(argsObj.ReplacementChunks) ? argsObj.ReplacementChunks : (Array.isArray(argsObj.replacementChunks) ? argsObj.replacementChunks : []);
-                                    const targetContent = chunks.map((c: any, i: number) => `--- Chunk ${i + 1} ---\n${c.TargetContent || c.targetContent || ''}`).join('\n\n');
-                                    const replacementContent = chunks.map((c: any, i: number) => `--- Chunk ${i + 1} ---\n${c.ReplacementContent || c.replacementContent || ''}`).join('\n\n');
+                            if (tc) {
+                              try {
+                                const argsObj = parseArgs(tc.args);
+                                if (tc.name === 'write_to_file') {
+                                  handleDiffClick(filePath, {
+                                    type: 'write',
+                                    codeContent: argsObj.codeContent || argsObj.code_content || ''
+                                  });
+                                } else if (tc.name === 'replace_file_content') {
+                                  handleDiffClick(filePath, {
+                                    type: 'replace',
+                                    targetContent: argsObj.targetContent || '',
+                                    replacementContent: argsObj.replacementContent || ''
+                                  });
+                                } else if (tc.name === 'apply_patch') {
+                                  if (Array.isArray(argsObj.edits) && argsObj.edits.length > 0) {
+                                    const targetContent = argsObj.edits.map((edit: any, i: number) => `--- Edit ${i + 1} ---\n${edit.targetContent || ''}`).join('\n\n');
+                                    const replacementContent = argsObj.edits.map((edit: any, i: number) => `--- Edit ${i + 1} ---\n${edit.replacementContent || ''}`).join('\n\n');
                                     handleDiffClick(filePath, {
                                       type: 'replace',
                                       targetContent,
                                       replacementContent
                                     });
+                                  } else {
+                                    handleDiffClick(filePath, {
+                                      type: 'write',
+                                      codeContent: argsObj.newContent || ''
+                                    });
                                   }
-                                } catch (err) {
-                                  console.error('Failed to parse diff args from toolCall:', err);
-                                  handleFileClick(filePath);
+                                } else if (tc.name === 'multi_replace_file_content') {
+                                  const chunks = Array.isArray(argsObj.ReplacementChunks) ? argsObj.ReplacementChunks : (Array.isArray(argsObj.replacementChunks) ? argsObj.replacementChunks : []);
+                                  const targetContent = chunks.map((c: any, i: number) => `--- Chunk ${i + 1} ---\n${c.TargetContent || c.targetContent || ''}`).join('\n\n');
+                                  const replacementContent = chunks.map((c: any, i: number) => `--- Chunk ${i + 1} ---\n${c.ReplacementContent || c.replacementContent || ''}`).join('\n\n');
+                                  handleDiffClick(filePath, {
+                                    type: 'replace',
+                                    targetContent,
+                                    replacementContent
+                                  });
                                 }
-                              } else {
+                              } catch (err) {
+                                console.error('Failed to parse diff args from toolCall:', err);
                                 handleFileClick(filePath);
                               }
-                            }}
-                          />
-                        );
-                      })()}
-                    </div>
-                  </Flex>
-                )
-              )}
-            </Stack>
-          ) : (
-            <HomePage onOpenRecentProject={handleOpenRecentProject} />
-          )
-        })()}
-      </Stack>
-
-      {/* 底部输入及浮动面板区域 */}
-      <div className="w-full relative shrink-0 z-50">
-        
-        {/* 输入框上方的扩展/浮动容器：使用相对定位的子元素排布，让内容自然向上顶，未来可以无缝堆叠更多内容 */}
-        <div className="absolute bottom-full left-0 right-0 flex flex-col items-center pointer-events-none pb-2">
-          
-          {/* 这里可以放其他未来的挂载点，例如：停止生成的按钮、提示条等... */}
-
-          {/* 权限审批弹窗：天然宽度与 PromptArea 内部限制相同 */}
-          {messages.map((msg) => {
-            if (!msg.permissionRequests || msg.permissionRequests.filter(r => r.status === 'pending').length === 0) return null;
-            return (
-              <div key={msg.id} className="pointer-events-auto w-full px-4 mb-2" style={{ maxWidth: '48rem' }}>
-                <div className="dropdown-shadow rounded-xl">
-                  <PermissionApprovalWidget
-                    msgId={msg.id}
-                    requests={msg.permissionRequests}
-                    onResolve={handleResolvePermission}
-                  />
+                            } else {
+                              handleFileClick(filePath);
+                            }
+                          }}
+                        />
+                      );
+                    })()}
+                  </div>
+                </Flex>
+              )
+            })}
+          </Stack>
+        ) : (
+          <HomePage onOpenRecentProject={handleOpenRecentProject} />
+        )
+      }
+      auditArea={
+        messages.some(m => m.permissionRequests?.some((r: any) => r.status === 'pending')) ? (
+          <div style={{ width: '100%', flexShrink: 0, zIndex: 60, marginBottom: '-16px' }}>
+            {messages.map((msg) => {
+              if (!msg.permissionRequests || msg.permissionRequests.filter((r: any) => r.status === 'pending').length === 0) return null;
+              return (
+                <div key={msg.id} style={{ width: '100%', maxWidth: '48rem', margin: '0 auto', padding: '0 16px', marginBottom: '8px', pointerEvents: 'auto' }}>
+                  <div className="dropdown-shadow rounded-xl">
+                    <PermissionApprovalWidget
+                      msgId={msg.id}
+                      requests={msg.permissionRequests}
+                      onResolve={handleResolvePermission}
+                    />
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-
-        </div>
-
-        <div className="relative w-full z-10">
+              );
+            })}
+          </div>
+        ) : undefined
+      }
+      promptArea={
+        <div style={{ width: '100%', flexShrink: 0, zIndex: 50 }}>
           <PromptArea
             onSend={handleSendMessage}
             placeholder={activeSessionId ? "随心输入..." : "开始新的对话..."}
@@ -560,21 +557,21 @@ export default function ChatArea({
             workspace={workspace}
           />
         </div>
-      </div>
-
-      {/* 终端面板 */}
-      {terminalOpen && workspace && (
-        <TerminalPanel
-          workspaceId={workspace.id}
-          rootPath={workspace.rootPath}
-          height={terminalHeight}
-          setHeight={setTerminalHeight}
-          onClose={() => setTerminalOpen(false)}
-          sidebarWidth={sidebarWidth}
-          previewPanelWidth={previewPanelWidth}
-        />
-      )}
-    </Stack>
+      }
+      terminalPanel={
+        terminalOpen && workspace ? (
+          <TerminalPanel
+            workspaceId={workspace.id}
+            rootPath={workspace.rootPath}
+            height={terminalHeight}
+            setHeight={setTerminalHeight}
+            onClose={() => setTerminalOpen(false)}
+            sidebarWidth={sidebarWidth}
+            previewPanelWidth={previewPanelWidth}
+          />
+        ) : undefined
+      }
+    />
   )
 }
 

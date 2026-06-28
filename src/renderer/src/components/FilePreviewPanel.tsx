@@ -27,8 +27,6 @@ export interface FilePreviewPanelProps {
     totalLines?: number
   } | null
   messages?: any[]
-  previewPanelWidth?: number
-  onMouseDownResize?: (e: React.MouseEvent) => void
   onClose?: () => void
   onFileClick?: (path: string) => void
 }
@@ -198,8 +196,6 @@ export default function FilePreviewPanel({
   previewLoading = false,
   previewContent = null,
   messages = [],
-  previewPanelWidth = 480,
-  onMouseDownResize = () => {},
   onClose = () => {},
   onFileClick = () => {}
 }: FilePreviewPanelProps): React.ReactElement | null {
@@ -277,12 +273,8 @@ export default function FilePreviewPanel({
   return (
     <>
       <div
-        className="preview-resize-bar"
-        onMouseDown={onMouseDownResize}
-      />
-      <div
         className="preview-panel-container"
-        style={{ width: previewPanelWidth }}
+        style={{ width: '100%' }}
       >
         <Flex align="center" justify="between" className="preview-panel-header">
           <Flex align="center" gap={2} className="preview-panel-title-area">

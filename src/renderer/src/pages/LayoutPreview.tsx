@@ -111,10 +111,13 @@ const LayoutPreview: React.FC = () => {
       onRightPanelWidthChange={setRightPanelWidth}
       sidebarWidth={sidebarWidth}
       onSidebarWidthChange={setSidebarWidth}
-      
-      chatList={ChatListContent}
-      permissionArea={PermissionContent}
-      chatInput={ChatInputContent}
+      chatArea={
+        <>
+          {ChatListContent}
+          {PermissionContent}
+          {ChatInputContent}
+        </>
+      }
     />
   );
 };

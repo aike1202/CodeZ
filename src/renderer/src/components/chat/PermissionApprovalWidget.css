@@ -6,8 +6,7 @@
   /* 悬浮面板的一些调整 */
   padding: 12px 16px;
   border-radius: 12px;
-  /* 关键修复：确保不受外层 overflow 等影响时的相对高度拉抬 */
-  transform: translateY(-8px);
+  /* 关键修复：取消相对高度拉抬，通过外层 margin 控制 */
 }
 
 [data-theme='dark'] .permission-approval-float-card {

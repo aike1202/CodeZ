@@ -1,21 +1,19 @@
 import React, { ReactNode, useState, useCallback } from 'react';
 import './AppLayout.css';
 
-interface AppLayoutProps {
+export interface AppLayoutProps {
   /** 左侧边栏组件 */
   sidebar?: ReactNode;
   /** 顶部标题栏/功能栏组件 */
   topbar?: ReactNode;
   
-  /** 中间核心工作区：聊天列表区 */
-  chatList?: ReactNode;
-  /** 中间核心工作区：权限审核悬浮/插入区 */
-  permissionArea?: ReactNode;
-  /** 中间核心工作区：底部输入区 */
-  chatInput?: ReactNode;
+  /** 中间核心工作区（如 ChatArea 等） */
+  chatArea?: ReactNode;
 
-  /** 如果仍然想用统一的 children 也可以保留，或者不用 */
+  /** 中间核心工作区的内容 (备用/兼容) */
   children?: ReactNode;
+
+
 
   /** 右侧辅助面板组件 (可选) */
   rightPanel?: ReactNode;
@@ -39,9 +37,7 @@ interface AppLayoutProps {
 export const AppLayout: React.FC<AppLayoutProps> = ({
   sidebar,
   topbar,
-  chatList,
-  permissionArea,
-  chatInput,
+  chatArea,
   children,
   rightPanel,
   className = '',
@@ -160,9 +156,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         <div className="app-layout-content-wrapper">
           {/* 中间主要工作区 */}
           <div className="app-layout-workspace">
-            {chatList}
-            {permissionArea}
-            {chatInput}
+            {chatArea}
             {children}
           </div>
 

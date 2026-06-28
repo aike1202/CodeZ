@@ -30,9 +30,6 @@ interface SidebarProps {
   onSelectProject: (project: SidebarProject) => void
   onOpenProject: () => void
   activeProjectId?: string
-  sidebarWidth: number
-  setSidebarWidth: (width: number) => void
-  maxSidebarWidth?: number
   onShowInExplorer?: (projectId: string) => void
   onRenameProject?: (projectId: string, newName: string) => void
   onRemoveProject?: (projectId: string) => void
@@ -49,9 +46,6 @@ export default function Sidebar({
   onSelectProject,
   onOpenProject,
   activeProjectId,
-  sidebarWidth,
-  setSidebarWidth,
-  maxSidebarWidth = 600,
   onShowInExplorer,
   onRenameProject,
   onRemoveProject,
@@ -105,37 +99,7 @@ export default function Sidebar({
   }
 
   return (
-    <aside 
-      className="sidebar-container"
-      style={{ width: sidebarWidth }}
-    >
-      {/* 拖拽分隔线 */}
-      <div 
-        className="sidebar-resizer"
-        style={{ transform: 'translateX(50%)' }}
-        onMouseDown={(e) => {
-          e.preventDefault();
-          const startX = e.clientX;
-          const startWidth = sidebarWidth;
-          
-          const onMouseMove = (moveEvent: MouseEvent) => {
-            const deltaX = moveEvent.clientX - startX;
-            const newWidth = Math.max(200, Math.min(maxSidebarWidth, startWidth + deltaX));
-            setSidebarWidth(newWidth);
-          };
-          
-          const onMouseUp = () => {
-            document.removeEventListener('mousemove', onMouseMove);
-            document.removeEventListener('mouseup', onMouseUp);
-            document.body.style.cursor = '';
-          };
-          
-          document.addEventListener('mousemove', onMouseMove);
-          document.addEventListener('mouseup', onMouseUp);
-          document.body.style.cursor = 'col-resize';
-        }}
-      />
-
+    <aside className="sidebar-container" style={{ width: '100%' }}>
       <Stack className="flex-1 overflow-hidden">
         {/* 全局操作 */}
         <Stack className="sidebar-action-list" gap="4px">
