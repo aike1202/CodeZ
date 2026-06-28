@@ -1,0 +1,145 @@
+.preview-placeholder-sidebar {
+  width: 260px;
+  background-color: #f8f9fa;
+  border-right: 1px solid #e0e0e0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.preview-sidebar-top {
+  padding: 16px;
+  border-bottom: 1px solid #e0e0e0;
+  color: #333;
+  font-weight: 500;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.preview-sidebar-menu {
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.preview-sidebar-middle {
+  flex: 1;
+  padding: 16px;
+  color: #666;
+  font-size: 14px;
+}
+
+.preview-sidebar-item {
+  padding: 8px;
+  margin-bottom: 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.preview-sidebar-item:hover {
+  background-color: #e9ecef;
+}
+
+.preview-placeholder-topbar {
+  height: 48px;
+  background-color: #ffffff;
+  border-bottom: 1px solid #e0e0e0;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  justify-content: space-between;
+}
+
+.preview-topbar-center {
+  background-color: #f1f3f5;
+  border-radius: 6px;
+  width: 300px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #868e96;
+  font-size: 13px;
+}
+
+.preview-placeholder-workspace {
+  flex: 1;
+  background-color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+}
+
+.preview-chat-list {
+  flex: 1;
+  border: 4px dashed #69db7c;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #2b8a3e;
+  font-weight: bold;
+  font-size: 20px;
+  margin-bottom: 8px; /* 修改为 8px，为下方的 Permission 区留出空隙 */
+}
+
+/* 新增：权限审核面板的外观 */
+.preview-permission-panel {
+  padding: 16px;
+  border: 2px solid #3b82f6;
+  border-radius: 8px;
+  background-color: #eff6ff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px; /* 距离底部的输入框 8px */
+  color: #1e3a8a;
+}
+.preview-permission-actions button {
+  margin-left: 8px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+}
+.preview-btn-accept {
+  background-color: #3b82f6;
+  color: white;
+}
+.preview-btn-reject {
+  background-color: #e5e7eb;
+  color: #4b5563;
+}
+
+.preview-chat-input {
+  height: 80px;
+  border: 2px solid #ff8787;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #c92a2a;
+  font-weight: bold;
+}
+
+.preview-placeholder-rightpanel {
+  height: 100%;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.preview-rightpanel-content {
+  flex: 1;
+  border: 4px dashed #ffd43b;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #e67700;
+  font-weight: bold;
+  font-size: 18px;
+}
