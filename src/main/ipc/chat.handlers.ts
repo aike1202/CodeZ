@@ -4,6 +4,7 @@ import * as path from 'path'
 import * as os from 'os'
 import { IPC_CHANNELS } from '../../shared/ipc/channels'
 import { AgentRunner } from '../agent/AgentRunner'
+import { VerificationStrategyService } from '../services/VerificationStrategyService'
 import { getProviderService } from './provider.handlers'
 import { getWorkspaceService } from './workspace.handlers'
 import type { ChatMessage } from '../../shared/types/provider'
@@ -69,24 +70,10 @@ You have access to various tools. Choose the most efficient tool for each task b
 
       // 动态生成验证策略 (属于 Developer Instructions)
       try {
-        const pkgJsonPath = path.join(currentWorkspace, 'package.json')
-        if (fs.existsSync(pkgJsonPath)) {
-          const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'))
-          if (pkg.scripts) {
-            const recommendedScripts: string[] = []
-            if (pkg.scripts.test) recommendedScripts.push('npm run test')
-            if (pkg.scripts.typecheck) recommendedScripts.push('npm run typecheck')
-            if (pkg.scripts.lint) recommendedScripts.push('npm run lint')
-            if (pkg.scripts.build) recommendedScripts.push('npm run build')
-
-            if (recommendedScripts.length > 0) {
-              systemPrompt += '\n\n  【VERIFICATION STRATEGY】\n'
-              systemPrompt += '  To verify your code changes, you MUST run the appropriate verification scripts using the "run_command" tool.\n'
-              systemPrompt += '  Available verification scripts in this project:\n'
-              recommendedScripts.forEach(s => systemPrompt += `  - ${s}\n`)
-              systemPrompt += '  Run these commands after making edits to ensure you haven\'t broken the code. If the command fails, use the error output to fix the code, then run it again until it passes.'
-            }
-          }
+        const scripts = await VerificationStrategyService.readPackageScripts(currentWorkspace)
+        const verificationSection = VerificationStrategyService.formatPromptSection(scripts)
+        if (verificationSection) {
+          systemPrompt += `\n\n${verificationSection}`
         }
       } catch (e) {
         console.error('Failed to parse package.json for verification strategy', e)

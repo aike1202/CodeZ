@@ -13,8 +13,14 @@ export interface TrimOptions {
 }
 
 export interface GoalSnapshot {
+  id?: string
+  title?: string
   originalPrompt: string
+  normalizedGoal?: string
   keyRequirements: string[]
+  nonGoals?: string[]
+  successCriteria?: string[]
+  updatedAt?: string
 }
 
 export interface TaskPlan {
@@ -24,10 +30,21 @@ export interface TaskPlan {
 }
 
 export interface ResumeState {
-  goal: GoalSnapshot
-  plan: TaskPlan
-  contextFiles: string[]
+  currentGoalId: string
+  currentPhase: string
+  currentStep: string
+  lastCompletedStep?: string
+  nextAction: string
+  openQuestions: string[]
+  blockedBy: string[]
+  filesTouched: string[]
+  filesToInspectNext: string[]
+  validationPending: string[]
+  goal?: GoalSnapshot
+  plan?: TaskPlan
+  contextFiles?: string[]
   lastTrimmedAt?: number
+  updatedAt?: string
 }
 
 const DEFAULT_MAX_TOOL_OUTPUT = 3000
@@ -166,6 +183,12 @@ export class ContextManager {
     return final
   }
 
+  static createResumeStateKey(workspaceRoot: string, sessionId?: string): string {
+    const crypto = require('crypto')
+    const wsHash = crypto.createHash('md5').update(path.resolve(workspaceRoot)).digest('hex')
+    return sessionId ? `workspace_${wsHash}_${sessionId}` : `workspace_${wsHash}`
+  }
+
   /**
    * 存储任务核心状态
    */
@@ -173,7 +196,7 @@ export class ContextManager {
     const dir = path.join(app.getPath('userData'), 'agent-sessions')
     await fs.mkdir(dir, { recursive: true })
     const file = path.join(dir, `${sessionId}.json`)
-    await fs.writeFile(file, JSON.stringify(state, null, 2), 'utf-8')
+    await fs.writeFile(file, JSON.stringify({ ...state, updatedAt: new Date().toISOString() }, null, 2), 'utf-8')
   }
 
   /**

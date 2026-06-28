@@ -602,15 +602,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (m.id !== msgId || !m.toolCalls) return m
 
         const now = Date.now()
-          const updateToolCall = (toolCall: ToolCallState): ToolCallState =>
-          toolCall.id === toolCallId
-            ? {
-                ...toolCall,
-                result,
-                status: result.startsWith('Error:') || result.includes('"ok":false') ? 'error' : 'success',
-                completedAt: now
-              }
-            : toolCall
+          const updateToolCall = (toolCall: ToolCallState): ToolCallState => {
+          if (toolCall.id !== toolCallId) return toolCall
+
+          let hasStructuredError = false
+          try {
+            const parsed = JSON.parse(result)
+            hasStructuredError = parsed?.ok === false || Boolean(parsed?.error && !parsed?.data)
+          } catch {
+            hasStructuredError = false
+          }
+
+          return {
+            ...toolCall,
+            result,
+            status: result.startsWith('Error:') || hasStructuredError ? 'error' : 'success',
+            completedAt: now
+          }
+        }
 
         const nextToolCalls = m.toolCalls.map(updateToolCall)
 

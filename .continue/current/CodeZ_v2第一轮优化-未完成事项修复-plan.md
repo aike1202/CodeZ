@@ -13,8 +13,9 @@
 > - `docsv2/08-ui-observability.md`
 >
 > 生成时间：2026-06-28  
+> 最近更新：2026-06-28 17:10  
 > 计划目标：把 Gemini 已做的半成品骨架修成可用的最小稳定闭环。  
-> 当前状态：⏳ 待实施  
+> 当前状态：🔄 P0/P1/P2/P3 主链路已实施并通过 typecheck/test/build；剩余 search/read_files 增强、IPC/UI 手动回归、裁剪触发 ResumeState 提醒等收尾项。
 
 ---
 
@@ -69,46 +70,46 @@ search / read_files
 
 ### 2.1 P0 安全与 UI 闭环问题
 
-| 编号 | 问题 | 影响 |
-|---|---|---|
-| P0-1 | `run_command` 权限判断没有读取 `commandLine` | 安全命令被误判，危险命令分类不可靠 |
-| P0-2 | preload 无审批 handler 时自动 approve | 高风险操作可能静默执行 |
-| P0-3 | ChatArea 未接 `onPermissionRequest` | 用户看不到审批卡片 |
-| P0-4 | `CHAT_STREAM_END` 参数顺序错位 | txId 可能丢失，Accept/Reject 失效 |
-| P0-5 | 前端不识别 `apply_patch` 编辑 | 修改后无 Diff 卡片，无法 Reject |
-| P0-6 | preload 未暴露 `chat.getDiff` | 前端无法获取事务真实 diff |
+| 编号 | 问题 | 影响 | 状态 |
+|---|---|---|---|
+| P0-1 | `run_command` 权限判断没有读取 `commandLine` | 安全命令被误判，危险命令分类不可靠 | ✅ 已完成 |
+| P0-2 | preload 无审批 handler 时自动 approve | 高风险操作可能静默执行 | ✅ 已完成 |
+| P0-3 | ChatArea 未接 `onPermissionRequest` | 用户看不到审批卡片 | ✅ 已完成 |
+| P0-4 | `CHAT_STREAM_END` 参数顺序错位 | txId 可能丢失，Accept/Reject 失效 | ✅ 已完成 |
+| P0-5 | 前端不识别 `apply_patch` 编辑 | 修改后无 Diff 卡片，无法 Reject | ✅ 已完成 |
+| P0-6 | preload 未暴露 `chat.getDiff` | 前端无法获取事务真实 diff | ✅ 已完成 |
 
 ### 2.2 P1 Patch / Diff / 事务问题
 
-| 编号 | 问题 | 影响 |
-|---|---|---|
-| P1-1 | `apply_patch` 返回字符串而非结构化结果 | UI/模型难以判断变更 |
-| P1-2 | `fullOverwrite` 修改已有文件可不传 hash | 覆盖风险 |
-| P1-3 | 新建文件不进入事务记录 | Reject 不能删除新文件 |
-| P1-4 | ToolResult 无法识别工具字符串错误 | `Error:` 可能被包成 `ok:true` |
-| P1-5 | `search` 依赖 git 命令，结构不统一 | 非 Git/未跟踪文件场景不稳 |
-| P1-6 | `read_files` 缺少全局预算与行号 | Patch 定位和上下文控制不足 |
-| P1-7 | UI 文案乱码 | 影响实际体验 |
+| 编号 | 问题 | 影响 | 状态 |
+|---|---|---|---|
+| P1-1 | `apply_patch` 返回字符串而非结构化结果 | UI/模型难以判断变更 | ✅ 已完成 |
+| P1-2 | `fullOverwrite` 修改已有文件可不传 hash | 覆盖风险 | ✅ 已完成 |
+| P1-3 | 新建文件不进入事务记录 | Reject 不能删除新文件 | ✅ 已完成 |
+| P1-4 | ToolResult 无法识别工具字符串错误 | `Error:` 可能被包成 `ok:true` | ✅ 已完成 |
+| P1-5 | `search` 依赖 git 命令，结构不统一 | 非 Git/未跟踪文件场景不稳 | ✅ 已完成：filesystem-first、统一结构、fuzzy 候选 |
+| P1-6 | `read_files` 缺少全局预算与行号 | Patch 定位和上下文控制不足 | ✅ 已完成：预算、行号、contextAroundLine、omitted 信息 |
+| P1-7 | UI 文案乱码 | 影响实际体验 | 🔄 部分完成：ChatArea 主要乱码已修，仍需全局巡检 |
 
 ### 2.3 P2 测试覆盖问题
 
-| 编号 | 缺失测试 | 目标 |
-|---|---|---|
-| P2-1 | `PermissionManager` 单测 | 覆盖 allow/ask/deny 分类 |
-| P2-2 | `ApplyPatchTool` 单测 | 覆盖 hash、创建、回滚、失败路径 |
-| P2-3 | `AgentRunner` ToolResult 单测 | 工具失败必须 `ok:false` |
-| P2-4 | IPC 参数与审批回归 | 确保 approval/txId/diff 通道可用 |
-| P2-5 | UI 工具名适配验证 | 确保 `apply_patch` 可显示编辑卡片 |
+| 编号 | 缺失测试 | 目标 | 状态 |
+|---|---|---|---|
+| P2-1 | `PermissionManager` 单测 | 覆盖 allow/ask/deny 分类 | ✅ 已完成 |
+| P2-2 | `ApplyPatchTool` 单测 | 覆盖 hash、创建、回滚、失败路径 | ✅ 已完成 |
+| P2-3 | `AgentRunner` ToolResult 单测 | 工具失败必须 `ok:false` | ✅ 已完成 |
+| P2-4 | IPC 参数与审批回归 | 确保 approval/txId/diff 通道可用 | ⏳ 待手动回归 |
+| P2-5 | UI 工具名适配验证 | 确保 `apply_patch` 可显示编辑卡片 | ⏳ 待手动回归 |
 
 ### 2.4 P3 验证闭环与 ResumeState 问题
 
-| 编号 | 问题 | 影响 |
-|---|---|---|
-| P3-1 | 验证策略只是 prompt | 模型可能不运行验证 |
-| P3-2 | 无 changedFiles → verification 推荐模块 | 无法选择最小相关验证 |
-| P3-3 | 无结构化 VerificationResult | UI/最终报告不可审计 |
-| P3-4 | ResumeState 依赖模型主动调用 | 长任务容易遗忘 |
-| P3-5 | 缺 RequirementLedger/DecisionLog/VerificationLedger | 恢复信息不足 |
+| 编号 | 问题 | 影响 | 状态 |
+|---|---|---|---|
+| P3-1 | 验证策略只是 prompt | 模型可能不运行验证 | ✅ 已增强：新增验证策略服务与更强 prompt 约束；runtime 自动执行暂未做 |
+| P3-2 | 无 changedFiles → verification 推荐模块 | 无法选择最小相关验证 | ✅ 已完成 |
+| P3-3 | 无结构化 VerificationResult | UI/最终报告不可审计 | 🔄 部分完成：`run_command` 已结构化输出；UI 验证面板未做 |
+| P3-4 | ResumeState 依赖模型主动调用 | 长任务容易遗忘 | 🔄 部分完成：扩展 state 与统一 key；裁剪自动保存/强提醒未做 |
+| P3-5 | 缺 RequirementLedger/DecisionLog/VerificationLedger | 恢复信息不足 | ⏳ 待做：本轮仅完成 ResumeState MVP |
 
 ---
 
@@ -239,9 +240,9 @@ function recommend(changedFiles: string[], scripts: Record<string, string>): Ver
 
 ## 4. 阶段与任务拆解
 
-### ⏳ 第一阶段 · P0 安全与主链路修复
+### ✅ 第一阶段 · P0 安全与主链路修复
 
-#### ⏳ 1. 修复 `run_command` 权限参数与命令风险分类
+#### ✅ 1. 修复 `run_command` 权限参数与命令风险分类
 
 **目标**：让安全命令正确 allow，危险命令正确 ask/deny。
 
@@ -275,9 +276,11 @@ function recommend(changedFiles: string[], scripts: Record<string, string>): Ver
 
 - 新增或扩展 `PermissionManager` 单测。
 
+**进度**：✅ 已完成。实现于 `src/main/services/PermissionManager.ts`，并新增 `src/tests/permission-manager.test.ts` 覆盖命令风险分类与 workspace 外写入拒绝。
+
 ---
 
-#### ⏳ 2. 移除 preload 自动批准，改为默认拒绝
+#### ✅ 2. 移除 preload 自动批准，改为默认拒绝
 
 **目标**：没有 UI 审批 handler 时，权限请求不能静默通过。
 
@@ -303,9 +306,11 @@ function recommend(changedFiles: string[], scripts: Record<string, string>): Ver
 
 - 可先做手动验证；后续补 IPC 测试。
 
+**进度**：✅ 已完成。`src/preload/index.ts` 已改为缺少 UI handler 时默认 deny，不再静默 approve。
+
 ---
 
-#### ⏳ 3. ChatArea 接入审批卡片
+#### ✅ 3. ChatArea 接入审批卡片
 
 **目标**：用户能看到权限请求，并选择允许/拒绝。
 
@@ -339,9 +344,11 @@ function recommend(changedFiles: string[], scripts: Record<string, string>): Ver
 
 - 手动验证为主；后续补组件测试或 store 测试。
 
+**进度**：✅ 已完成。新增 `PermissionApprovalWidget.tsx/css`，`ChatArea` 已传入 `onPermissionRequest` 并通过 `respondToApproval` 回传用户决定。
+
 ---
 
-#### ⏳ 4. 修复 `CHAT_STREAM_END` 的 stopReason / txId 参数错位
+#### ✅ 4. 修复 `CHAT_STREAM_END` 的 stopReason / txId 参数错位
 
 **目标**：前端正确收到 txId，Accept/Reject 能找到事务。
 
@@ -371,9 +378,11 @@ function recommend(changedFiles: string[], scripts: Record<string, string>): Ver
 
 - 手动验证一次 `apply_patch` 修改 → Reject。
 
+**进度**：✅ 已完成。preload 与 renderer onDone 已按 `fullContent, stopReason, txId` 对齐。
+
 ---
 
-#### ⏳ 5. 前端识别 `apply_patch` 编辑并暴露 `chat.getDiff`
+#### ✅ 5. 前端识别 `apply_patch` 编辑并暴露 `chat.getDiff`
 
 **目标**：`apply_patch` 修改后 UI 能展示编辑卡片和真实 diff。
 
@@ -399,11 +408,13 @@ function recommend(changedFiles: string[], scripts: Record<string, string>): Ver
 - 点击文件能看到 diff。
 - Reject 后文件恢复。
 
+**进度**：✅ 已完成。preload 已暴露 `chat.getDiff(txId)`；`ChatArea` / `ExecutionLogUtils` 已识别 `apply_patch`，并在完成后拉取事务 diff。
+
 ---
 
-### ⏳ 第二阶段 · P1 Patch / Diff / 事务稳定化
+### 🔄 第二阶段 · P1 Patch / Diff / 事务稳定化
 
-#### ⏳ 6. 强化 `ApplyPatchTool` 的 hash 与事务安全
+#### ✅ 6. 强化 `ApplyPatchTool` 的 hash 与事务安全
 
 **目标**：避免覆盖旧文件，支持新文件 Reject 删除。
 
@@ -425,9 +436,11 @@ function recommend(changedFiles: string[], scripts: Record<string, string>): Ver
 - 新建文件后 Reject 会删除文件。
 - hash mismatch 时不写入。
 
+**进度**：✅ 已完成。已有文件所有修改路径均强制 `expectedHash`；新建文件也进入事务记录。覆盖于 `src/tests/apply-patch-tool.test.ts`。
+
 ---
 
-#### ⏳ 7. `apply_patch` 返回结构化结果
+#### ✅ 7. `apply_patch` 返回结构化结果
 
 **目标**：让模型和 UI 都能知道改了哪些文件、diff 是什么、摘要是什么。
 
@@ -462,9 +475,11 @@ function recommend(changedFiles: string[], scripts: Record<string, string>): Ver
 - AgentRunner 的 tool result data 中包含 JSON 字符串。
 - UI 能从 result 或 tx diff 解析 changedFiles。
 
+**进度**：✅ 已完成。`ApplyPatchTool` 返回 JSON 字符串，包含 `changedFiles/diff/summary/fileHashBefore/fileHashAfter`。
+
 ---
 
-#### ⏳ 8. 修复 AgentRunner ToolResult 错误语义
+#### ✅ 8. 修复 AgentRunner ToolResult 错误语义
 
 **目标**：工具失败不能被包装成 `ok:true`。
 
@@ -492,9 +507,11 @@ function recommend(changedFiles: string[], scripts: Record<string, string>): Ver
 - targetContent not found → ToolResult `ok:false`。
 - 模型下一轮能看到明确错误与建议。
 
+**进度**：✅ 已完成。新增并导出 `isToolErrorResult` / `buildToolError`，工具错误会包装为 `ok:false`。覆盖于 `src/tests/agent-runner-tool-result.test.ts`。
+
 ---
 
-#### ⏳ 9. 强化 `search` 工具
+#### ✅ 9. 强化 `search` 工具
 
 **目标**：减少对 shell/git 的依赖，提高非 Git 与未跟踪文件场景稳定性。
 
@@ -531,9 +548,11 @@ type SearchResult = {
 - 搜索拼写轻微错误时有 fuzzy 候选。
 - 返回包含 kind/path/preview。
 
+**进度**：✅ 已完成。`SearchTool` 已改为 filesystem-first，可搜索未跟踪文件；返回 `kind/path/line/column/preview/score/reason`；文件搜索支持 fuzzy 候选。覆盖于 `src/tests/search-read-tools.test.ts`。
+
 ---
 
-#### ⏳ 10. 强化 `read_files` 预算与行号
+#### ✅ 10. 强化 `read_files` 预算与行号
 
 **目标**：控制上下文预算，提升 patch 定位能力。
 
@@ -562,9 +581,11 @@ type SearchResult = {
 - 返回总行数、当前范围、hash。
 - 可围绕某行读取上下文。
 
+**进度**：✅ 已完成。`ReadFilesTool` 已支持 `maxTotalLines/maxTotalBytes/includeLineNumbers/contextAroundLine/contextLines`，并返回 `omittedLines/omittedBytes/budgetExceeded`。覆盖于 `src/tests/search-read-tools.test.ts`。
+
 ---
 
-#### ⏳ 11. 修复 UI 乱码
+#### 🔄 11. 修复 UI 乱码
 
 **目标**：修复用户可见中文乱码，提升使用体验。
 
@@ -587,11 +608,13 @@ type SearchResult = {
 - 主要界面不再出现乱码。
 - build/typecheck 通过。
 
+**进度**：🔄 部分完成。已修复 `ChatArea` 输入框 placeholder 与错误输出模板；`App.tsx` 等其他乱码仍需全局巡检。
+
 ---
 
-### ⏳ 第三阶段 · P2 测试与回归覆盖
+### 🔄 第三阶段 · P2 测试与回归覆盖
 
-#### ⏳ 12. PermissionManager 单测
+#### ✅ 12. PermissionManager 单测
 
 **目标**：权限分类可回归。
 
@@ -605,9 +628,11 @@ type SearchResult = {
 - `git reset --hard` → ask or deny/destructive
 - workspace 外写入 → deny
 
+**进度**：✅ 已完成。新增 `src/tests/permission-manager.test.ts`。
+
 ---
 
-#### ⏳ 13. ApplyPatchTool 单测
+#### ✅ 13. ApplyPatchTool 单测
 
 **目标**：编辑安全可回归。
 
@@ -621,9 +646,11 @@ type SearchResult = {
 - 新建文件进入事务，rollback 删除。
 - 已有文件修改进入事务，rollback 恢复。
 
+**进度**：✅ 已完成。新增 `src/tests/apply-patch-tool.test.ts`，覆盖 hash、失败路径、结构化输出与新文件事务记录。
+
 ---
 
-#### ⏳ 14. AgentRunner ToolResult 单测
+#### ✅ 14. AgentRunner ToolResult 单测
 
 **目标**：工具失败 observation 不被误判。
 
@@ -634,6 +661,8 @@ type SearchResult = {
 - 用户拒绝审批 → `ok:false`
 - 工具成功返回 JSON → `ok:true`
 - 连续失败达到上限 → 停止继续工具执行
+
+**进度**：✅ 已完成。新增 `src/tests/agent-runner-tool-result.test.ts`，覆盖字符串错误、结构化错误和可恢复错误 suggestion。
 
 ---
 
@@ -651,11 +680,13 @@ type SearchResult = {
 6. 再次修改并 Accept，事务提交。
 7. 运行 `npm run typecheck` 和 `npm test`。
 
+**进度**：⏳ 待手动回归。自动化测试已覆盖核心服务/工具逻辑，但 Electron IPC + UI 审批/Diff 需要启动应用实测。
+
 ---
 
-### ⏳ 第四阶段 · P3 验证闭环 MVP
+### ✅ 第四阶段 · P3 验证闭环 MVP
 
-#### ⏳ 16. 新增验证策略服务
+#### ✅ 16. 新增验证策略服务
 
 **目标**：根据 changedFiles 推荐验证命令。
 
@@ -679,9 +710,11 @@ type SearchResult = {
 - 修改工具文件时推荐 test/typecheck。
 - docs only 不推荐重型 build。
 
+**进度**：✅ 已完成。新增 `src/main/services/VerificationStrategyService.ts` 并接入 `chat.handlers.ts`。
+
 ---
 
-#### ⏳ 17. 结构化 run_command / VerificationResult
+#### ✅ 17. 结构化 run_command / VerificationResult
 
 **目标**：验证结果可被模型和 UI 理解。
 
@@ -713,9 +746,11 @@ type SearchResult = {
 - 命令失败时模型能看到 exitCode/stderr。
 - timeout 时明确 `timedOut:true`。
 
+**进度**：✅ 已完成。`RunCommandTool` 已返回结构化 JSON：`command/cwd/exitCode/stdout/stderr/timedOut/truncated/error`。UI 验证面板仍未做。
+
 ---
 
-#### ⏳ 18. 最终回复验证状态约束
+#### ✅ 18. 最终回复验证状态约束
 
 **目标**：防止验证失败仍声称完成。
 
@@ -739,11 +774,13 @@ type SearchResult = {
 
 - 验证失败场景下，最终回复不会说“全部完成”。
 
+**进度**：✅ 已完成（prompt 约束层）。`VerificationStrategyService.formatPromptSection` 已加入失败不可声称完成的要求；runtime 自动阻止最终回复未做。
+
 ---
 
-### ⏳ 第五阶段 · P3 ResumeState 防丢失 MVP
+### 🔄 第五阶段 · P3 ResumeState 防丢失 MVP
 
-#### ⏳ 19. 扩展 ResumeState 类型
+#### ✅ 19. 扩展 ResumeState 类型
 
 **目标**：恢复时包含目标、阶段、下一步、验证状态。
 
@@ -773,9 +810,11 @@ type ResumeState = {
 
 可保留旧字段兼容，但写入新结构。
 
+**进度**：✅ 已完成。`ContextManager.ResumeState` 已扩展 currentGoalId/currentPhase/currentStep/nextAction/filesTouched/validationPending 等字段，并兼容旧 goal/plan/contextFiles。
+
 ---
 
-#### ⏳ 20. 修正 ResumeState session key
+#### ✅ 20. 修正 ResumeState session key
 
 **目标**：保存和加载使用同一 key。
 
@@ -794,6 +833,8 @@ type ResumeState = {
 **验收标准**：
 
 - 调用 `update_resume_state` 后，下次同 workspace run 能加载同一状态。
+
+**进度**：✅ 已完成。`ToolContext` 新增 `sessionId/resumeStateKey`；`AgentRunner` 与 `UpdateResumeStateTool` 使用 `ContextManager.createResumeStateKey` 统一 key。新增 `src/tests/context-manager-resume-state.test.ts`。
 
 ---
 
@@ -816,25 +857,27 @@ type ResumeState = {
 
 - 长对话裁剪后，模型不会完全丢失当前任务目标。
 
+**进度**：⏳ 待做。本轮完成 ResumeState 结构与 key，但尚未让 `trimMessages` 返回裁剪 metadata，也未自动注入“必须更新 ResumeState”的强提醒。
+
 ---
 
 ## 5. 验收标准总表
 
-| 编号 | 验收项 | 通过标准 |
-|---|---|---|
-| AC-1 | 权限默认安全 | 没有 UI 审批 handler 时，高风险操作默认拒绝 |
-| AC-2 | 安全命令分类 | `npm test` / `npm run typecheck` 正确 allow |
-| AC-3 | 审批 UI | ask 操作显示审批卡片，用户可 Allow/Deny |
-| AC-4 | txId 正确 | Agent 修改文件后前端保存真实 txId |
-| AC-5 | Diff 显示 | `apply_patch` 后能看到真实 diff |
-| AC-6 | Reject 恢复 | Reject 能恢复已有文件，删除新建文件 |
-| AC-7 | ToolResult 错误 | hash mismatch / target not found 返回 `ok:false` |
-| AC-8 | Search 稳定 | 非 Git/未跟踪文件搜索有 fallback |
-| AC-9 | Read 预算 | 超预算读取明确返回 omitted/truncated |
-| AC-10 | 验证推荐 | changedFiles 能推荐相关验证命令 |
-| AC-11 | 验证报告 | 最终回复包含已运行/未运行/失败的验证状态 |
-| AC-12 | ResumeState | 状态保存和恢复 key 一致，长任务不丢下一步 |
-| AC-13 | 测试覆盖 | P0/P1 至少有单测或手动验证记录 |
+| 编号 | 验收项 | 通过标准 | 状态 |
+|---|---|---|---|
+| AC-1 | 权限默认安全 | 没有 UI 审批 handler 时，高风险操作默认拒绝 | ✅ 通过代码实现，待 UI 手动回归 |
+| AC-2 | 安全命令分类 | `npm test` / `npm run typecheck` 正确 allow | ✅ 单测通过 |
+| AC-3 | 审批 UI | ask 操作显示审批卡片，用户可 Allow/Deny | 🔄 已实现，待手动回归 |
+| AC-4 | txId 正确 | Agent 修改文件后前端保存真实 txId | 🔄 已修复参数错位，待手动回归 |
+| AC-5 | Diff 显示 | `apply_patch` 后能看到真实 diff | 🔄 已接 `getDiff`，待手动回归 |
+| AC-6 | Reject 恢复 | Reject 能恢复已有文件，删除新建文件 | 🔄 事务记录已修复，待手动回归 |
+| AC-7 | ToolResult 错误 | hash mismatch / target not found 返回 `ok:false` | ✅ 单测通过 |
+| AC-8 | Search 稳定 | 非 Git/未跟踪文件搜索有 fallback | ✅ 单测通过 |
+| AC-9 | Read 预算 | 超预算读取明确返回 omitted/truncated | ✅ 单测通过 |
+| AC-10 | 验证推荐 | changedFiles 能推荐相关验证命令 | ✅ 单测通过 |
+| AC-11 | 验证报告 | 最终回复包含已运行/未运行/失败的验证状态 | 🔄 prompt 约束已增强，runtime/UI 未完全闭环 |
+| AC-12 | ResumeState | 状态保存和恢复 key 一致，长任务不丢下一步 | 🔄 key 与结构已完成；裁剪自动提醒未做 |
+| AC-13 | 测试覆盖 | P0/P1 至少有单测或手动验证记录 | ✅ 关键单测已补，UI 手动回归待做 |
 
 ---
 
@@ -846,6 +889,12 @@ type ResumeState = {
 npm run typecheck
 npm test
 ```
+
+**最近执行结果（2026-06-28 17:40）**：
+
+- ✅ `npm run typecheck` 通过
+- ✅ `npm test` 通过：11 个测试文件，50 个测试通过
+- ✅ `npm run build` 通过；仍有 Vite 动态/静态 import warning，不影响构建
 
 ### 6.2 UI / IPC 改动后运行
 
@@ -886,18 +935,20 @@ npm run build
 
 推荐严格按以下顺序推进：
 
-1. P0-1 修权限参数名。
-2. P0-2 移除自动批准。
-3. P0-3 接审批 UI。
-4. P0-4 修 txId 参数错位。
-5. P0-5 接 `apply_patch` Diff UI。
-6. P1-1/P1-2/P1-3 修 `ApplyPatchTool` 安全与事务。
-7. P1-4 修 ToolResult 错误语义。
-8. P2 补关键测试。
-9. P1-5/P1-6 强化 search/read_files。
-10. P3 做验证策略服务。
-11. P3 做 ResumeState key 和结构修复。
-12. 全量 typecheck/test/build。
+1. ✅ P0-1 修权限参数名。
+2. ✅ P0-2 移除自动批准。
+3. ✅ P0-3 接审批 UI。
+4. ✅ P0-4 修 txId 参数错位。
+5. ✅ P0-5 接 `apply_patch` Diff UI。
+6. ✅ P1-1/P1-2/P1-3 修 `ApplyPatchTool` 安全与事务。
+7. ✅ P1-4 修 ToolResult 错误语义。
+8. ✅ P2 补关键测试。
+9. ⏳ P1-5/P1-6 强化 search/read_files。
+10. ✅ P3 做验证策略服务。
+11. ✅ P3 做 ResumeState key 和结构修复。
+12. ✅ 全量 typecheck/test/build。
+
+**下一步建议**：优先补 `search` / `read_files` 增强与 Electron UI 手动回归，再推进 UI 验证面板和裁剪触发 ResumeState 提醒。
 
 ---
 

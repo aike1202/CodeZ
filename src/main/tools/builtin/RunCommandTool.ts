@@ -11,7 +11,7 @@ export class RunCommandTool extends Tool {
   }
 
   get description() {
-    return 'Executes a terminal command (like npm test, build, or git commands) in a specified directory. Returns the standard output and error output.'
+    return 'Executes a terminal command (like npm test, build, or git commands) in a specified directory. Returns structured JSON with command, exitCode, stdout, stderr, timedOut, and truncated.'
   }
 
   get parameters_schema() {
@@ -39,7 +39,7 @@ export class RunCommandTool extends Tool {
     try {
       if (!args) return 'Error: Missing arguments.'
       const parsedArgs = JSON.parse(args)
-      const commandLine = parsedArgs.commandLine
+      const commandLine = parsedArgs.commandLine || parsedArgs.CommandLine || parsedArgs.command
       const cwdParam = parsedArgs.cwd || '.'
       let timeoutMs = parsedArgs.timeoutMs || 30000
 
@@ -52,7 +52,9 @@ export class RunCommandTool extends Tool {
       const cwd = path.resolve(context.workspaceRoot, cwdParam)
 
       // 防御限制
-      if (!cwd.startsWith(context.workspaceRoot)) {
+      const normalizedCwd = cwd.replace(/\\/g, '/').toLowerCase()
+      const normalizedRoot = context.workspaceRoot.replace(/\\/g, '/').toLowerCase()
+      if (!normalizedCwd.startsWith(normalizedRoot)) {
         return `Error: Access denied. Cannot execute commands outside of workspace.`
       }
 
@@ -64,14 +66,19 @@ export class RunCommandTool extends Tool {
           maxBuffer: 10 * 1024 * 1024 // 10MB buffer
         })
 
-        return this.formatResult(stdout, stderr, 0)
+        return this.formatResult(commandLine, cwdParam, stdout, stderr, 0, false)
       } catch (err: any) {
         // 如果命令退出码非 0，execAsync 会抛出异常，其中包含 stdout, stderr, code
-        if (err.killed && err.signal === 'SIGTERM') {
-          return `Error: Command timed out after ${timeoutMs}ms.\n\nPartial Stdout:\n${this.truncate(err.stdout)}\n\nPartial Stderr:\n${this.truncate(err.stderr)}`
-        }
-
-        return this.formatResult(err.stdout || '', err.stderr || err.message, err.code || 1)
+        const timedOut = Boolean(err.killed && err.signal === 'SIGTERM')
+        return this.formatResult(
+          commandLine,
+          cwdParam,
+          err.stdout || '',
+          err.stderr || err.message,
+          timedOut ? null : (err.code || 1),
+          timedOut,
+          timedOut ? `Command timed out after ${timeoutMs}ms.` : undefined
+        )
       }
 
     } catch (err: any) {
@@ -79,29 +86,42 @@ export class RunCommandTool extends Tool {
     }
   }
 
-  private formatResult(stdout: string | Buffer, stderr: string | Buffer, code: number): string {
-    const outStr = this.truncate(stdout.toString())
-    const errStr = this.truncate(stderr.toString())
+  private formatResult(
+    command: string,
+    cwd: string,
+    stdout: string | Buffer,
+    stderr: string | Buffer,
+    exitCode: number | null,
+    timedOut: boolean,
+    error?: string
+  ): string {
+    const out = this.truncate(stdout.toString())
+    const err = this.truncate(stderr.toString())
 
-    let result = `Exit Code: ${code}\n`
-    if (outStr) {
-      result += `\nSTDOUT:\n${outStr}\n`
-    }
-    if (errStr) {
-      result += `\nSTDERR:\n${errStr}\n`
-    }
-    return result.trim()
+    return JSON.stringify({
+      command,
+      cwd,
+      exitCode,
+      stdout: out.text,
+      stderr: err.text,
+      timedOut,
+      truncated: out.truncated || err.truncated,
+      error
+    }, null, 2)
   }
 
-  private truncate(text: string): string {
-    if (!text) return ''
+  private truncate(text: string): { text: string; truncated: boolean } {
+    if (!text) return { text: '', truncated: false }
     const maxLen = 4000
-    if (text.length <= maxLen) return text
+    if (text.length <= maxLen) return { text, truncated: false }
     
     // 如果太长，保留头尾，砍掉中间
     const headChars = 1000
     const tailChars = 3000
     
-    return `${text.slice(0, headChars)}\n\n[... Output Truncated. Original size: ${text.length} chars ...]\n\n${text.slice(-tailChars)}`
+    return {
+      text: `${text.slice(0, headChars)}\n\n[... Output Truncated. Original size: ${text.length} chars ...]\n\n${text.slice(-tailChars)}`,
+      truncated: true
+    }
   }
 }

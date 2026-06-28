@@ -17,6 +17,34 @@ export interface AgentRunConfig extends ChatRequestConfig {
   sessionId?: string
 }
 
+export function isToolErrorResult(resultMessage: string): boolean {
+  const trimmed = resultMessage.trim()
+  if (!trimmed) return false
+  if (/^(Error:|Error in|Access denied|Hash mismatch)/i.test(trimmed)) return true
+
+  try {
+    const parsed = JSON.parse(trimmed)
+    if (parsed && typeof parsed === 'object') {
+      if (parsed.ok === false) return true
+      if (parsed.error && !parsed.changedFiles && !parsed.data) return true
+    }
+  } catch {
+    // Non-JSON successful tool output is still allowed.
+  }
+
+  return false
+}
+
+export function buildToolError(resultMessage: string) {
+  const recoverable = /hash mismatch|not found|not unique|expectedhash|re-read|read_files/i.test(resultMessage)
+  return {
+    code: recoverable ? 'RECOVERABLE_TOOL_ERROR' : 'TOOL_ERROR',
+    message: resultMessage,
+    recoverable,
+    suggestion: recoverable ? 'Re-read the relevant file or range, then retry with updated arguments.' : undefined
+  }
+}
+
 export class AgentRunner {
   private chatService: ChatService
   private toolManager: ToolManager
@@ -49,11 +77,10 @@ export class AgentRunner {
       console.error('[AgentRunner] Failed to begin transaction:', err.message)
     }
 
+    const resumeStateKey = ContextManager.createResumeStateKey(config.workspaceRoot, config.sessionId)
+
     try {
-      const crypto = require('crypto')
-      const wsHash = crypto.createHash('md5').update(config.workspaceRoot).digest('hex')
-      const stateSessionId = `workspace_${wsHash}`
-      const resumeState = await ContextManager.loadResumeState(stateSessionId)
+      const resumeState = await ContextManager.loadResumeState(resumeStateKey)
       if (resumeState && allMessages.length > 0 && allMessages[0].role === 'system') {
         const stateStr = `\n\n<resume_state>\nPrevious task state loaded:\n${JSON.stringify(resumeState, null, 2)}\n</resume_state>\n`
         allMessages[0] = {
@@ -261,9 +288,14 @@ export class AgentRunner {
                 if (!resultMessage) {
                   resultMessage = await toolInstance.execute(args, {
                     workspaceRoot: config.workspaceRoot,
+                    sessionId,
+                    resumeStateKey,
                     transactionId: txId || undefined,
                     editTransactionService: this.editTransactionService
                   })
+                  if (isToolErrorResult(resultMessage)) {
+                    isError = true
+                  }
                 }
               } catch (err: any) {
                 resultMessage = `Error: ${err.message}`
@@ -273,10 +305,15 @@ export class AgentRunner {
 
             callbacks.onToolEnd?.(toolCallId, resultMessage)
 
-            const toolResultWrapper = {
-              ok: !isError,
-              [isError ? 'error' : 'data']: resultMessage
-            }
+            const toolResultWrapper = isError
+              ? {
+                  ok: false,
+                  error: buildToolError(resultMessage)
+                }
+              : {
+                  ok: true,
+                  data: resultMessage
+                }
 
             // 转换为大模型约定的工具结果消息
             return {

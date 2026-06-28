@@ -22,7 +22,7 @@ export class ApplyPatchTool extends Tool {
   }
 
   get description() {
-    return 'The unified writing tool for modifying or creating files. You can provide multiple search-replace blocks (edits) for partial modifications, or fullOverwrite for replacing the whole file. MUST provide expectedHash (obtained from read_files) to ensure you are editing the latest version.'
+    return 'The unified writing tool for modifying or creating files. For existing files, you MUST first call read_files and provide expectedHash. Use edits for exact unique search-replace blocks, or fullOverwrite with newContent for creating files or replacing small files. Returns changedFiles, diff, summary, and file hashes.'
   }
 
   get parameters_schema() {
@@ -35,7 +35,7 @@ export class ApplyPatchTool extends Tool {
         },
         expectedHash: {
           type: 'string',
-          description: 'The SHA256 hash of the file before your edit. Obtain this by calling read_files. Mandatory for existing files to prevent conflict.'
+          description: 'The SHA256 hash of the existing file before your edit. Obtain this by calling read_files. Mandatory for all existing files, including fullOverwrite.'
         },
         edits: {
           type: 'array',
@@ -51,7 +51,7 @@ export class ApplyPatchTool extends Tool {
         },
         fullOverwrite: {
           type: 'boolean',
-          description: 'If true, replaces the entire file with newContent (or creates it if it does not exist).'
+          description: 'If true, replaces the entire file with newContent (or creates it if it does not exist). Existing files still require expectedHash.'
         },
         newContent: {
           type: 'string',
@@ -70,15 +70,19 @@ export class ApplyPatchTool extends Tool {
       if (!filePath) return 'Error: filePath is required.'
       
       const absolutePath = path.resolve(context.workspaceRoot, filePath)
-      if (!absolutePath.replace(/\\/g, '/').toLowerCase().startsWith(context.workspaceRoot.replace(/\\/g, '/').toLowerCase())) {
+      const normalizedTarget = absolutePath.replace(/\\/g, '/').toLowerCase()
+      const normalizedRoot = context.workspaceRoot.replace(/\\/g, '/').toLowerCase()
+      if (!normalizedTarget.startsWith(normalizedRoot)) {
         return `Error: Access denied. Cannot modify file outside of workspace.`
       }
 
       let fileExists = true
       let fileContent = ''
+      let beforeHash: string | undefined
       try {
         const buffer = await fs.readFile(absolutePath)
         fileContent = buffer.toString('utf-8')
+        beforeHash = createHash('sha256').update(buffer).digest('hex')
       } catch (err: any) {
         if (err.code === 'ENOENT') {
           fileExists = false
@@ -87,14 +91,14 @@ export class ApplyPatchTool extends Tool {
         }
       }
 
-      // 强校验预期 Hash
-      if (fileExists && expectedHash) {
-        const actualHash = createHash('sha256').update(fileContent).digest('hex')
-        if (actualHash !== expectedHash) {
-          return `Error: Hash mismatch! Expected ${expectedHash}, but file hash is ${actualHash}. The file has been modified recently. Please call read_files to get the latest content and hash before patching.`
+      // 强校验预期 Hash：所有已有文件修改都必须带 expectedHash，包含 fullOverwrite。
+      if (fileExists) {
+        if (!expectedHash) {
+          return `Error: expectedHash is missing. You MUST provide the expectedHash of the existing file by calling read_files before patching.`
         }
-      } else if (fileExists && !fullOverwrite && !expectedHash) {
-         return `Error: expectedHash is missing. You MUST provide the expectedHash of the existing file to safely patch it.`
+        if (beforeHash !== expectedHash) {
+          return `Error: Hash mismatch! Expected ${expectedHash}, but file hash is ${beforeHash}. The file has been modified recently. Please call read_files to get the latest content and hash before patching.`
+        }
       }
 
       let updatedContent = fileContent
@@ -108,6 +112,9 @@ export class ApplyPatchTool extends Tool {
         if (!fileExists) {
           return 'Error: Cannot apply partial edits to a non-existent file. Use fullOverwrite to create it.'
         }
+        if (edits.length === 0) {
+          return 'Error: edits must contain at least one edit block.'
+        }
         
         let tempContent = fileContent.replace(/\r\n/g, '\n')
         
@@ -117,7 +124,7 @@ export class ApplyPatchTool extends Tool {
           const occurrences = tempContent.split(target).length - 1
           
           if (occurrences === 0) {
-            return `Error in edit block ${i + 1}: targetContent not found. Ensure exact match including whitespaces.`
+            return `Error in edit block ${i + 1}: targetContent not found. Ensure exact match including whitespaces. Re-read the relevant range before retrying.`
           }
           if (occurrences > 1) {
             return `Error in edit block ${i + 1}: targetContent is not unique (${occurrences} matches). Please expand the target text.`
@@ -130,14 +137,12 @@ export class ApplyPatchTool extends Tool {
         return 'Error: You must provide either fullOverwrite=true (with newContent) or an array of edits.'
       }
 
-      // 执行事务备份
+      // 执行事务备份。新建文件也必须记录，以便 Reject 时删除。
       if (context.editTransactionService && context.transactionId) {
         try {
-          if (fileExists) {
-            await context.editTransactionService.backupFile(context.transactionId, absolutePath)
-          }
+          await context.editTransactionService.backupFile(context.transactionId, absolutePath)
         } catch (backupErr: any) {
-          console.error(`[ApplyPatchTool] Backup failed for ${absolutePath}:`, backupErr)
+          return `Error: Failed to backup file before writing: ${backupErr.message}`
         }
       }
 
@@ -145,7 +150,27 @@ export class ApplyPatchTool extends Tool {
       await fs.mkdir(path.dirname(absolutePath), { recursive: true })
       await fs.writeFile(absolutePath, updatedContent, 'utf-8')
 
-      return `Successfully applied patch to: ${filePath}`
+      const afterHash = createHash('sha256').update(updatedContent).digest('hex')
+      let diff = ''
+      if (context.editTransactionService && context.transactionId) {
+        try {
+          const diffs = await context.editTransactionService.getDiff(context.transactionId)
+          const currentDiff = diffs.find((item) => item.path === absolutePath)
+          diff = currentDiff?.diff || ''
+        } catch {
+          diff = ''
+        }
+      }
+
+      const output = {
+        changedFiles: [filePath],
+        diff,
+        summary: `${fileExists ? 'Modified' : 'Created'} ${filePath}`,
+        fileHashBefore: beforeHash,
+        fileHashAfter: afterHash
+      }
+
+      return JSON.stringify(output, null, 2)
     } catch (err: any) {
       return `Error in apply_patch: ${err.message}`
     }
