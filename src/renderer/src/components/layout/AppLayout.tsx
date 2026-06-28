@@ -6,8 +6,17 @@ interface AppLayoutProps {
   sidebar?: ReactNode;
   /** 顶部标题栏/功能栏组件 */
   topbar?: ReactNode;
-  /** 中间核心工作区内容 */
-  children: ReactNode;
+  
+  /** 中间核心工作区：聊天列表区 */
+  chatList?: ReactNode;
+  /** 中间核心工作区：权限审核悬浮/插入区 */
+  permissionArea?: ReactNode;
+  /** 中间核心工作区：底部输入区 */
+  chatInput?: ReactNode;
+
+  /** 如果仍然想用统一的 children 也可以保留，或者不用 */
+  children?: ReactNode;
+
   /** 右侧辅助面板组件 (可选) */
   rightPanel?: ReactNode;
   /** 给最外层容器加的额外的类名 */
@@ -30,6 +39,9 @@ interface AppLayoutProps {
 export const AppLayout: React.FC<AppLayoutProps> = ({
   sidebar,
   topbar,
+  chatList,
+  permissionArea,
+  chatInput,
   children,
   rightPanel,
   className = '',
@@ -148,6 +160,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         <div className="app-layout-content-wrapper">
           {/* 中间主要工作区 */}
           <div className="app-layout-workspace">
+            {chatList}
+            {permissionArea}
+            {chatInput}
             {children}
           </div>
 

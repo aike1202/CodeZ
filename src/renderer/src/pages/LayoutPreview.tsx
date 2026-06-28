@@ -11,7 +11,7 @@ const LayoutPreview: React.FC = () => {
   const [rightPanelWidth, setRightPanelWidth] = useState(480);
   const [sidebarWidth, setSidebarWidth] = useState(260);
 
-  // 模拟假数据
+  // 1. Sidebar (侧边栏) 的内容变量
   const SidebarContent = (
     <div className="preview-placeholder-sidebar" style={{ border: '4px solid #ff6b6b' }}>
       <div className="preview-sidebar-top">
@@ -35,6 +35,7 @@ const LayoutPreview: React.FC = () => {
     </div>
   );
 
+  // 2. TopBar (顶部栏) 的内容变量
   const TopBarContent = (
     <div className="preview-placeholder-topbar" style={{ border: '4px solid #339af0' }}>
       <div style={{ display: 'flex', gap: 16 }}>
@@ -52,6 +53,7 @@ const LayoutPreview: React.FC = () => {
     </div>
   );
 
+  // 3. RightPanel (右侧面板) 的内容变量
   const RightPanelContent = (
     <div className="preview-placeholder-rightpanel" style={{ border: '4px solid #fcc419' }}>
       <div className="preview-rightpanel-content">
@@ -59,6 +61,44 @@ const LayoutPreview: React.FC = () => {
         <br/><br/>
         (例如：代码预览、文件详情)
       </div>
+    </div>
+  );
+
+  // 4a. ChatList
+  const ChatListContent = (
+    <div className="preview-chat-list">
+      中间工作区 (绿框大区域) - 例如 ChatList
+    </div>
+  );
+
+  // 4b. Permission (权限审核)
+  const PermissionContent = showPermission ? (
+    <div className="preview-permission-panel">
+      <div>
+        <strong>⚠️ 审批请求：</strong>
+        <span>执行命令 `npm install lodash`</span>
+      </div>
+      <div className="preview-permission-actions">
+        <button 
+          className="preview-btn-reject" 
+          onClick={() => setShowPermission(false)}
+        >
+          拒绝
+        </button>
+        <button 
+          className="preview-btn-accept"
+          onClick={() => setShowPermission(false)}
+        >
+          接受并执行
+        </button>
+      </div>
+    </div>
+  ) : null;
+
+  // 4c. ChatInput
+  const ChatInputContent = (
+    <div className="preview-chat-input" style={{ border: '4px solid #ff6b6b' }}>
+      底部输入区 (红框小区域)
     </div>
   );
 
@@ -71,46 +111,11 @@ const LayoutPreview: React.FC = () => {
       onRightPanelWidthChange={setRightPanelWidth}
       sidebarWidth={sidebarWidth}
       onSidebarWidthChange={setSidebarWidth}
-    >
-      {/* 工作区内容（将挂载在绿框里面） */}
-      <div className="preview-placeholder-workspace" style={{ border: '4px solid #51cf66' }}>
-        
-        {/* 聊天列表区 */}
-        <div className="preview-chat-list">
-          中间工作区 (绿框大区域) - 例如 ChatList
-        </div>
-        
-        {/* 悬浮/插进在输入框上方的权限审批区域 */}
-        {showPermission && (
-          <div className="preview-permission-panel">
-            <div>
-              <strong>⚠️ 审批请求：</strong>
-              <span>执行命令 `npm install lodash`</span>
-            </div>
-            <div className="preview-permission-actions">
-              <button 
-                className="preview-btn-reject" 
-                onClick={() => setShowPermission(false)}
-              >
-                拒绝
-              </button>
-              <button 
-                className="preview-btn-accept"
-                onClick={() => setShowPermission(false)}
-              >
-                接受并执行
-              </button>
-            </div>
-          </div>
-        )}
-        
-        {/* 底部的输入框 */}
-        <div className="preview-chat-input" style={{ border: '4px solid #ff6b6b' }}>
-          底部输入区 (红框小区域)
-        </div>
-        
-      </div>
-    </AppLayout>
+      
+      chatList={ChatListContent}
+      permissionArea={PermissionContent}
+      chatInput={ChatInputContent}
+    />
   );
 };
 
