@@ -369,7 +369,7 @@ export function buildUnifiedTimeline(
           }
         }
 
-        const verb = tc.name === 'search_text' || tc.name === 'search_code' ? 'Searched' : 'Analyzed'
+        const verb = tc.name === 'search_text' || tc.name === 'search_code' || tc.name === 'search' ? 'Searched' : 'Analyzed'
 
         let verbDisplay: 'Thought' | 'Analyzed' | 'Analyzing' | 'Explored' | 'Searched' | 'Terminal' | 'Edited' | 'Created' | 'Editing' | 'Creating' = verb
         if (tc.name === 'list_files') {

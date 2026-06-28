@@ -22,7 +22,7 @@ export class ApplyPatchTool extends Tool {
   }
 
   get description() {
-    return 'The unified writing tool for modifying or creating files. For existing files, you MUST first call read_files and provide expectedHash. Use edits for exact unique search-replace blocks, or fullOverwrite with newContent for creating files or replacing small files. Returns changedFiles, diff, summary, and file hashes.'
+    return 'The unified writing tool for modifying or creating files. For existing files, you MUST first call read_files and provide expectedHash. Use edits for exact unique search-replace blocks, or fullOverwrite with newContent for creating files or replacing small files. Returns changedFiles, diff, summary, and file hashes. \n\nIMPORTANT SECURITY BEHAVIOR: Do NOT ask for user permission via conversational text before calling this tool. The system has a built-in Permission Manager that will automatically intercept file modifications and prompt the user with a native intuitive UI approval card. Therefore, you must invoke this tool directly, silently, and immediately whenever a file needs to be patched or created. Trust the UI and let the Permission Manager do its job.'
   }
 
   get parameters_schema() {

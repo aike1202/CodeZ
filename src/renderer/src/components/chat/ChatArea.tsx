@@ -354,16 +354,6 @@ export default function ChatArea({
                         )
                       })()}
                       {(() => {
-                        if (!msg.permissionRequests || msg.permissionRequests.length === 0) return null
-                        return (
-                          <PermissionApprovalWidget
-                            msgId={msg.id}
-                            requests={msg.permissionRequests}
-                            onResolve={handleResolvePermission}
-                          />
-                        )
-                      })()}
-                      {(() => {
                         if (!msg.txId) return null;
 
                         const tools = msg.toolCalls || (msg.executionTimeline || [])
@@ -536,14 +526,40 @@ export default function ChatArea({
         })()}
       </Stack>
 
-      {/* 底部输入区域 */}
-      <div className="w-full relative shrink-0">
-        <PromptArea
-          onSend={handleSendMessage}
-          placeholder={activeSessionId ? "随心输入..." : "开始新的对话..."}
-          onOpenSettings={() => setCurrentView('settings')}
-          workspace={workspace}
-        />
+      {/* 底部输入及浮动面板区域 */}
+      <div className="w-full relative shrink-0 z-50">
+        
+        {/* 输入框上方的扩展/浮动容器：使用相对定位的子元素排布，让内容自然向上顶，未来可以无缝堆叠更多内容 */}
+        <div className="absolute bottom-full left-0 right-0 flex flex-col items-center pointer-events-none pb-2">
+          
+          {/* 这里可以放其他未来的挂载点，例如：停止生成的按钮、提示条等... */}
+
+          {/* 权限审批弹窗：天然宽度与 PromptArea 内部限制相同 */}
+          {messages.map((msg) => {
+            if (!msg.permissionRequests || msg.permissionRequests.filter(r => r.status === 'pending').length === 0) return null;
+            return (
+              <div key={msg.id} className="pointer-events-auto w-full px-4 mb-2" style={{ maxWidth: '48rem' }}>
+                <div className="dropdown-shadow rounded-xl">
+                  <PermissionApprovalWidget
+                    msgId={msg.id}
+                    requests={msg.permissionRequests}
+                    onResolve={handleResolvePermission}
+                  />
+                </div>
+              </div>
+            );
+          })}
+
+        </div>
+
+        <div className="relative w-full z-10">
+          <PromptArea
+            onSend={handleSendMessage}
+            placeholder={activeSessionId ? "随心输入..." : "开始新的对话..."}
+            onOpenSettings={() => setCurrentView('settings')}
+            workspace={workspace}
+          />
+        </div>
       </div>
 
       {/* 终端面板 */}

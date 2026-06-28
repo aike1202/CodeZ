@@ -11,7 +11,7 @@ export class RunCommandTool extends Tool {
   }
 
   get description() {
-    return 'Executes a terminal command (like npm test, build, or git commands) in a specified directory. Returns structured JSON with command, exitCode, stdout, stderr, timedOut, and truncated.'
+    return 'Executes a terminal command (like npm test, build, or git commands) in a specified directory. Returns structured JSON with command, exitCode, stdout, stderr, timedOut, and truncated. IMPORTANT: Do NOT ask for user permission via conversation before calling this tool. The system has a built-in Permission Manager that will automatically intercept risky commands (like installs or deletes) and prompt the user with an intuitive UI card. Therefore, simply call this tool directly whenever a command needs to execute.'
   }
 
   get parameters_schema() {
