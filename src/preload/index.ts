@@ -70,7 +70,7 @@ const api = {
       messages: ChatMessage[],
       callbacks: {
         onChunk: (delta: string, reasoningDelta?: string) => void
-        onDone: (fullContent: string, txId?: string) => void
+        onDone: (fullContent: string, stopReason?: string, txId?: string) => void
         onError: (error: string) => void
         onToolStart?: (toolCallId: string, name: string, args: string, thoughtSignature?: string) => void
         onToolEnd?: (toolCallId: string, result: string) => void
@@ -84,10 +84,10 @@ const api = {
         if (streamId !== activeStreamId) return
         callbacks.onChunk(delta, reasoningDelta)
       }
-      const endHandler = (_event: unknown, streamId: string, fullContent: string, txId?: string) => {
+      const endHandler = (_event: unknown, streamId: string, fullContent: string, stopReason?: string, txId?: string) => {
         if (streamId !== activeStreamId) return
         cleanup()
-        callbacks.onDone(fullContent, txId)
+        callbacks.onDone(fullContent, stopReason, txId)
       }
       const errorHandler = (_event: unknown, streamId: string, error: string) => {
         if (streamId !== activeStreamId) return
@@ -107,8 +107,8 @@ const api = {
         if (callbacks.onPermissionRequest) {
           callbacks.onPermissionRequest(request)
         } else {
-          console.warn('Auto-approving permission request because UI has not implemented onPermissionRequest:', request)
-          ipcRenderer.invoke(`${IPC_CHANNELS.CHAT_APPROVAL_RESPONSE}:${request.id}`, true).catch(console.error)
+          console.warn('Denying permission request because UI has not implemented onPermissionRequest:', request)
+          ipcRenderer.invoke(`${IPC_CHANNELS.CHAT_APPROVAL_RESPONSE}:${request.id}`, false).catch(console.error)
         }
       }
 
@@ -149,6 +149,9 @@ const api = {
 
     rejectFile: (txId: string, filePath: string): Promise<boolean> =>
       ipcRenderer.invoke(IPC_CHANNELS.CHAT_REJECT_FILE, txId, filePath),
+
+    getDiff: (txId: string): Promise<Array<{ path: string; diff: string }>> =>
+      ipcRenderer.invoke(IPC_CHANNELS.CHAT_GET_DIFF, txId),
       
     respondToApproval: (requestId: string, approved: boolean): Promise<void> =>
       ipcRenderer.invoke(`${IPC_CHANNELS.CHAT_APPROVAL_RESPONSE}:${requestId}`, approved)

@@ -1,4 +1,3 @@
-import { IPC_CHANNELS } from '../../shared/ipc/channels'
 import * as path from 'path'
 
 export type CommandRisk = 'safe' | 'write' | 'network' | 'destructive' | 'unknown'
@@ -24,25 +23,33 @@ export class PermissionManager {
     return PermissionManager.instance
   }
 
+  private getCommandFromArgs(parsedArgs: any): string {
+    return parsedArgs?.commandLine || parsedArgs?.CommandLine || parsedArgs?.command || ''
+  }
+
   public getCommandRisk(command: string): CommandRisk {
-    const safeCmds = ['npm test', 'npm run typecheck', 'git status', 'git diff', 'git log']
-    const writeCmds = ['npm install', 'npm run package', 'npm i', 'yarn install']
+    const safeCmds = ['npm test', 'npm run test', 'npm run typecheck', 'npm run build', 'git status', 'git diff', 'git log']
+    const writeCmds = ['npm install', 'npm i', 'npm run package', 'yarn install', 'yarn add', 'pnpm install', 'pnpm add']
     const networkCmds = ['curl', 'wget']
     const destructiveCmds = ['rm', 'del', 'git reset --hard', 'git clean', 'rmdir', 'rd']
 
     const lowerCmd = command.toLowerCase().trim()
     
-    if (safeCmds.some(c => lowerCmd.startsWith(c))) return 'safe'
-    if (writeCmds.some(c => lowerCmd.startsWith(c))) return 'write'
-    if (networkCmds.some(c => lowerCmd.startsWith(c))) return 'network'
-    if (destructiveCmds.some(c => lowerCmd.startsWith(c))) return 'destructive'
+    if (safeCmds.some(c => lowerCmd === c || lowerCmd.startsWith(`${c} `))) return 'safe'
+    if (destructiveCmds.some(c => lowerCmd === c || lowerCmd.startsWith(`${c} `))) return 'destructive'
+    if (writeCmds.some(c => lowerCmd === c || lowerCmd.startsWith(`${c} `))) return 'write'
+    if (networkCmds.some(c => lowerCmd === c || lowerCmd.startsWith(`${c} `))) return 'network'
     
     return 'unknown'
   }
 
   public checkToolPermission(toolName: string, parsedArgs: any, workspaceRoot: string): PermissionResult {
-    if (['search', 'list_files', 'read_files', 'get_project_snapshot', 'fast_context', 'rollback_last_edit'].includes(toolName)) {
+    if (['search', 'list_files', 'read_files', 'get_project_snapshot', 'fast_context'].includes(toolName)) {
       return 'allow'
+    }
+
+    if (toolName === 'rollback_last_edit') {
+      return 'ask'
     }
 
     // 2. 写入类工具：安全边界内拦截询问，超出边界直接拒绝
@@ -64,8 +71,9 @@ export class PermissionManager {
     }
 
     if (toolName === 'run_command') {
-      const risk = this.getCommandRisk(parsedArgs?.CommandLine || parsedArgs?.command || '')
+      const risk = this.getCommandRisk(this.getCommandFromArgs(parsedArgs))
       if (risk === 'safe') return 'allow'
+      if (risk === 'destructive') return 'ask'
       return 'ask'
     }
 
@@ -77,11 +85,11 @@ export class PermissionManager {
     let description = `Requesting permission to run tool ${toolName}`
 
     if (toolName === 'run_command') {
-      const cmd = parsedArgs?.CommandLine || parsedArgs?.command || ''
+      const cmd = this.getCommandFromArgs(parsedArgs)
       risk = this.getCommandRisk(cmd)
       description = `Execute command: ${cmd}`
     } else if (['write_to_file', 'replace_file_content', 'apply_patch'].includes(toolName)) {
-      const targetPath = parsedArgs?.TargetFile || parsedArgs?.file_path || parsedArgs?.path || 'unknown path'
+      const targetPath = parsedArgs?.TargetFile || parsedArgs?.filePath || parsedArgs?.file_path || parsedArgs?.path || 'unknown path'
       risk = 'write'
       description = `Modify file: ${targetPath}`
     }

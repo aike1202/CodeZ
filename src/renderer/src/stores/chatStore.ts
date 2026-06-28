@@ -80,6 +80,20 @@ export interface ChatMessage {
   txId?: string
   /** 记录各个文件的 Accept/Reject 状态 (key: filePath) */
   editStatuses?: Record<string, 'accepted' | 'rejected'>
+  /** 事务生成的真实 diff 列表 */
+  diffEntries?: Array<{ path: string; diff: string }>
+  /** 等待用户审批的权限请求 */
+  permissionRequests?: PermissionRequestState[]
+}
+
+export interface PermissionRequestState {
+  id: string
+  toolName: string
+  risk: string
+  description: string
+  args: any
+  status: 'pending' | 'approved' | 'denied'
+  createdAt: number
 }
 
 export interface ChatSession {
@@ -125,7 +139,10 @@ interface ChatState {
   finishStreaming: (msgId: string) => void
   setStreamCleanup: (cleanup: (() => void) | null) => void
   setTransactionId: (msgId: string, txId: string) => void
+  setDiffEntries: (msgId: string, diffEntries: Array<{ path: string; diff: string }>) => void
   setEditStatus: (msgId: string, filePath: string, status: 'accepted' | 'rejected') => void
+  addPermissionRequest: (msgId: string, request: Omit<PermissionRequestState, 'status' | 'createdAt'>) => void
+  resolvePermissionRequest: (msgId: string, requestId: string, approved: boolean) => void
   persistCurrentSession: () => Promise<void>
   archiveSession: (sessionId: string, archive: boolean) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
@@ -294,6 +311,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }))
   },
 
+  setDiffEntries: (msgId, diffEntries) => {
+    set((s) => {
+      const msgs = s.messages.map((m) =>
+        m.id === msgId ? { ...m, diffEntries } : m
+      )
+      const activeId = s.activeSessionId
+      const sessions = s.sessions.map((session) =>
+        session.id === activeId ? { ...session, messages: msgs } : session
+      )
+      return { messages: msgs, sessions }
+    })
+    get().persistCurrentSession()
+  },
+
   setEditStatus: (msgId: string, filePath: string, status: 'accepted' | 'rejected') => {
     set((s) => {
       const msgs = s.messages.map((m) => {
@@ -303,6 +334,55 @@ export const useChatStore = create<ChatState>((set, get) => ({
           return { ...m, editStatuses: newStatuses }
         }
         return m
+      })
+      const activeId = s.activeSessionId
+      const sessions = s.sessions.map((session) =>
+        session.id === activeId ? { ...session, messages: msgs } : session
+      )
+      return { messages: msgs, sessions }
+    })
+    get().persistCurrentSession()
+  },
+
+  addPermissionRequest: (msgId: string, request: Omit<PermissionRequestState, 'status' | 'createdAt'>) => {
+    set((s) => {
+      const msgs = s.messages.map((m) => {
+        if (m.id !== msgId) return m
+        const existing = m.permissionRequests || []
+        if (existing.some((item) => item.id === request.id)) return m
+        return {
+          ...m,
+          permissionRequests: [
+            ...existing,
+            {
+              ...request,
+              status: 'pending' as const,
+              createdAt: Date.now()
+            }
+          ]
+        }
+      })
+      const activeId = s.activeSessionId
+      const sessions = s.sessions.map((session) =>
+        session.id === activeId ? { ...session, messages: msgs } : session
+      )
+      return { messages: msgs, sessions }
+    })
+    get().persistCurrentSession()
+  },
+
+  resolvePermissionRequest: (msgId: string, requestId: string, approved: boolean) => {
+    set((s) => {
+      const msgs = s.messages.map((m) => {
+        if (m.id !== msgId || !m.permissionRequests) return m
+        return {
+          ...m,
+          permissionRequests: m.permissionRequests.map((request) =>
+            request.id === requestId
+              ? { ...request, status: approved ? 'approved' as const : 'denied' as const }
+              : request
+          )
+        }
       })
       const activeId = s.activeSessionId
       const sessions = s.sessions.map((session) =>
@@ -522,15 +602,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (m.id !== msgId || !m.toolCalls) return m
 
         const now = Date.now()
-        const updateToolCall = (toolCall: ToolCallState): ToolCallState =>
+          const updateToolCall = (toolCall: ToolCallState): ToolCallState =>
           toolCall.id === toolCallId
             ? {
                 ...toolCall,
                 result,
-                status: result.startsWith('Error:') ? 'error' : 'success',
+                status: result.startsWith('Error:') || result.includes('"ok":false') ? 'error' : 'success',
                 completedAt: now
               }
             : toolCall
+
         const nextToolCalls = m.toolCalls.map(updateToolCall)
 
         return {

@@ -1,0 +1,112 @@
+.permission-approval-card {
+  margin-top: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.permission-approval-header {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.permission-approval-title {
+  color: var(--text-primary, #f8fafc);
+}
+
+.permission-approval-count {
+  color: var(--text-secondary, #94a3b8);
+  font-size: 12px;
+}
+
+.permission-approval-item {
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.permission-approval-risk-destructive {
+  border-color: rgba(239, 68, 68, 0.55);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.permission-approval-risk-network,
+.permission-approval-risk-write,
+.permission-approval-risk-unknown {
+  border-color: rgba(245, 158, 11, 0.45);
+}
+
+.permission-approval-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.permission-approval-risk {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.permission-approval-tool {
+  color: var(--text-primary, #f8fafc);
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.permission-approval-desc {
+  color: var(--text-primary, #f8fafc);
+  font-size: 13px;
+  word-break: break-word;
+}
+
+.permission-approval-details {
+  color: var(--text-secondary, #94a3b8);
+  font-size: 12px;
+}
+
+.permission-approval-details summary {
+  cursor: pointer;
+}
+
+.permission-approval-details pre {
+  margin-top: 6px;
+  max-height: 160px;
+  overflow: auto;
+  padding: 8px;
+  border-radius: 6px;
+  background: rgba(2, 6, 23, 0.5);
+  color: #cbd5e1;
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
+.permission-approval-actions {
+  flex-shrink: 0;
+}
+
+.permission-approval-deny,
+.permission-approval-allow {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.permission-approval-status {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.permission-approval-status-approved {
+  color: #22c55e;
+}
+
+.permission-approval-status-denied {
+  color: #ef4444;
+}
+
+.permission-approval-note {
+  color: var(--text-secondary, #94a3b8);
+  font-size: 12px;
+}

@@ -279,7 +279,7 @@ export function buildUnifiedTimeline(
       } else {
         const target = getToolTarget(tc) || getToolNoun(tc.name)
 
-        if (tc.name === 'write_to_file' || tc.name === 'replace_file_content' || tc.name === 'multi_replace_file_content') {
+        if (tc.name === 'write_to_file' || tc.name === 'replace_file_content' || tc.name === 'multi_replace_file_content' || tc.name === 'apply_patch') {
           const argsObj = parseArgs(tc.args)
           let additions = '+0'
           let deletions = '-0'
@@ -295,6 +295,19 @@ export function buildUnifiedTimeline(
             }
             if (typeof argsObj.targetContent === 'string') {
               deletions = `-${argsObj.targetContent.split('\n').length}`
+            }
+          } else if (tc.name === 'apply_patch') {
+            if (Array.isArray(argsObj.edits)) {
+              let totalAdds = 0
+              let totalDels = 0
+              argsObj.edits.forEach((edit: any) => {
+                totalAdds += String(edit.replacementContent || '').split('\n').length
+                totalDels += String(edit.targetContent || '').split('\n').length
+              })
+              additions = `+${totalAdds}`
+              deletions = `-${totalDels}`
+            } else if (typeof argsObj.newContent === 'string') {
+              additions = `+${argsObj.newContent.split('\n').length}`
             }
           } else if (tc.name === 'multi_replace_file_content') {
             const chunks = Array.isArray(argsObj.ReplacementChunks) ? argsObj.ReplacementChunks : (Array.isArray(argsObj.replacementChunks) ? argsObj.replacementChunks : [])

@@ -5,6 +5,7 @@ import PromptArea from '../PromptArea'
 import ExecutionLog from './ExecutionLog'
 import MessageBody from './MessageBody'
 import EditApprovalWidget from './EditApprovalWidget'
+import PermissionApprovalWidget from './PermissionApprovalWidget'
 import TerminalPanel from './TerminalPanel'
 import Flex from '../ui/Flex'
 import Stack from '../ui/Stack'
@@ -72,6 +73,14 @@ export default function ChatArea({
   const startToolCall = useChatStore((s) => s.startToolCall)
   const finishToolCall = useChatStore((s) => s.finishToolCall)
   const appendReasoningTimelineChunk = useChatStore((s) => s.appendReasoningTimelineChunk)
+  const addPermissionRequest = useChatStore((s) => s.addPermissionRequest)
+  const resolvePermissionRequest = useChatStore((s) => s.resolvePermissionRequest)
+  const setDiffEntries = useChatStore((s) => s.setDiffEntries)
+
+  const handleResolvePermission = React.useCallback(async (msgId: string, requestId: string, approved: boolean) => {
+    await window.api.chat.respondToApproval(requestId, approved)
+    resolvePermissionRequest(msgId, requestId, approved)
+  }, [resolvePermissionRequest])
 
   const handleSendMessage = React.useCallback(
     async (message: string, modelName: string) => {
@@ -179,16 +188,24 @@ export default function ChatArea({
             appendStreamChunk(agentId, delta, reasoningDelta)
             appendReasoningTimelineChunk(agentId, reasoningDelta || '')
           },
-          onDone: (fullContent: string, txId?: string) => {
+          onDone: async (fullContent: string, _stopReason?: string, txId?: string) => {
             finishStreaming(agentId)
             if (txId) {
               useChatStore.getState().setTransactionId(agentId, txId)
+              try {
+                const diffs = await window.api.chat.getDiff(txId)
+                if (Array.isArray(diffs) && diffs.length > 0) {
+                  setDiffEntries(agentId, diffs)
+                }
+              } catch (err) {
+                console.warn('Failed to load transaction diff:', err)
+              }
             }
             persistCurrentSession()
             setStreamCleanup(null)
           },
           onError: (error: string) => {
-            appendStreamChunk(agentId, `\n\n错误：{error}`)
+            appendStreamChunk(agentId, `\n\n错误：${error}`)
             finishStreaming(agentId)
             persistCurrentSession()
             setStreamCleanup(null)
@@ -203,6 +220,9 @@ export default function ChatArea({
           },
           onToolEnd: (toolCallId: string, result: string) => {
             finishToolCall(agentId, toolCallId, result)
+          },
+          onPermissionRequest: (request: any) => {
+            addPermissionRequest(agentId, request)
           }
         }
       )
@@ -216,7 +236,7 @@ export default function ChatArea({
 
       setStreamCleanup(wrappedCleanup)
     },
-    [addUserMessage, startStreamingReply, appendStreamChunk, finishStreaming, persistCurrentSession, setStreamCleanup, createSession, startToolCall, finishToolCall, appendReasoningTimelineChunk]
+    [addUserMessage, startStreamingReply, appendStreamChunk, finishStreaming, persistCurrentSession, setStreamCleanup, createSession, startToolCall, finishToolCall, appendReasoningTimelineChunk, addPermissionRequest, setDiffEntries]
   )
 
   // 鏅鸿兘瑙﹀簳婊氬姩閫昏緫
@@ -334,6 +354,16 @@ export default function ChatArea({
                         )
                       })()}
                       {(() => {
+                        if (!msg.permissionRequests || msg.permissionRequests.length === 0) return null
+                        return (
+                          <PermissionApprovalWidget
+                            msgId={msg.id}
+                            requests={msg.permissionRequests}
+                            onResolve={handleResolvePermission}
+                          />
+                        )
+                      })()}
+                      {(() => {
                         if (!msg.txId) return null;
 
                         const tools = msg.toolCalls || (msg.executionTimeline || [])
@@ -344,10 +374,21 @@ export default function ChatArea({
                         const editTools = tools.filter((tc: any) =>
                           tc.name === 'write_to_file' ||
                           tc.name === 'replace_file_content' ||
-                          tc.name === 'multi_replace_file_content'
+                          tc.name === 'multi_replace_file_content' ||
+                          tc.name === 'apply_patch'
                         );
 
                         if (editTools.length === 0) return null;
+
+                        let diffByPath: Record<string, string> = {};
+                        try {
+                          diffByPath = (msg.diffEntries || []).reduce((acc: Record<string, string>, item: any) => {
+                            if (item?.path && item?.diff) acc[item.path] = item.diff;
+                            return acc;
+                          }, {});
+                        } catch {
+                          diffByPath = {};
+                        }
 
                         const edits = editTools.map((tc: any) => {
                           let filePath = '';
@@ -357,12 +398,38 @@ export default function ChatArea({
                             const argsObj = parseArgs(tc.args);
                             filePath = argsObj.targetFile || argsObj.TargetFile || argsObj.filePath || argsObj.path || '';
 
-                            if (tc.name === 'write_to_file') {
+                            const matchingDiff = Object.entries(diffByPath).find(([diffPath]) => {
+                              if (!filePath) return false;
+                              const normalize = (p: string) => p.replace(/\\/g, '/').toLowerCase();
+                              const fileNorm = normalize(filePath);
+                              const diffNorm = normalize(diffPath);
+                              return fileNorm === diffNorm || diffNorm.endsWith(fileNorm) || fileNorm.endsWith(diffNorm);
+                            })?.[1];
+
+                            if (matchingDiff) {
+                              const added = matchingDiff.split('\n').filter((line) => line.startsWith('+') && !line.startsWith('+++')).length;
+                              const removed = matchingDiff.split('\n').filter((line) => line.startsWith('-') && !line.startsWith('---')).length;
+                              additions = `+${added}`;
+                              deletions = `-${removed}`;
+                            } else if (tc.name === 'write_to_file') {
                               const codeContent = argsObj.codeContent || argsObj.code_content || '';
                               additions = `+${codeContent.split('\n').length}`;
                             } else if (tc.name === 'replace_file_content') {
                               additions = `+${(argsObj.replacementContent || '').split('\n').length}`;
                               deletions = `-${(argsObj.targetContent || '').split('\n').length}`;
+                            } else if (tc.name === 'apply_patch') {
+                              if (Array.isArray(argsObj.edits)) {
+                                let totalAdds = 0;
+                                let totalDels = 0;
+                                argsObj.edits.forEach((edit: any) => {
+                                  totalAdds += String(edit.replacementContent || '').split('\n').length;
+                                  totalDels += String(edit.targetContent || '').split('\n').length;
+                                });
+                                additions = `+${totalAdds}`;
+                                deletions = `-${totalDels}`;
+                              } else if (typeof argsObj.newContent === 'string') {
+                                additions = `+${argsObj.newContent.split('\n').length}`;
+                              }
                             } else if (tc.name === 'multi_replace_file_content') {
                               const chunks = Array.isArray(argsObj.ReplacementChunks) ? argsObj.ReplacementChunks : (Array.isArray(argsObj.replacementChunks) ? argsObj.replacementChunks : []);
                               let totalAdds = 0;
@@ -394,7 +461,7 @@ export default function ChatArea({
                               const normalize = (p: string) => p.replace(/\\/g, '/').toLowerCase();
                               const targetNorm = normalize(filePath);
                               const tc = tools.find((t: any) => {
-                                if (t.name !== 'write_to_file' && t.name !== 'replace_file_content' && t.name !== 'multi_replace_file_content') return false;
+                                if (t.name !== 'write_to_file' && t.name !== 'replace_file_content' && t.name !== 'multi_replace_file_content' && t.name !== 'apply_patch') return false;
                                 try {
                                   const argsObj = parseArgs(t.args);
                                   const fileArg = argsObj.targetFile || argsObj.TargetFile || argsObj.filePath || argsObj.path;
@@ -422,6 +489,21 @@ export default function ChatArea({
                                       targetContent: argsObj.targetContent || '',
                                       replacementContent: argsObj.replacementContent || ''
                                     });
+                                  } else if (tc.name === 'apply_patch') {
+                                    if (Array.isArray(argsObj.edits) && argsObj.edits.length > 0) {
+                                      const targetContent = argsObj.edits.map((edit: any, i: number) => `--- Edit ${i + 1} ---\n${edit.targetContent || ''}`).join('\n\n');
+                                      const replacementContent = argsObj.edits.map((edit: any, i: number) => `--- Edit ${i + 1} ---\n${edit.replacementContent || ''}`).join('\n\n');
+                                      handleDiffClick(filePath, {
+                                        type: 'replace',
+                                        targetContent,
+                                        replacementContent
+                                      });
+                                    } else {
+                                      handleDiffClick(filePath, {
+                                        type: 'write',
+                                        codeContent: argsObj.newContent || ''
+                                      });
+                                    }
                                   } else if (tc.name === 'multi_replace_file_content') {
                                     const chunks = Array.isArray(argsObj.ReplacementChunks) ? argsObj.ReplacementChunks : (Array.isArray(argsObj.replacementChunks) ? argsObj.replacementChunks : []);
                                     const targetContent = chunks.map((c: any, i: number) => `--- Chunk ${i + 1} ---\n${c.TargetContent || c.targetContent || ''}`).join('\n\n');
@@ -454,17 +536,17 @@ export default function ChatArea({
         })()}
       </Stack>
 
-      {/* 搴曢儴杈撳叆鍖哄煙 */}
+      {/* 底部输入区域 */}
       <div className="w-full relative shrink-0">
         <PromptArea
           onSend={handleSendMessage}
-          placeholder={activeSessionId ? "闅忓績杈撳叆..." : "寮€濮嬫柊鐨勫璇?.."}
+          placeholder={activeSessionId ? "随心输入..." : "开始新的对话..."}
           onOpenSettings={() => setCurrentView('settings')}
           workspace={workspace}
         />
       </div>
 
-      {/* 缁堢闈㈡澘 */}
+      {/* 终端面板 */}
       {terminalOpen && workspace && (
         <TerminalPanel
           workspaceId={workspace.id}

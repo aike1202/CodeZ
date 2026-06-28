@@ -32,14 +32,17 @@ declare global {
           messages: any[],
           callbacks: {
             onChunk: (delta: string, reasoningDelta?: string) => void
-            onDone: (fullContent: string) => void
+            onDone: (fullContent: string, stopReason?: string, txId?: string) => void
             onError: (error: string) => void
-            onToolStart?: (toolCallId: string, name: string, args: string) => void
+            onToolStart?: (toolCallId: string, name: string, args: string, thoughtSignature?: string) => void
             onToolEnd?: (toolCallId: string, result: string) => void
+            onPermissionRequest?: (request: any) => void
           }
         ) => () => void
         acceptFile: (txId: string, filePath: string) => Promise<boolean>
         rejectFile: (txId: string, filePath: string) => Promise<boolean>
+        getDiff: (txId: string) => Promise<Array<{ path: string; diff: string }>>
+        respondToApproval: (requestId: string, approved: boolean) => Promise<void>
       }
       session: {
         list: () => Promise<any>
