@@ -134,3 +134,4 @@ testmsg.txt
 scratch_*
 electron.vite.config.*.mjs
 .myagent-cache/
+dist-app
