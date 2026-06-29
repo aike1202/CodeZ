@@ -80,6 +80,8 @@ app.whenReady().then(() => {
   registerTaskIpc()
   registerThemeIpc()
   registerSkillIpc()
+  const { registerRulesIpc } = require('./ipc/rules.handlers')
+  registerRulesIpc()
 
   // 监听来自前端渲染进程的自定义标题栏指令
   ipcMain.on('window-control', (_, action) => {
