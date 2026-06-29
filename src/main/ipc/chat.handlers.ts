@@ -90,15 +90,15 @@ You have access to various tools. Choose the most efficient tool for each task b
 
       systemPrompt += `\n</developer_instructions>\n\n`
 
-      // 自动加载本地全局规则 (属于 Repository Instructions)
-      const agentsMdPath = path.join(currentWorkspace, 'AGENTS.md')
-      if (fs.existsSync(agentsMdPath)) {
-        try {
-          const rulesContent = fs.readFileSync(agentsMdPath, 'utf-8')
+      // 动态加载项目和全局规则
+      try {
+        const { RulesResolver } = await import('../agent/RulesResolver')
+        const rulesContent = await RulesResolver.getRules(currentWorkspace)
+        if (rulesContent) {
           systemPrompt += `<repository_instructions>\n${rulesContent}\n</repository_instructions>\n\n`
-        } catch (e) {
-          console.error('Failed to read AGENTS.md', e)
         }
+      } catch (e) {
+        console.error('Failed to resolve rules via RulesResolver', e)
       }
 
       // Environment Context
