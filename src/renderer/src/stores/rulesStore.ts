@@ -9,6 +9,7 @@ interface RulesState {
   loadRules: () => Promise<void>
   saveRule: (rule: RuleFile) => Promise<boolean>
   deleteRule: (rulePath: string) => Promise<boolean>
+  renameRule: (oldPath: string, newFilename: string, projectId: string | undefined, scope: 'global' | 'workspace') => Promise<boolean>
 }
 
 export const useRulesStore = create<RulesState>((set, get) => ({
@@ -45,6 +46,25 @@ export const useRulesStore = create<RulesState>((set, get) => ({
   deleteRule: async (rulePath: string) => {
     try {
       const success = await window.api.rules.delete(rulePath)
+      if (success) {
+        await get().loadRules()
+      }
+      return success
+    } catch (err: any) {
+      set({ error: err.message })
+      return false
+    }
+  },
+
+  renameRule: async (oldPath: string, newFilename: string, projectId: string | undefined, scope: 'global' | 'workspace') => {
+    try {
+      let workspaceRoot = ''
+      if (scope === 'workspace') {
+        const recentProjects = useWorkspaceStore.getState().recentProjects || []
+        const proj = recentProjects.find(p => p.id === projectId)
+        if (proj) workspaceRoot = proj.rootPath
+      }
+      const success = await window.api.rules.rename(oldPath, newFilename, workspaceRoot, scope)
       if (success) {
         await get().loadRules()
       }

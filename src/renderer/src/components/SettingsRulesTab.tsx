@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react'
 import Flex from './ui/Flex'
 import Stack from './ui/Stack'
-import { IconBook, IconAdd, IconTrash, IconFolder, IconChevron, IconMessagePlus, IconMoreHorizontal, IconMessage } from './Icons'
+import { IconAdd, IconTrash, IconFolder, IconChevron, IconMessagePlus, IconMoreHorizontal, IconMessage, IconEdit } from './Icons'
 import { useRulesStore } from '../stores/rulesStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import type { RuleFile, RuleScope } from '@shared/types/rules'
+import MarkdownEditor from './ui/MarkdownEditor'
 import './SettingsRulesTab.css'
 
 export default function SettingsRulesTab(): React.ReactElement {
@@ -12,6 +13,7 @@ export default function SettingsRulesTab(): React.ReactElement {
   const loadRules = useRulesStore(s => s.loadRules)
   const saveRule = useRulesStore(s => s.saveRule)
   const deleteRule = useRulesStore(s => s.deleteRule)
+  const renameRule = useRulesStore(s => s.renameRule)
   
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set())
@@ -19,6 +21,9 @@ export default function SettingsRulesTab(): React.ReactElement {
   // Local state for the editor
   const [editingRule, setEditingRule] = useState<Partial<RuleFile> | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+
+  const [inlineEditId, setInlineEditId] = useState<string | null>(null)
+  const [inlineEditValue, setInlineEditValue] = useState('')
 
   useEffect(() => {
     loadRules()
@@ -28,11 +33,17 @@ export default function SettingsRulesTab(): React.ReactElement {
   const workspaceRules = rules.filter(r => r.scope === 'workspace')
 
   const handleSelectRule = (rule: RuleFile) => {
+    // If we are currently inline editing something else, commit it first
+    if (inlineEditId && inlineEditId !== rule.path) {
+      commitRename()
+    }
     setActiveTabId(rule.path)
     setEditingRule({ ...rule })
   }
 
   const handleNewRule = (scope: RuleScope, projectId?: string) => {
+    if (inlineEditId) commitRename()
+    
     setActiveTabId('new')
     setEditingRule({
       scope,
@@ -40,6 +51,45 @@ export default function SettingsRulesTab(): React.ReactElement {
       content: '',
       projectId
     })
+    setInlineEditId('new')
+    setInlineEditValue('')
+    
+    if (projectId && !expandedProjects.has(projectId)) {
+      setExpandedProjects(prev => new Set(prev).add(projectId))
+    }
+  }
+
+  const startRename = (rule: RuleFile) => {
+    setInlineEditId(rule.path)
+    setInlineEditValue(rule.filename)
+  }
+
+  const commitRename = async () => {
+    if (!inlineEditId) return
+    const newName = inlineEditValue.trim()
+    
+    if (inlineEditId === 'new') {
+      if (newName) {
+        setEditingRule(prev => prev ? { ...prev, filename: newName } : null)
+      } else {
+        // If empty name on new rule, cancel creation
+        setActiveTabId(null)
+        setEditingRule(null)
+      }
+      setInlineEditId(null)
+      return
+    }
+
+    if (newName) {
+      const rule = rules.find(r => r.path === inlineEditId)
+      if (rule && rule.filename !== newName) {
+        await renameRule(rule.path, newName, rule.projectId, rule.scope)
+        if (activeTabId === rule.path && editingRule) {
+          setEditingRule({ ...editingRule, filename: newName })
+        }
+      }
+    }
+    setInlineEditId(null)
   }
 
   const toggleProject = (projectId: string) => {
@@ -95,6 +145,53 @@ export default function SettingsRulesTab(): React.ReactElement {
     }
   }, [recentProjects])
 
+  const renderInlineInput = () => (
+    <input 
+      autoFocus
+      value={inlineEditValue}
+      onChange={e => setInlineEditValue(e.target.value)}
+      onBlur={commitRename}
+      onKeyDown={e => e.key === 'Enter' && commitRename()}
+      className="inline-rename-input"
+      placeholder="输入文件名..."
+      style={{ 
+        flex: 1, background: 'transparent', border: '1px solid var(--accent-primary)', 
+        color: 'var(--text-primary)', outline: 'none', padding: '2px 4px', borderRadius: 4, fontSize: 13
+      }}
+    />
+  )
+
+  const renderRuleItem = (r: RuleFile) => {
+    const isEditing = inlineEditId === r.path
+    return (
+      <div
+        key={r.path}
+        className={`rule-item ${activeTabId === r.path ? 'active' : ''}`}
+        onClick={() => { if (!isEditing) handleSelectRule(r) }}
+        onDoubleClick={() => startRename(r)}
+      >
+        <IconMessage className="shrink-0" style={{ marginRight: 8, opacity: 0.7 }}/>
+        {isEditing ? (
+          renderInlineInput()
+        ) : (
+          <span className="truncate" style={{ flex: 1 }}>{r.filename}</span>
+        )}
+      </div>
+    )
+  }
+
+  const renderNewRulePlaceholder = (scope: RuleScope, projectId?: string) => {
+    if (activeTabId !== 'new' || editingRule?.scope !== scope || editingRule?.projectId !== projectId) return null
+    if (inlineEditId !== 'new') return null
+    
+    return (
+      <div className="rule-item active">
+        <IconMessage className="shrink-0" style={{ marginRight: 8, opacity: 0.7 }}/>
+        {renderInlineInput()}
+      </div>
+    )
+  }
+
   return (
     <Flex className="settings-content-wrapper">
       {/* 左侧 - 规则列表 */}
@@ -120,16 +217,8 @@ export default function SettingsRulesTab(): React.ReactElement {
               </div>
             </div>
 
-            {globalRules.map((r) => (
-              <div
-                key={r.path}
-                className={`rule-item ${activeTabId === r.path ? 'active' : ''}`}
-                onClick={() => handleSelectRule(r)}
-              >
-                <IconMessage className="shrink-0" style={{ marginRight: 8, opacity: 0.7 }}/>
-                <span className="truncate">{r.filename}</span>
-              </div>
-            ))}
+            {globalRules.map(renderRuleItem)}
+            {renderNewRulePlaceholder('global')}
           </Stack>
 
           {/* 项目规则 */}
@@ -159,25 +248,14 @@ export default function SettingsRulesTab(): React.ReactElement {
                       <button className="project-action-btn" onClick={(e) => { e.stopPropagation(); handleNewRule('workspace', proj.id) }} title="添加项目规则">
                         <IconMessagePlus />
                       </button>
-                      <button className="project-action-btn" onClick={(e) => { e.stopPropagation(); }} title="更多">
-                        <IconMoreHorizontal />
-                      </button>
                     </div>
                   </div>
                   
                   {isExpanded && (
                     <Stack gap={1}>
-                      {projRules.map((r) => (
-                        <div
-                          key={r.path}
-                          className={`rule-item ${activeTabId === r.path ? 'active' : ''}`}
-                          onClick={() => handleSelectRule(r)}
-                        >
-                          <IconMessage className="shrink-0" style={{ marginRight: 8, opacity: 0.7 }}/>
-                          <span className="truncate">{r.filename}</span>
-                        </div>
-                      ))}
-                      {projRules.length === 0 && (
+                      {projRules.map(renderRuleItem)}
+                      {renderNewRulePlaceholder('workspace', proj.id)}
+                      {projRules.length === 0 && activeTabId !== 'new' && (
                         <div style={{ padding: '4px 8px 4px 32px', fontSize: 12, color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
                           暂无规则
                         </div>
@@ -193,10 +271,17 @@ export default function SettingsRulesTab(): React.ReactElement {
 
       {/* 右侧 - 编辑区 */}
       {editingRule ? (
-        <Flex direction="col" className="settings-panel-container" style={{ padding: '24px', flex: 1, overflowY: 'auto' }}>
-          <Flex align="center" justify="between" style={{ marginBottom: 20 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)' }}>
-              {activeTabId === 'new' ? '新建规则' : '编辑规则'}
+        <Flex direction="col" className="settings-panel-container" style={{ flex: 1, overflow: 'hidden' }}>
+          <Flex align="center" justify="between" style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-color)' }}>
+            <h2 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              {editingRule.filename ? (
+                <>
+                  <IconMessage style={{ width: 20, height: 20, color: 'var(--accent-primary)' }} />
+                  {editingRule.filename}
+                </>
+              ) : (
+                '未命名规则'
+              )}
             </h2>
             <Flex gap={2}>
               {activeTabId !== 'new' && (
@@ -218,32 +303,13 @@ export default function SettingsRulesTab(): React.ReactElement {
             </Flex>
           </Flex>
 
-          <Stack gap={4}>
-            {/* Meta data form */}
-            <div className="form-group">
-              <label>文件名 (File Name)</label>
-              <input 
-                type="text" 
-                className="input" 
-                placeholder="例如: react-style.md"
-                value={editingRule.filename || ''}
-                onChange={e => setEditingRule({ ...editingRule, filename: e.target.value })}
-                disabled={activeTabId !== 'new'} // cannot rename existing files easily via this UI yet
-              />
-              <span className="help-text">推荐使用 .md 后缀。如果填入 AGENTS.md 或 .clinerules 则会存放在根目录。</span>
-            </div>
-
-            <div className="form-group" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-              <label>规则内容 (Markdown)</label>
-              <textarea 
-                className="input rules-textarea" 
-                placeholder={`---\ndescription: 例如: react-style.md\nglobs: src/**/*.tsx\nalwaysApply: false\n---\n\n# 编写你的规则...`}
-                value={editingRule.content || ''}
-                onChange={e => setEditingRule({ ...editingRule, content: e.target.value })}
-                style={{ flex: 1, minHeight: 300, fontFamily: 'monospace', resize: 'vertical' }}
-              />
-            </div>
-          </Stack>
+          <div style={{ flex: 1, padding: 24, overflow: 'hidden' }}>
+            <MarkdownEditor 
+              value={editingRule.content || ''}
+              onChange={val => setEditingRule({ ...editingRule, content: val })}
+              placeholder={`---\ndescription: 例如规则描述\nglobs: src/**/*.tsx\nalwaysApply: false\n---\n\n# 编写你的规则...`}
+            />
+          </div>
         </Flex>
       ) : (
         <Flex align="center" justify="center" className="settings-empty-pane">

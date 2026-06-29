@@ -78,9 +78,10 @@ declare global {
         importExternal: (sourceName?: string, customPath?: string, forceOverwrite?: boolean) => Promise<boolean>
       }
       rules: {
-        getList: (workspaceRoot: string) => Promise<any[]>
+        getList: (workspaces: any[]) => Promise<any[]>
         save: (rule: any, workspaceRoot: string) => Promise<boolean>
         delete: (rulePath: string) => Promise<boolean>
+        rename: (oldPath: string, newFilename: string, workspaceRoot: string, scope: string) => Promise<boolean>
       }
     }
   }

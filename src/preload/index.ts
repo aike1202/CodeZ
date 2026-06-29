@@ -240,12 +240,14 @@ const api = {
   },
 
   rules: {
-    getList: (workspaceRoot: string): Promise<any[]> =>
-      ipcRenderer.invoke(IPC_CHANNELS.RULES_GET_LIST, workspaceRoot),
+    getList: (workspaces: any[]): Promise<any[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.RULES_GET_LIST, workspaces),
     save: (rule: any, workspaceRoot: string): Promise<boolean> =>
       ipcRenderer.invoke(IPC_CHANNELS.RULES_SAVE, rule, workspaceRoot),
     delete: (rulePath: string): Promise<boolean> =>
-      ipcRenderer.invoke(IPC_CHANNELS.RULES_DELETE, rulePath)
+      ipcRenderer.invoke(IPC_CHANNELS.RULES_DELETE, rulePath),
+    rename: (oldPath: string, newFilename: string, workspaceRoot: string, scope: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC_CHANNELS.RULES_RENAME, oldPath, newFilename, workspaceRoot, scope)
   }
 }
 

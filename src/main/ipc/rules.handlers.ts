@@ -75,6 +75,37 @@ export function registerRulesIpc(): void {
       throw e
     }
   })
+
+  ipcMain.handle(IPC_CHANNELS.RULES_RENAME, async (_, oldPath: string, newFilename: string, workspaceRoot: string, scope: RuleScope): Promise<boolean> => {
+    try {
+      if (!newFilename) throw new Error('Filename is required')
+      let newPath = ''
+      const isRootFile = ['AGENTS.md', '.clinerules', '.cursorrules'].includes(newFilename)
+      
+      if (scope === 'global') {
+        const homeDir = os.homedir()
+        if (newFilename === 'AGENTS.md') {
+          newPath = path.join(homeDir, '.codez', 'AGENTS.md')
+        } else {
+          newPath = path.join(homeDir, '.codez', 'rules', newFilename)
+        }
+      } else {
+        if (!workspaceRoot) throw new Error('Workspace root is required for workspace rules')
+        if (isRootFile) {
+          newPath = path.join(workspaceRoot, newFilename)
+        } else {
+          newPath = path.join(workspaceRoot, '.codez', 'rules', newFilename)
+        }
+      }
+
+      await fs.mkdir(path.dirname(newPath), { recursive: true })
+      await fs.rename(oldPath, newPath)
+      return true
+    } catch (e) {
+      console.error('Failed to rename rule', e)
+      throw e
+    }
+  })
 }
 
 async function loadRulesFromPath(filePath: string, scope: RuleScope, rules: RuleFile[], projectId?: string) {

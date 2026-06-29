@@ -56,5 +56,6 @@ export const IPC_CHANNELS = {
   // Rules
   RULES_GET_LIST: 'rules:get-list',
   RULES_SAVE: 'rules:save',
-  RULES_DELETE: 'rules:delete'
+  RULES_DELETE: 'rules:delete',
+  RULES_RENAME: 'rules:rename'
 } as const
