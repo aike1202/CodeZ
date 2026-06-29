@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import Flex from './ui/Flex'
 import Stack from './ui/Stack'
-import { IconBook, IconAdd, IconTrash, IconFolder } from './Icons'
+import { IconBook, IconAdd, IconTrash, IconFolder, IconChevron, IconMessagePlus, IconMoreHorizontal, IconMessage } from './Icons'
 import { useRulesStore } from '../stores/rulesStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import type { RuleFile, RuleScope } from '@shared/types/rules'
@@ -14,6 +14,7 @@ export default function SettingsRulesTab(): React.ReactElement {
   const deleteRule = useRulesStore(s => s.deleteRule)
   
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set())
   
   // Local state for the editor
   const [editingRule, setEditingRule] = useState<Partial<RuleFile> | null>(null)
@@ -31,16 +32,24 @@ export default function SettingsRulesTab(): React.ReactElement {
     setEditingRule({ ...rule })
   }
 
-  const handleNewRule = (scope: RuleScope) => {
+  const handleNewRule = (scope: RuleScope, projectId?: string) => {
     setActiveTabId('new')
     setEditingRule({
       scope,
       filename: '',
-      description: '',
-      globs: '',
-      alwaysApply: false,
-      content: ''
+      content: '',
+      projectId
     })
+  }
+
+  const toggleProject = (projectId: string) => {
+    const next = new Set(expandedProjects)
+    if (next.has(projectId)) {
+      next.delete(projectId)
+    } else {
+      next.add(projectId)
+    }
+    setExpandedProjects(next)
   }
 
   const handleSave = async () => {
@@ -49,8 +58,6 @@ export default function SettingsRulesTab(): React.ReactElement {
     try {
       const success = await saveRule(editingRule as RuleFile)
       if (success) {
-        // If it was new, we might need to select it by its new path, 
-        // but since we don't have the exact path returned easily, we just reload
         if (activeTabId === 'new') {
           setActiveTabId(null)
           setEditingRule(null)
@@ -81,6 +88,13 @@ export default function SettingsRulesTab(): React.ReactElement {
     }
   })
 
+  // Expand all projects by default when loaded
+  useEffect(() => {
+    if (recentProjects.length > 0 && expandedProjects.size === 0) {
+      setExpandedProjects(new Set(recentProjects.map(p => p.id)))
+    }
+  }, [recentProjects])
+
   return (
     <Flex className="settings-content-wrapper">
       {/* 左侧 - 规则列表 */}
@@ -90,71 +104,86 @@ export default function SettingsRulesTab(): React.ReactElement {
           <p className="settings-provider-desc">管理全局和项目的 Agent 规则，指导 AI 如何编写代码。</p>
         </div>
         
-        <Stack className="settings-provider-list-container">
+        <Stack className="settings-provider-list-container" style={{ padding: '0 8px' }}>
           {/* 全局规则 */}
-          <div className="settings-provider-group-label">全局规则 (Global)</div>
           <Stack gap={1} style={{ marginBottom: 16 }}>
+            <div 
+              className="project-header" 
+              style={{ color: 'var(--accent-primary)' }}
+            >
+              <IconFolder className="shrink-0" style={{ marginRight: 6, fill: 'currentColor' }} />
+              <span className="truncate" style={{ flex: 1 }}>全局规则 (Global)</span>
+              <div className="project-actions">
+                <button className="project-action-btn" onClick={(e) => { e.stopPropagation(); handleNewRule('global') }} title="添加全局规则">
+                  <IconMessagePlus />
+                </button>
+              </div>
+            </div>
+
             {globalRules.map((r) => (
-              <Flex
+              <div
                 key={r.path}
-                align="center"
-                className={`settings-provider-item ${activeTabId === r.path ? 'active' : 'inactive'}`}
+                className={`rule-item ${activeTabId === r.path ? 'active' : ''}`}
                 onClick={() => handleSelectRule(r)}
               >
-                <IconBook className="btn-icon shrink-0" style={{ marginRight: 8 }}/>
+                <IconMessage className="shrink-0" style={{ marginRight: 8, opacity: 0.7 }}/>
                 <span className="truncate">{r.filename}</span>
-              </Flex>
+              </div>
             ))}
-            <Flex
-              align="center"
-              className="settings-provider-item inactive"
-              onClick={() => handleNewRule('global')}
-              style={{ marginTop: 4, color: 'var(--text-secondary)' }}
-            >
-              <IconAdd className="shrink-0" style={{ marginRight: 8 }}/>
-              <span>添加全局规则</span>
-            </Flex>
           </Stack>
 
           {/* 项目规则 */}
-          <div className="settings-provider-group-label">项目规则 (Workspace)</div>
-          <Stack gap={2}>
+          <Stack gap={1}>
             {recentProjects.map(proj => {
               const projRules = workspaceRulesGrouped[proj.id] || []
+              const isExpanded = expandedProjects.has(proj.id)
+              
               return (
-                <Stack key={proj.id} gap={1} style={{ paddingLeft: 8, borderLeft: '1px solid var(--border-color)', marginLeft: 4 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4, display: 'flex', alignItems: 'center' }}>
-                    <IconFolder className="shrink-0" style={{ marginRight: 4, opacity: 0.7 }} />
-                    <span className="truncate">{proj.name}</span>
-                  </div>
-                  {projRules.map((r) => (
-                    <Flex
-                      key={r.path}
-                      align="center"
-                      className={`settings-provider-item ${activeTabId === r.path ? 'active' : 'inactive'}`}
-                      onClick={() => handleSelectRule(r)}
-                    >
-                      <IconBook className="btn-icon shrink-0" style={{ marginRight: 8 }}/>
-                      <span className="truncate">{r.filename}</span>
-                    </Flex>
-                  ))}
-                  <Flex
-                    align="center"
-                    className="settings-provider-item inactive"
-                    onClick={() => {
-                      setActiveTabId('new')
-                      setEditingRule({
-                        scope: 'workspace',
-                        filename: '',
-                        content: '',
-                        projectId: proj.id
-                      })
-                    }}
-                    style={{ marginTop: 4, color: 'var(--text-secondary)' }}
+                <Stack key={proj.id} gap={1}>
+                  <div 
+                    className="project-header"
+                    onClick={() => toggleProject(proj.id)}
                   >
-                    <IconAdd className="shrink-0" style={{ marginRight: 8 }}/>
-                    <span>添加项目规则</span>
-                  </Flex>
+                    <IconChevron 
+                      className="shrink-0" 
+                      style={{ 
+                        marginRight: 4, 
+                        transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                        transition: 'transform 0.2s',
+                        width: 16, height: 16, opacity: 0.6
+                      }} 
+                    />
+                    <IconFolder className="shrink-0" style={{ marginRight: 6, opacity: 0.8 }} />
+                    <span className="truncate" style={{ flex: 1 }}>{proj.name}</span>
+                    <div className="project-actions">
+                      <button className="project-action-btn" onClick={(e) => { e.stopPropagation(); handleNewRule('workspace', proj.id) }} title="添加项目规则">
+                        <IconMessagePlus />
+                      </button>
+                      <button className="project-action-btn" onClick={(e) => { e.stopPropagation(); }} title="更多">
+                        <IconMoreHorizontal />
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {isExpanded && (
+                    <Stack gap={1}>
+                      {projRules.map((r) => (
+                        <div
+                          key={r.path}
+                          className={`rule-item ${activeTabId === r.path ? 'active' : ''}`}
+                          onClick={() => handleSelectRule(r)}
+                        >
+                          <IconMessage className="shrink-0" style={{ marginRight: 8, opacity: 0.7 }}/>
+                          <span className="truncate">{r.filename}</span>
+                        </div>
+                      ))}
+                      {projRules.length === 0 && (
+                        <div style={{ padding: '4px 8px 4px 32px', fontSize: 12, color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
+                          暂无规则
+                        </div>
+                      )}
+                    </Stack>
+                  )}
                 </Stack>
               )
             })}
