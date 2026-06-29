@@ -182,12 +182,17 @@ export default function SettingsRulesTab(): React.ReactElement {
 
   const renderNewRulePlaceholder = (scope: RuleScope, projectId?: string) => {
     if (activeTabId !== 'new' || editingRule?.scope !== scope || editingRule?.projectId !== projectId) return null
-    if (inlineEditId !== 'new') return null
     
     return (
-      <div className="rule-item active">
+      <div 
+        className="rule-item active"
+        onDoubleClick={() => {
+          setInlineEditId('new')
+          setInlineEditValue(editingRule.filename || '')
+        }}
+      >
         <IconMessage className="shrink-0" style={{ marginRight: 8, opacity: 0.7 }}/>
-        {renderInlineInput()}
+        {inlineEditId === 'new' ? renderInlineInput() : <span className="truncate" style={{ flex: 1 }}>{editingRule.filename || '未命名规则'}</span>}
       </div>
     )
   }
