@@ -308,7 +308,7 @@ export default function SettingsRulesTab(): React.ReactElement {
             </Flex>
           </Flex>
 
-          <div style={{ flex: 1, padding: 24, overflow: 'hidden' }}>
+          <div style={{ flex: 1, overflow: 'hidden' }}>
             <MarkdownEditor 
               value={editingRule.content || ''}
               onChange={val => setEditingRule({ ...editingRule, content: val })}
