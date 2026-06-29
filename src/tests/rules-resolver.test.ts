@@ -4,12 +4,20 @@ import * as fs from 'fs/promises'
 import * as os from 'os'
 import { RulesResolver } from '../main/agent/RulesResolver'
 
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('os')>()
+  return {
+    ...actual,
+    homedir: vi.fn()
+  }
+})
+
 describe('RulesResolver', () => {
   const mockWorkspace = path.join(__dirname, 'mock_workspace')
   const mockHomeDir = path.join(__dirname, 'mock_home')
 
   beforeEach(async () => {
-    vi.spyOn(os, 'homedir').mockReturnValue(mockHomeDir)
+    (os.homedir as any).mockReturnValue(mockHomeDir)
     await fs.mkdir(mockWorkspace, { recursive: true })
     await fs.mkdir(mockHomeDir, { recursive: true })
   })
