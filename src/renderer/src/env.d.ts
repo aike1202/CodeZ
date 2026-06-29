@@ -77,6 +77,11 @@ declare global {
         checkExternal: () => Promise<{ hasUpdates: boolean; totalCount: number; sources: { sourceName: string; count: number }[] }>
         importExternal: (sourceName?: string, customPath?: string, forceOverwrite?: boolean) => Promise<boolean>
       }
+      rules: {
+        getList: (workspaceRoot: string) => Promise<any[]>
+        save: (rule: any, workspaceRoot: string) => Promise<boolean>
+        delete: (rulePath: string) => Promise<boolean>
+      }
     }
   }
 }

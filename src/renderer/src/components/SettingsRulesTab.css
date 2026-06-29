@@ -1,0 +1,15 @@
+.rules-textarea {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', Courier, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.rules-textarea:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
