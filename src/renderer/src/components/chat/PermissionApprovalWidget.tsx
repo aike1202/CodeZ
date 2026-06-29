@@ -36,7 +36,7 @@ function riskLabel(risk: string): string {
 }
 
 export default function PermissionApprovalWidget({ msgId, requests, onResolve }: PermissionApprovalWidgetProps) {
-  const [loadingId, setLoadingId] = useState<string | null>(null)
+  const [loadingAll, setLoadingAll] = useState<boolean>(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   
   // 只显示未处理的请求
@@ -44,13 +44,15 @@ export default function PermissionApprovalWidget({ msgId, requests, onResolve }:
 
   if (pendingRequests.length === 0) return null
 
-  const handleResolve = async (requestId: string, approved: boolean) => {
-    if (loadingId) return
-    setLoadingId(requestId)
+  const handleResolveAll = async (approved: boolean) => {
+    if (loadingAll) return
+    setLoadingAll(true)
     try {
-      await onResolve(msgId, requestId, approved)
+      for (const req of pendingRequests) {
+        await onResolve(msgId, req.id, approved)
+      }
     } finally {
-      setLoadingId(null)
+      setLoadingAll(false)
     }
   }
 
@@ -60,18 +62,80 @@ export default function PermissionApprovalWidget({ msgId, requests, onResolve }:
 
   return (
     <Card variant="default" className="permission-approval-float-card">
-      <Stack gap={2}>
+      <Stack gap={1.5}>
         <Flex align="center" justify="between" className="permission-approval-float-header">
           <Flex align="center" gap={2}>
              <div className="permission-approval-pulse-icon">⚠️</div>
              <span className="permission-approval-title">需要您的授权 ({pendingRequests.length})</span>
           </Flex>
+          <Flex align="center" gap={2}>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={loadingAll}
+              onClick={() => handleResolveAll(false)}
+              className="permission-approval-deny-all"
+            >
+              拒绝全部
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={loadingAll}
+              onClick={() => handleResolveAll(true)}
+              className="permission-approval-allow-all"
+            >
+              允许全部执行
+            </Button>
+          </Flex>
         </Flex>
 
-        <Stack gap={2}>
+        <Stack gap={1}>
           {pendingRequests.map((request) => {
-            const isLoading = loadingId === request.id
             const isExpanded = expandedId === request.id
+            
+            // Compute diff numbers if it's an edit tool
+            let diffNums = null
+            if (['write_to_file', 'replace_file_content', 'multi_replace_file_content', 'apply_patch'].includes(request.toolName)) {
+              let argsObj = request.args
+              if (typeof argsObj === 'string') {
+                try { argsObj = JSON.parse(argsObj) } catch {}
+              }
+              argsObj = argsObj || {}
+              
+              let additions = 0
+              let deletions = 0
+              if (request.toolName === 'write_to_file') {
+                const content = argsObj.codeContent || argsObj.code_content || ''
+                additions = content ? content.split('\n').length : 0
+              } else if (request.toolName === 'replace_file_content') {
+                const add = argsObj.replacementContent || ''
+                const del = argsObj.targetContent || ''
+                additions = add ? add.split('\n').length : 0
+                deletions = del ? del.split('\n').length : 0
+              } else if (request.toolName === 'apply_patch') {
+                if (Array.isArray(argsObj.edits)) {
+                  argsObj.edits.forEach((edit: any) => {
+                    const add = String(edit.replacementContent || '')
+                    const del = String(edit.targetContent || '')
+                    additions += add ? add.split('\n').length : 0
+                    deletions += del ? del.split('\n').length : 0
+                  })
+                } else if (typeof argsObj.newContent === 'string') {
+                  additions = argsObj.newContent ? argsObj.newContent.split('\n').length : 0
+                }
+              } else if (request.toolName === 'multi_replace_file_content') {
+                const chunks = Array.isArray(argsObj.ReplacementChunks) ? argsObj.ReplacementChunks : (Array.isArray(argsObj.replacementChunks) ? argsObj.replacementChunks : [])
+                chunks.forEach((chunk: any) => {
+                  const add = chunk.ReplacementContent || chunk.replacementContent || ''
+                  const del = chunk.TargetContent || chunk.targetContent || ''
+                  additions += add ? String(add).split('\n').length : 0
+                  deletions += del ? String(del).split('\n').length : 0
+                })
+              }
+              diffNums = { adds: additions, dels: deletions }
+            }
+
             return (
               <div key={request.id} className={`permission-approval-float-item permission-approval-risk-${request.risk}`}>
                 <Flex align="center" justify="between" gap={3}>
@@ -80,27 +144,12 @@ export default function PermissionApprovalWidget({ msgId, requests, onResolve }:
                     <span className="permission-approval-tool" onClick={() => toggleExpand(request.id)}>{request.toolName}</span>
                     <span className="permission-approval-desc-inline" onClick={() => toggleExpand(request.id)}>{request.description}</span>
                   </Flex>
-
-                  <Flex align="center" gap={2} className="permission-approval-actions">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={isLoading}
-                      onClick={() => handleResolve(request.id, false)}
-                      className="permission-approval-deny"
-                    >
-                      拒绝
-                    </Button>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      disabled={isLoading}
-                      onClick={() => handleResolve(request.id, true)}
-                      className="permission-approval-allow"
-                    >
-                      允许执行
-                    </Button>
-                  </Flex>
+                  {diffNums && (
+                    <Flex align="center" gap={1.5} style={{ fontFamily: 'ui-monospace, monospace', fontSize: '11.5px', flexShrink: 0 }}>
+                      <span style={{ color: '#16a34a' }}>+{diffNums.adds}</span>
+                      <span style={{ color: '#dc2626' }}>-{diffNums.dels}</span>
+                    </Flex>
+                  )}
                 </Flex>
                 
                 {isExpanded && (

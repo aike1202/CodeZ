@@ -25,6 +25,7 @@ export class GeminiProvider implements IChatProvider {
     // 构建 Gemini native payload
     const systemInstructionParts: any[] = []
     const contents: any[] = []
+    let pendingAssistantSummary: string | null = null
 
     const pushOrMergeContent = (role: 'user' | 'model' | 'function', parts: any[]) => {
       if (parts.length === 0) return
@@ -43,9 +44,18 @@ export class GeminiProvider implements IChatProvider {
         pushOrMergeContent('user', [{ text: msg.content }])
       } else if (msg.role === 'assistant') {
         const parts: any[] = []
-        if (msg.content) parts.push({ text: msg.content })
-        if (msg.tool_calls && msg.tool_calls.length > 0) {
-          for (const tc of msg.tool_calls) {
+        const hasToolCalls = msg.tool_calls && msg.tool_calls.length > 0
+        if (msg.content) {
+          if (hasToolCalls) {
+            // 当 assistant 同时有文本和工具调用时，将文本延迟到工具结果之后，
+            // 避免 "先声称完成再调工具" 的有毒 in-context learning 模式
+            pendingAssistantSummary = msg.content
+          } else {
+            parts.push({ text: msg.content })
+          }
+        }
+        if (hasToolCalls) {
+          for (const tc of msg.tool_calls!) {
             parts.push({
               functionCall: {
                 name: tc.function.name,
@@ -74,9 +84,13 @@ export class GeminiProvider implements IChatProvider {
         // If the next message is ALSO a user message (e.g. user typed "继续"),
         // Gemini strictly forbids mixing functionResponse and text in the same 'user' turn,
         // and also strictly forbids consecutive 'user' turns.
-        // So we MUST inject a dummy 'model' turn to separate them.
+        // So we MUST inject a 'model' turn to separate them.
+        // 使用延迟的 assistant 总结文本替代无信息量的 "OK"，
+        // 让模型看到正确的因果顺序：先调工具 → 拿到结果 → 再总结
         if (j < messages.length && messages[j].role === 'user') {
-          contents.push({ role: 'model', parts: [{ text: 'OK' }] })
+          const summaryText = pendingAssistantSummary || 'OK'
+          contents.push({ role: 'model', parts: [{ text: summaryText }] })
+          pendingAssistantSummary = null
         }
         
         i = j - 1

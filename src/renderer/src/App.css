@@ -32,7 +32,8 @@
 
 .app-chat-column {
   flex: 1;
-  overflow: hidden;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .app-chat-column--border {

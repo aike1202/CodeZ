@@ -232,7 +232,7 @@ export function buildUnifiedTimeline(
         timestamp: item.startedAt,
         status: isActuallyRunning ? 'running' : 'success',
         verb: 'Thought',
-        target: isActuallyRunning ? 'Thinking...' : `Thought for ${durationStr}`,
+        target: isActuallyRunning ? '思考中...' : `用时 ${durationStr}`,
         detail: item.content
       })
     } else if (item.type === 'text') {
@@ -254,12 +254,12 @@ export function buildUnifiedTimeline(
         const argsObj = parseArgs(tc.args)
         const filePaths = Array.isArray(argsObj.filePaths) ? argsObj.filePaths : []
 
-        let targetText = 'Files'
+        let targetText = '多个文件'
         if (filePaths.length === 1) {
           targetText = filePaths[0]
         } else if (filePaths.length > 1) {
           const names = filePaths.map(p => p.split(/[/\\]/).pop()).slice(0, 2)
-          targetText = `${filePaths.length} files (${names.join(', ')}${filePaths.length > 2 ? '...' : ''})`
+          targetText = `${filePaths.length} 个文件 (${names.join(', ')}${filePaths.length > 2 ? '...' : ''})`
         }
 
         list.push({
@@ -429,7 +429,7 @@ export function buildUnifiedTimeline(
       status: isActuallyRunning ? 'running' : cmd.status === 'running' ? 'error' : cmd.status,
       verb: 'Terminal',
       target: cmd.title,
-      detail: isActuallyRunning ? 'Running command...' : 'Command completed.'
+      detail: isActuallyRunning ? '正在运行命令...' : '命令执行完成。'
     })
   })
 
@@ -462,7 +462,7 @@ export function buildUnifiedTimeline(
       timestamp: fallbackTimestamp,
       status: isStillRunning ? 'running' : 'success',
       verb: 'Thought',
-      target: isStillRunning ? 'Thinking...' : `Thought for ${durationStr}`,
+      target: isStillRunning ? '思考中...' : `用时 ${durationStr}`,
       detail: reasoning
     })
   }
@@ -483,11 +483,11 @@ export function buildUnifiedTimeline(
       const originalItem = timeline.find((t) => t.id === item.id) as ReasoningTimelineItem | undefined
       if (originalItem) {
         const durationStr = formatReasoningDuration(originalItem)
-        item.target = `Thought for ${durationStr}`
+        item.target = `用时 ${durationStr}`
       } else {
         const duration = Math.max(Date.now() - item.timestamp, 1)
         const durationStr = duration < 1000 ? `${duration}ms` : `${Math.round(duration / 1000)}s`
-        item.target = `Thought for ${durationStr}`
+        item.target = `用时 ${durationStr}`
       }
     }
   })
@@ -503,13 +503,13 @@ export function buildSummaryText(items: UnifiedTimelineItem[], running: boolean)
   const editCount = items.filter((i) => i.type === 'edit').length
 
   const parts = [
-    readCount > 0 ? `${readCount} file${readCount > 1 ? 's' : ''}` : '',
-    dirCount > 0 ? `${dirCount} folder${dirCount > 1 ? 's' : ''}` : '',
-    searchCount > 0 ? `${searchCount} search${searchCount > 1 ? 'es' : ''}` : '',
-    cmdCount > 0 ? `${cmdCount} command${cmdCount > 1 ? 's' : ''}` : '',
-    editCount > 0 ? `${editCount} edit${editCount > 1 ? 's' : ''}` : ''
+    readCount > 0 ? `${readCount} 个文件` : '',
+    dirCount > 0 ? `${dirCount} 个目录` : '',
+    searchCount > 0 ? `${searchCount} 次搜索` : '',
+    cmdCount > 0 ? `${cmdCount} 条命令` : '',
+    editCount > 0 ? `${editCount} 处修改` : ''
   ].filter(Boolean)
 
-  const prefix = running ? 'Working: ' : 'Explored: '
-  return parts.length > 0 ? `${prefix}${parts.join(', ')}` : running ? 'Working...' : 'Completed'
+  const prefix = running ? '正在处理: ' : '已探索: '
+  return parts.length > 0 ? `${prefix}${parts.join(', ')}` : running ? '运行中...' : '已完成'
 }

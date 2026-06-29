@@ -47,7 +47,7 @@
 }
 
 .permission-approval-float-item {
-  padding: 8px 12px;
+  padding: 4px 10px;
   border-radius: 6px;
   border: 1px solid var(--border-color, rgba(148, 163, 184, 0.2));
   background: var(--bg-body, #f8fafc);

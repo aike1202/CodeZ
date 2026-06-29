@@ -87,6 +87,20 @@ export class EditTransactionService {
     }
   }
 
+  private findBackedUpKey(tx: TransactionState, requestPath: string): string | undefined {
+    if (tx.backedUpFiles.has(requestPath)) {
+      return requestPath
+    }
+    const normReq = requestPath.replace(/\\/g, '/').toLowerCase()
+    for (const key of tx.backedUpFiles.keys()) {
+      const normKey = key.replace(/\\/g, '/').toLowerCase()
+      if (normKey === normReq || normKey.endsWith('/' + normReq)) {
+        return key
+      }
+    }
+    return undefined
+  }
+
   /**
    * 单个文件回滚：将特定备份的文件恢复到原路径，从事务中移除该文件。
    */
@@ -94,21 +108,22 @@ export class EditTransactionService {
     const tx = this.transactions.get(txId)
     if (!tx) return false
 
-    const backupPath = tx.backedUpFiles.get(absolutePath)
-    if (backupPath === undefined) return false
+    const key = this.findBackedUpKey(tx, absolutePath)
+    if (!key) return false
+    const backupPath = tx.backedUpFiles.get(key)!
 
     try {
       if (backupPath === '') {
         try {
-          await fs.unlink(absolutePath)
+          await fs.unlink(key)
         } catch {}
       } else {
-        await fs.copyFile(backupPath, absolutePath)
+        await fs.copyFile(backupPath, key)
       }
-      tx.backedUpFiles.delete(absolutePath)
+      tx.backedUpFiles.delete(key)
       return true
     } catch (err: any) {
-      console.error(`[EditTransaction] Failed to rollback file ${absolutePath}:`, err.message)
+      console.error(`[EditTransaction] Failed to rollback file ${key}:`, err.message)
       return false
     }
   }
@@ -120,10 +135,11 @@ export class EditTransactionService {
     const tx = this.transactions.get(txId)
     if (!tx) return false
 
-    const backupPath = tx.backedUpFiles.get(absolutePath)
-    if (backupPath === undefined) return false
+    const key = this.findBackedUpKey(tx, absolutePath)
+    if (!key) return false
+    const backupPath = tx.backedUpFiles.get(key)!
 
-    tx.backedUpFiles.delete(absolutePath)
+    tx.backedUpFiles.delete(key)
     if (backupPath !== '') {
       try {
         await fs.unlink(backupPath)

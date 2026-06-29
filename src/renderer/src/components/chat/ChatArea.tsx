@@ -20,6 +20,160 @@ function genId(): string {
   return `_`
 }
 
+export function extractMessageEdits(msg: any) {
+  if (!msg.txId) return { edits: [], tools: [] };
+
+  const tools = msg.toolCalls || (msg.executionTimeline || [])
+    .filter((t: any) => t.type === 'tool')
+    .map((t: any) => (t as any).toolCall)
+    .filter(Boolean);
+
+  const editTools = tools.filter((tc: any) =>
+    tc.name === 'write_to_file' ||
+    tc.name === 'replace_file_content' ||
+    tc.name === 'multi_replace_file_content' ||
+    tc.name === 'apply_patch'
+  );
+
+  if (editTools.length === 0) return { edits: [], tools: [] };
+
+  let diffByPath: Record<string, string> = {};
+  try {
+    diffByPath = (msg.diffEntries || []).reduce((acc: Record<string, string>, item: any) => {
+      if (item?.path && item?.diff) acc[item.path] = item.diff;
+      return acc;
+    }, {});
+  } catch {
+    diffByPath = {};
+  }
+
+  const edits = editTools.map((tc: any) => {
+    let filePath = '';
+    let additions = '+0';
+    let deletions = '-0';
+    try {
+      const argsObj = parseArgs(tc.args);
+      filePath = argsObj.targetFile || argsObj.TargetFile || argsObj.filePath || argsObj.path || '';
+
+      const matchingDiff = Object.entries(diffByPath).find(([diffPath]) => {
+        if (!filePath) return false;
+        const normalize = (p: string) => p.replace(/\\/g, '/').toLowerCase();
+        const fileNorm = normalize(filePath);
+        const diffNorm = normalize(diffPath);
+        return fileNorm === diffNorm || diffNorm.endsWith(fileNorm) || fileNorm.endsWith(diffNorm);
+      })?.[1];
+
+      if (matchingDiff) {
+        const added = matchingDiff.split('\n').filter((line) => line.startsWith('+') && !line.startsWith('+++')).length;
+        const removed = matchingDiff.split('\n').filter((line) => line.startsWith('-') && !line.startsWith('---')).length;
+        additions = `+${added}`;
+        deletions = `-${removed}`;
+      } else if (tc.name === 'write_to_file') {
+        const codeContent = argsObj.codeContent || argsObj.code_content || '';
+        additions = `+${codeContent.split('\n').length}`;
+      } else if (tc.name === 'replace_file_content') {
+        additions = `+${(argsObj.replacementContent || '').split('\n').length}`;
+        deletions = `-${(argsObj.targetContent || '').split('\n').length}`;
+      } else if (tc.name === 'apply_patch') {
+        if (Array.isArray(argsObj.edits)) {
+          let totalAdds = 0;
+          let totalDels = 0;
+          argsObj.edits.forEach((edit: any) => {
+            totalAdds += String(edit.replacementContent || '').split('\n').length;
+            totalDels += String(edit.targetContent || '').split('\n').length;
+          });
+          additions = `+${totalAdds}`;
+          deletions = `-${totalDels}`;
+        } else if (typeof argsObj.newContent === 'string') {
+          additions = `+${argsObj.newContent.split('\n').length}`;
+        }
+      } else if (tc.name === 'multi_replace_file_content') {
+        const chunks = Array.isArray(argsObj.ReplacementChunks) ? argsObj.ReplacementChunks : (Array.isArray(argsObj.replacementChunks) ? argsObj.replacementChunks : []);
+        let totalAdds = 0;
+        let totalDels = 0;
+        chunks.forEach((chunk: any) => {
+          const add = chunk.ReplacementContent || chunk.replacementContent || '';
+          const del = chunk.TargetContent || chunk.targetContent || '';
+          totalAdds += add.split('\n').length;
+          totalDels += del.split('\n').length;
+        });
+        additions = `+${totalAdds}`;
+        deletions = `-${totalDels}`;
+      }
+    } catch (err) {
+      console.error('Failed to parse edit args in ChatArea:', err);
+    }
+    return { filePath, additions, deletions };
+  }).filter((e: any) => e.filePath);
+
+  return { edits, tools };
+}
+
+export function handleApprovalDiffClick(filePath: string, tools: any[], handleDiffClick: any, handleFileClick: any) {
+  const normalize = (p: string) => p.replace(/\\/g, '/').toLowerCase();
+  const targetNorm = normalize(filePath);
+  const tc = tools.find((t: any) => {
+    if (t.name !== 'write_to_file' && t.name !== 'replace_file_content' && t.name !== 'multi_replace_file_content' && t.name !== 'apply_patch') return false;
+    try {
+      const argsObj = parseArgs(t.args);
+      const fileArg = argsObj.targetFile || argsObj.TargetFile || argsObj.filePath || argsObj.path;
+      if (typeof fileArg === 'string') {
+        const fileNorm = normalize(fileArg);
+        return fileNorm === targetNorm || targetNorm.endsWith(fileNorm) || fileNorm.endsWith(targetNorm);
+      }
+    } catch {
+    }
+    return false;
+  });
+
+  if (tc) {
+    try {
+      const argsObj = parseArgs(tc.args);
+      if (tc.name === 'write_to_file') {
+        handleDiffClick(filePath, {
+          type: 'write',
+          codeContent: argsObj.codeContent || argsObj.code_content || ''
+        });
+      } else if (tc.name === 'replace_file_content') {
+        handleDiffClick(filePath, {
+          type: 'replace',
+          targetContent: argsObj.targetContent || '',
+          replacementContent: argsObj.replacementContent || ''
+        });
+      } else if (tc.name === 'apply_patch') {
+        if (Array.isArray(argsObj.edits) && argsObj.edits.length > 0) {
+          const targetContent = argsObj.edits.map((edit: any, i: number) => `--- Edit ${i + 1} ---\n${edit.targetContent || ''}`).join('\n\n');
+          const replacementContent = argsObj.edits.map((edit: any, i: number) => `--- Edit ${i + 1} ---\n${edit.replacementContent || ''}`).join('\n\n');
+          handleDiffClick(filePath, {
+            type: 'replace',
+            targetContent,
+            replacementContent
+          });
+        } else {
+          handleDiffClick(filePath, {
+            type: 'write',
+            codeContent: argsObj.newContent || ''
+          });
+        }
+      } else if (tc.name === 'multi_replace_file_content') {
+        const chunks = Array.isArray(argsObj.ReplacementChunks) ? argsObj.ReplacementChunks : (Array.isArray(argsObj.replacementChunks) ? argsObj.replacementChunks : []);
+        const targetContent = chunks.map((c: any, i: number) => `--- Chunk ${i + 1} ---\n${c.TargetContent || c.targetContent || ''}`).join('\n\n');
+        const replacementContent = chunks.map((c: any, i: number) => `--- Chunk ${i + 1} ---\n${c.ReplacementContent || c.replacementContent || ''}`).join('\n\n');
+        handleDiffClick(filePath, {
+          type: 'replace',
+          targetContent,
+          replacementContent
+        });
+      }
+    } catch (err) {
+      console.error('Failed to parse diff args from toolCall:', err);
+      handleFileClick(filePath);
+    }
+  } else {
+    handleFileClick(filePath);
+  }
+}
+
 export interface ChatAreaProps {
   messages: any[]
   activeSessionId: string | null
@@ -359,92 +513,17 @@ export default function ChatArea({
                       )
                     })()}
                     {(() => {
-                      if (!msg.txId) return null;
-
-                      const tools = msg.toolCalls || (msg.executionTimeline || [])
-                        .filter((t: any) => t.type === 'tool')
-                        .map((t: any) => (t as any).toolCall)
-                        .filter(Boolean);
-
-                      const editTools = tools.filter((tc: any) =>
-                        tc.name === 'write_to_file' ||
-                        tc.name === 'replace_file_content' ||
-                        tc.name === 'multi_replace_file_content' ||
-                        tc.name === 'apply_patch'
-                      );
-
-                      if (editTools.length === 0) return null;
-
-                      let diffByPath: Record<string, string> = {};
-                      try {
-                        diffByPath = (msg.diffEntries || []).reduce((acc: Record<string, string>, item: any) => {
-                          if (item?.path && item?.diff) acc[item.path] = item.diff;
-                          return acc;
-                        }, {});
-                      } catch {
-                        diffByPath = {};
-                      }
-
-                      const edits = editTools.map((tc: any) => {
-                        let filePath = '';
-                        let additions = '+0';
-                        let deletions = '-0';
-                        try {
-                          const argsObj = parseArgs(tc.args);
-                          filePath = argsObj.targetFile || argsObj.TargetFile || argsObj.filePath || argsObj.path || '';
-
-                          const matchingDiff = Object.entries(diffByPath).find(([diffPath]) => {
-                            if (!filePath) return false;
-                            const normalize = (p: string) => p.replace(/\\/g, '/').toLowerCase();
-                            const fileNorm = normalize(filePath);
-                            const diffNorm = normalize(diffPath);
-                            return fileNorm === diffNorm || diffNorm.endsWith(fileNorm) || fileNorm.endsWith(diffNorm);
-                          })?.[1];
-
-                          if (matchingDiff) {
-                            const added = matchingDiff.split('\n').filter((line) => line.startsWith('+') && !line.startsWith('+++')).length;
-                            const removed = matchingDiff.split('\n').filter((line) => line.startsWith('-') && !line.startsWith('---')).length;
-                            additions = `+${added}`;
-                            deletions = `-${removed}`;
-                          } else if (tc.name === 'write_to_file') {
-                            const codeContent = argsObj.codeContent || argsObj.code_content || '';
-                            additions = `+${codeContent.split('\n').length}`;
-                          } else if (tc.name === 'replace_file_content') {
-                            additions = `+${(argsObj.replacementContent || '').split('\n').length}`;
-                            deletions = `-${(argsObj.targetContent || '').split('\n').length}`;
-                          } else if (tc.name === 'apply_patch') {
-                            if (Array.isArray(argsObj.edits)) {
-                              let totalAdds = 0;
-                              let totalDels = 0;
-                              argsObj.edits.forEach((edit: any) => {
-                                totalAdds += String(edit.replacementContent || '').split('\n').length;
-                                totalDels += String(edit.targetContent || '').split('\n').length;
-                              });
-                              additions = `+${totalAdds}`;
-                              deletions = `-${totalDels}`;
-                            } else if (typeof argsObj.newContent === 'string') {
-                              additions = `+${argsObj.newContent.split('\n').length}`;
-                            }
-                          } else if (tc.name === 'multi_replace_file_content') {
-                            const chunks = Array.isArray(argsObj.ReplacementChunks) ? argsObj.ReplacementChunks : (Array.isArray(argsObj.replacementChunks) ? argsObj.replacementChunks : []);
-                            let totalAdds = 0;
-                            let totalDels = 0;
-                            chunks.forEach((chunk: any) => {
-                              const add = chunk.ReplacementContent || chunk.replacementContent || '';
-                              const del = chunk.TargetContent || chunk.targetContent || '';
-                              totalAdds += add.split('\n').length;
-                              totalDels += del.split('\n').length;
-                            });
-                            additions = `+${totalAdds}`;
-                            deletions = `-${totalDels}`;
-                          }
-                        } catch (err) {
-                          console.error('Failed to parse edit args in ChatArea:', err);
-                        }
-                        return { filePath, additions, deletions };
-                      }).filter((e: any) => e.filePath);
-
+                      const { edits, tools } = extractMessageEdits(msg);
                       if (edits.length === 0) return null;
+
+                      // Check if all edits are processed
+                      const allProcessed = edits.every(e => {
+                        // uniqueEdits handles duplicate files, but here we just check all
+                        return msg.editStatuses?.[e.filePath]
+                      });
+
+                      // IF NOT PROCESSED, WE SHOW IN AUDIT AREA, NOT CHAT AREA
+                      if (!allProcessed) return null;
 
                       return (
                         <EditApprovalWidget
@@ -452,70 +531,8 @@ export default function ChatArea({
                           txId={msg.txId}
                           edits={edits}
                           editStatuses={msg.editStatuses}
-                          onDiffClick={(filePath) => {
-                            const normalize = (p: string) => p.replace(/\\/g, '/').toLowerCase();
-                            const targetNorm = normalize(filePath);
-                            const tc = tools.find((t: any) => {
-                              if (t.name !== 'write_to_file' && t.name !== 'replace_file_content' && t.name !== 'multi_replace_file_content' && t.name !== 'apply_patch') return false;
-                              try {
-                                const argsObj = parseArgs(t.args);
-                                const fileArg = argsObj.targetFile || argsObj.TargetFile || argsObj.filePath || argsObj.path;
-                                if (typeof fileArg === 'string') {
-                                  const fileNorm = normalize(fileArg);
-                                  return fileNorm === targetNorm || targetNorm.endsWith(fileNorm) || fileNorm.endsWith(targetNorm);
-                                }
-                              } catch {
-                              }
-                              return false;
-                            });
-
-                            if (tc) {
-                              try {
-                                const argsObj = parseArgs(tc.args);
-                                if (tc.name === 'write_to_file') {
-                                  handleDiffClick(filePath, {
-                                    type: 'write',
-                                    codeContent: argsObj.codeContent || argsObj.code_content || ''
-                                  });
-                                } else if (tc.name === 'replace_file_content') {
-                                  handleDiffClick(filePath, {
-                                    type: 'replace',
-                                    targetContent: argsObj.targetContent || '',
-                                    replacementContent: argsObj.replacementContent || ''
-                                  });
-                                } else if (tc.name === 'apply_patch') {
-                                  if (Array.isArray(argsObj.edits) && argsObj.edits.length > 0) {
-                                    const targetContent = argsObj.edits.map((edit: any, i: number) => `--- Edit ${i + 1} ---\n${edit.targetContent || ''}`).join('\n\n');
-                                    const replacementContent = argsObj.edits.map((edit: any, i: number) => `--- Edit ${i + 1} ---\n${edit.replacementContent || ''}`).join('\n\n');
-                                    handleDiffClick(filePath, {
-                                      type: 'replace',
-                                      targetContent,
-                                      replacementContent
-                                    });
-                                  } else {
-                                    handleDiffClick(filePath, {
-                                      type: 'write',
-                                      codeContent: argsObj.newContent || ''
-                                    });
-                                  }
-                                } else if (tc.name === 'multi_replace_file_content') {
-                                  const chunks = Array.isArray(argsObj.ReplacementChunks) ? argsObj.ReplacementChunks : (Array.isArray(argsObj.replacementChunks) ? argsObj.replacementChunks : []);
-                                  const targetContent = chunks.map((c: any, i: number) => `--- Chunk ${i + 1} ---\n${c.TargetContent || c.targetContent || ''}`).join('\n\n');
-                                  const replacementContent = chunks.map((c: any, i: number) => `--- Chunk ${i + 1} ---\n${c.ReplacementContent || c.replacementContent || ''}`).join('\n\n');
-                                  handleDiffClick(filePath, {
-                                    type: 'replace',
-                                    targetContent,
-                                    replacementContent
-                                  });
-                                }
-                              } catch (err) {
-                                console.error('Failed to parse diff args from toolCall:', err);
-                                handleFileClick(filePath);
-                              }
-                            } else {
-                              handleFileClick(filePath);
-                            }
-                          }}
+                          onDiffClick={(filePath) => handleApprovalDiffClick(filePath, tools, handleDiffClick, handleFileClick)}
+                          onFileClick={(filePath) => handleFileClick(filePath)}
                         />
                       );
                     })()}
@@ -529,19 +546,44 @@ export default function ChatArea({
         )
       }
       auditArea={
-        messages.some(m => m.permissionRequests?.some((r: any) => r.status === 'pending')) ? (
+        messages.some(m => {
+          const hasPendingPermission = m.permissionRequests?.some((r: any) => r.status === 'pending');
+          const { edits } = extractMessageEdits(m);
+          const hasPendingEdits = edits.length > 0 && !edits.every(e => m.editStatuses?.[e.filePath]);
+          return hasPendingPermission || hasPendingEdits;
+        }) ? (
           <div style={{ width: '100%', flexShrink: 0, zIndex: 60, marginBottom: '-16px' }}>
             {messages.map((msg) => {
-              if (!msg.permissionRequests || msg.permissionRequests.filter((r: any) => r.status === 'pending').length === 0) return null;
+              const { edits, tools } = extractMessageEdits(msg);
+              const hasPendingEdits = edits.length > 0 && !edits.every(e => msg.editStatuses?.[e.filePath]);
+              const pendingPermissions = msg.permissionRequests?.filter((r: any) => r.status === 'pending') || [];
+              const hasPendingPermission = pendingPermissions.length > 0;
+
+              if (!hasPendingPermission && !hasPendingEdits) return null;
+
               return (
                 <div key={msg.id} style={{ width: '100%', maxWidth: '48rem', margin: '0 auto', padding: '0 16px', marginBottom: '8px', pointerEvents: 'auto' }}>
-                  <div className="dropdown-shadow rounded-xl">
-                    <PermissionApprovalWidget
-                      msgId={msg.id}
-                      requests={msg.permissionRequests}
-                      onResolve={handleResolvePermission}
-                    />
-                  </div>
+                  {hasPendingPermission && (
+                    <div className="dropdown-shadow rounded-xl mb-2">
+                      <PermissionApprovalWidget
+                        msgId={msg.id}
+                        requests={pendingPermissions}
+                        onResolve={handleResolvePermission}
+                      />
+                    </div>
+                  )}
+                  {hasPendingEdits && (
+                    <div className="dropdown-shadow rounded-xl">
+                      <EditApprovalWidget
+                        msgId={msg.id}
+                        txId={msg.txId}
+                        edits={edits}
+                        editStatuses={msg.editStatuses}
+                        onDiffClick={(filePath) => handleApprovalDiffClick(filePath, tools, handleDiffClick, handleFileClick)}
+                        onFileClick={(filePath) => handleFileClick(filePath)}
+                      />
+                    </div>
+                  )}
                 </div>
               );
             })}

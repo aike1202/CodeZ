@@ -185,7 +185,7 @@ export default function ExecutionLog({
           <span>{summary}</span>
         </Flex>
         <span className="timeline-header-arrow-text">
-          {expanded ? 'Collapse' : 'Expand'}
+          {expanded ? '收起' : '展开'}
         </span>
       </button>
 
@@ -395,6 +395,21 @@ export default function ExecutionLog({
                                       targetContent,
                                       replacementContent
                                     })
+                                  } else if (item.toolName === 'apply_patch') {
+                                    if (Array.isArray(argsObj.edits) && argsObj.edits.length > 0) {
+                                      const targetContent = argsObj.edits.map((edit: any, i: number) => `--- Edit ${i + 1} ---\n${edit.targetContent || ''}`).join('\n\n')
+                                      const replacementContent = argsObj.edits.map((edit: any, i: number) => `--- Edit ${i + 1} ---\n${edit.replacementContent || ''}`).join('\n\n')
+                                      onDiffClick?.(item.target, {
+                                        type: 'replace',
+                                        targetContent,
+                                        replacementContent
+                                      })
+                                    } else {
+                                      onDiffClick?.(item.target, {
+                                        type: 'write',
+                                        codeContent: argsObj.newContent || ''
+                                      })
+                                    }
                                   } else {
                                     onDiffClick?.(item.target, {
                                       type: 'replace',
@@ -405,9 +420,9 @@ export default function ExecutionLog({
                                 }
                               }}
                             >
-                              <span className="timeline-diff-add">+{item.additions}</span>
+                              <span className="timeline-diff-add">{item.additions}</span>
                               <span style={{ margin: '0 2px', color: 'var(--text-light, #d1d5db)' }}>/</span>
-                              <span className="timeline-diff-del">-{item.deletions}</span>
+                              <span className="timeline-diff-del">{item.deletions}</span>
                             </span>
                           )}
                         </span>
