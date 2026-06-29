@@ -55,22 +55,7 @@ export function registerRulesIpc(): void {
 
       await fs.mkdir(path.dirname(targetPath), { recursive: true })
 
-      let fileContent = ''
-      
-      // Only inject frontmatter if it's a .md file inside rules dir, or if it already has frontmatter fields.
-      // Root files like .clinerules or AGENTS.md conventionally don't have YAML frontmatter, but we can add it if fields exist.
-      const hasMeta = rule.description || rule.globs || rule.alwaysApply !== undefined
-      if (hasMeta) {
-        fileContent += '---\n'
-        if (rule.description) fileContent += `description: ${rule.description}\n`
-        if (rule.globs) fileContent += `globs: ${rule.globs}\n`
-        if (rule.alwaysApply !== undefined) fileContent += `alwaysApply: ${rule.alwaysApply}\n`
-        fileContent += '---\n'
-      }
-      
-      fileContent += rule.content
-
-      await fs.writeFile(targetPath, fileContent, 'utf-8')
+      await fs.writeFile(targetPath, rule.content, 'utf-8')
       return true
     } catch (e) {
       console.error('Failed to save rule', e)
@@ -126,7 +111,7 @@ function parseRuleFile(filePath: string, scope: RuleScope, raw: string): RuleFil
 
   if (match) {
     const yamlStr = match[1]
-    rule.content = match[2]
+    // keep rule.content as raw so the UI shows the entire file
 
     const lines = yamlStr.split(/\r?\n/)
     for (const line of lines) {

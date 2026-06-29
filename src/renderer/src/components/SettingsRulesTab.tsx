@@ -173,44 +173,11 @@ export default function SettingsRulesTab(): React.ReactElement {
               <span className="help-text">推荐使用 .md 后缀。如果填入 AGENTS.md 或 .clinerules 则会存放在根目录。</span>
             </div>
 
-            <div className="form-group">
-              <label>描述 (Description)</label>
-              <input 
-                type="text" 
-                className="input" 
-                placeholder="这条规则的作用是什么？"
-                value={editingRule.description || ''}
-                onChange={e => setEditingRule({ ...editingRule, description: e.target.value })}
-              />
-            </div>
-
-            <div className="form-group">
-              <label>匹配路径 (Globs)</label>
-              <input 
-                type="text" 
-                className="input" 
-                placeholder="例如: src/**/*.tsx"
-                value={editingRule.globs || ''}
-                onChange={e => setEditingRule({ ...editingRule, globs: e.target.value })}
-              />
-            </div>
-
-            <div className="form-group checkbox-group">
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                <input 
-                  type="checkbox" 
-                  checked={!!editingRule.alwaysApply}
-                  onChange={e => setEditingRule({ ...editingRule, alwaysApply: e.target.checked })}
-                />
-                总是生效 (Always Apply)
-              </label>
-            </div>
-
             <div className="form-group" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
               <label>规则内容 (Markdown)</label>
               <textarea 
                 className="input rules-textarea" 
-                placeholder="# 编写你的规则..."
+                placeholder={`---\ndescription: 例如: react-style.md\nglobs: src/**/*.tsx\nalwaysApply: false\n---\n\n# 编写你的规则...`}
                 value={editingRule.content || ''}
                 onChange={e => setEditingRule({ ...editingRule, content: e.target.value })}
                 style={{ flex: 1, minHeight: 300, fontFamily: 'monospace', resize: 'vertical' }}
