@@ -9,6 +9,7 @@ import { registerTerminalIpc } from './ipc/terminal.handlers'
 import { registerTaskIpc } from './ipc/task.handlers'
 import { registerThemeIpc } from './ipc/theme.handlers'
 import { registerSkillIpc } from './ipc/skill.handlers'
+import { registerRulesIpc } from './ipc/rules.handlers'
 import { TerminalService } from './services/TerminalService'
 
 let mainWindow: BrowserWindow | null = null
@@ -80,7 +81,6 @@ app.whenReady().then(() => {
   registerTaskIpc()
   registerThemeIpc()
   registerSkillIpc()
-  const { registerRulesIpc } = require('./ipc/rules.handlers')
   registerRulesIpc()
 
   // 监听来自前端渲染进程的自定义标题栏指令

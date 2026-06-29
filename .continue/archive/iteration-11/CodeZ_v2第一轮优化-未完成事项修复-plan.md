@@ -608,7 +608,7 @@ type SearchResult = {
 - 主要界面不再出现乱码。
 - build/typecheck 通过。
 
-**进度**：🔄 部分完成。已修复 `ChatArea` 输入框 placeholder 与错误输出模板；`App.tsx` 等其他乱码仍需全局巡检。
+**进度**：✅ 全面完成。已修复 `ChatArea` 和 `App.tsx` 中的所有残留乱码（如 `娓呯┖` -> `清空`，`鏅鸿兘` -> `智能` 等注释与输出模板乱码）。
 
 ---
 

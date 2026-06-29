@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { languages } from '@codemirror/language-data'
+import { vscodeDark } from '@uiw/codemirror-theme-vscode'
 import MessageBody from '../chat/MessageBody'
 import './MarkdownEditor.css'
 
@@ -47,7 +48,7 @@ export default function MarkdownEditor({ value, onChange, placeholder, className
                 foldGutter: true,
                 highlightActiveLine: true,
               }}
-              theme="dark"
+              theme={vscodeDark}
             />
           </div>
         ) : (
