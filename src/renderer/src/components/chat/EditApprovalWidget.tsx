@@ -114,8 +114,8 @@ export default function EditApprovalWidget({ msgId, txId, edits, editStatuses = 
               {uniqueEdits.length} 个文件已更改
             </span>
             <Flex align="center" gap={1.5} className="edit-approval-total-diff">
-              {totalAdd > 0 && <span className="edit-approval-diff-add">+{totalAdd}</span>}
-              {totalDel > 0 && <span className="edit-approval-diff-del">-{totalDel}</span>}
+              <span className="edit-approval-diff-add">+{totalAdd}</span>
+              <span className="edit-approval-diff-del">-{totalDel}</span>
             </Flex>
           </Flex>
 
@@ -168,9 +168,18 @@ export default function EditApprovalWidget({ msgId, txId, edits, editStatuses = 
                   >
                     <FileIcon />
                     <span className="edit-approval-file-name">{fileName}</span>
-                    <Flex align="center" gap={1.5} className="edit-approval-item-diffs">
-                      {edit.additions !== '+0' && <span className="edit-approval-diff-add">{edit.additions}</span>}
-                      {edit.deletions !== '-0' && <span className="edit-approval-diff-del">{edit.deletions}</span>}
+                    <Flex 
+                      align="center" 
+                      gap={1.5} 
+                      className="edit-approval-item-diffs edit-approval-clickable-diff"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDiffClick?.(edit.filePath);
+                      }}
+                      title="点击查看修改 Diff"
+                    >
+                      <span className="edit-approval-diff-add">{edit.additions}</span>
+                      <span className="edit-approval-diff-del">{edit.deletions}</span>
                     </Flex>
                   </Flex>
 

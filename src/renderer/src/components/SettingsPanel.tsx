@@ -227,7 +227,7 @@ export default function SettingsPanel({
                       value={m.maxContextTokens || ''}
                       onChange={(e) => updateModel(idx, 'maxContextTokens', parseInt(e.target.value) || 0)}
                     />
-                    <span className="settings-tokens-unit">万</span>
+                    <span className="settings-tokens-unit">Tokens</span>
                     <Button type="text" danger size="none" className="settings-remove-model-btn" onClick={() => removeModel(idx)}>
                       <IconClose />
                     </Button>

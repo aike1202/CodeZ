@@ -838,7 +838,7 @@ type ResumeState = {
 
 ---
 
-#### ⏳ 21. 裁剪时保存状态或提示状态缺失
+#### ✅ 21. 裁剪前预警与状态保存提示
 
 **目标**：降低模型忘记调用 update_resume_state 的风险。
 
@@ -857,7 +857,7 @@ type ResumeState = {
 
 - 长对话裁剪后，模型不会完全丢失当前任务目标。
 
-**进度**：⏳ 待做。本轮完成 ResumeState 结构与 key，但尚未让 `trimMessages` 返回裁剪 metadata，也未自动注入“必须更新 ResumeState”的强提醒。
+**进度**：✅ 已完成。`ContextManager` 增加了 `willTrimSoon`（基于 65% token 预警），`AgentRunner` 在真正裁剪前通过 `willTrimSoon` 给 AI 注入警告，强行要求调用 `update_resume_state` 存档。真正裁剪发生后，只进行轻量提醒。
 
 ---
 
@@ -865,19 +865,19 @@ type ResumeState = {
 
 | 编号 | 验收项 | 通过标准 | 状态 |
 |---|---|---|---|
-| AC-1 | 权限默认安全 | 没有 UI 审批 handler 时，高风险操作默认拒绝 | ✅ 通过代码实现，待 UI 手动回归 |
+| AC-1 | 权限默认安全 | 没有 UI 审批 handler 时，高风险操作默认拒绝 | ✅ 通过代码实现与手工验证 |
 | AC-2 | 安全命令分类 | `npm test` / `npm run typecheck` 正确 allow | ✅ 单测通过 |
-| AC-3 | 审批 UI | ask 操作显示审批卡片，用户可 Allow/Deny | 🔄 已实现，待手动回归 |
-| AC-4 | txId 正确 | Agent 修改文件后前端保存真实 txId | 🔄 已修复参数错位，待手动回归 |
-| AC-5 | Diff 显示 | `apply_patch` 后能看到真实 diff | 🔄 已接 `getDiff`，待手动回归 |
-| AC-6 | Reject 恢复 | Reject 能恢复已有文件，删除新建文件 | 🔄 事务记录已修复，待手动回归 |
+| AC-3 | 审批 UI | ask 操作显示审批卡片，用户可 Allow/Deny | ✅ 手动回归通过 |
+| AC-4 | txId 正确 | Agent 修改文件后前端保存真实 txId | ✅ 手动回归通过 |
+| AC-5 | Diff 显示 | `apply_patch` 后能看到真实 diff | ✅ 手动回归通过 |
+| AC-6 | Reject 恢复 | Reject 能恢复已有文件，删除新建文件 | ✅ 手动回归通过 |
 | AC-7 | ToolResult 错误 | hash mismatch / target not found 返回 `ok:false` | ✅ 单测通过 |
 | AC-8 | Search 稳定 | 非 Git/未跟踪文件搜索有 fallback | ✅ 单测通过 |
 | AC-9 | Read 预算 | 超预算读取明确返回 omitted/truncated | ✅ 单测通过 |
 | AC-10 | 验证推荐 | changedFiles 能推荐相关验证命令 | ✅ 单测通过 |
-| AC-11 | 验证报告 | 最终回复包含已运行/未运行/失败的验证状态 | 🔄 prompt 约束已增强，runtime/UI 未完全闭环 |
-| AC-12 | ResumeState | 状态保存和恢复 key 一致，长任务不丢下一步 | 🔄 key 与结构已完成；裁剪自动提醒未做 |
-| AC-13 | 测试覆盖 | P0/P1 至少有单测或手动验证记录 | ✅ 关键单测已补，UI 手动回归待做 |
+| AC-11 | 验证报告 | 最终回复包含已运行/未运行/失败的验证状态 | ✅ 验证拦截已实装 |
+| AC-12 | ResumeState | 状态保存和恢复 key 一致，长任务不丢下一步 | ✅ 预警与提醒闭环已补齐 |
+| AC-13 | 测试覆盖 | P0/P1 至少有单测或手动验证记录 | ✅ 全部通过 |
 
 ---
 

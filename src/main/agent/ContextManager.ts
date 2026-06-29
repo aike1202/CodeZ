@@ -48,8 +48,12 @@ export interface ResumeState {
 }
 
 const DEFAULT_MAX_TOOL_OUTPUT = 3000
+const DEFAULT_MIN_TOOL_OUTPUT = 1500
 const DEFAULT_MAX_TOTAL_MESSAGES = 40
 const DEFAULT_KEEP_RECENT_ROUNDS = 3
+
+/** CJK 字符范围正则（中日韩统一表意 + 常用标点 + 全角符号） */
+const CJK_REGEX = /[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g
 
 /**
  * 智能上下文窗口管理器。
@@ -63,11 +67,46 @@ const DEFAULT_KEEP_RECENT_ROUNDS = 3
  */
 export class ContextManager {
   /**
-   * 对消息数组进行智能裁剪，返回新数组（不修改原数组）。
+   * 估算消息的 Token 数。
+   * 对 CJK 字符使用 1:1.5 比率，非 CJK 字符使用 1:4 比率。
    */
-  static trimMessages(messages: ChatMessage[], options?: TrimOptions): ChatMessage[] {
-    const maxToolOutput = options?.maxToolOutputChars ?? DEFAULT_MAX_TOOL_OUTPUT
-    const maxTotal = options?.maxTotalMessages ?? DEFAULT_MAX_TOTAL_MESSAGES
+  static estimateTokens(messages: ChatMessage[]): number {
+    let count = 0
+    for (const msg of messages) {
+      if (msg.content) count += ContextManager.estimateStringTokens(msg.content)
+      if (msg.tool_calls) {
+        for (const tc of msg.tool_calls) {
+          count += Math.ceil((tc.function?.name?.length || 0) / 4)
+          const args = tc.function?.arguments || ''
+          count += ContextManager.estimateStringTokens(args)
+        }
+      }
+    }
+    return count
+  }
+
+  /** 对单个字符串做 CJK 感知的 Token 估算 */
+  private static estimateStringTokens(text: string): number {
+    const cjkMatches = text.match(CJK_REGEX)
+    const cjkCount = cjkMatches ? cjkMatches.length : 0
+    const otherCount = text.length - cjkCount
+    return Math.ceil(cjkCount / 1.5 + otherCount / 4)
+  }
+
+  /**
+   * 对消息数组进行智能裁剪，返回新数组及裁剪状态。
+   */
+  static trimMessages(
+    messages: ChatMessage[],
+    contextWindowTokens: number = 32000,
+    options?: TrimOptions
+  ): { messages: ChatMessage[], trimmed: boolean, trimmedCount: number, willTrimSoon: boolean } {
+    // 根据上下文窗口大小动态调整工具输出截断长度
+    const dynamicMaxToolOutput = Math.max(
+      DEFAULT_MIN_TOOL_OUTPUT,
+      Math.min(30000, Math.floor(contextWindowTokens / 100))
+    )
+    const maxToolOutput = options?.maxToolOutputChars ?? dynamicMaxToolOutput
     const keepRecent = options?.keepRecentRounds ?? DEFAULT_KEEP_RECENT_ROUNDS
 
     // 步骤 1: 浅拷贝并截断 tool 输出
@@ -81,12 +120,44 @@ export class ContextManager {
       return msg
     })
 
-    // 步骤 2: 数量裁剪
-    if (result.length > maxTotal) {
+    const initialLength = result.length
+    let trimmed = false
+    let trimmedCount = 0
+
+    // 步骤 2: 基于 Token 的动态裁剪
+    const threshold = contextWindowTokens * 0.75
+    const warningThreshold = contextWindowTokens * 0.65
+    const targetTokens = contextWindowTokens * 0.6
+
+    const tokensBefore = ContextManager.estimateTokens(result)
+    
+    let willTrimSoon = false
+
+    if (tokensBefore > threshold) {
+      result = ContextManager.trimByTokens(result, targetTokens, keepRecent)
+    } else if (tokensBefore > warningThreshold) {
+      willTrimSoon = true
+    }
+
+    // 步骤 3: 兼容旧的固定条数裁剪（作为兜底）
+    // 仅在步骤 2 未触发裁剪（消息数未减少）且条数超限时生效
+    const maxTotal = options?.maxTotalMessages ?? DEFAULT_MAX_TOTAL_MESSAGES
+    if (result.length === initialLength && result.length > maxTotal) {
       result = ContextManager.trimByCount(result, maxTotal, keepRecent)
     }
 
-    return result
+    if (result.length < initialLength) {
+      trimmed = true
+      trimmedCount = initialLength - result.length
+      const tokensAfter = ContextManager.estimateTokens(result)
+      console.log(
+        `[ContextManager] Trimmed ${trimmedCount} messages. ` +
+        `Tokens: ${tokensBefore} → ${tokensAfter} ` +
+        `(window: ${contextWindowTokens}, threshold: ${Math.floor(threshold)}, toolOutput: ${maxToolOutput})`
+      )
+    }
+
+    return { messages: result, trimmed, trimmedCount, willTrimSoon }
   }
 
   /**
@@ -107,22 +178,19 @@ export class ContextManager {
   }
 
   /**
-   * 按消息总数裁剪：
+   * 按 Token 数量裁剪：
    * - 始终保留 messages[0]（System Prompt）
    * - 始终保留最近 keepRecentRounds 轮的完整 user→assistant→tool 组
    * - 从最旧的消息开始移除，保证 assistant(带 tool_calls) 和对应 tool 结果成组删除
    */
-  private static trimByCount(
+  private static trimByTokens(
     messages: ChatMessage[],
-    maxTotal: number,
+    targetTokens: number,
     keepRecentRounds: number
   ): ChatMessage[] {
-    // 分离 System Prompt
     const systemMsg = messages[0]?.role === 'system' ? messages[0] : null
     const rest = systemMsg ? messages.slice(1) : [...messages]
 
-    // 找出需要保护的最近 N 轮对话的起始索引
-    // 一"轮"定义为: user 消息 + 后续的 assistant/tool 消息直到下一个 user
     const roundStartIndices: number[] = []
     for (let i = 0; i < rest.length; i++) {
       if (rest[i].role === 'user') {
@@ -130,7 +198,6 @@ export class ContextManager {
       }
     }
 
-    // 保护最近 keepRecentRounds 轮
     const protectedStartIdx = roundStartIndices.length > keepRecentRounds
       ? roundStartIndices[roundStartIndices.length - keepRecentRounds]
       : 0
@@ -138,24 +205,89 @@ export class ContextManager {
     const protectedMessages = rest.slice(protectedStartIdx)
     let trimCandidates = rest.slice(0, protectedStartIdx)
 
-    // 从 trimCandidates 中删除消息直到总数满足限制
+    let currentTokens = ContextManager.estimateTokens([
+      ...(systemMsg ? [systemMsg] : []),
+      ...trimCandidates,
+      ...protectedMessages
+    ])
+
+    if (currentTokens <= targetTokens) {
+      return messages
+    }
+
+    let removed = 0
+
+    for (let i = 0; i < trimCandidates.length && currentTokens > targetTokens; i++) {
+      const msg = trimCandidates[i]
+      let groupTokens = ContextManager.estimateTokens([msg])
+
+      if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
+        const toolCallIds = new Set(msg.tool_calls.map(tc => tc.id))
+        let groupSize = 1
+        for (let j = i + 1; j < trimCandidates.length; j++) {
+          if (trimCandidates[j].role === 'tool' && trimCandidates[j].tool_call_id && toolCallIds.has(trimCandidates[j].tool_call_id!)) {
+            groupSize++
+            groupTokens += ContextManager.estimateTokens([trimCandidates[j]])
+          } else {
+            break
+          }
+        }
+        removed += groupSize
+        i += groupSize - 1
+      } else {
+        removed++
+      }
+
+      currentTokens -= groupTokens
+    }
+
+    trimCandidates = trimCandidates.slice(Math.min(removed, trimCandidates.length))
+
+    const final: ChatMessage[] = []
+    if (systemMsg) final.push(systemMsg)
+    final.push(...trimCandidates)
+    final.push(...protectedMessages)
+
+    return final
+  }
+
+  /**
+   * 按消息总数裁剪：兜底逻辑
+   */
+  private static trimByCount(
+    messages: ChatMessage[],
+    maxTotal: number,
+    keepRecentRounds: number
+  ): ChatMessage[] {
+    const systemMsg = messages[0]?.role === 'system' ? messages[0] : null
+    const rest = systemMsg ? messages.slice(1) : [...messages]
+
+    const roundStartIndices: number[] = []
+    for (let i = 0; i < rest.length; i++) {
+      if (rest[i].role === 'user') {
+        roundStartIndices.push(i)
+      }
+    }
+
+    const protectedStartIdx = roundStartIndices.length > keepRecentRounds
+      ? roundStartIndices[roundStartIndices.length - keepRecentRounds]
+      : 0
+
+    const protectedMessages = rest.slice(protectedStartIdx)
+    let trimCandidates = rest.slice(0, protectedStartIdx)
+
     const systemCount = systemMsg ? 1 : 0
     const neededRemoval = (systemCount + trimCandidates.length + protectedMessages.length) - maxTotal
 
     if (neededRemoval > 0) {
-      // 从头部移除，但要保证 assistant+tool 成组删除
       let removed = 0
-      const keepSet = new Set<number>()
 
       for (let i = 0; i < trimCandidates.length && removed < neededRemoval; i++) {
-        if (keepSet.has(i)) continue
-
         const msg = trimCandidates[i]
 
         if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
-          // 找出对应的 tool 结果消息
           const toolCallIds = new Set(msg.tool_calls.map(tc => tc.id))
-          let groupSize = 1 // assistant 本身
+          let groupSize = 1
           for (let j = i + 1; j < trimCandidates.length; j++) {
             if (trimCandidates[j].role === 'tool' && trimCandidates[j].tool_call_id && toolCallIds.has(trimCandidates[j].tool_call_id!)) {
               groupSize++
@@ -164,17 +296,15 @@ export class ContextManager {
             }
           }
           removed += groupSize
-          // 不加入 keepSet，让默认移除生效
+          i += groupSize - 1
         } else {
           removed++
         }
       }
 
-      // 实际移除
       trimCandidates = trimCandidates.slice(Math.min(removed, trimCandidates.length))
     }
 
-    // 重组
     const final: ChatMessage[] = []
     if (systemMsg) final.push(systemMsg)
     final.push(...trimCandidates)

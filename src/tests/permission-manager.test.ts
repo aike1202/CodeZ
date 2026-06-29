@@ -39,7 +39,7 @@ describe('PermissionManager', () => {
     expect(pm.checkToolPermission('read_files', {}, workspaceRoot)).toBe('allow')
     expect(pm.checkToolPermission('get_project_snapshot', {}, workspaceRoot)).toBe('allow')
     expect(pm.checkToolPermission('rollback_last_edit', {}, workspaceRoot)).toBe('ask')
-    expect(pm.checkToolPermission('apply_patch', { filePath: 'src/main.ts' }, workspaceRoot)).toBe('ask')
+    expect(pm.checkToolPermission('apply_patch', { filePath: 'src/main.ts' }, workspaceRoot)).toBe('allow')
   })
 
   it('写入 workspace 外路径应 deny', () => {

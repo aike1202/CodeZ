@@ -399,7 +399,11 @@ version changed manually
 ### 实测结果记录
 
 ```text
-待填写：
+✅ 完美通过：
+1. 第一次 apply_patch 因为 hash 不匹配被拦截。
+2. Agent 自动自愈，主动调用 read_files 获取了手动修改后的最新 hash。
+3. Agent 紧接着发起了第二次 apply_patch 并成功写入。
+整个过程在一轮对话内闭环，自动修复错误。
 ```
 
 ---
@@ -450,7 +454,11 @@ AI 应该：
 ### 实测结果记录
 
 ```text
-待填写：
+✅ 完美通过：
+1. 成功新建了包含类型错误的测试文件。
+2. 真实执行了 npm run typecheck。
+3. Agent 准确捕捉并输出了包含 error TS2322 的终端报错信息。
+4. Agent 没有撒谎称任务完成，客观呈现了当前的报错状态，诚实可靠。
 ```
 
 ---
@@ -500,7 +508,11 @@ AI 应该：
 ### 实测结果记录
 
 ```text
-待填写：
+✅ 完美通过：
+1. 成功新建了 report.txt 并写入 verified ok。
+2. 虽然是普通文本文件，但 Agent 主动选择了执行 git status 和 npm run typecheck 作为验证。
+3. 发现并正确展示了因为上一个测试用例残留的 tmp-type-error.ts 导致的 TypeScript 类型报错。
+4. 最终回复逻辑极其清晰：分类列出了「修改的文件」和「验证结果」，详细说明了为何报错且认为机制有效，完全避开了“笼统说完成”的坑。
 ```
 
 ---
@@ -562,7 +574,15 @@ update_resume_state
 ### 实测结果记录
 
 ```text
-待填写：
+⚠️ 部分通过（工具连通性 OK，自动触发机制待实现）：
+1. 工具后端代码完好，手动调用可以正常存档并返回 ok:true + resumeStateKey。
+2. 但在真实开发场景中，没有任何自动触发机制会调用这个工具：
+   - 用户不会主动说"存档"
+   - System Prompt 中没有引导大模型自觉调用
+   - 框架层没有在上下文裁剪时注入存档提醒
+3. 当前的上下文裁剪策略也过于粗糙（固定 40 条消息），未考虑模型实际 Token 窗口大小。
+4. 已创建第二轮优化需求文档，详见：
+   .continue/current/CodeZ_v2第二轮优化-动态上下文管理-requirements.md
 ```
 
 ---
@@ -616,7 +636,12 @@ tmp-agent-test/UntrackedSearchTarget.ts
 ### 实测结果记录
 
 ```text
-待填写：
+✅ 通过：
+1. Agent 正确使用了 search 工具搜索 specialSearchNeedle。
+2. 成功找到了未被 git 追踪的文件 tmp-agent-test/UntrackedSearchTarget.tx。
+3. 同时还找到了测试清单 .md 文件中的引用（符合预期）。
+4. 没有使用 run_command grep/find 等命令替代。
+注：实际测试文件后缀为 .tx 而非 .ts，不影响结论。
 ```
 
 ---
@@ -664,7 +689,11 @@ AI 应调用 `read_files`，参数类似：
 ### 实测结果记录
 
 ```text
-待填写：
+✅ 通过：
+1. 正确使用了 read_files 工具，未用 shell cat/head/sed。
+2. 精准定位到第 20 行附近，返回了第 17-23 行共 7 行内容。
+3. 每行都带有行号显示。
+4. 没有一次读取整个大文件，上下文窗口控制合理。
 ```
 
 ---

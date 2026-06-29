@@ -12,6 +12,7 @@ import IconGear from './icons/IconGear'
 import IconStop from './icons/IconStop'
 import IconSend from './icons/IconSend'
 import IconPackage from './icons/IconPackage'
+import ContextTracker from './ContextTracker'
 import { builtinCommands } from '../commands/SlashCommandParser'
 import './PromptArea.css'
 
@@ -47,6 +48,9 @@ export default function PromptArea({ onSend, placeholder, onOpenSettings, worksp
       setSelectedModelName(models[0].name)
     }
   }, [activeProviderId])
+
+  const messages = useChatStore((s) => s.messages)
+  const maxContextTokens = models.find(m => m.name === selectedModelName)?.maxContextTokens || 32000
 
   useEffect(() => {
     if (workspace) {
@@ -285,6 +289,12 @@ export default function PromptArea({ onSend, placeholder, onOpenSettings, worksp
                     <IconGear />
                   </Button>
                 )}
+
+                <ContextTracker 
+                  messages={messages} 
+                  maxContextTokens={maxContextTokens} 
+                  skillsCount={dynamicSkills.length} 
+                />
 
                 <div className="relative">
                   <Button

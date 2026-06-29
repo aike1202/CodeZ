@@ -52,8 +52,8 @@ export class PermissionManager {
       return 'ask'
     }
 
-    // 2. 写入类工具：安全边界内拦截询问，超出边界直接拒绝
-    if (['apply_patch'].includes(toolName)) {
+    // 2. 写入类工具：安全边界内拦截，符合边界则直接允许，超出边界直接拒绝
+    if (['apply_patch', 'write_to_file', 'replace_file_content', 'multi_replace_file_content'].includes(toolName)) {
       // workspace check
       let targetPath = parsedArgs?.filePath || parsedArgs?.TargetFile || parsedArgs?.file_path || parsedArgs?.path
       if (targetPath) {
@@ -67,7 +67,7 @@ export class PermissionManager {
           return 'deny'
         }
       }
-      return 'ask'
+      return 'allow'
     }
 
     if (toolName === 'run_command') {

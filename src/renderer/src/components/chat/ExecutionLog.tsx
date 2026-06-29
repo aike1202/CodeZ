@@ -37,7 +37,9 @@ const VERB_TRANSLATIONS: Record<string, string> = {
   Edited: '已修改',
   Editing: '正在修改',
   Created: '已创建',
-  Creating: '正在创建'
+  Creating: '正在创建',
+  Executed: '已执行',
+  Executing: '正在执行'
 }
 
 export default function ExecutionLog({
@@ -134,11 +136,14 @@ export default function ExecutionLog({
       return getFileIconComponent(item.fileName)
     }
     if (item.type === 'tool') {
-      if (item.verb === 'Searched') {
+      if (item.verb === 'Searched' || item.verb === 'Searching') {
         return <SearchIcon />
       }
-      if (item.verb === 'Explored') {
+      if (item.verb === 'Explored' || item.verb === 'Exploring') {
         return <FolderIcon />
+      }
+      if (item.verb === 'Executed' || item.verb === 'Executing') {
+        return <CmdIcon />
       }
       return getFileIconComponent(item.fileName)
     }

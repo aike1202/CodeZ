@@ -343,6 +343,7 @@ export default function ChatArea({
         activeProv.id,
         model,
         chatMessages,
+        sid,
         {
           onChunk: (delta: string, reasoningDelta?: string) => {
             appendStreamChunk(agentId, delta, reasoningDelta)
@@ -399,7 +400,7 @@ export default function ChatArea({
     [addUserMessage, startStreamingReply, appendStreamChunk, finishStreaming, persistCurrentSession, setStreamCleanup, createSession, startToolCall, finishToolCall, appendReasoningTimelineChunk, addPermissionRequest, setDiffEntries]
   )
 
-  // 鏅鸿兘瑙﹀簳婊氬姩閫昏緫
+  // 智能触底滚动逻辑
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
@@ -517,7 +518,7 @@ export default function ChatArea({
                       if (edits.length === 0) return null;
 
                       // Check if all edits are processed
-                      const allProcessed = edits.every(e => {
+                      const allProcessed = edits.every((e: any) => {
                         // uniqueEdits handles duplicate files, but here we just check all
                         return msg.editStatuses?.[e.filePath]
                       });
@@ -549,13 +550,13 @@ export default function ChatArea({
         messages.some(m => {
           const hasPendingPermission = m.permissionRequests?.some((r: any) => r.status === 'pending');
           const { edits } = extractMessageEdits(m);
-          const hasPendingEdits = edits.length > 0 && !edits.every(e => m.editStatuses?.[e.filePath]);
+          const hasPendingEdits = edits.length > 0 && !edits.every((e: any) => m.editStatuses?.[e.filePath]);
           return hasPendingPermission || hasPendingEdits;
         }) ? (
           <div style={{ width: '100%', flexShrink: 0, zIndex: 60, marginBottom: '-16px' }}>
             {messages.map((msg) => {
               const { edits, tools } = extractMessageEdits(msg);
-              const hasPendingEdits = edits.length > 0 && !edits.every(e => msg.editStatuses?.[e.filePath]);
+              const hasPendingEdits = edits.length > 0 && !edits.every((e: any) => msg.editStatuses?.[e.filePath]);
               const pendingPermissions = msg.permissionRequests?.filter((r: any) => r.status === 'pending') || [];
               const hasPendingPermission = pendingPermissions.length > 0;
 

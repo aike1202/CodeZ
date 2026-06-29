@@ -92,8 +92,8 @@
     },
     "F:\\MyProjectF\\CodeZ": {
       "rootPath": "F:\\MyProjectF\\CodeZ",
-      "packageJsonHash": "0f46efb9704a3334e5f8f357905055358f190f0cb18f44381b8c29f2244ab35d",
-      "lockfileHash": "56320601ade790e897638d47591c3c0a6733ff1523e2e6ff755f9e54e0dbe54a",
+      "packageJsonHash": "6086d0a5489ff3e9ece2f432b507251124e3f79476ecd24b4b501aad356df562",
+      "lockfileHash": "a312e5fad3487834e5abd61f4c44eccf87c70430b7aa817490fcaafd54a0bd6a",
       "options": {
         "dirPaths": [
           "src/main",
@@ -118,6 +118,7 @@
           "@electron-toolkit/utils": "^3.0.0",
           "@xterm/addon-fit": "^0.11.0",
           "@xterm/xterm": "^6.0.0",
+          "lodash": "^4.18.1",
           "node-pty": "^1.1.0",
           "prismjs": "^1.30.0",
           "react": "^18.3.1",
@@ -126,6 +127,7 @@
         },
         "devDependencies": {
           "@google/generative-ai": "^0.24.1",
+          "@types/lodash": "^4.17.24",
           "@types/node": "^20.14.0",
           "@types/prismjs": "^1.26.6",
           "@types/react": "^18.3.3",
@@ -176,9 +178,9 @@
           "src/shared/types/provider.ts"
         ],
         "tree": "=== Directory: src/main ===\nsrc/main\n[DIR] agent\n[DIR] ipc\n[DIR] services\n[DIR] tools\n[FILE] index.ts\n\n=== Directory: src/shared ===\nsrc/shared\n[DIR] constants\n[DIR] ipc\n[DIR] types",
-        "docsTree": "[Documentation Files]\n.agents/AGENTS.md\nCONTEXT_DISTILLER_SCOUT_PLAN.md\ndocs/ai-coding-agent-evolution.md\ndocs/ai-coding-agent-requirements-analysis.md\ndocs/ai-coding-agent-tools-design.md\ndocs/proxy-logs-restaurant-pos-analysis.md\ndocs/SWARM_ARCHITECTURE_PLAN.md\ndocsv2/00-current-state-and-scope.md\ndocsv2/01-tool-system.md\ndocsv2/02-edit-diff-rollback.md\ndocsv2/03-agent-loop-provider.md\ndocsv2/04-permission-safety.md\ndocsv2/05-verification-loop.md\ndocsv2/06-context-rules-skills.md\ndocsv2/07-goal-context-resume.md\ndocsv2/08-ui-observability.md\ndocsv2/09-mcp-plugins.md\ndocsv2/10-swarm-roadmap.md\nimplementation_plan.md\nimplementation_plan2.md\nREADME.md\ntask.md\nunqualified_code_report.md",
+        "docsTree": "[Documentation Files]\n.agents/AGENTS.md\nCONTEXT_DISTILLER_SCOUT_PLAN.md\ndocs/ai-coding-agent-evolution.md\ndocs/ai-coding-agent-requirements-analysis.md\ndocs/ai-coding-agent-tools-design.md\ndocs/SWARM_ARCHITECTURE_PLAN.md\ndocsv2/00-current-state-and-scope.md\ndocsv2/01-tool-system.md\ndocsv2/02-edit-diff-rollback.md\ndocsv2/03-agent-loop-provider.md\ndocsv2/04-permission-safety.md\ndocsv2/05-verification-loop.md\ndocsv2/06-context-rules-skills.md\ndocsv2/07-goal-context-resume.md\ndocsv2/08-ui-observability.md\ndocsv2/09-mcp-plugins.md\ndocsv2/10-swarm-roadmap.md\nimplementation_plan.md\nimplementation_plan2.md\nREADME.md\ntask.md\nunqualified_code_report.md",
         "fromCache": false,
-        "updatedAt": "2026-06-28T08:35:48.920Z"
+        "updatedAt": "2026-06-29T09:13:21.791Z"
       }
     }
   }

@@ -89,15 +89,44 @@ export function parseInline(
     } else if (first.type === 'code') {
       const nextCode = remaining.indexOf('`', 1)
       if (nextCode !== -1) {
-        const codeText = remaining.slice(1, nextCode)
-        nodes.push(
-          React.createElement('code', { key: `code-${keyIdx++}`, className: 'inline-code' }, codeText)
-        )
+        const rawCodeText = remaining.slice(1, nextCode)
+        const codeText = rawCodeText.trim()
+        
+        let isFile = false
+        FILE_PATH_RE.lastIndex = 0
+        const codeFileMatch = FILE_PATH_RE.exec(codeText)
+        if (codeFileMatch && codeFileMatch[0] === codeText) {
+          const fullPath = codeFileMatch[1].split(':')[0]
+          const basename = fullPath.split(/[/\\]/).pop() || fullPath
+          const validFiles = useWorkspaceStore.getState().validFiles
+          if (validFiles.size === 0 || validFiles.has(basename) || validFiles.has(fullPath)) {
+            isFile = true
+          }
+        }
+
+        if (isFile) {
+          nodes.push(
+            React.createElement(
+              'code',
+              { 
+                key: `code-${keyIdx++}`, 
+                className: 'inline-code file-link',
+                onClick: () => onFileClick(codeText),
+                title: `点击预览 ${codeText}`
+              },
+              rawCodeText
+            )
+          )
+        } else {
+          nodes.push(
+            React.createElement('code', { key: `code-${keyIdx++}`, className: 'inline-code' }, rawCodeText)
+          )
+        }
         remaining = remaining.slice(nextCode + 1)
       } else {
-        const codeText = remaining.slice(1)
+        const rawCodeText = remaining.slice(1)
         nodes.push(
-          React.createElement('code', { key: `code-${keyIdx++}`, className: 'inline-code' }, codeText)
+          React.createElement('code', { key: `code-${keyIdx++}`, className: 'inline-code' }, rawCodeText)
         )
         remaining = ''
       }

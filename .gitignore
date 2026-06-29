@@ -135,3 +135,7 @@ scratch_*
 electron.vite.config.*.mjs
 .myagent-cache/
 dist-app
+
+# Agent test temporaries
+tmp-agent-test/
+src/tests/tmp-*

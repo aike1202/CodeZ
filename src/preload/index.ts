@@ -68,6 +68,7 @@ const api = {
       providerId: string,
       model: string,
       messages: ChatMessage[],
+      sessionId: string | null,
       callbacks: {
         onChunk: (delta: string, reasoningDelta?: string) => void
         onDone: (fullContent: string, stopReason?: string, txId?: string) => void
@@ -132,7 +133,7 @@ const api = {
       ipcRenderer.on(IPC_CHANNELS.CHAT_REQUEST_APPROVAL, approvalHandler)
 
       // 发起请求
-      ipcRenderer.invoke(IPC_CHANNELS.CHAT_STREAM_START, { providerId, model, messages })
+      ipcRenderer.invoke(IPC_CHANNELS.CHAT_STREAM_START, { providerId, model, messages, sessionId })
         .then((streamId) => {
           activeStreamId = streamId
         })

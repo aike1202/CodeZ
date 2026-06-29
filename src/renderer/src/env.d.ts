@@ -30,6 +30,7 @@ declare global {
           providerId: string,
           model: string,
           messages: any[],
+          sessionId: string | null,
           callbacks: {
             onChunk: (delta: string, reasoningDelta?: string) => void
             onDone: (fullContent: string, stopReason?: string, txId?: string) => void

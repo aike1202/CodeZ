@@ -113,7 +113,8 @@ export default function App(): React.ReactElement {
       const updated = await window.api.workspace.getRecentProjects()
       store.setRecentProjects(updated)
 
-      // 鑷姩鍒涘缓鏂颁細璇?      createSession(ws.id)
+      // 自动创建新会话
+      createSession(ws.id)
     } catch (error) {
       console.error('Failed to open workspace:', error)
     } finally {
@@ -245,20 +246,20 @@ export default function App(): React.ReactElement {
 
   const panelOpen = previewPath !== null || previewDiff !== null
 
-  // 褰?workspace 鍙樺姩涓斾负绌烘椂锛屽叧闂粓绔獥鍙?
+  // 当 workspace 变动且为空时，关闭终端窗口
   useEffect(() => {
     if (!workspace) {
       setTerminalOpen(false)
     }
   }, [workspace])
 
-  // 闄愬埗渚ц竟鏍忔渶澶у搴︼紝淇濊瘉涓棿鑱婂ぉ鍖哄搴﹁嚦灏戜负 300px
+  // 限制侧边栏最大宽度，保证中间聊天区宽度至少为 300px
   const maxSidebarWidth = useMemo(() => {
     const totalWidth = typeof window !== 'undefined' ? window.innerWidth : 1200
     return Math.max(200, totalWidth - 300 - (panelOpen ? previewPanelWidth : 0))
   }, [panelOpen, previewPanelWidth])
 
-  // 褰撶獥鍙ｅぇ灏忔敼鍙樻垨鍖哄煙澶у皬鏀瑰彉鏃讹紝鑷姩绾︽潫瀹藉害锛岄槻姝㈣秴鍑虹獥鍙ｅ鑷存爣棰樻爮绛夋埅鏂?
+  // 当窗口大小改变或区域大小改变时，自动约束宽度，防止超出窗口导致标题栏等截断
   useEffect(() => {
     const handleResize = () => {
       const totalWidth = window.innerWidth
@@ -291,7 +292,7 @@ export default function App(): React.ReactElement {
   }, [panelOpen, sidebarWidth, previewPanelWidth])
 
   const handleFileClick = useCallback(async (filePath: string, virtualContent?: string) => {
-    setPreviewDiff(null) // 娓呯┖ Diff 鐘舵€佷互闃叉贩娣?
+    setPreviewDiff(null) // 清空 Diff 状态以防混淆
     const ws = useWorkspaceStore.getState().workspace
     if (!ws) return
 
@@ -317,7 +318,7 @@ export default function App(): React.ReactElement {
     } catch {
       setPreviewContent({
         path: cleanPath,
-        content: `鏃犳硶璇诲彇鏂囦欢锛?{cleanPath}`,
+        content: `无法读取文件：${cleanPath}`,
         truncated: false,
         totalLines: 0
       })
@@ -335,7 +336,8 @@ export default function App(): React.ReactElement {
       codeContent?: string
     }
   ) => {
-    setPreviewPath(null) // 鍏抽棴鏅€氭枃浠堕瑙?    setPreviewContent(null)
+    setPreviewPath(null) // 关闭普通文件预览
+    setPreviewContent(null)
     setPreviewDiff({
       filePath,
       ...editInfo
@@ -424,7 +426,7 @@ export default function App(): React.ReactElement {
         }
       />
 
-      {/* 妯℃€佹 */}
+      {/* 模态框 */}
       {taskModalOpen && workspace && (
         <TaskHistoryModal
           workspaceId={workspace.id}

@@ -36,7 +36,7 @@ export interface UnifiedTimelineItem {
   type: 'reasoning' | 'tool' | 'command' | 'edit' | 'text'
   timestamp: number
   status: 'running' | 'success' | 'error'
-  verb: 'Thought' | 'Analyzed' | 'Analyzing' | 'Explored' | 'Exploring' | 'Searched' | 'Searching' | 'Terminal' | 'Edited' | 'Created' | 'Editing' | 'Creating'
+  verb: 'Thought' | 'Analyzed' | 'Analyzing' | 'Explored' | 'Exploring' | 'Searched' | 'Searching' | 'Terminal' | 'Edited' | 'Created' | 'Editing' | 'Creating' | 'Executed' | 'Executing'
   target: string
   detail?: string
   args?: string
@@ -369,13 +369,17 @@ export function buildUnifiedTimeline(
           }
         }
 
-        const verb = tc.name === 'search_text' || tc.name === 'search_code' || tc.name === 'search' ? 'Searched' : 'Analyzed'
-
-        let verbDisplay: 'Thought' | 'Analyzed' | 'Analyzing' | 'Explored' | 'Searched' | 'Terminal' | 'Edited' | 'Created' | 'Editing' | 'Creating' = verb
-        if (tc.name === 'list_files') {
-          verbDisplay = 'Explored'
+        let verbDisplay: UnifiedTimelineItem['verb'] = 'Executed'
+        if (tc.name === 'search_text' || tc.name === 'search_code' || tc.name === 'search') {
+          verbDisplay = tc.status === 'running' ? 'Searching' : 'Searched'
+        } else if (tc.name === 'list_files' || tc.name === 'list_dir') {
+          verbDisplay = tc.status === 'running' ? 'Exploring' : 'Explored'
         } else if (tc.name === 'run_command') {
           verbDisplay = 'Terminal'
+        } else if (tc.name === 'read_file' || tc.name === 'read_files' || tc.name === 'get_project_snapshot' || tc.name === 'fast_context' || tc.name === 'read_url_content' || tc.name === 'view_file') {
+          verbDisplay = tc.status === 'running' ? 'Analyzing' : 'Analyzed'
+        } else {
+          verbDisplay = tc.status === 'running' ? 'Executing' : 'Executed'
         }
 
         let targetDisplay = target
@@ -401,6 +405,7 @@ export function buildUnifiedTimeline(
 
         const cleanRealPath = getToolTarget(tc)
         const isActuallyRunning = tc.status === 'running' && isStreaming !== false
+        
         list.push({
           id: tc.id,
           type: tc.name === 'run_command' ? 'command' : 'tool',
