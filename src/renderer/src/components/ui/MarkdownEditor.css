@@ -86,14 +86,15 @@
   font-size: 13.5px;
   line-height: 1.6;
   background-color: transparent;
-  color: transparent;
+  color: var(--text-primary);
+  -webkit-text-fill-color: transparent;
   caret-color: var(--text-primary);
   overflow-y: auto;
 }
 
 .md-editor-textarea::selection {
   background-color: var(--bg-selected);
-  color: transparent;
+  -webkit-text-fill-color: transparent;
 }
 
 .md-editor-textarea:focus {

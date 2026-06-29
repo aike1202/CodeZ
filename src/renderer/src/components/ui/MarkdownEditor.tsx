@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, UIEvent } from 'react'
 import Prism from 'prismjs'
+import 'prismjs/components/prism-markdown'
 import MessageBody from '../chat/MessageBody'
 import './MarkdownEditor.css'
 
