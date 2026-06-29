@@ -48,7 +48,7 @@ export default function SettingsRulesTab(): React.ReactElement {
     setEditingRule({
       scope,
       filename: '',
-      content: '',
+      content: '---\ndescription: 例如规则描述\nglobs: src/**/*.tsx\nalwaysApply: false\n---\n\n# ',
       projectId
     })
     setInlineEditId('new')
@@ -307,7 +307,6 @@ export default function SettingsRulesTab(): React.ReactElement {
             <MarkdownEditor 
               value={editingRule.content || ''}
               onChange={val => setEditingRule({ ...editingRule, content: val })}
-              placeholder={`---\ndescription: 例如规则描述\nglobs: src/**/*.tsx\nalwaysApply: false\n---\n\n# 编写你的规则...`}
             />
           </div>
         </Flex>
