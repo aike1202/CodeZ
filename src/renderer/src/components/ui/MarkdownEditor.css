@@ -9,6 +9,7 @@
 .md-editor-tabs {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 20px;
   padding: 0 24px;
   border-bottom: 1px solid var(--border-color);
@@ -43,18 +44,56 @@
   overflow: hidden;
 }
 
-.md-editor-textarea {
+.md-editor-source-wrapper {
+  position: relative;
   flex: 1;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.md-editor-pre {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 24px;
+  box-sizing: border-box;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', Courier, monospace;
+  font-size: 13.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow: hidden; /* Sync scroll with textarea */
+  pointer-events: none;
+  color: var(--text-primary);
+  background-color: transparent;
+}
+
+.md-editor-textarea {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
   height: 100%;
   border: none;
   resize: none;
   padding: 24px;
+  box-sizing: border-box;
   font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', Courier, monospace;
   font-size: 13.5px;
   line-height: 1.6;
   background-color: transparent;
-  color: var(--text-primary);
+  color: transparent;
+  caret-color: var(--text-primary);
+  overflow-y: auto;
+}
+
+.md-editor-textarea::selection {
+  background-color: var(--bg-selected);
+  color: transparent;
 }
 
 .md-editor-textarea:focus {
