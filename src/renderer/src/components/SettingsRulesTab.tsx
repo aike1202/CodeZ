@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react'
 import Flex from './ui/Flex'
 import Stack from './ui/Stack'
-import { IconBook, IconAdd, IconTrash } from './Icons'
+import { IconBook, IconAdd, IconTrash, IconFolder } from './Icons'
 import { useRulesStore } from '../stores/rulesStore'
+import { useWorkspaceStore } from '../stores/workspaceStore'
 import type { RuleFile, RuleScope } from '@shared/types/rules'
 import './SettingsRulesTab.css'
 
@@ -69,18 +70,29 @@ export default function SettingsRulesTab(): React.ReactElement {
     }
   }
 
+  const recentProjects = useWorkspaceStore(s => s.recentProjects)
+
+  // Group workspace rules by projectId
+  const workspaceRulesGrouped: Record<string, RuleFile[]> = {}
+  workspaceRules.forEach(r => {
+    if (r.projectId) {
+      if (!workspaceRulesGrouped[r.projectId]) workspaceRulesGrouped[r.projectId] = []
+      workspaceRulesGrouped[r.projectId].push(r)
+    }
+  })
+
   return (
     <Flex className="settings-content-wrapper">
       {/* 左侧 - 规则列表 */}
-      <Stack className="settings-provider-sidebar">
+      <Stack className="settings-provider-sidebar" style={{ width: 280 }}>
         <div className="settings-provider-header">
           <h1 className="settings-provider-title">规则设置</h1>
-          <p className="settings-provider-desc">管理全局和当前项目的 Agent 规则，指导 AI 如何编写代码。</p>
+          <p className="settings-provider-desc">管理全局和项目的 Agent 规则，指导 AI 如何编写代码。</p>
         </div>
         
         <Stack className="settings-provider-list-container">
           {/* 全局规则 */}
-          <div className="settings-provider-group-label">🌐 全局规则 (Global)</div>
+          <div className="settings-provider-group-label">全局规则 (Global)</div>
           <Stack gap={1} style={{ marginBottom: 16 }}>
             {globalRules.map((r) => (
               <Flex
@@ -105,28 +117,47 @@ export default function SettingsRulesTab(): React.ReactElement {
           </Stack>
 
           {/* 项目规则 */}
-          <div className="settings-provider-group-label">📁 当前项目规则 (Workspace)</div>
-          <Stack gap={1}>
-            {workspaceRules.map((r) => (
-              <Flex
-                key={r.path}
-                align="center"
-                className={`settings-provider-item ${activeTabId === r.path ? 'active' : 'inactive'}`}
-                onClick={() => handleSelectRule(r)}
-              >
-                <IconBook className="btn-icon shrink-0" style={{ marginRight: 8 }}/>
-                <span className="truncate">{r.filename}</span>
-              </Flex>
-            ))}
-            <Flex
-              align="center"
-              className="settings-provider-item inactive"
-              onClick={() => handleNewRule('workspace')}
-              style={{ marginTop: 4, color: 'var(--text-secondary)' }}
-            >
-              <IconAdd className="shrink-0" style={{ marginRight: 8 }}/>
-              <span>添加项目规则</span>
-            </Flex>
+          <div className="settings-provider-group-label">项目规则 (Workspace)</div>
+          <Stack gap={2}>
+            {recentProjects.map(proj => {
+              const projRules = workspaceRulesGrouped[proj.id] || []
+              return (
+                <Stack key={proj.id} gap={1} style={{ paddingLeft: 8, borderLeft: '1px solid var(--border-color)', marginLeft: 4 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4, display: 'flex', alignItems: 'center' }}>
+                    <IconFolder className="shrink-0" style={{ marginRight: 4, opacity: 0.7 }} />
+                    <span className="truncate">{proj.name}</span>
+                  </div>
+                  {projRules.map((r) => (
+                    <Flex
+                      key={r.path}
+                      align="center"
+                      className={`settings-provider-item ${activeTabId === r.path ? 'active' : 'inactive'}`}
+                      onClick={() => handleSelectRule(r)}
+                    >
+                      <IconBook className="btn-icon shrink-0" style={{ marginRight: 8 }}/>
+                      <span className="truncate">{r.filename}</span>
+                    </Flex>
+                  ))}
+                  <Flex
+                    align="center"
+                    className="settings-provider-item inactive"
+                    onClick={() => {
+                      setActiveTabId('new')
+                      setEditingRule({
+                        scope: 'workspace',
+                        filename: '',
+                        content: '',
+                        projectId: proj.id
+                      })
+                    }}
+                    style={{ marginTop: 4, color: 'var(--text-secondary)' }}
+                  >
+                    <IconAdd className="shrink-0" style={{ marginRight: 8 }}/>
+                    <span>添加项目规则</span>
+                  </Flex>
+                </Stack>
+              )
+            })}
           </Stack>
         </Stack>
       </Stack>

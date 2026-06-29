@@ -6,7 +6,7 @@ import { IPC_CHANNELS } from '../../shared/ipc/channels'
 import type { RuleFile, RuleScope } from '../../shared/types/rules'
 
 export function registerRulesIpc(): void {
-  ipcMain.handle(IPC_CHANNELS.RULES_GET_LIST, async (_, workspaceRoot: string): Promise<RuleFile[]> => {
+  ipcMain.handle(IPC_CHANNELS.RULES_GET_LIST, async (_, workspaces: { id: string, rootPath: string }[]): Promise<RuleFile[]> => {
     const rules: RuleFile[] = []
 
     // Global
@@ -15,12 +15,15 @@ export function registerRulesIpc(): void {
     await loadRulesFromDir(path.join(homeDir, '.codez', 'rules'), 'global', rules)
 
     // Workspace
-    if (workspaceRoot) {
-      await loadRulesFromPath(path.join(workspaceRoot, 'AGENTS.md'), 'workspace', rules)
-      await loadRulesFromPath(path.join(workspaceRoot, '.agents', 'AGENTS.md'), 'workspace', rules)
-      await loadRulesFromPath(path.join(workspaceRoot, '.clinerules'), 'workspace', rules)
-      await loadRulesFromPath(path.join(workspaceRoot, '.cursorrules'), 'workspace', rules)
-      await loadRulesFromDir(path.join(workspaceRoot, '.codez', 'rules'), 'workspace', rules)
+    if (workspaces && workspaces.length > 0) {
+      for (const ws of workspaces) {
+        if (!ws.rootPath) continue
+        await loadRulesFromPath(path.join(ws.rootPath, 'AGENTS.md'), 'workspace', rules, ws.id)
+        await loadRulesFromPath(path.join(ws.rootPath, '.agents', 'AGENTS.md'), 'workspace', rules, ws.id)
+        await loadRulesFromPath(path.join(ws.rootPath, '.clinerules'), 'workspace', rules, ws.id)
+        await loadRulesFromPath(path.join(ws.rootPath, '.cursorrules'), 'workspace', rules, ws.id)
+        await loadRulesFromDir(path.join(ws.rootPath, '.codez', 'rules'), 'workspace', rules, ws.id)
+      }
     }
 
     return rules
@@ -74,21 +77,21 @@ export function registerRulesIpc(): void {
   })
 }
 
-async function loadRulesFromPath(filePath: string, scope: RuleScope, rules: RuleFile[]) {
+async function loadRulesFromPath(filePath: string, scope: RuleScope, rules: RuleFile[], projectId?: string) {
   try {
     const raw = await fs.readFile(filePath, 'utf-8')
-    rules.push(parseRuleFile(filePath, scope, raw))
+    rules.push(parseRuleFile(filePath, scope, raw, projectId))
   } catch {
     // ignore missing files
   }
 }
 
-async function loadRulesFromDir(dirPath: string, scope: RuleScope, rules: RuleFile[]) {
+async function loadRulesFromDir(dirPath: string, scope: RuleScope, rules: RuleFile[], projectId?: string) {
   try {
     const entries = await fs.readdir(dirPath, { withFileTypes: true })
     for (const entry of entries) {
       if (entry.isFile() && entry.name.endsWith('.md')) {
-        await loadRulesFromPath(path.join(dirPath, entry.name), scope, rules)
+        await loadRulesFromPath(path.join(dirPath, entry.name), scope, rules, projectId)
       }
     }
   } catch {
@@ -96,13 +99,14 @@ async function loadRulesFromDir(dirPath: string, scope: RuleScope, rules: RuleFi
   }
 }
 
-function parseRuleFile(filePath: string, scope: RuleScope, raw: string): RuleFile {
+function parseRuleFile(filePath: string, scope: RuleScope, raw: string, projectId?: string): RuleFile {
   const filename = path.basename(filePath)
   const rule: RuleFile = {
     filename,
     scope,
     path: filePath,
-    content: raw
+    content: raw,
+    projectId
   }
 
   // Simple YAML frontmatter parser
