@@ -237,6 +237,15 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.SKILL_CHECK_EXTERNAL),
     importExternal: (sourceName?: string, customPath?: string, forceOverwrite?: boolean): Promise<boolean> =>
       ipcRenderer.invoke(IPC_CHANNELS.SKILL_IMPORT_EXTERNAL, sourceName, customPath, forceOverwrite)
+  },
+
+  rules: {
+    getList: (workspaceRoot: string): Promise<any[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.RULES_GET_LIST, workspaceRoot),
+    save: (rule: any, workspaceRoot: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC_CHANNELS.RULES_SAVE, rule, workspaceRoot),
+    delete: (rulePath: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC_CHANNELS.RULES_DELETE, rulePath)
   }
 }
 
