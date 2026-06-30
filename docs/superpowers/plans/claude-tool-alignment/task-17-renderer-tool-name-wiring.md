@@ -14,6 +14,13 @@
 
 **说明：** 旧名分支（`apply_patch/read_files/run_command/search/write_to_file/...`）随 Task 16 删除已不会再触发，本任务在其旁补新名分支即可，旧名分支可保留为死代码或一并移除（建议移除以净）。`Edit/Write` 返回 JSON `{changedFiles,diff,summary,fileHashAfter}`（Task 3/4），与原 `apply_patch` 同形，故 Accept/Reject 流只需扩工具名判定。
 
+**预存 typecheck 基线（不在本计划范围）：** 截至本任务，`npm run typecheck` 有 7 个**先于本计划存在**的错误，均与本工具对齐无关：
+- `ExecutionLog.tsx:146/153` — `FolderIcon/FileIcon` 未导入；
+- `ExecutionLogDetail.tsx:46/58/154` — `<FolderIcon />` 缺 `folderName`；
+- `ExecutionLogUtils.ts:51` — `FileIcon` createElement 缺必填 prop；
+- `PromptArea.tsx:65` — `window.api.workspace.getAllPaths` 已从 preload 移除。
+本任务**不修这些预存错误**（超出工具对齐范围），只做新名接线，并**不得引入新错误**。Task 17 完成后，typecheck 错误数应仍为 7（不增），且新接线代码本身类型干净。
+
 - [ ] **Step 1: Extend editDiffUtils.ts**
 
 1a. `getFilePathFromToolArgs` 加入 `file_path`（Edit/Write/NotebookEdit 用）：
@@ -183,9 +190,9 @@ function getFilePathFromToolArgs(args: string): string {
 - [ ] **Step 6: typecheck + build**
 
 Run: `npm run typecheck`
-Expected: 无错误。
+Expected: 错误数 ≤ 7（预存基线，见上节"预存 typecheck 基线"），且**本任务新接线的代码不引入新错误**。具体：`ExecutionLog.tsx`/`PromptArea.tsx`/`ExecutionLogDetail.tsx`/`ExecutionLogUtils.ts` 之外的文件零错误；这四个文件中的错误须是预存的那 7 条，不得新增。
 Run: `npm run build`
-Expected: 构建成功（渲染端类型/导入完整）。
+Expected: 构建成功（vite 构建不因类型错误阻断；渲染端类型/导入完整）。
 
 - [ ] **Step 7: Commit**
 

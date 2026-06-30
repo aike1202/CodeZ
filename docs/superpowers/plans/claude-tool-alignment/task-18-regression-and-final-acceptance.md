@@ -12,7 +12,7 @@
 Run: `npm test`
 Expected: 全绿（含 18 个任务新增/改写的全部测试）。
 Run: `npm run typecheck`
-Expected: 无错误。
+Expected: 错误数 ≤ 7（预存基线，与本计划无关的 `ExecutionLog.tsx`/`PromptArea.tsx`/`ExecutionLogDetail.tsx`/`ExecutionLogUtils.ts` 中 7 条先存错误）；**本计划新增/修改的文件零类型错误**。若错误数 >7，说明本计划引入了新错误，须定位修复。
 Run: `npm run build`
 Expected: 构建成功。
 
