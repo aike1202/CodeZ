@@ -1,5 +1,4 @@
 import React from 'react'
-import { useWorkspaceStore } from '../../stores/workspaceStore'
 import IconPackage from '../icons/IconPackage'
 
 /* ---------- file path regex ---------- */
@@ -7,18 +6,15 @@ const EXTENSIONS = ['tsx', 'jsx', 'scss', 'less', 'json', 'html', 'yaml', 'toml'
 EXTENSIONS.sort((a, b) => b.length - a.length)
 const FILE_PATH_RE = new RegExp(`([\\w./\\\\-]+\\.(${EXTENSIONS.join('|')})(:\\d+)?)`, 'gi')
 
-export interface MarkdownBlock {
-  type: 'p' | 'code' | 'blockquote' | 'ul' | 'ol' | 'h1' | 'h2' | 'h3' | 'hr' | 'table'
-  lang?: string
-  lines: string[]
-}
-
 export function parseInline(
   text: string,
   onFileClick: (path: string) => void,
-  showCursor = false
+  showCursor = false,
+  validFiles?: Set<string>
 ): React.ReactNode[] {
   const nodes: React.ReactNode[] = []
+  const files = validFiles ?? new Set<string>()
+
   if (!text) {
     if (showCursor) {
       nodes.push(React.createElement('span', { key: 'cursor', className: 'streaming-cursor' }, '▊'))
@@ -30,9 +26,30 @@ export function parseInline(
   let keyIdx = 0
 
   while (remaining) {
+    // --- 搜索所有内联格式的起始位置 ---
+
+    // Markdown 链接: [text](url)
+    const linkMatch = remaining.match(/\[([^\]]+)\]\(([^)]+)\)/)
+    const linkIdx = linkMatch ? remaining.indexOf(linkMatch[0]) : -1
+
+    // 加粗: **text**
     const boldIdx = remaining.indexOf('**')
+
+    // 斜体: *text* (前后不紧接 *)
+    let italicIdx = -1
+    const italicRe = /(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/
+    const italicMatch = italicRe.exec(remaining)
+    if (italicMatch) {
+      italicIdx = remaining.indexOf(italicMatch[0])
+    }
+
+    // 删除线: ~~text~~
+    const strikeIdx = remaining.indexOf('~~')
+
+    // 行内代码: `code`
     const codeIdx = remaining.indexOf('`')
 
+    // 文件路径
     FILE_PATH_RE.lastIndex = 0
     let fileMatch = FILE_PATH_RE.exec(remaining)
     let fileIdx = -1
@@ -40,21 +57,31 @@ export function parseInline(
     while (fileMatch) {
       const fullPath = fileMatch[1].split(':')[0]
       const basename = fullPath.split(/[/\\]/).pop() || fullPath
-      const validFiles = useWorkspaceStore.getState().validFiles
-      if (validFiles.size === 0 || validFiles.has(basename) || validFiles.has(fullPath)) {
+      if (files.size === 0 || files.has(basename) || files.has(fullPath)) {
         fileIdx = fileMatch.index
         break
       }
       fileMatch = FILE_PATH_RE.exec(remaining)
     }
 
-    const COMMAND_RE = /(\/[a-zA-Z0-9_-]+)/g
+    // 斜杠命令: /command (只匹配行首或空格后)
+    const COMMAND_RE = /(?:^|\s)(\/[a-zA-Z0-9_-]+)/g
     COMMAND_RE.lastIndex = 0
     const cmdMatch = COMMAND_RE.exec(remaining)
-    const cmdIdx = cmdMatch ? cmdMatch.index : -1
+    let cmdIdx = -1
+    let cmdActualStart = -1
+    if (cmdMatch) {
+      // 调整索引到 / 的实际位置（跳过前面可能的空格）
+      const slashPos = cmdMatch[0].indexOf('/')
+      cmdActualStart = cmdMatch.index + slashPos
+      cmdIdx = cmdActualStart
+    }
 
     const indices = [
+      { type: 'link', index: linkIdx, match: linkMatch },
       { type: 'bold', index: boldIdx },
+      { type: 'italic', index: italicIdx, match: italicMatch },
+      { type: 'strike', index: strikeIdx },
       { type: 'code', index: codeIdx },
       { type: 'file', index: fileIdx, match: fileMatch },
       { type: 'cmd', index: cmdIdx, match: cmdMatch }
@@ -74,7 +101,25 @@ export function parseInline(
 
     remaining = remaining.slice(first.index)
 
-    if (first.type === 'bold') {
+    if (first.type === 'link' && first.match) {
+      const fullMatch = first.match[0]
+      const linkText = first.match[1]
+      const linkUrl = first.match[2]
+      nodes.push(
+        React.createElement(
+          'a',
+          {
+            key: `link-${keyIdx++}`,
+            href: linkUrl,
+            target: '_blank',
+            rel: 'noopener noreferrer',
+            className: 'msg-inline-link'
+          },
+          linkText
+        )
+      )
+      remaining = remaining.slice(fullMatch.length)
+    } else if (first.type === 'bold') {
       const nextBold = remaining.indexOf('**', 2)
       if (nextBold !== -1) {
         const boldText = remaining.slice(2, nextBold)
@@ -82,6 +127,25 @@ export function parseInline(
           React.createElement('strong', { key: `bold-${keyIdx++}`, className: 'msg-bold' }, boldText)
         )
         remaining = remaining.slice(nextBold + 2)
+      } else {
+        nodes.push(React.createElement('span', { key: `txt-${keyIdx++}` }, remaining.slice(0, 2)))
+        remaining = remaining.slice(2)
+      }
+    } else if (first.type === 'italic' && first.match) {
+      const fullMatch = first.match[0]
+      const italicText = first.match[1]
+      nodes.push(
+        React.createElement('em', { key: `italic-${keyIdx++}`, className: 'msg-italic' }, italicText)
+      )
+      remaining = remaining.slice(fullMatch.length)
+    } else if (first.type === 'strike') {
+      const nextStrike = remaining.indexOf('~~', 2)
+      if (nextStrike !== -1) {
+        const strikeText = remaining.slice(2, nextStrike)
+        nodes.push(
+          React.createElement('del', { key: `strike-${keyIdx++}`, className: 'msg-strikethrough' }, strikeText)
+        )
+        remaining = remaining.slice(nextStrike + 2)
       } else {
         nodes.push(React.createElement('span', { key: `txt-${keyIdx++}` }, remaining.slice(0, 2)))
         remaining = remaining.slice(2)
@@ -98,8 +162,7 @@ export function parseInline(
         if (codeFileMatch && codeFileMatch[0] === codeText) {
           const fullPath = codeFileMatch[1].split(':')[0]
           const basename = fullPath.split(/[/\\]/).pop() || fullPath
-          const validFiles = useWorkspaceStore.getState().validFiles
-          if (validFiles.size === 0 || validFiles.has(basename) || validFiles.has(fullPath)) {
+          if (files.size === 0 || files.has(basename) || files.has(fullPath)) {
             isFile = true
           }
         }
@@ -146,7 +209,8 @@ export function parseInline(
       )
       remaining = remaining.slice(matchText.length)
     } else if (first.type === 'cmd' && first.match) {
-      const matchText = first.match[0]
+      const slashPos = first.match[0].indexOf('/')
+      const cmdText = first.match[0].slice(slashPos)
       nodes.push(
         React.createElement(
           'span',
@@ -154,15 +218,15 @@ export function parseInline(
             key: `cmd-link-${keyIdx++}`,
             className: 'cmd-inline-link',
             onClick: () => {
-              window.dispatchEvent(new CustomEvent('insert-command', { detail: `${matchText} ` }))
+              window.dispatchEvent(new CustomEvent('insert-command', { detail: `${cmdText} ` }))
             },
-            title: `点击在输入框中调用 ${matchText}`
+            title: `点击在输入框中调用 ${cmdText}`
           },
           React.createElement(IconPackage, { className: 'cmd-inline-link-icon' }),
-          matchText.substring(1)
+          cmdText.substring(1)
         )
       )
-      remaining = remaining.slice(matchText.length)
+      remaining = remaining.slice(cmdText.length)
     }
   }
 
@@ -173,136 +237,3 @@ export function parseInline(
   return nodes
 }
 
-export function parseMarkdownBlocks(text: string): MarkdownBlock[] {
-  const lines = text.split('\n')
-  const blocks: MarkdownBlock[] = []
-  let currentBlock: MarkdownBlock | null = null
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-
-    if (line.trim().startsWith('```')) {
-      if (currentBlock && currentBlock.type === 'code') {
-        blocks.push(currentBlock)
-        currentBlock = null
-      } else {
-        if (currentBlock) blocks.push(currentBlock)
-        const lang = line.trim().slice(3).trim()
-        currentBlock = {
-          type: 'code',
-          lang: lang || 'text',
-          lines: []
-        }
-      }
-      continue
-    }
-
-    if (currentBlock && currentBlock.type === 'code') {
-      currentBlock.lines.push(line)
-      continue
-    }
-
-    const headerMatch = line.match(/^(#{1,3})\s+(.*)/u)
-    if (headerMatch) {
-      if (currentBlock) blocks.push(currentBlock)
-      const level = headerMatch[1].length
-      currentBlock = {
-        type: level === 1 ? 'h1' : level === 2 ? 'h2' : 'h3',
-        lines: [headerMatch[2]]
-      }
-      blocks.push(currentBlock)
-      currentBlock = null
-      continue
-    }
-
-    if (line.trim() === '---' || line.trim() === '***') {
-      if (currentBlock) blocks.push(currentBlock)
-      currentBlock = {
-        type: 'hr',
-        lines: []
-      }
-      blocks.push(currentBlock)
-      currentBlock = null
-      continue
-    }
-
-    if (line.trim().startsWith('|')) {
-      if (currentBlock && currentBlock.type === 'table') {
-        currentBlock.lines.push(line)
-      } else {
-        if (currentBlock) blocks.push(currentBlock)
-        currentBlock = {
-          type: 'table',
-          lines: [line]
-        }
-      }
-      continue
-    }
-
-    if (line.startsWith('>')) {
-      const quoteContent = line.slice(1).replace(/^\s/u, '')
-      if (currentBlock && currentBlock.type === 'blockquote') {
-        currentBlock.lines.push(quoteContent)
-      } else {
-        if (currentBlock) blocks.push(currentBlock)
-        currentBlock = {
-          type: 'blockquote',
-          lines: [quoteContent]
-        }
-      }
-      continue
-    }
-
-    const ulMatch = line.match(/^(\s*)([-*+])(?:$|\s+(.*))/u)
-    if (ulMatch) {
-      if (currentBlock && currentBlock.type === 'ul') {
-        currentBlock.lines.push(line)
-      } else {
-        if (currentBlock) blocks.push(currentBlock)
-        currentBlock = {
-          type: 'ul',
-          lines: [line]
-        }
-      }
-      continue
-    }
-
-    const olMatch = line.match(/^(\s*)(\d+)\.(?:$|\s+(.*))/u)
-    if (olMatch) {
-      if (currentBlock && currentBlock.type === 'ol') {
-        currentBlock.lines.push(line)
-      } else {
-        if (currentBlock) blocks.push(currentBlock)
-        currentBlock = {
-          type: 'ol',
-          lines: [line]
-        }
-      }
-      continue
-    }
-
-    if (line.trim() === '') {
-      if (currentBlock) {
-        blocks.push(currentBlock)
-        currentBlock = null
-      }
-      continue
-    }
-
-    if (currentBlock && currentBlock.type === 'p') {
-      currentBlock.lines.push(line)
-    } else {
-      if (currentBlock) blocks.push(currentBlock)
-      currentBlock = {
-        type: 'p',
-        lines: [line]
-      }
-    }
-  }
-
-  if (currentBlock) {
-    blocks.push(currentBlock)
-  }
-
-  return blocks
-}
