@@ -24,7 +24,11 @@ export function parseArgs(args: string): Record<string, any> {
     'pattern',
     'regex',
     'startLine',
-    'endLine'
+    'endLine',
+    'DirectoryPath',
+    'AbsolutePath',
+    'SearchPath',
+    'Url'
   ]
 
   fields.forEach((field) => {

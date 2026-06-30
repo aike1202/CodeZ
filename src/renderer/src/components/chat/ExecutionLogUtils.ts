@@ -88,11 +88,12 @@ export function getFileIconComponent(fileName?: string): React.ReactElement {
 export function getToolTarget(log: ToolCallState): string {
   const args = parseArgs(log.args)
 
-  if (Array.isArray(args.targetPaths) && args.targetPaths.length > 0) {
-    const paths = args.targetPaths as string[]
+  const targetPathsObj = args.targetPaths || args.TargetPaths || args.dirPaths || args.DirPaths
+  if (Array.isArray(targetPathsObj) && targetPathsObj.length > 0) {
+    const paths = targetPathsObj as string[]
     if (paths.length === 1) return paths[0]
     const names = paths.map(p => p.split(/[/\\]/).pop()).slice(0, 3)
-    return `${paths.length} targets (${names.join(', ')}${paths.length > 3 ? '...' : ''})`
+    return `${paths.length} 个目标 (${names.join(', ')}${paths.length > 3 ? '...' : ''})`
   }
 
   if (log.name === 'grep_search' || log.name === 'search_code' || log.name === 'search_text') {
@@ -107,17 +108,24 @@ export function getToolTarget(log: ToolCallState): string {
 
   const value =
     args.DirectoryPath ||
+    args.directoryPath ||
     args.AbsolutePath ||
+    args.absolutePath ||
     args.SearchPath ||
+    args.searchPath ||
     args.targetFile ||
     args.TargetFile ||
     args.path ||
     args.dirPath ||
     args.filePath ||
     args.directory ||
+    args.Directory ||
     args.query ||
+    args.Query ||
     args.pattern ||
-    args.regex
+    args.Pattern ||
+    args.regex ||
+    args.Regex
 
   return typeof value === 'string' ? value : ''
 }
@@ -127,6 +135,7 @@ export function getToolNoun(toolName: string): string {
     case 'read_file':
       return '文件'
     case 'list_files':
+    case 'list_dir':
       return '目录'
     case 'search_text':
       return '文本搜索'
