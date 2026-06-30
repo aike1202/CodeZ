@@ -4,21 +4,11 @@ import * as path from 'path'
 import * as fs from 'fs/promises'
 import { spawn } from 'child_process'
 import fastGlob from 'fast-glob'
+import { resolveRgPath } from '../ripgrepPath'
 
 interface GlobArgs {
   pattern?: string
   path?: string
-}
-
-function resolveRgPath(): string | null {
-  if (process.env.CODEZ_RG_PATH) return process.env.CODEZ_RG_PATH
-  try {
-    // @vscode/ripgrep 导出 rgPath 字符串
-    const mod = require('@vscode/ripgrep')
-    return mod && mod.rgPath ? mod.rgPath : null
-  } catch {
-    return null
-  }
 }
 
 function toPosix(p: string): string {

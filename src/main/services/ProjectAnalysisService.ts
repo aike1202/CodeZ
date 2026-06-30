@@ -191,7 +191,7 @@ export class ProjectAnalysisService {
     return snapshot
   }
 
-  async getFastContext(targetPaths: string[], maxDepth: number = 2, maxCharsPerFile: number = 15000): Promise<string> {
+  async getFastContext(targetPaths: string[], maxDepth: number = 2, maxCharsPerFile: number = 12000): Promise<string> {
     const tasks = targetPaths.map(async (targetPath) => {
       try {
         const absolutePath = this.validatePath(targetPath)

@@ -67,10 +67,13 @@ export class ReadTool extends Tool {
 
       const sha = createHash('sha256').update(buffer).digest('hex')
       const sessionId = context.sessionId
-      if (sessionId) {
+      // 仅对"默认全文件读"做未变去重；显式 offset/limit 的 range 读不去重——
+      // 上下文裁剪后旧 tool_result 可能已不在历史，range 读是模型重新取内容的逃逸口。
+      const isRangeRead = (parsed.offset != null && parsed.offset > 0) || (parsed.limit != null && parsed.limit > 0)
+      if (sessionId && !isRangeRead) {
         const store = getReadFingerprintStore()
         if (store.isUnchanged(sessionId, absolutePath, sha)) {
-          return 'Wasted call — file unchanged since your last Read. Refer to that earlier tool_result instead.'
+          return 'Wasted call — file unchanged since your last Read. Refer to that earlier tool_result instead. If that earlier result is no longer in your context (e.g. after context trimming), re-read with offset/limit to fetch the specific range you need.'
         }
       }
 

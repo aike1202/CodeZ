@@ -2,6 +2,7 @@
 import { Tool, ToolContext } from '../Tool'
 import * as path from 'path'
 import { spawn } from 'child_process'
+import { resolveRgPath } from '../ripgrepPath'
 
 interface GrepArgs {
   pattern?: string
@@ -18,16 +19,6 @@ interface GrepArgs {
   multiline?: boolean
   head_limit?: number
   offset?: number
-}
-
-function resolveRgPath(): string | null {
-  if (process.env.CODEZ_RG_PATH) return process.env.CODEZ_RG_PATH
-  try {
-    const mod = require('@vscode/ripgrep')
-    return mod && mod.rgPath ? mod.rgPath : null
-  } catch {
-    return null
-  }
 }
 
 function toPosix(p: string): string {

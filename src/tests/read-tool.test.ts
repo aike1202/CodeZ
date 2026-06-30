@@ -44,6 +44,14 @@ describe('ReadTool', () => {
     expect(again).not.toContain('line one')
   })
 
+  it('默认读命中指纹后，range 读（offset/limit）应返回正文而非 Wasted call（裁剪后逃逸口）', async () => {
+    const tool = new ReadTool()
+    await tool.execute(JSON.stringify({ file_path: fp }), { workspaceRoot: root, sessionId: SESSION })
+    const rangeResult = await tool.execute(JSON.stringify({ file_path: fp, offset: 1, limit: 2 }), { workspaceRoot: root, sessionId: SESSION })
+    expect(rangeResult).not.toContain('Wasted call')
+    expect(rangeResult).toContain('line one')
+  })
+
   it('内容改变后：返回新正文并更新指纹', async () => {
     const tool = new ReadTool()
     await tool.execute(JSON.stringify({ file_path: fp }), { workspaceRoot: root, sessionId: SESSION })

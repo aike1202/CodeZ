@@ -33,7 +33,7 @@ export class FastContextTool extends Tool {
         },
         maxCharsPerFile: {
           type: 'number',
-          description: 'Maximum number of characters to retain per file. Defaults to 15000.'
+          description: 'Maximum number of characters to retain per file. Defaults to 12000 (kept below the 15000 tool-output cap to avoid truncation).'
         }
       },
       required: ['targetPaths']
