@@ -163,6 +163,13 @@ triggers: [code-review, review, 代码审查]
     return skills.filter(s => s.enabled)
   }
 
+  /** 依 name 或 id 取命中 skill 的正文；未命中返回 null。 */
+  public async getSkillContent(workspaceRoot: string | null, name: string): Promise<string | null> {
+    const skills = await this.getSkills(workspaceRoot)
+    const hit = skills.find(s => s.name === name || s.id === name)
+    return hit ? hit.content : null
+  }
+
   public async toggleSkill(workspaceRoot: string | null, id: string, enabled: boolean): Promise<void> {
     // 根据 ID 前缀判断该 Skill 属于 Global 还是 Workspace
     const isGlobal = id.startsWith('global-')
