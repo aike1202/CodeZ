@@ -16,9 +16,26 @@ async function setup(): Promise<string> {
   return root
 }
 
+// Windows 下 detached 后台进程被 kill 后，其 cwd 句柄不会同步释放，
+// 立即 rm 会偶发 EBUSY/EPERM。重试几次以消除测试清理的时序抖动。
+async function rmRetry(target: string): Promise<void> {
+  for (let i = 0; i < 10; i++) {
+    try {
+      await fsp.rm(target, { recursive: true, force: true })
+      return
+    } catch (err: any) {
+      if (err.code === 'EBUSY' || err.code === 'EPERM' || err.code === 'ENOTEMPTY') {
+        await new Promise((r) => setTimeout(r, 200))
+        continue
+      }
+      throw err
+    }
+  }
+}
+
 describe.skipIf(!bashOk)('BashTool', () => {
   beforeEach(async () => { await setup() })
-  afterEach(async () => { await fsp.rm(root, { recursive: true, force: true }) })
+  afterEach(async () => { await rmRetry(root) })
 
   it('前台 echo：exitCode 0 且 stdout 含 hello', async () => {
     const tool = new BashTool()
