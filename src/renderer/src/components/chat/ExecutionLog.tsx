@@ -15,6 +15,7 @@ import {
   buildSummaryText,
   getFileIconComponent
 } from './ExecutionLogUtils'
+import { buildDiffEditInfo } from '../../utils/editDiffUtils'
 import ExecutionLogDetail from './ExecutionLogDetail'
 import {
   FileIcon,
@@ -250,29 +251,9 @@ export default function ExecutionLog({
                               onClick={(e) => {
                                 e.stopPropagation()
                                 if (item.type === 'edit') {
-                                  const argsObj = parseArgs(item.args || '')
-                                  if (item.verb === 'Created' || item.verb === 'Creating') {
-                                    onDiffClick?.(item.target, {
-                                      type: 'write',
-                                      codeContent: argsObj.codeContent || argsObj.code_content || ''
-                                    })
-                                  } else if (item.verb === 'Edited' || item.verb === 'Editing') {
-                                    if (item.toolName === 'multi_replace_file_content') {
-                                      const chunks = Array.isArray(argsObj.ReplacementChunks) ? argsObj.ReplacementChunks : (Array.isArray(argsObj.replacementChunks) ? argsObj.replacementChunks : [])
-                                      const targetContent = chunks.map((c: any, i: number) => `--- Chunk ${i + 1} ---\n${c.TargetContent || c.targetContent || ''}`).join('\n\n')
-                                      const replacementContent = chunks.map((c: any, i: number) => `--- Chunk ${i + 1} ---\n${c.ReplacementContent || c.replacementContent || ''}`).join('\n\n')
-                                      onDiffClick?.(item.target, {
-                                        type: 'replace',
-                                        targetContent,
-                                        replacementContent
-                                      })
-                                    } else {
-                                      onDiffClick?.(item.target, {
-                                        type: 'replace',
-                                        targetContent: argsObj.targetContent || '',
-                                        replacementContent: argsObj.replacementContent || ''
-                                      })
-                                    }
+                                  const diffInfo = buildDiffEditInfo(item.toolName || '', item.args || '')
+                                  if (diffInfo) {
+                                    onDiffClick?.(item.target, diffInfo)
                                   }
                                 } else if (isSnapshotItem) {
                                   let markdownContent = ''
@@ -384,44 +365,9 @@ export default function ExecutionLog({
                               title="点击查看修改 Diff"
                               onClick={(e) => {
                                 e.stopPropagation()
-                                const argsObj = parseArgs(item.args || '')
-                                if (item.verb === 'Created' || item.verb === 'Creating') {
-                                  onDiffClick?.(item.target, {
-                                    type: 'write',
-                                    codeContent: argsObj.codeContent || argsObj.code_content || ''
-                                  })
-                                } else if (item.verb === 'Edited' || item.verb === 'Editing') {
-                                  if (item.toolName === 'multi_replace_file_content') {
-                                    const chunks = Array.isArray(argsObj.ReplacementChunks) ? argsObj.ReplacementChunks : (Array.isArray(argsObj.replacementChunks) ? argsObj.replacementChunks : [])
-                                    const targetContent = chunks.map((c: any, i: number) => `--- Chunk ${i + 1} ---\n${c.TargetContent || c.targetContent || ''}`).join('\n\n')
-                                    const replacementContent = chunks.map((c: any, i: number) => `--- Chunk ${i + 1} ---\n${c.ReplacementContent || c.replacementContent || ''}`).join('\n\n')
-                                    onDiffClick?.(item.target, {
-                                      type: 'replace',
-                                      targetContent,
-                                      replacementContent
-                                    })
-                                  } else if (item.toolName === 'apply_patch') {
-                                    if (Array.isArray(argsObj.edits) && argsObj.edits.length > 0) {
-                                      const targetContent = argsObj.edits.map((edit: any, i: number) => `--- Edit ${i + 1} ---\n${edit.targetContent || ''}`).join('\n\n')
-                                      const replacementContent = argsObj.edits.map((edit: any, i: number) => `--- Edit ${i + 1} ---\n${edit.replacementContent || ''}`).join('\n\n')
-                                      onDiffClick?.(item.target, {
-                                        type: 'replace',
-                                        targetContent,
-                                        replacementContent
-                                      })
-                                    } else {
-                                      onDiffClick?.(item.target, {
-                                        type: 'write',
-                                        codeContent: argsObj.newContent || ''
-                                      })
-                                    }
-                                  } else {
-                                    onDiffClick?.(item.target, {
-                                      type: 'replace',
-                                      targetContent: argsObj.targetContent || '',
-                                      replacementContent: argsObj.replacementContent || ''
-                                    })
-                                  }
+                                const diffInfo = buildDiffEditInfo(item.toolName || '', item.args || '')
+                                if (diffInfo) {
+                                  onDiffClick?.(item.target, diffInfo)
                                 }
                               }}
                             >
