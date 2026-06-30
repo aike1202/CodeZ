@@ -68,6 +68,62 @@
 
 **alias**：`read_files` / `apply_patch` / `run_command` / `search(text)` 在本期以同文件薄包装形式委托给对应新工具（`read_files→Read`、`apply_patch→Edit|Write`、`run_command→Bash`、`search type=text→Grep`、`search type=file→Glob`），下周期一次性删除。
 
+### 3.1 现有系统契约与接缝（file:line，实现期不再依赖对话上下文）
+
+本小节把改造所依赖的现有代码事实**固化为 spec 的一部分**。改这些文件前必须对位到下述行号；若行号因前期改动漂移，按符号名重新定位。
+
+- **工具基类契约** — `src/main/tools/Tool.ts`：
+  - `ToolContext` 接口 `:3`：`{ workspaceRoot, sessionId, resumeStateKey, transactionId, editTransactionService }`。
+  - 抽象契约 `:17/:19/:21/:29`：`get name()`、`get description()`、`get parameters_schema(): Record<string,any>`、`execute(args: string, context: ToolContext): Promise<string>`。
+  - **关键**：`execute` 收到的 `args` 是 **JSON 字符串**（不是对象），返回值也是 **字符串**。所有新工具必须 `JSON.parse(args)` 入参、`stringify`/纯文本出参。
+- **注册与声明** — `src/main/tools/ToolManager.ts`：
+  - `tools: Map<string, Tool>` `:14`，按 `tool.name` 查。
+  - `registerBuiltinTools()` `:20`：硬编码 9 个实例 `:22-30`（`ListFilesTool/ReadFilesTool/SearchTool/GetProjectSnapshotTool/RollbackLastEditTool/UpdateResumeStateTool/ApplyPatchTool/RunCommandTool/FastContextTool`）。**新增工具在此追加**，alias 在其后注册（同 Map，旧名 key 委托新实现）。
+  - `getTool(name)` `:38`；`getAllTools()` `:42`；`getToolDefinitions()` `:47`：`map(t => ({ type:'function', function:{ name, description, parameters } }))` ——这是**唯一**对外声明源（OpenAI 形 `ToolDefinition`）。
+- **派发循环** — `src/main/agent/AgentRunner.ts`：
+  - `availableTools` `:75`：`config.tools || this.toolManager.getToolDefinitions()`。
+  - 工具并发执行 `Promise.all` `:261`；`toolManager.getTool(name)` `:295`；未知工具回错 `:298-300`。
+  - 权限闸 `:310-328`：`PermissionManager.checkToolPermission` + `'ask'` 时 `await callbacks.onPermissionRequest(permReq)`；用户拒 → `Error: User denied permission for this operation.` `:321`。
+  - 结果包裹 `:350-358` `{ok:true,data}` / `{ok:false,error}` 并作为 `role:'tool'` `:360-367` 回灌。
+  - **verification 闭环硬编码工具名** `:375-377`：`['apply_patch','write_to_file','replace_file_content','multi_replace_file_content']` → `filesModifiedInSession=true`；`:377` `run_command` 记验证结果。**本期加入 `Edit`、`Write` 到此列表**；alias 期保留 `apply_patch`/`run_command` 名以保证闭环文案 `:435` 生效。
+  - **verification 拦截** `:421-442`：文件被改但最后验证命令失败时注入"必须修复"提示；其文案 `:435` 提到 `read_files, apply_patch, run_command`——alias 期内仍是有效名，不改文案。
+- **三 provider 各自映射** — `src/main/services/chat/`：
+  - **Gemini** `GeminiProvider.ts :100-106`：`[{ functionDeclarations: tools.map(t => ({ name, description, parameters: t.function.parameters })) }]`。
+  - **Anthropic** `AnthropicProvider.ts :51-55`：`[{ name, description, input_schema: t.function.parameters }]`。
+  - **OpenAI** `OpenAIProvider.ts :95`：`tools` 原样透传。
+  - 结论：新工具只需保证 `description` + `parameters_schema`(JSON Schema) 正确，三 provider 自动翻译；勿在 provider 内做工具特例。
+- **system prompt 双重声明** — `src/main/ipc/chat.handlers.ts`：
+  - `<available_tools>` `:113-118`：把 `getToolDefinitions()` 以文本 `name: description` 列入 prompt。**新增工具同步出现于此**；alias 期旧名保留占位。
+  - `<skills_instructions>` `:126-132`：激活的 skill 提示模型去 `read_files` SKILL.md。**本期不删**（Skill 工具并立）。
+- **上下文裁剪** — `src/main/agent/ContextManager.ts`：`truncateToolOutput :166` 对大输出动态截断（约 15k–60k 字符预算）。Read/Grep/Glob 大输出走此路径，设计时使返回体可被安全截断。
+- **ReadFilesTool 现有预算与检测** — `src/main/tools/builtin/ReadFilesTool.ts`（Read 必须继承，勿回归）：
+  - 默认常量 `:80-82`：`maxCharsPerFile=40000`、`maxTotalLines=1200`、`maxTotalBytes=120000`；`includeLineNumbers !== false` `:83`。
+  - 行号前缀 `:199-201`：`"${startLine + index}\t${line}"` —— `Edit` 匹配时须剥此前缀。
+  - 二进制检测：首 512 字节含 NUL 即判二进制 → `Cannot read binary file.`。
+  - 5MB 上限。
+  - 工作区前缀校验（大小写不敏感，Windows-aware）`:152-155`。
+  - 返回 `fileHash`(SHA256)，现仅供 `apply_patch` 的 `expectedHash` 校验**用**；本期复用此 hash 作为去重指纹。
+- **apply_patch + 事务链路** — `src/main/tools/builtin/ApplyPatchTool.ts` + `EditTransactionService`：
+  - `edits[]:{targetContent,replacementContent}` 为 search-replace；`fullOverwrite + newContent` 为整体覆写；`expectedHash` 强校验已存在文件防覆写陈旧。
+  - Edit/Write **复刻**这两条路径，写入走同一个 `EditTransactionService`，`rollback_last_edit` 自然覆盖新工具（事务是按 `transactionId` 维度，与工具名无关）。
+- **PermissionManager 现有引用** — `src/main/services/PermissionManager.ts`：
+  - 只读白名单 `:47`：`['search','list_files','read_files','get_project_snapshot','fast_context']` → `allow`。
+  - 写工具列表 `:56`：`['apply_patch','write_to_file','replace_file_content','multi_replace_file_content']` —— **`write_to_file/replace_file_content/multi_replace_file_content` 为死引用**（无对应工具类）。
+  - `run_command` 风险评估 `:73-77`：`safe→allow`、`destructive→ask`、其余 `ask`。
+  - `createPermissionRequest` `:83` + args diff 计算 `:91` 也以 `write_to_file/replace_file_content/apply_patch` 为分支。
+  - **本期收口**：写工具列表改为 `['apply_patch','Edit','Write']`（alias 期保留 `apply_patch`）；删除 `write_to_file/replace_file_content/multi_replace_file_content` 三处死引用；新增 `AskUserQuestion`→`ask`、`Read/NotebookEdit/Glob/Grep/Skill/PushNotification`→`allow`。
+- **SkillManager 扫描 mechanics** — `src/main/services/SkillManager.ts`：
+  - `scanDir(dir, config, isGlobal)` `:59`；只收 `SKILL.md` 或 `*.skill.md` `:69`。
+  - frontmatter 解析 `:76-82`：`name:`、`description:`、`triggers: [a,b,c]`。
+  - id 构建 `:87`：global→`global-<parentDirName>`，workspace→`workspace-<fileName>`。
+  - 扫描目录：全局 `getGlobalSkillsDir()`（`~/.codez/skills`）`:137`；工作区 `<workspace>/.skills` `:142-144`。
+  - `getSkills(workspaceRoot)` `:153`（带 cache `:149`）。**SkillTool.execute 复用此 API** 取正文。
+- **IPC 审批范式**（AskUserQuestion 照抄）— `src/main/ipc/chat.handlers.ts :172-180`：
+  - main→renderer：`sender.send(CHAT_REQUEST_APPROVAL, streamId, request)`。
+  - renderer→main：`ipcMain.handleOnce(CHAT_APPROVAL_RESPONSE:<request.id>, ...)` 解析用户布尔。
+  - preload 转发 `CHAT_REQUEST_APPROVAL → callbacks.onPermissionRequest`；无 handler 时自动拒（`respondToApproval(id,false)`）。
+  - AskUserQuestion 复刻为 `CHAT_REQUEST_ASK_USER` + `CHAT_ASK_USER_RESPONSE:<requestId>`，payload 携带 `questions[]`，回 `answers`。
+
 ---
 
 ## 4. 文件操作设计
@@ -261,12 +317,118 @@ Read.execute → 读盘 + sha256 → 查 ReadFingerprintStore
 
 ---
 
-## 11. 期一/期二分界
+## 11. 每工具验收标准（可断言）
+
+每条都应是单测/集成测或手动验收能判"通过/不通过"的断言。
+
+### Read
+- 必填 `file_path` 缺失 → execute 返错（JSON `{ok:false}`）。
+- 首次读未读过的文件 → 返回带行号+SHA256 的正文，且 `ReadFingerprintStore` 写入 `(absPath → sha256)`。
+- 同一 `(absPath, 首次返回的 sha256)` 再次 Read → 返回字符串 `Wasted call — file unchanged since your last Read. Refer to that earlier tool_result instead.`，不返回正文。
+- 文件内容改变后再次 Read（sha256 不同）→ 正常返回新正文并更新指纹。
+- 客户端 `@file` 预读一次后，模型显式 Read 同文件 → 同样命中 `Wasted call`（指纹互锁）。
+- 文件 > 5MB → 返错；首 512 字节含 NUL → `Cannot read binary file.`。
+- 工作区外的绝对路径 → 返错并拒绝。
+- 截断场景：超过 `maxTotalLines(1200)`/`maxTotalBytes(120000)` 时附 `[System Note: ...]` 并继续输出 omitted 元数据。
+
+### Edit
+- 未先 Read 该文件（指纹表无记录）→ 返错并提示先 Read。
+- `old_string` 在文件中 0 次 → 返错"未匹配"；>1 次 → 返错"不唯一，用 replace_all 或扩大 old_string"。
+- 命中唯一 → 写入成功，文件读回内容已替换，走 `EditTransactionService`（含 `transactionId`），`rollback_last_edit` 可回滚。
+- `replace_all:true` + 存在多处 → 全替换成功。
+- `old_string` 含 Read 返回的 `数字\t` 前缀 → 校验前自动剥除前缀再匹配（不因前缀导致 0 匹配）。
+- workspace 外文件 → 拒绝。
+
+### Write
+- 新建文件（不存在）→ 直接写入成功，事务覆盖。
+- 覆盖已存在但本会话未 Read 的文件 → 返错"须先 Read"。
+- 覆盖已 Read 的文件 → 整体覆写成功，可 `rollback_last_edit`。
+- workspace 外 → 拒绝。
+
+### NotebookEdit
+- `replace` 模式 + `cell_id` 命中 → cell 源被 `new_source` 替换，文件 v4 结构不变（nbformat/minor 不被改写）。
+- `insert` 模式 + 缺省 `cell_id` → 在开头插入新 cell；`cell_type` 缺省按 code。
+- `insert` 给定 `cell_id` → 在该 cell 之后插入；未找到 `cell_id` → 返错。
+- `delete` 模式 → cell 被移除；`cell_id` 未命中 → 返错。
+- 未先 Read 该 notebook → 返错。
+- 重新 Read 该 .ipynb → 渲染为 `<cell id="...">` 文本块供下一轮 NotebookEdit 取 id。
+
+### Glob
+- `pattern:"**/*.ts"` 命中 workspace 内 TS 路径，按 mtime 排序返回。
+- `pattern` 非法 → 返错。
+- `path` 指定子目录 → 仅该子树匹配。
+- ripgrep 不可用 → 回退 `fast-glob` 并返回一致结果（不抛错）。
+
+### Grep
+- `output_mode:"files_with_matches"` + 命中 → 返回路径列表（默认）。
+- `output_mode:"content"` + `-n:true` → 返回带行号的匹配行。
+- `glob:"**/*.tsx"` 过滤生效；`type:"rust"` 等效 `--type`。
+- `-A 2 -B 1` 上下文出现。
+- `multiline:true` 支持跨行模式。
+- `head_limit:N` 限制输出条数。
+- ripgrep 不可用 → Grep 返错（不回退纯 JS，按已明选）。
+
+### Bash
+- `command:"echo hello"` 前台 → 返回 `{exitCode:0, stdout:"hello\n"}`。
+- `timeout:1000` + `command:"sleep 5"` → `{timedOut:true}`。
+- `run_in_background:true` + `command:"sleep 3"` → 立即返回 `{background:true, pid, stdoutFile}`，3s 后现有 task 通知机制触发退出事件。
+- 超长输出（> 阈值）→ 截断保留 head 1000 + tail 3000 + `[System Note]`。
+- 工作目录跨多轮 Bash 调用持久（同主进程会话内）。
+- Git Bash 不可用 → 回退 `spawn("bash")`；都不可用 → 返错。
+
+### PowerShell
+- `command:"Write-Output hi"` → `{exitCode:0, stdout:"hi\r\n"}`（或经边界规范化）。
+- `--NoProfile -NonInteractive` 确认无 profile 加载、无交互阻塞。
+- `run_in_background:true` 同 Bash 行为。
+- description 内包含 5.1 限制（无 `&&` / 三元 / `??`），模型可见。
+
+### AskUserQuestion
+- 1 个问题 2 个选项 → 渲染 `AskUserQuestionWidget`，显示 2 选项 + 自动 "Other"。
+- 4 个问题（上限）正常；>4 → execute 返错。
+- 每问 `options` <2 或 >4 → execute 返错。
+- 任一问 `multiSelect:true` → 多选可选多个。
+- 单选选项含 `preview` → 渲染端侧边对照显示。
+- 用户决议后 `tool_result` 为结构化 `answers`（每个 `question` → 选中 `label` 或 Other 文本）回灌，AgentRunner 下一轮继续。
+- 用户长时间不答复 → 进程不卡死（IPC 超时/UI 关闭返回空答案作安全默认）。
+- 与 `PermissionApprovalWidget` 同时存在互不干扰。
+
+### PushNotification
+- `PushNotification({message, status:"success"})` → 触发 Electron Notification（主进程单测用事件断言可注入 provider）。
+- 默认 `DesktopNotificationProvider.send` 返回 `{sent:true}`；远端未注入时同上。
+- 点击 → 主窗口 `webContents.focus()` 被调用。
+- 整条消息 <200 字（execute 内不做强制裁剪，文案写在 description 提示模型）。
+
+### Skill
+- `Skill({skill:"existing-skill-id"})` → 返回该 SKILL.md 正文。
+- 不存在名 → 返错 + 列出当前可用清单（≤30 个）。
+- `/<skill>` 内联路径与 prompt 提示路径不变（既有 e2e 不回归）。
+- AgentRunner 对 Skill 不二次 ask 权限（`allow`）。
+
+---
+
+## 12. 回归保证清单（本期不得破坏的现有行为）
+
+实现与本 spec 任何改动，下述既有能力必须**保持原行为**，CI/手测覆盖：
+
+- [ ] **`@file` 预读**：渲染端 `@src/...` 引用仍被展开为带原文件的 systemInstruction 注入（与现 chat.handlers 行为一致），不因新增 Read 指纹逻辑而改变文本注入面。
+- [ ] **verification 闭环**：AgentRunner `:421-442` 在"文件被改但验证命令失败"时仍注入修复提示；`filesModifiedInSession` 仍能在 `Edit/Write` 被选中时置 true（alias 期 `apply_patch` 被选同样置 true）。
+- [ ] **resume-state**：`update_resume_state` 写盘路径、`ContextManager.loadResumeState/saveResumeState` 不动；新工具不引入新 resume 字段。
+- [ ] **edit-transaction / rollback**：`EditTransactionService.beginTransaction/commit` 链路、`rollback_last_edit` 覆盖所有事务内写入（含新 Edit/Write），跨 PID 会话恢复仍可滚。
+- [ ] **permission ask 闭环**：`run_command` 风险（safe/write/network/destructive/unknown）映射与现一致；新增 `Bash/PowerShell` 复用 `getCommandRisk`。
+- [ ] **approval IPC**：现有 `CHAT_REQUEST_APPROVAL/CHAT_APPROVAL_RESPONSE` 不被 AskUserQuestion 通道挤占；两个 widget 独立。
+- [ ] **三 provider 映射**：OpenAI 原样 / Gemini functionDeclarations / Anthropic input_schema 不变更；新工具自动经三映射翻译。
+- [ ] **system prompt 双重声明**：`<available_tools>` 与 `<skills_instructions>` 文本块仍生成；alias 期内旧名占位仍在。
+- [ ] **上下文裁剪**：`ContextManager.truncateToolOutput` 对 `Read/Grep/Glob` 大输出仍生效，token 估算（CJK-aware）不被破坏。
+- [ ] **保留 5 工具**：`list_files / get_project_snapshot / fast_context / rollback_last_edit / update_resume_state` 名字、schema、行为、被既有上下文文案引用处一律不变。
+
+---
+
+## 13. 期一/期二分界
 
 ### 期一（本 spec 范围，下次 plan 实现）
 
 - 实现 11 个新工具 + alias 5 + 死引用清理 + 渲染端 AskUserWidget + PushNotification + SkillTool。
-- 验收：现有功能（verification-loop/resume-state/transaction/permission/`@file`）无回归；新工具能被 LLM 选到、执行、结果正确。
+- 验收：现有功能（§12 回归清单全部 pass）无回归；§11 每工具验收标准全部 pass；新工具能被 LLM 选到、执行、结果正确。
 
 ### 期二（下一周期，本 spec 仅占位）
 
