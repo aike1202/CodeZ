@@ -550,6 +550,8 @@ Read.execute → 读盘 + sha256 → 查 ReadFingerprintStore
 - [ ] **上下文裁剪**：`ContextManager.truncateToolOutput` 对 `Read/Grep/Glob` 大输出仍生效，token 估算（CJK-aware）不被破坏。
 - [ ] **保留 5 工具**：`list_files / get_project_snapshot / fast_context / rollback_last_edit / update_resume_state` 名字、schema、行为、被既有上下文文案引用处一律不变。
 
+  > **有意例外（2026-07-01）**：`update_resume_state` 的权限映射由 `ask` 调整为 `allow`。该工具仅向 app userData 目录写状态快照（按 workspace+session 派生 key），不触碰工作区源文件、不执行命令、不可逆性为零（last-write-wins 草稿本）；其设计意图是鼓励模型在长任务关键节点频繁存档防失忆，`ask` 的弹卡摩擦会反向劝退调用、削弱核心价值。风险等级与 `Read/Glob/fast_context` 同档，故归 allow。`rollback_last_edit`（真会抹掉本轮文件改动）保持 `ask` 不变。此项不视为对"行为不变"的回归破坏。
+
 ---
 
 ## 13. 期一/期二分界

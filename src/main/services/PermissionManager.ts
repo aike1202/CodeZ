@@ -44,7 +44,7 @@ export class PermissionManager {
   }
 
   public checkToolPermission(toolName: string, parsedArgs: any, workspaceRoot: string): PermissionResult {
-    if (['list_files', 'get_project_snapshot', 'fast_context', 'Read', 'NotebookEdit', 'Glob', 'Grep', 'Skill', 'PushNotification', 'AskUserQuestion'].includes(toolName)) {
+    if (['list_files', 'get_project_snapshot', 'fast_context', 'update_resume_state', 'Read', 'NotebookEdit', 'Glob', 'Grep', 'Skill', 'PushNotification', 'AskUserQuestion'].includes(toolName)) {
       return 'allow'
     }
 

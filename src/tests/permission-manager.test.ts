@@ -37,6 +37,7 @@ describe('PermissionManager', () => {
     expect(pm.checkToolPermission('Read', {}, workspaceRoot)).toBe('allow')
     expect(pm.checkToolPermission('Glob', {}, workspaceRoot)).toBe('allow')
     expect(pm.checkToolPermission('get_project_snapshot', {}, workspaceRoot)).toBe('allow')
+    expect(pm.checkToolPermission('update_resume_state', {}, workspaceRoot)).toBe('allow')
     expect(pm.checkToolPermission('rollback_last_edit', {}, workspaceRoot)).toBe('ask')
     expect(pm.checkToolPermission('Edit', { file_path: 'src/main.ts' }, workspaceRoot)).toBe('allow')
   })
