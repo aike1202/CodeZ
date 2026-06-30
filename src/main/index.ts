@@ -85,6 +85,19 @@ app.whenReady().then(() => {
   registerRulesIpc()
   registerSettingsIpc()
 
+  // Initialize memory system for the current workspace
+  import('./services/MemoryService').then(({ MemoryService }) => {
+    import('./ipc/workspace.handlers').then(({ getWorkspaceService }) => {
+      const wsSvc = getWorkspaceService()
+      const currentWs = wsSvc ? wsSvc.getCurrentWorkspace() : null
+      if (currentWs) {
+        MemoryService.ensureInitialized(currentWs).catch((e: Error) =>
+          console.error('[MemoryService] Init failed:', e.message)
+        )
+      }
+    })
+  })
+
   // 初始化设置并应用全局主题
   import('./ipc/settings.handlers').then(({ getSettingsService }) => {
     const svc = getSettingsService()
