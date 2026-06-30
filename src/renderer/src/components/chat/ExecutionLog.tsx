@@ -361,7 +361,18 @@ export default function ExecutionLog({
                               )}
                             </>
                           ) : (
-                            <span className="timeline-target-link" style={{ textDecoration: 'none', cursor: 'default' }}>{item.target}</span>
+                            <span className="timeline-target-link" style={{ textDecoration: 'none', cursor: 'default' }} title={item.target}>
+                              {(() => {
+                                const fileName = item.target.split(/[/\\]/).pop() || item.target
+                                const dirPath = item.target.substring(0, item.target.length - fileName.length)
+                                return (
+                                  <>
+                                    <span className="timeline-target-filename">{fileName}</span>
+                                    {dirPath && <span className="timeline-target-dir">{dirPath}</span>}
+                                  </>
+                                )
+                              })()}
+                            </span>
                           )}
                           {item.type === 'edit' && (
                             <span
