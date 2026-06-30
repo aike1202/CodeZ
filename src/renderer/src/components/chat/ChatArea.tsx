@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useMemo } from 'react'
 import type { WorkspaceInfo } from '@shared/types/workspace'
 import HomePage from '../../pages/HomePage'
 import PromptArea from '../PromptArea'
@@ -11,13 +11,17 @@ import Flex from '../ui/Flex'
 import Stack from '../ui/Stack'
 import { ChatAreaLayout } from './ChatAreaLayout'
 import { parseArgs } from '../../utils/parseArgs'
+import { computeEditStats, handleDiffClickForFile } from '../../utils/editDiffUtils'
 import { parseSlashCommand } from '../../commands/SlashCommandParser'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useProviderStore } from '../../stores/providerStore'
 import { useChatStore } from '../../stores/chatStore'
 
+import { AgentMessageContent } from './AgentMessageContent'
+import { useSendMessage } from './hooks/useSendMessage'
+
 function genId(): string {
-  return `_`
+  return '_' + Math.random().toString(36).substring(2, 9)
 }
 
 export function extractMessageEdits(msg: any) {
@@ -68,37 +72,10 @@ export function extractMessageEdits(msg: any) {
         const removed = matchingDiff.split('\n').filter((line) => line.startsWith('-') && !line.startsWith('---')).length;
         additions = `+${added}`;
         deletions = `-${removed}`;
-      } else if (tc.name === 'write_to_file') {
-        const codeContent = argsObj.codeContent || argsObj.code_content || '';
-        additions = `+${codeContent.split('\n').length}`;
-      } else if (tc.name === 'replace_file_content') {
-        additions = `+${(argsObj.replacementContent || '').split('\n').length}`;
-        deletions = `-${(argsObj.targetContent || '').split('\n').length}`;
-      } else if (tc.name === 'apply_patch') {
-        if (Array.isArray(argsObj.edits)) {
-          let totalAdds = 0;
-          let totalDels = 0;
-          argsObj.edits.forEach((edit: any) => {
-            totalAdds += String(edit.replacementContent || '').split('\n').length;
-            totalDels += String(edit.targetContent || '').split('\n').length;
-          });
-          additions = `+${totalAdds}`;
-          deletions = `-${totalDels}`;
-        } else if (typeof argsObj.newContent === 'string') {
-          additions = `+${argsObj.newContent.split('\n').length}`;
-        }
-      } else if (tc.name === 'multi_replace_file_content') {
-        const chunks = Array.isArray(argsObj.ReplacementChunks) ? argsObj.ReplacementChunks : (Array.isArray(argsObj.replacementChunks) ? argsObj.replacementChunks : []);
-        let totalAdds = 0;
-        let totalDels = 0;
-        chunks.forEach((chunk: any) => {
-          const add = chunk.ReplacementContent || chunk.replacementContent || '';
-          const del = chunk.TargetContent || chunk.targetContent || '';
-          totalAdds += add.split('\n').length;
-          totalDels += del.split('\n').length;
-        });
-        additions = `+${totalAdds}`;
-        deletions = `-${totalDels}`;
+      } else {
+        const stats = computeEditStats(tc.name, tc.args);
+        additions = stats.additions;
+        deletions = stats.deletions;
       }
     } catch (err) {
       console.error('Failed to parse edit args in ChatArea:', err);
@@ -109,70 +86,7 @@ export function extractMessageEdits(msg: any) {
   return { edits, tools };
 }
 
-export function handleApprovalDiffClick(filePath: string, tools: any[], handleDiffClick: any, handleFileClick: any) {
-  const normalize = (p: string) => p.replace(/\\/g, '/').toLowerCase();
-  const targetNorm = normalize(filePath);
-  const tc = tools.find((t: any) => {
-    if (t.name !== 'write_to_file' && t.name !== 'replace_file_content' && t.name !== 'multi_replace_file_content' && t.name !== 'apply_patch') return false;
-    try {
-      const argsObj = parseArgs(t.args);
-      const fileArg = argsObj.targetFile || argsObj.TargetFile || argsObj.filePath || argsObj.path;
-      if (typeof fileArg === 'string') {
-        const fileNorm = normalize(fileArg);
-        return fileNorm === targetNorm || targetNorm.endsWith(fileNorm) || fileNorm.endsWith(targetNorm);
-      }
-    } catch {
-    }
-    return false;
-  });
-
-  if (tc) {
-    try {
-      const argsObj = parseArgs(tc.args);
-      if (tc.name === 'write_to_file') {
-        handleDiffClick(filePath, {
-          type: 'write',
-          codeContent: argsObj.codeContent || argsObj.code_content || ''
-        });
-      } else if (tc.name === 'replace_file_content') {
-        handleDiffClick(filePath, {
-          type: 'replace',
-          targetContent: argsObj.targetContent || '',
-          replacementContent: argsObj.replacementContent || ''
-        });
-      } else if (tc.name === 'apply_patch') {
-        if (Array.isArray(argsObj.edits) && argsObj.edits.length > 0) {
-          const targetContent = argsObj.edits.map((edit: any, i: number) => `--- Edit ${i + 1} ---\n${edit.targetContent || ''}`).join('\n\n');
-          const replacementContent = argsObj.edits.map((edit: any, i: number) => `--- Edit ${i + 1} ---\n${edit.replacementContent || ''}`).join('\n\n');
-          handleDiffClick(filePath, {
-            type: 'replace',
-            targetContent,
-            replacementContent
-          });
-        } else {
-          handleDiffClick(filePath, {
-            type: 'write',
-            codeContent: argsObj.newContent || ''
-          });
-        }
-      } else if (tc.name === 'multi_replace_file_content') {
-        const chunks = Array.isArray(argsObj.ReplacementChunks) ? argsObj.ReplacementChunks : (Array.isArray(argsObj.replacementChunks) ? argsObj.replacementChunks : []);
-        const targetContent = chunks.map((c: any, i: number) => `--- Chunk ${i + 1} ---\n${c.TargetContent || c.targetContent || ''}`).join('\n\n');
-        const replacementContent = chunks.map((c: any, i: number) => `--- Chunk ${i + 1} ---\n${c.ReplacementContent || c.replacementContent || ''}`).join('\n\n');
-        handleDiffClick(filePath, {
-          type: 'replace',
-          targetContent,
-          replacementContent
-        });
-      }
-    } catch (err) {
-      console.error('Failed to parse diff args from toolCall:', err);
-      handleFileClick(filePath);
-    }
-  } else {
-    handleFileClick(filePath);
-  }
-}
+export { handleDiffClickForFile as handleApprovalDiffClick }
 
 export interface ChatAreaProps {
   messages: any[]
@@ -196,7 +110,7 @@ export interface ChatAreaProps {
     }
   ) => void
   handleOpenRecentProject: (project: any) => Promise<void>
-  setCurrentView: (view: 'home' | 'chat' | 'settings') => void
+  onOpenSettings: (tab?: string) => void
 }
 
 export default function ChatArea({
@@ -213,24 +127,13 @@ export default function ChatArea({
   handleFileClick,
   handleDiffClick,
   handleOpenRecentProject,
-  setCurrentView
+  onOpenSettings
 }: ChatAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const prevSessionIdRef = useRef<string | null>(null)
 
-  const addUserMessage = useChatStore((s) => s.addUserMessage)
-  const startStreamingReply = useChatStore((s) => s.startStreamingReply)
-  const appendStreamChunk = useChatStore((s) => s.appendStreamChunk)
-  const finishStreaming = useChatStore((s) => s.finishStreaming)
-  const persistCurrentSession = useChatStore((s) => s.persistCurrentSession)
-  const setStreamCleanup = useChatStore((s) => s.setStreamCleanup)
-  const createSession = useChatStore((s) => s.createSession)
-  const startToolCall = useChatStore((s) => s.startToolCall)
-  const finishToolCall = useChatStore((s) => s.finishToolCall)
-  const appendReasoningTimelineChunk = useChatStore((s) => s.appendReasoningTimelineChunk)
-  const addPermissionRequest = useChatStore((s) => s.addPermissionRequest)
   const resolvePermissionRequest = useChatStore((s) => s.resolvePermissionRequest)
-  const setDiffEntries = useChatStore((s) => s.setDiffEntries)
+  const { handleSendMessage } = useSendMessage()
 
   const handleResolvePermission = React.useCallback(async (msgId: string, requestId: string, approved: boolean) => {
     try {
@@ -241,164 +144,6 @@ export default function ChatArea({
       resolvePermissionRequest(msgId, requestId, approved)
     }
   }, [resolvePermissionRequest])
-
-  const handleSendMessage = React.useCallback(
-    async (message: string, modelName: string) => {
-      const ws = useWorkspaceStore.getState().workspace
-      if (!ws) {
-        alert('请先选择或打开一个项目工作区才能发送消息！')
-        return
-      }
-
-      const provState = useProviderStore.getState()
-      const activeProv = provState.providers.find((p) => p.id === provState.activeProviderId)
-      if (!activeProv) {
-        const userMsg = addUserMessage(message)
-        const agentId = startStreamingReply()
-        const simText = `请先配置模型 Provider 才能进行 AI 对话。\n\n点击输入框左侧齿轮图标打开设置，添加一个 OpenAI-compatible Provider（如 OpenAI、Ollama、DeepSeek 等）。\n\n配置完成后，输入消息即可获得 AI 实时流式回复。`
-
-        let i = 0
-        const interval = setInterval(() => {
-          if (i < simText.length) {
-            appendStreamChunk(agentId, simText[i])
-            i++
-          } else {
-            clearInterval(interval)
-            finishStreaming(agentId)
-            persistCurrentSession()
-          }
-        }, 15)
-        setStreamCleanup(() => () => clearInterval(interval))
-        return
-      }
-
-      let sid = useChatStore.getState().activeSessionId
-      if (!sid) {
-        sid = createSession(ws.id)
-      }
-
-      addUserMessage(message)
-      const agentId = startStreamingReply()
-
-      let allSkills: any[] = []
-      try {
-        allSkills = await (window as any).api.skill.getAll(ws.rootPath)
-      } catch (e) {}
-
-      const model = modelName || activeProv.models[0]?.name || 'gpt-4o'
-      const currentMsgs = useChatStore.getState().messages
-      const chatMessages: Array<any> = [
-        {
-          role: 'system',
-          content: `你是一个 AI 编程助手，运行在 Codez 桌面应用中。当前项目：${ws.name}（${ws.projectType}）。请用中文回复，保持简洁专业。`
-        },
-        ...currentMsgs
-          .filter((m) => !m.streaming)
-          .slice(-40)
-          .flatMap((m, index, arr) => {
-            const isLastMessage = index === arr.length - 1
-            const mapped: Array<{ role: 'system' | 'user' | 'assistant' | 'tool'; content: string; tool_calls?: any[]; tool_call_id?: string; name?: string; thought_signature?: string; provider_specific_fields?: any }> = []
-            if (m.role === 'user') {
-              let c = m.content
-              if (isLastMessage) {
-                const { isCommand, processedMessage } = parseSlashCommand(c, allSkills)
-                if (isCommand) {
-                  c = processedMessage
-                }
-              }
-              mapped.push({ role: 'user', content: c })
-            } else {
-              const assistantMsg: any = { role: 'assistant', content: m.content || '' }
-              if (m.toolCalls && m.toolCalls.length > 0) {
-                const finalSig = m.toolCalls[m.toolCalls.length - 1].thoughtSignature || 'skip_thought_signature_validator'
-                assistantMsg.tool_calls = m.toolCalls.map((tc: any) => ({
-                  id: tc.id,
-                  type: 'function',
-                  function: { name: tc.name, arguments: tc.args },
-                  thought_signature: tc.thoughtSignature || finalSig
-                }))
-                assistantMsg.thought_signature = finalSig
-                assistantMsg.provider_specific_fields = { thought_signature: finalSig }
-              }
-              mapped.push(assistantMsg)
-              
-              if (m.toolCalls && m.toolCalls.length > 0) {
-                for (const tc of m.toolCalls) {
-                  if (tc.status === 'success' || tc.status === 'error') {
-                    mapped.push({
-                      role: 'tool',
-                      tool_call_id: tc.id,
-                      name: tc.name,
-                      content: tc.result || ''
-                    })
-                  }
-                }
-              }
-            }
-            return mapped
-          })
-      ]
-
-      const cleanup = (window as any).api.chat.stream(
-        activeProv.id,
-        model,
-        chatMessages,
-        sid,
-        {
-          onChunk: (delta: string, reasoningDelta?: string) => {
-            appendStreamChunk(agentId, delta, reasoningDelta)
-            appendReasoningTimelineChunk(agentId, reasoningDelta || '')
-          },
-          onDone: async (fullContent: string, _stopReason?: string, txId?: string) => {
-            finishStreaming(agentId)
-            if (txId) {
-              useChatStore.getState().setTransactionId(agentId, txId)
-              try {
-                const diffs = await window.api.chat.getDiff(txId)
-                if (Array.isArray(diffs) && diffs.length > 0) {
-                  setDiffEntries(agentId, diffs)
-                }
-              } catch (err) {
-                console.warn('Failed to load transaction diff:', err)
-              }
-            }
-            persistCurrentSession()
-            setStreamCleanup(null)
-          },
-          onError: (error: string) => {
-            appendStreamChunk(agentId, `\n\n错误：${error}`)
-            finishStreaming(agentId)
-            persistCurrentSession()
-            setStreamCleanup(null)
-          },
-          onToolStart: (toolCallId: string, name: string, args: string, thoughtSignature?: string) => {
-            startToolCall(agentId, {
-              id: toolCallId || genId(),
-              name,
-              args,
-              thoughtSignature
-            })
-          },
-          onToolEnd: (toolCallId: string, result: string) => {
-            finishToolCall(agentId, toolCallId, result)
-          },
-          onPermissionRequest: (request: any) => {
-            addPermissionRequest(agentId, request)
-          }
-        }
-      )
-
-      const wrappedCleanup = () => {
-        cleanup()
-        finishStreaming(agentId)
-        persistCurrentSession()
-        setStreamCleanup(null)
-      }
-
-      setStreamCleanup(wrappedCleanup)
-    },
-    [addUserMessage, startStreamingReply, appendStreamChunk, finishStreaming, persistCurrentSession, setStreamCleanup, createSession, startToolCall, finishToolCall, appendReasoningTimelineChunk, addPermissionRequest, setDiffEntries]
-  )
 
   // 智能触底滚动逻辑
   useEffect(() => {
@@ -421,6 +166,26 @@ export default function ChatArea({
 
   const hasMessages = messages.length > 0
 
+  // P0 优化: 提前计算 lastStreamingMsgId，避免在 map 内 O(N²) 重复计算
+  const lastStreamingMsgId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'agent' && messages[i].streaming) {
+        return messages[i].id
+      }
+    }
+    return null
+  }, [messages])
+
+  // P0 优化: 缓存需要审批的消息列表，避免 auditArea 重复调用 extractMessageEdits
+  const auditMessages = useMemo(() => {
+    return messages.filter(m => {
+      const hasPendingPermission = m.permissionRequests?.some((r: any) => r.status === 'pending')
+      const { edits } = extractMessageEdits(m)
+      const hasPendingEdits = edits.length > 0 && !edits.every((e: any) => m.editStatuses?.[e.filePath])
+      return hasPendingPermission || hasPendingEdits
+    })
+  }, [messages])
+
   return (
     <ChatAreaLayout
       containerRef={containerRef}
@@ -429,12 +194,6 @@ export default function ChatArea({
         hasMessages ? (
           <Stack gap={6} className="app-message-list">
             {messages.map((msg) => {
-              const lastStreamingMsgId = messages.reduceRight<string | null>((acc, m) => {
-                if (acc) return acc
-                if (m.role === 'agent' && m.streaming) return m.id
-                return null
-              }, null)
-
               return msg.role === 'user' ? (
                 <Flex key={msg.id} justify="end" className="w-full">
                   <div className="user-message-bubble">
@@ -446,98 +205,12 @@ export default function ChatArea({
                   <Flex align="center" justify="center" className="agent-avatar">
                     AI
                   </Flex>
-                  <div className="agent-message-content">
-                    {(() => {
-                      if (!msg.executionTimeline || msg.executionTimeline.length === 0) {
-                        return (
-                          <>
-                            <ExecutionLog timeline={[]} reasoning={msg.reasoningContent} agentStates={msg.agentStates} onFileClick={handleFileClick} onDiffClick={handleDiffClick} streaming={msg.streaming && msg.id === lastStreamingMsgId} />
-                            <MessageBody content={msg.content} streaming={msg.streaming && msg.id === lastStreamingMsgId} reasoning={msg.reasoningContent} onFileClick={handleFileClick} />
-                          </>
-                        )
-                      }
-
-                      const executionTimeline = msg.executionTimeline || []
-                      let lastNonTextIdx = -1
-                      for (let i = executionTimeline.length - 1; i >= 0; i--) {
-                        if (executionTimeline[i].type !== 'text') {
-                          lastNonTextIdx = i
-                          break
-                        }
-                      }
-
-                      const isStreaming = msg.streaming && msg.id === lastStreamingMsgId;
-                      let timelineForLog: any[] = [];
-                      let finalContent = '';
-
-                      if (isStreaming) {
-                        timelineForLog = executionTimeline;
-                        finalContent = '';
-                      } else {
-                        timelineForLog = lastNonTextIdx === -1 ? [] : executionTimeline.slice(0, lastNonTextIdx + 1);
-                        timelineForLog = timelineForLog.filter((item: any) => item.type !== 'text');
-
-                        const finalTextItems = lastNonTextIdx === -1 ? executionTimeline : executionTimeline.slice(lastNonTextIdx + 1);
-                        finalContent = finalTextItems
-                          .filter((item: any) => item.type === 'text')
-                          .map((item: any) => (item as any).content)
-                          .join('')
-                          .trimStart();
-                      }
-
-                      const hasToolsOrAgentStates = timelineForLog.length > 0 || (msg.agentStates && msg.agentStates.length > 0) || !!msg.reasoningContent
-
-                      return (
-                        <>
-                          {hasToolsOrAgentStates && (
-                            <div className="app-spacer">
-                              <ExecutionLog
-                                timeline={timelineForLog}
-                                reasoning={msg.reasoningContent}
-                                agentStates={msg.agentStates}
-                                onFileClick={handleFileClick}
-                                onDiffClick={handleDiffClick}
-                                streaming={isStreaming && !finalContent}
-                              />
-                            </div>
-                          )}
-                          {finalContent && (
-                            <div className={hasToolsOrAgentStates ? "mt-4" : ""}>
-                              <MessageBody
-                                content={finalContent}
-                                streaming={false}
-                                onFileClick={handleFileClick}
-                              />
-                            </div>
-                          )}
-                        </>
-                      )
-                    })()}
-                    {(() => {
-                      const { edits, tools } = extractMessageEdits(msg);
-                      if (edits.length === 0) return null;
-
-                      // Check if all edits are processed
-                      const allProcessed = edits.every((e: any) => {
-                        // uniqueEdits handles duplicate files, but here we just check all
-                        return msg.editStatuses?.[e.filePath]
-                      });
-
-                      // IF NOT PROCESSED, WE SHOW IN AUDIT AREA, NOT CHAT AREA
-                      if (!allProcessed) return null;
-
-                      return (
-                        <EditApprovalWidget
-                          msgId={msg.id}
-                          txId={msg.txId}
-                          edits={edits}
-                          editStatuses={msg.editStatuses}
-                          onDiffClick={(filePath) => handleApprovalDiffClick(filePath, tools, handleDiffClick, handleFileClick)}
-                          onFileClick={(filePath) => handleFileClick(filePath)}
-                        />
-                      );
-                    })()}
-                  </div>
+                  <AgentMessageContent
+                    msg={msg}
+                    lastStreamingMsgId={lastStreamingMsgId}
+                    handleFileClick={handleFileClick}
+                    handleDiffClick={handleDiffClick}
+                  />
                 </Flex>
               )
             })}
@@ -547,14 +220,9 @@ export default function ChatArea({
         )
       }
       auditArea={
-        messages.some(m => {
-          const hasPendingPermission = m.permissionRequests?.some((r: any) => r.status === 'pending');
-          const { edits } = extractMessageEdits(m);
-          const hasPendingEdits = edits.length > 0 && !edits.every((e: any) => m.editStatuses?.[e.filePath]);
-          return hasPendingPermission || hasPendingEdits;
-        }) ? (
+        auditMessages.length > 0 ? (
           <div style={{ width: '100%', flexShrink: 0, zIndex: 60, marginBottom: '-16px' }}>
-            {messages.map((msg) => {
+            {auditMessages.map((msg) => {
               const { edits, tools } = extractMessageEdits(msg);
               const hasPendingEdits = edits.length > 0 && !edits.every((e: any) => msg.editStatuses?.[e.filePath]);
               const pendingPermissions = msg.permissionRequests?.filter((r: any) => r.status === 'pending') || [];
@@ -580,7 +248,7 @@ export default function ChatArea({
                         txId={msg.txId}
                         edits={edits}
                         editStatuses={msg.editStatuses}
-                        onDiffClick={(filePath) => handleApprovalDiffClick(filePath, tools, handleDiffClick, handleFileClick)}
+                        onDiffClick={(filePath) => handleDiffClickForFile(filePath, tools, handleDiffClick, handleFileClick)}
                         onFileClick={(filePath) => handleFileClick(filePath)}
                       />
                     </div>
@@ -596,7 +264,7 @@ export default function ChatArea({
           <PromptArea
             onSend={handleSendMessage}
             placeholder={activeSessionId ? "随心输入..." : "开始新的对话..."}
-            onOpenSettings={() => setCurrentView('settings')}
+            onOpenSettings={() => onOpenSettings('model-config')}
             workspace={workspace}
           />
         </div>
