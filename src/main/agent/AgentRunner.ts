@@ -39,7 +39,7 @@ export function isToolErrorResult(resultMessage: string): boolean {
 }
 
 export function buildToolError(resultMessage: string) {
-  const recoverable = /hash mismatch|not found|not unique|expectedhash|re-read|read_files/i.test(resultMessage)
+  const recoverable = /hash mismatch|not found|not unique|expectedhash|re-read|read_files|must read/i.test(resultMessage)
   return {
     code: recoverable ? 'RECOVERABLE_TOOL_ERROR' : 'TOOL_ERROR',
     message: resultMessage,
@@ -384,11 +384,11 @@ export class AgentRunner {
             try {
               const parsed = JSON.parse(tr.content)
               if (parsed.ok) {
-                if (['apply_patch', 'write_to_file', 'replace_file_content', 'multi_replace_file_content'].includes(tr.name)) {
+                if (['Edit', 'Write'].includes(tr.name)) {
                   filesModifiedInSession = true
-                } else if (tr.name === 'run_command') {
+                } else if (tr.name === 'Bash' || tr.name === 'PowerShell') {
                   const cmdArgs = JSON.parse((tr as any)._rawArgs || '{}')
-                  const cmdStr = cmdArgs.commandLine || cmdArgs.command || ''
+                  const cmdStr = cmdArgs.command || cmdArgs.commandLine || ''
                   if (/(test|typecheck|build|lint)/.test(cmdStr)) {
                     let cmdData = parsed.data
                     if (typeof cmdData === 'string') {
@@ -444,7 +444,7 @@ export class AgentRunner {
             // 注入强制修复提示
             allMessages.push({
               role: 'system',
-              content: `⚠️ 验证闭环拦截：你最后一次运行的验证命令 (${lastVerificationResult.command}) 未成功通过。作为负责任的 AI，你必须修复这些错误并重新验证，在验证通过之前绝对不能声称任务已完成。请继续使用相关工具（如 read_files, apply_patch, run_command 等）进行排查和修复。`
+              content: `⚠️ 验证闭环拦截：你最后一次运行的验证命令 (${lastVerificationResult.command}) 未成功通过。作为负责任的 AI，你必须修复这些错误并重新验证，在验证通过之前绝对不能声称任务已完成。请继续使用相关工具（如 Read, Edit, Write, Bash 等）进行排查和修复。`
             } as any)
             
             if (callbacks.onChunk) {

@@ -27,23 +27,23 @@ describe('PermissionManager', () => {
     expect(pm.getCommandRisk('git clean -fd')).toBe('destructive')
   })
 
-  it('run_command 应支持 commandLine / CommandLine / command 参数名', () => {
-    expect(pm.checkToolPermission('run_command', { commandLine: 'npm test' }, workspaceRoot)).toBe('allow')
-    expect(pm.checkToolPermission('run_command', { CommandLine: 'npm run typecheck' }, workspaceRoot)).toBe('allow')
-    expect(pm.checkToolPermission('run_command', { command: 'git status' }, workspaceRoot)).toBe('allow')
-    expect(pm.checkToolPermission('run_command', { commandLine: 'npm install' }, workspaceRoot)).toBe('ask')
+  it('Bash 支持 command 参数名', () => {
+    expect(pm.checkToolPermission('Bash', { command: 'npm test' }, workspaceRoot)).toBe('allow')
+    expect(pm.checkToolPermission('Bash', { command: 'npm install' }, workspaceRoot)).toBe('ask')
+    expect(pm.checkToolPermission('PowerShell', { command: 'git status' }, workspaceRoot)).toBe('allow')
   })
 
-  it('只读工具应 allow，rollback 和写入工具应 ask', () => {
-    expect(pm.checkToolPermission('search', {}, workspaceRoot)).toBe('allow')
-    expect(pm.checkToolPermission('read_files', {}, workspaceRoot)).toBe('allow')
+  it('只读工具应 allow，rollback 和写入工具应 allow(边界内)', () => {
+    expect(pm.checkToolPermission('Read', {}, workspaceRoot)).toBe('allow')
+    expect(pm.checkToolPermission('Glob', {}, workspaceRoot)).toBe('allow')
     expect(pm.checkToolPermission('get_project_snapshot', {}, workspaceRoot)).toBe('allow')
     expect(pm.checkToolPermission('rollback_last_edit', {}, workspaceRoot)).toBe('ask')
-    expect(pm.checkToolPermission('apply_patch', { filePath: 'src/main.ts' }, workspaceRoot)).toBe('allow')
+    expect(pm.checkToolPermission('Edit', { file_path: 'src/main.ts' }, workspaceRoot)).toBe('allow')
   })
 
   it('写入 workspace 外路径应 deny', () => {
     const outsidePath = path.resolve('/tmp/outside.txt')
-    expect(pm.checkToolPermission('apply_patch', { filePath: outsidePath }, workspaceRoot)).toBe('deny')
+    expect(pm.checkToolPermission('Edit', { file_path: outsidePath }, workspaceRoot)).toBe('deny')
+    expect(pm.checkToolPermission('Write', { file_path: outsidePath }, workspaceRoot)).toBe('deny')
   })
 })

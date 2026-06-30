@@ -11,7 +11,7 @@ describe('VerificationStrategyService', () => {
 
   it('应为 tools/agent 源码变更推荐 test 和 typecheck', () => {
     const recommendations = VerificationStrategyService.recommend([
-      'src/main/tools/builtin/ApplyPatchTool.ts',
+      'src/main/tools/builtin/EditTool.ts',
       'src/main/agent/AgentRunner.ts'
     ], scripts)
 

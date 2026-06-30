@@ -1,12 +1,19 @@
 import { Tool } from './Tool'
 import { ListFilesTool } from './builtin/ListFilesTool'
-import { ReadFilesTool } from './builtin/ReadFilesTool'
-import { SearchTool } from './builtin/SearchTool'
+import { ReadTool } from './builtin/ReadTool'
+import { EditTool } from './builtin/EditTool'
+import { WriteTool } from './builtin/WriteTool'
+import { NotebookEditTool } from './builtin/NotebookEditTool'
+import { GlobTool } from './builtin/GlobTool'
+import { GrepTool } from './builtin/GrepTool'
+import { BashTool } from './builtin/BashTool'
+import { PowerShellTool } from './builtin/PowerShellTool'
+import { AskUserQuestionTool } from './builtin/AskUserQuestionTool'
+import { PushNotificationTool } from './builtin/PushNotificationTool'
+import { SkillTool } from './builtin/SkillTool'
 import { GetProjectSnapshotTool } from './builtin/GetProjectSnapshotTool'
 import { RollbackLastEditTool } from './builtin/RollbackLastEditTool'
 import { UpdateResumeStateTool } from './builtin/UpdateResumeStateTool'
-import { ApplyPatchTool } from './builtin/ApplyPatchTool'
-import { RunCommandTool } from './builtin/RunCommandTool'
 import { FastContextTool } from './builtin/FastContextTool'
 import type { ToolDefinition } from '../../shared/types/provider'
 
@@ -20,13 +27,20 @@ export class ToolManager {
   private registerBuiltinTools() {
     const builtinTools = [
       new ListFilesTool(),
-      new ReadFilesTool(),
-      new SearchTool(),
+      new ReadTool(),
+      new EditTool(),
+      new WriteTool(),
+      new NotebookEditTool(),
+      new GlobTool(),
+      new GrepTool(),
+      new BashTool(),
+      new PowerShellTool(),
+      new AskUserQuestionTool(),
+      new PushNotificationTool(),
+      new SkillTool(),
       new GetProjectSnapshotTool(),
       new RollbackLastEditTool(),
       new UpdateResumeStateTool(),
-      new ApplyPatchTool(),
-      new RunCommandTool(),
       new FastContextTool()
     ]
     

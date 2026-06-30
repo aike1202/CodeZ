@@ -44,7 +44,7 @@ export class PermissionManager {
   }
 
   public checkToolPermission(toolName: string, parsedArgs: any, workspaceRoot: string): PermissionResult {
-    if (['search', 'list_files', 'read_files', 'get_project_snapshot', 'fast_context', 'Read', 'NotebookEdit', 'Glob', 'Grep', 'Skill', 'PushNotification', 'AskUserQuestion'].includes(toolName)) {
+    if (['list_files', 'get_project_snapshot', 'fast_context', 'Read', 'NotebookEdit', 'Glob', 'Grep', 'Skill', 'PushNotification', 'AskUserQuestion'].includes(toolName)) {
       return 'allow'
     }
 
@@ -53,7 +53,7 @@ export class PermissionManager {
     }
 
     // 2. 写入类工具：安全边界内拦截，符合边界则直接允许，超出边界直接拒绝
-    if (['apply_patch', 'Edit', 'Write'].includes(toolName)) {
+    if (['Edit', 'Write'].includes(toolName)) {
       // workspace check
       let targetPath = parsedArgs?.filePath || parsedArgs?.TargetFile || parsedArgs?.file_path || parsedArgs?.path
       if (targetPath) {
@@ -70,7 +70,7 @@ export class PermissionManager {
       return 'allow'
     }
 
-    if (['run_command', 'Bash', 'PowerShell'].includes(toolName)) {
+    if (toolName === 'Bash' || toolName === 'PowerShell') {
       const risk = this.getCommandRisk(this.getCommandFromArgs(parsedArgs))
       if (risk === 'safe') return 'allow'
       return 'ask'
@@ -83,11 +83,11 @@ export class PermissionManager {
     let risk: CommandRisk = 'unknown'
     let description = `Requesting permission to run tool ${toolName}`
 
-    if (toolName === 'run_command' || toolName === 'Bash' || toolName === 'PowerShell') {
+    if (toolName === 'Bash' || toolName === 'PowerShell') {
       const cmd = this.getCommandFromArgs(parsedArgs)
       risk = this.getCommandRisk(cmd)
       description = `Execute command: ${cmd}`
-    } else if (['apply_patch', 'Edit', 'Write'].includes(toolName)) {
+    } else if (['Edit', 'Write'].includes(toolName)) {
       const targetPath = parsedArgs?.file_path || parsedArgs?.filePath || parsedArgs?.TargetFile || parsedArgs?.path || 'unknown path'
       risk = 'write'
       description = `Modify file: ${targetPath}`
