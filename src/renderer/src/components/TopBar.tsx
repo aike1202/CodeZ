@@ -141,23 +141,16 @@ export default function TopBar({
       const handler = (_event: any, state: boolean) => setIsMaximized(state)
       win.electron.ipcRenderer.on('window-maximized-state', handler)
       
-      // Initialize theme
+      let cleanup: (() => void) | undefined
+      // Initialize theme source state for UI display only
       if (window.api?.theme) {
         window.api.theme.get().then((info) => {
           setThemeSource(info.themeSource)
-          if (info.shouldUseDarkColors) {
-            document.documentElement.classList.add('dark')
-          } else {
-            document.documentElement.classList.remove('dark')
-          }
         })
 
-        const cleanup = window.api.theme.onUpdated((info) => {
-          if (info.shouldUseDarkColors) {
-            document.documentElement.classList.add('dark')
-          } else {
-            document.documentElement.classList.remove('dark')
-          }
+        // Just update local state for the moon/sun icon
+        cleanup = window.api.theme.onUpdated((info) => {
+          setThemeSource(info.themeSource)
         })
         
         // This is necessary to store cleanup and remove listener properly.
@@ -203,8 +196,7 @@ export default function TopBar({
 
       return () => {
         win.electron.ipcRenderer.removeListener('window-maximized-state', handler)
-        // Note: currently there's no way to easily cleanup onUpdated here if we don't store the func,
-        // but since TopBar never unmounts, it's acceptable for now.
+        if (cleanup) cleanup()
       }
     }
     return undefined

@@ -2,9 +2,9 @@
 
 .settings-panel-container {
   flex: 1;
-  background-color: var(--bg-panel, #f3f4f6);
+  background-color: var(--bg-panel);
   overflow-y: auto;
-  border-left: 1px solid var(--border, #e5e7eb);
+  border-left: 1px solid var(--border);
 }
 
 .settings-panel-inner {
@@ -35,20 +35,20 @@
 .settings-status-tag {
   font-size: 11px;
   background-color: rgba(16, 185, 129, 0.2); /* bg-green-500/20 */
-  color: #10b981; /* text-green-500 */
+  color: var(--color-success); /* text-green-500 */
   padding: 2px 8px;
   border-radius: 9999px;
   font-weight: 500;
 }
 
 .settings-trash-btn {
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   padding: 4px;
   transition: color 0.2s;
 }
 
 .settings-trash-btn:hover {
-  color: #ef4444; /* hover:text-red-500 */
+  color: var(--color-error); /* hover:text-red-500 */
 }
 
 .settings-apikey-wrapper {
@@ -65,18 +65,18 @@
 .settings-eye-btn {
   position: absolute;
   right: 12px;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   padding: 4px;
   transition: color 0.2s;
 }
 
 .settings-eye-btn:hover {
-  color: var(--text-main, #111827);
+  color: var(--text-main);
 }
 
 .settings-thinking-box {
-  background-color: var(--bg-input, #ffffff);
-  border: 1px solid var(--border, #e5e7eb);
+  background-color: var(--bg-input);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 12px;
   display: flex;
@@ -89,7 +89,7 @@
   align-items: center;
   gap: 8px;
   font-size: 13px;
-  color: var(--text-main, #111827);
+  color: var(--text-main);
   cursor: pointer;
 }
 
@@ -100,13 +100,13 @@
 
 .settings-thinking-desc {
   font-size: 12px;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   line-height: 1.625;
 }
 
 .settings-models-box {
-  background-color: var(--bg-input, #ffffff);
-  border: 1px solid var(--border, #e5e7eb);
+  background-color: var(--bg-input);
+  border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -116,12 +116,12 @@
   align-items: center;
   gap: 12px;
   padding: 12px;
-  border-bottom: 1px solid var(--border, #e5e7eb);
+  border-bottom: 1px solid var(--border);
   transition: background-color 0.2s;
 }
 
 .settings-model-row:hover {
-  background-color: var(--bg-hover, #f9fafb);
+  background-color: var(--bg-hover);
 }
 
 .settings-model-row:last-child {
@@ -155,7 +155,7 @@
 
 .settings-tokens-unit {
   font-size: 13px;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   margin-right: 8px;
 }
 
@@ -166,13 +166,13 @@
 
 .settings-add-model-wrapper {
   padding: 12px;
-  background-color: var(--bg-app, #f9fafb);
-  border-top: 1px solid var(--border, #e5e7eb);
+  background-color: var(--bg-app);
+  border-top: 1px solid var(--border);
 }
 
 .settings-add-model-btn {
   font-size: 13px;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -180,7 +180,7 @@
 }
 
 .settings-add-model-btn:hover {
-  color: var(--text-main, #111827);
+  color: var(--text-main);
 }
 
 .settings-actions-footer {
@@ -194,7 +194,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  border-top: 1px solid var(--border, #e5e7eb);
+  border-top: 1px solid var(--border);
   padding-top: 24px;
   flex: 1;
 }
@@ -206,11 +206,11 @@
 }
 
 .settings-test-result.is-success {
-  color: #10b981; /* text-green-500 */
+  color: var(--color-success); /* text-green-500 */
 }
 
 .settings-test-result.is-error {
-  color: #ef4444; /* text-red-500 */
+  color: var(--color-error); /* text-red-500 */
 }
 
 /* Custom form utilities to replace Tailwind classes */

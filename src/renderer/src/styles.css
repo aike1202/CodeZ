@@ -205,8 +205,8 @@ textarea::placeholder {
   justify-content: space-between;
   height: 44px;
   padding: 0 12px;
-  background: white;
-  border-bottom: 1px solid #ebecf0;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
   -webkit-app-region: drag;
   user-select: none;
@@ -222,50 +222,50 @@ textarea::placeholder {
 
 .logo-btn {
   display: flex; align-items: center; gap: 6px;
-  font-size: 0.9rem; font-weight: 600; color: #1f2328;
+  font-size: 0.9rem; font-weight: 600; color: var(--text-main);
   padding: 4px 8px; border-radius: 6px; transition: background 0.15s;
 }
-.logo-btn:hover { background: #ebedef; }
+.logo-btn:hover { background: var(--bg-hover); }
 
 .logo-icon {
   width: 22px; height: 22px; border-radius: 4px;
-  background: #1f2328; color: white;
+  background: var(--text-main); color: var(--bg-panel);
   display: flex; align-items: center; justify-content: center;
   font-size: 0.75rem; font-weight: 700;
 }
 
 .project-indicator {
   display: flex; align-items: center; gap: 6px;
-  font-size: 0.8rem; color: #666;
-  padding: 4px 10px; border-radius: 6px; border: 1px solid #ebecf0;
+  font-size: 0.8rem; color: var(--text-muted);
+  padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border-color);
   transition: background 0.15s;
 }
-.project-indicator:hover { background: #ebedef; }
+.project-indicator:hover { background: var(--bg-hover); }
 
 .global-search {
   width: 100%; max-width: 320px;
-  padding: 6px 12px; border-radius: 6px; border: 1px solid #ebecf0;
-  font-size: 0.8rem; background: #f8f9fa; color: #1f2328; outline: none;
+  padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border-color);
+  font-size: 0.8rem; background: var(--bg-sidebar); color: var(--text-main); outline: none;
   transition: border-color 0.15s, background 0.15s;
 }
-.global-search:focus { background: white; border-color: #94a3b8; }
-.global-search::placeholder { color: #9c9c9c; }
+.global-search:focus { background: var(--bg-input); border-color: var(--border-active); }
+.global-search::placeholder { color: var(--text-light); }
 
 .user-menu-btn {
-  width: 28px; height: 28px; border-radius: 9999px; background: #f8f9fa;
+  width: 28px; height: 28px; border-radius: 9999px; background: transparent;
   display: flex; align-items: center; justify-content: center;
-  font-size: 0.75rem; font-weight: 600; transition: background 0.15s;
+  font-size: 0.75rem; font-weight: 600; transition: background 0.15s; color: var(--text-main);
 }
-.user-menu-btn:hover { background: #ebedef; }
+.user-menu-btn:hover { background: var(--bg-hover); }
 
-.window-controls { display: flex; align-items: center; gap: 2px; margin-left: 8px; padding-left: 8px; border-left: 1px solid #ebecf0; }
+.window-controls { display: flex; align-items: center; gap: 2px; margin-left: 8px; padding-left: 8px; border-left: 1px solid var(--border-color); }
 .window-control-btn {
   width: 28px; height: 28px; border-radius: 4px;
   display: flex; align-items: center; justify-content: center;
-  color: #666; transition: background 0.15s, color 0.15s;
+  color: var(--text-muted); transition: background 0.15s, color 0.15s;
 }
-.window-control-btn:hover { background: #ebedef; color: #1f2328; }
-.window-control-btn.close:hover { background: #e11d48; color: white; }
+.window-control-btn:hover { background: var(--bg-hover); color: var(--text-main); }
+.window-control-btn.close:hover { background: var(--color-error); color: white; }
 
 /* ============================================
    自定义滚动条

@@ -12,6 +12,9 @@ const api = {
     scanFileTree: (rootPath: string): Promise<unknown> =>
       ipcRenderer.invoke(IPC_CHANNELS.SCAN_FILE_TREE, rootPath),
 
+    getAllPaths: (rootPath: string): Promise<Array<{ name: string; path: string; isDir: boolean }>> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GET_ALL_PATHS, rootPath),
+
     readFile: (filePath: string, rootPath: string): Promise<unknown> =>
       ipcRenderer.invoke(IPC_CHANNELS.READ_FILE, filePath, rootPath),
 
@@ -248,6 +251,13 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.RULES_DELETE, rulePath),
     rename: (oldPath: string, newFilename: string, workspaceRoot: string, scope: string): Promise<boolean> =>
       ipcRenderer.invoke(IPC_CHANNELS.RULES_RENAME, oldPath, newFilename, workspaceRoot, scope)
+  },
+
+  settings: {
+    get: (): Promise<any> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET),
+    save: (settings: any): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SAVE, settings)
   }
 }
 

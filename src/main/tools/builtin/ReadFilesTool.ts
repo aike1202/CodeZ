@@ -205,14 +205,16 @@ export class ReadFilesTool extends Tool {
 
       if (contentSlice.length > options.maxCharsPerFile) {
         omittedBytes += contentSlice.length - options.maxCharsPerFile
-        contentSlice = contentSlice.slice(0, options.maxCharsPerFile) + '\n... (truncated due to maxCharsPerFile limit)'
+        contentSlice = contentSlice.slice(0, options.maxCharsPerFile) + 
+          '\n\n[System Note: Content truncated due to maxCharsPerFile limit. You MUST use startLine and endLine parameters in your next call to paginate and read the rest of this file. Do NOT retry reading the whole file without pagination.]'
         truncated = true
       }
 
       const byteLength = Buffer.byteLength(contentSlice, 'utf-8')
       if (byteLength > options.remainingBytes) {
         const originalBytes = byteLength
-        contentSlice = Buffer.from(contentSlice, 'utf-8').subarray(0, options.remainingBytes).toString('utf-8') + '\n... (truncated due to maxTotalBytes limit)'
+        contentSlice = Buffer.from(contentSlice, 'utf-8').subarray(0, options.remainingBytes).toString('utf-8') + 
+          '\n\n[System Note: Content truncated due to maxTotalBytes budget limit. You MUST use startLine and endLine parameters in your next call to paginate.]'
         omittedBytes += originalBytes - options.remainingBytes
         truncated = true
         budgetExceeded = true

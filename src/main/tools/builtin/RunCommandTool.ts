@@ -120,7 +120,7 @@ export class RunCommandTool extends Tool {
     const tailChars = 3000
     
     return {
-      text: `${text.slice(0, headChars)}\n\n[... Output Truncated. Original size: ${text.length} chars ...]\n\n${text.slice(-tailChars)}`,
+      text: `${text.slice(0, headChars)}\n\n[System Note: Command output truncated due to length limits (Original size: ${text.length} chars). Do NOT run this exact same command again. If you need to see the full output, consider redirecting it to a file (e.g. \`> output.txt\`) and then reading the file using read_files, or use grep to filter the results.]\n\n${text.slice(-tailChars)}`,
       truncated: true
     }
   }

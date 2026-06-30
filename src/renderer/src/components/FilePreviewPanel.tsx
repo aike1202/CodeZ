@@ -8,6 +8,11 @@ import IconCopy from './icons/IconCopy'
 import IconClose from './icons/IconClose'
 import IconCheck from './icons/IconCheck'
 import { parseArgs } from '../utils/parseArgs'
+import CodeMirror from '@uiw/react-codemirror'
+import { vscodeDark } from '@uiw/codemirror-theme-vscode'
+import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
+import { languages } from '@codemirror/language-data'
+import { Extension } from '@codemirror/state'
 import './FilePreviewPanel.css'
 
 export interface FilePreviewPanelProps {
@@ -115,9 +120,6 @@ export function DiffViewer({
   )
 }
 
-/* ============================================
-   智能文件内容预览组件（支持 Markdown 与语法高亮）
-   ============================================ */
 export function FilePreviewViewer({
   code,
   filePath,
@@ -129,13 +131,30 @@ export function FilePreviewViewer({
 }) {
   const [copied, setCopied] = useState(false)
   const language = getLanguageFromPath(filePath)
-  const codeRef = useRef<HTMLElement>(null)
+  const [langExtension, setLangExtension] = useState<Extension[]>([])
 
   useEffect(() => {
-    if (codeRef.current && language !== 'text') {
-      Prism.highlightElement(codeRef.current)
+    let active = true
+    // Find matching language description
+    const langDesc = languages.find(l => 
+      l.name.toLowerCase() === language.toLowerCase() || 
+      l.alias.includes(language) ||
+      l.extensions.includes(filePath.split('.').pop()?.toLowerCase() || '')
+    )
+    
+    if (langDesc) {
+      langDesc.load().then(ext => {
+        if (active) setLangExtension([ext])
+      }).catch(err => {
+        console.error('Failed to load language extension:', err)
+        if (active) setLangExtension([])
+      })
+    } else {
+      setLangExtension([])
     }
-  }, [code, language])
+    
+    return () => { active = false }
+  }, [language, filePath])
 
   const handleCopy = () => {
     navigator.clipboard.writeText(code)
@@ -151,8 +170,11 @@ export function FilePreviewViewer({
     )
   }
 
+  // Determine dark mode based on document class
+  const isDark = document.documentElement.classList.contains('dark')
+
   return (
-    <div className="preview-code-container">
+    <div className="preview-code-container" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="preview-toolbar">
         <span className="preview-language-label">{language === 'text' ? 'TXT' : language}</span>
         <Button
@@ -176,12 +198,21 @@ export function FilePreviewViewer({
         </Button>
       </div>
 
-      <div className="preview-pre-wrapper">
-        <pre className="preview-pre">
-          <code ref={codeRef} className={`language-${language} whitespace-pre-wrap break-all`}>
-            {code}
-          </code>
-        </pre>
+      <div className="preview-pre-wrapper" style={{ flex: 1, overflow: 'auto' }}>
+        <CodeMirror
+          value={code}
+          height="100%"
+          theme={isDark ? vscodeDark : 'light'}
+          extensions={langExtension}
+          readOnly={true}
+          basicSetup={{
+            lineNumbers: true,
+            highlightActiveLineGutter: true,
+            highlightActiveLine: true,
+            foldGutter: true
+          }}
+          style={{ height: '100%' }}
+        />
       </div>
     </div>
   )

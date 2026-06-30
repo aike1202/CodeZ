@@ -20,27 +20,27 @@
 
 .task-history-modal-header {
   padding: 16px 20px;
-  border-bottom: 1px solid var(--border-light, #f3f4f6);
-  background-color: var(--bg-hover-light, rgba(249, 250, 251, 0.5));
+  border-bottom: 1px solid var(--border-light);
+  background-color: var(--bg-hover-light);
 }
 
 .task-history-modal-title {
   font-size: 18px;
   font-weight: 500;
-  color: var(--text-main, #1f2937);
+  color: var(--text-main);
   margin: 0;
 }
 
 .task-history-close-btn {
   padding: 4px;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   border-radius: 6px;
   transition: all 0.2s;
 }
 
 .task-history-close-btn:hover {
-  color: var(--text-main, #4b5563);
-  background-color: var(--bg-hover, rgba(229, 231, 235, 0.5));
+  color: var(--text-main);
+  background-color: var(--bg-hover);
 }
 
 .task-history-modal-content {
@@ -52,7 +52,7 @@
 
 .task-history-empty {
   text-align: center;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   padding: 40px 0;
 }
 
@@ -62,7 +62,7 @@
 }
 
 .task-card-item:hover {
-  border-color: var(--border-hover, #d1d5db);
+  border-color: var(--border-hover);
 }
 
 .task-item-header {
@@ -73,12 +73,12 @@
 .task-title {
   font-size: 14px;
   font-weight: 500;
-  color: var(--text-main, #1f2937);
+  color: var(--text-main);
 }
 
 .task-time {
   font-size: 12px;
-  color: var(--text-muted, #6b7280);
+  color: var(--text-muted);
   margin-top: 4px;
 }
 
@@ -89,58 +89,58 @@
 }
 
 .task-badge-completed {
-  background-color: var(--bg-success-light, #dcfce7);
-  color: var(--text-success, #15803d);
+  background-color: var(--bg-success-light);
+  color: var(--text-success);
 }
 
 .task-badge-failed {
-  background-color: var(--bg-danger-light, #fee2e2);
-  color: var(--text-danger, #b91c1c);
+  background-color: var(--bg-danger-light);
+  color: var(--text-danger);
 }
 
 .task-badge-running {
-  background-color: var(--bg-info-light, #dbeafe);
-  color: var(--text-info, #1d4ed8);
+  background-color: var(--bg-info-light);
+  color: var(--text-info);
 }
 
 .task-delete-btn {
   padding: 6px;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   border-radius: 6px;
   transition: all 0.2s ease;
 }
 
 .task-delete-btn:hover {
-  color: var(--text-danger, #ef4444);
-  background-color: var(--bg-danger-hover, #fef2f2);
+  color: var(--text-danger);
+  background-color: var(--bg-danger-hover);
 }
 
 .task-details-box {
   padding: 16px;
-  border-top: 1px solid var(--border-light, #f3f4f6);
+  border-top: 1px solid var(--border-light);
   margin-top: 8px;
   font-size: 14px;
-  color: var(--text-main, #374151);
-  background-color: var(--bg-hover-light, rgba(249, 250, 251, 0.5));
+  color: var(--text-main);
+  background-color: var(--bg-hover-light);
 }
 
 .task-detail-section-title {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-muted, #6b7280);
+  color: var(--text-muted);
   margin-bottom: 4px;
 }
 
 .task-file-list {
   list-style-type: disc;
   list-style-position: inside;
-  color: var(--text-muted, #4b5563);
+  color: var(--text-muted);
 }
 
 .task-cmd-list {
   list-style-type: disc;
   list-style-position: inside;
-  color: var(--text-muted, #4b5563);
+  color: var(--text-muted);
   font-family: var(--font-mono, monospace);
   font-size: 11px;
 }

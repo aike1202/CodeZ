@@ -4,7 +4,7 @@
   justify-content: center;
   min-height: 100vh;
   width: 100%;
-  background-color: var(--bg-app-fallback, #f8f9fa);
+  background-color: var(--bg-app-fallback);
   padding: 24px;
 }
 
@@ -13,21 +13,21 @@
   width: 100%;
   padding: 32px;
   box-shadow: var(--shadow-lg, 0 10px 15px -3px rgba(0, 0, 0, 0.1));
-  background-color: var(--bg-panel, #ffffff);
-  border: 1px solid var(--border-light, #f3f4f6);
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-light);
 }
 
 .welcome-title {
   font-size: 24px;
   font-weight: 700;
-  color: var(--text-main, #1f2937);
+  color: var(--text-main);
   margin: 0;
   text-align: center;
 }
 
 .welcome-subtitle {
   font-size: 14px;
-  color: var(--text-muted, #6b7280);
+  color: var(--text-muted);
   text-align: center;
   margin-bottom: 24px;
 }
@@ -50,7 +50,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   margin-bottom: 8px;
   padding-left: 8px;
 }
@@ -77,18 +77,18 @@
 }
 
 .welcome-recent-btn:hover {
-  background-color: var(--bg-hover, #f3f4f6);
+  background-color: var(--bg-hover);
 }
 
 .welcome-recent-name {
   font-size: 14px;
   font-weight: 500;
-  color: var(--text-main, #374151);
+  color: var(--text-main);
 }
 
 .welcome-recent-path {
   font-size: 12px;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   margin-top: 2px;
   width: 100%;
   overflow: hidden;
@@ -98,7 +98,7 @@
 
 .welcome-footer-text {
   font-size: 12px;
-  color: var(--text-light, #9ca3af);
+  color: var(--text-light);
   text-align: center;
   margin-top: 16px;
 }

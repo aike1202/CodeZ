@@ -10,6 +10,7 @@ import { registerTaskIpc } from './ipc/task.handlers'
 import { registerThemeIpc } from './ipc/theme.handlers'
 import { registerSkillIpc } from './ipc/skill.handlers'
 import { registerRulesIpc } from './ipc/rules.handlers'
+import { registerSettingsIpc } from './ipc/settings.handlers'
 import { TerminalService } from './services/TerminalService'
 
 let mainWindow: BrowserWindow | null = null
@@ -82,6 +83,18 @@ app.whenReady().then(() => {
   registerThemeIpc()
   registerSkillIpc()
   registerRulesIpc()
+  registerSettingsIpc()
+
+  // 初始化设置并应用全局主题
+  import('./ipc/settings.handlers').then(({ getSettingsService }) => {
+    const svc = getSettingsService()
+    svc.init().then(() => {
+      const theme = svc.getSettings().appTheme
+      import('electron').then(({ nativeTheme }) => {
+        nativeTheme.themeSource = theme
+      })
+    })
+  })
 
   // 监听来自前端渲染进程的自定义标题栏指令
   ipcMain.on('window-control', (_, action) => {

@@ -100,7 +100,7 @@ export default function Sidebar({
 
   return (
     <aside className="sidebar-container" style={{ width: '100%' }}>
-      <Stack className="flex-1 overflow-hidden">
+      <Stack className="flex-1 overflow-hidden" style={{ minHeight: 0 }}>
         {/* 全局操作 */}
         <Stack className="sidebar-action-list" gap="4px">
           <Button

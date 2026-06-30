@@ -1,6 +1,6 @@
 .permission-approval-float-card {
-  border: 1px solid var(--border-color, rgba(148, 163, 184, 0.2));
-  background: var(--bg-surface, #ffffff);
+  border: 1px solid var(--border-color);
+  background: var(--bg-surface);
   backdrop-filter: blur(8px);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.02);
   /* 悬浮面板的一些调整 */
@@ -18,7 +18,7 @@
 .permission-approval-float-header {
   font-size: 13px;
   font-weight: 600;
-  border-bottom: 1px solid var(--border-color, rgba(148, 163, 184, 0.2));
+  border-bottom: 1px solid var(--border-color);
   padding-bottom: 8px;
   margin-bottom: 4px;
 }
@@ -38,7 +38,7 @@
 }
 
 .permission-approval-title {
-  color: var(--text-primary, #1e293b);
+  color: var(--text-primary);
   font-size: 13px;
 }
 
@@ -49,8 +49,8 @@
 .permission-approval-float-item {
   padding: 4px 10px;
   border-radius: 6px;
-  border: 1px solid var(--border-color, rgba(148, 163, 184, 0.2));
-  background: var(--bg-body, #f8fafc);
+  border: 1px solid var(--border-color);
+  background: var(--bg-body);
   transition: all 0.2s ease;
 }
 
@@ -60,7 +60,7 @@
 }
 
 .permission-approval-float-item:hover {
-  background: var(--bg-hover, #f1f5f9);
+  background: var(--bg-hover);
   border-color: rgba(245, 158, 11, 0.3);
 }
 
@@ -94,7 +94,7 @@
 
 .permission-approval-risk-destructive .permission-approval-risk {
   background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
+  color: var(--color-error);
 }
 
 [data-theme='dark'] .permission-approval-risk-destructive .permission-approval-risk {
@@ -115,7 +115,7 @@
 }
 
 .permission-approval-desc-inline {
-  color: var(--text-primary, #1e293b);
+  color: var(--text-primary);
   font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
@@ -131,7 +131,7 @@
 .permission-approval-float-details {
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px dashed var(--border-color, rgba(148, 163, 184, 0.2));
+  border-top: 1px dashed var(--border-color);
 }
 
 [data-theme='dark'] .permission-approval-float-details {
@@ -166,7 +166,7 @@
 
 .permission-approval-deny:hover {
   background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
+  color: var(--color-error);
 }
 
 [data-theme='dark'] .permission-approval-deny:hover {

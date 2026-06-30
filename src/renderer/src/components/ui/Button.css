@@ -160,11 +160,11 @@
   color: var(--color-error);
 }
 .cz-btn-danger.cz-btn-text:hover {
-  background-color: #ff4d4f12;
+  background-color: var(--color-error)12;
   color: var(--color-error-hover);
 }
 .cz-btn-danger.cz-btn-text:active {
-  background-color: #ff4d4f24;
+  background-color: var(--color-error)24;
   color: var(--color-error-active);
 }
 

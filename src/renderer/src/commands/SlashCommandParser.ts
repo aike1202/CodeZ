@@ -27,13 +27,32 @@ export function parseSlashCommand(
   message: string,
   dynamicSkills: SkillDefinition[] = []
 ): { isCommand: boolean; processedMessage: string; commandName?: string } {
-  if (!message.trim().startsWith('/')) {
-    return { isCommand: false, processedMessage: message }
+  let cmdName = ''
+  let args = ''
+  let found = false
+
+  const trimMsg = message.trim()
+
+  // 1. Check for standard /command
+  if (trimMsg.startsWith('/')) {
+    const parts = trimMsg.split(/\s+/)
+    cmdName = parts[0].substring(1).toLowerCase()
+    args = parts.slice(1).join(' ')
+    found = true
+  } 
+  // 2. Check for UI pill format: [$skillName](path)
+  else if (trimMsg.startsWith('[$')) {
+    const match = trimMsg.match(/^\[\$([^\]]+)\]\([^)]+\)/)
+    if (match) {
+      cmdName = match[1].toLowerCase()
+      args = trimMsg.substring(match[0].length).trim()
+      found = true
+    }
   }
 
-  const parts = message.trim().split(/\s+/)
-  const cmdName = parts[0].substring(1).toLowerCase()
-  const args = parts.slice(1).join(' ')
+  if (!found) {
+    return { isCommand: false, processedMessage: message }
+  }
 
   const command = builtinCommands.find((c) => c.name === cmdName || c.aliases?.includes(cmdName))
 

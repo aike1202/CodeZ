@@ -291,19 +291,17 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px;
-  margin-top: 8px;
+  padding: 6px 4px 4px 4px;
+  margin-top: 10px;
   margin-bottom: 4px;
-  background-color: var(--bg-surface, #f3f4f6);
-  border-radius: 4px;
   color: var(--text-primary, #111827);
-  font-weight: 500;
+  font-weight: 600;
   font-size: 11.5px;
   font-family: var(--font-sans, sans-serif);
 }
 
 .exe-log-dir-header:first-child {
-  margin-top: 2px;
+  margin-top: 0;
 }
 
 .exe-log-dir-header svg {
@@ -314,8 +312,7 @@
 
 @media (prefers-color-scheme: dark) {
   .exe-log-dir-header {
-    background-color: rgba(63, 63, 70, 0.4); /* subtle dark background */
-    color: #f4f4f5;
+    color: #e4e4e7; /* zinc-200 */
   }
   .exe-log-dir-header svg {
     color: #a1a1aa;
@@ -326,9 +323,9 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding-left: 8px;
-  padding-top: 2px;
-  padding-bottom: 2px;
+  padding-left: 24px; /* Indented to look like a file tree */
+  padding-top: 3px;
+  padding-bottom: 3px;
   user-select: none;
   transition: color 0.15s;
 }

@@ -5,8 +5,8 @@
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background-color: var(--app-bg, #ffffff);
-  color: var(--app-text, #333333);
+  background-color: var(--app-bg);
+  color: var(--app-text);
 }
 
 /* Sidebar Wrapper */
@@ -54,7 +54,7 @@
   flex: 0 0 auto;
   position: relative;
   display: flex;
-  background-color: var(--panel-bg, #f9f9f9);
+  background-color: var(--panel-bg);
 }
 .app-layout-right-panel-content {
   flex: 1;
@@ -78,7 +78,7 @@
 /* 鼠标悬停时的拖拽条高亮色 */
 .app-layout-resize-handle:hover,
 .app-layout-resize-handle:active {
-  background-color: #3b82f6; 
+  background-color: var(--primary-color); 
 }
 
 /* 左侧边栏的把手放在右侧边缘 */

@@ -64,12 +64,33 @@ export default function App(): React.ReactElement {
 
   /* ---- settings panel ---- */
   const [currentView, setCurrentView] = useState<'home' | 'chat' | 'settings'>('home')
+  const [settingsTab, setSettingsTab] = useState('general')
 
   /* ---- init ---- */
   useEffect(() => {
     window.api.workspace.getRecentProjects().then(setRecentProjects).catch(() => {})
     loadProviders()
     loadSessions()
+
+    // 初始化主题监听
+    if (window.api?.theme) {
+      window.api.theme.get().then((info) => {
+        if (info.shouldUseDarkColors) {
+          document.documentElement.classList.add('dark')
+        } else {
+          document.documentElement.classList.remove('dark')
+        }
+      })
+      const cleanupTheme = window.api.theme.onUpdated((info) => {
+        if (info.shouldUseDarkColors) {
+          document.documentElement.classList.add('dark')
+        } else {
+          document.documentElement.classList.remove('dark')
+        }
+      })
+      return () => cleanupTheme()
+    }
+    return undefined
   }, [])
 
 
@@ -352,7 +373,10 @@ export default function App(): React.ReactElement {
   if (currentView === 'settings') {
     return (
       <div className="settings-view-wrapper">
-        <SettingsPage onBack={() => setCurrentView(hasMessages ? 'chat' : 'home')} />
+        <SettingsPage 
+          initialTab={settingsTab} 
+          onBack={() => setCurrentView(hasMessages ? 'chat' : 'home')} 
+        />
       </div>
     )
   }
@@ -380,7 +404,10 @@ export default function App(): React.ReactElement {
             onShowInExplorer={handleShowInExplorer}
             onRenameProject={handleRenameProject}
             onRemoveProject={handleRemoveProject}
-            onOpenSettings={() => setCurrentView('settings')}
+            onOpenSettings={() => {
+              setSettingsTab('general')
+              setCurrentView('settings')
+            }}
           />
         }
         topbar={
@@ -421,7 +448,10 @@ export default function App(): React.ReactElement {
             handleFileClick={handleFileClick}
             handleDiffClick={handleDiffClick}
             handleOpenRecentProject={handleOpenRecentProject}
-            setCurrentView={setCurrentView}
+            onOpenSettings={(tab?: string) => {
+              if (tab) setSettingsTab(tab)
+              setCurrentView('settings')
+            }}
           />
         }
       />

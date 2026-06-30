@@ -1,7 +1,7 @@
 .preview-placeholder-sidebar {
   width: 260px;
-  background-color: #f8f9fa;
-  border-right: 1px solid #e0e0e0;
+  background-color: var(--bg-app);
+  border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -9,8 +9,8 @@
 
 .preview-sidebar-top {
   padding: 16px;
-  border-bottom: 1px solid #e0e0e0;
-  color: #333;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-main);
   font-weight: 500;
   display: flex;
   flex-direction: column;
@@ -39,13 +39,13 @@
   cursor: pointer;
 }
 .preview-sidebar-item:hover {
-  background-color: #e9ecef;
+  background-color: var(--bg-hover);
 }
 
 .preview-placeholder-topbar {
   height: 48px;
-  background-color: #ffffff;
-  border-bottom: 1px solid #e0e0e0;
+  background-color: var(--bg-panel);
+  border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
   padding: 0 16px;
@@ -53,20 +53,20 @@
 }
 
 .preview-topbar-center {
-  background-color: #f1f3f5;
+  background-color: var(--bg-hover);
   border-radius: 6px;
   width: 300px;
   height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #868e96;
+  color: var(--text-muted);
   font-size: 13px;
 }
 
 .preview-placeholder-workspace {
   flex: 1;
-  background-color: #ffffff;
+  background-color: var(--bg-panel);
   display: flex;
   flex-direction: column;
   padding: 24px;
@@ -88,9 +88,9 @@
 /* 新增：权限审核面板的外观 */
 .preview-permission-panel {
   padding: 16px;
-  border: 2px solid #3b82f6;
+  border: 2px solid var(--primary-color);
   border-radius: 8px;
-  background-color: #eff6ff;
+  background-color: var(--bg-hover);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -106,12 +106,12 @@
   font-weight: bold;
 }
 .preview-btn-accept {
-  background-color: #3b82f6;
+  background-color: var(--primary-color);
   color: white;
 }
 .preview-btn-reject {
   background-color: #e5e7eb;
-  color: #4b5563;
+  color: var(--text-main);
 }
 
 .preview-chat-input {

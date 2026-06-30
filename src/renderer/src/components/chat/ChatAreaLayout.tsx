@@ -20,7 +20,7 @@ export const ChatAreaLayout: React.FC<ChatAreaLayoutProps> = ({
 }) => {
   return (
     <>
-      <Stack className={`app-chat-column flex-1 overflow-y-auto relative ${panelOpen ? 'app-chat-column--border' : ''}`} ref={containerRef}>
+      <Stack className={`app-chat-column ${panelOpen ? 'app-chat-column--border' : ''}`} ref={containerRef}>
         {messageArea}
       </Stack>
       {auditArea}

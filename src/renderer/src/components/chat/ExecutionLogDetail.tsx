@@ -3,7 +3,7 @@ import {
   type UnifiedTimelineItem,
   getFileIconComponent
 } from './ExecutionLogUtils'
-import { FolderIcon } from '../svg-icons'
+import { FolderIcon } from '@react-symbols/icons/utils'
 import { parseArgs } from '../../utils/parseArgs'
 
 interface ExecutionLogDetailProps {
@@ -236,9 +236,9 @@ export default function ExecutionLogDetail({
         <div className="exe-log-cmd-details-box">
           <div className="exe-log-terminal-screen">
             {cwd && (
-              <div className="exe-log-terminal-cwd">
-                <FolderIcon />
-                <span className="truncate">{cwd}</span>
+              <div className="exe-log-dir-item">
+                <FolderIcon folderName={cwd} width={14} height={14} className="exe-log-dir-icon" />
+                <span className="exe-log-dir-name truncate">{cwd}</span>
               </div>
             )}
             <div className="exe-log-terminal-cmdline">

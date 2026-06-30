@@ -1,13 +1,13 @@
 .sidebar-container {
   flex-shrink: 0;
   height: 100vh;
-  background-color: var(--bg-sidebar, #f8f9fa);
-  border-right: 1px solid var(--border-light, #e5e7eb);
+  background-color: var(--bg-sidebar);
+  border-right: 1px solid var(--border-light);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   font-size: 14px;
-  color: var(--text-main, #1f2937);
+  color: var(--text-main);
   font-family: var(--font-sans, system-ui, sans-serif);
   position: relative;
 }
@@ -24,11 +24,11 @@
 }
 
 .sidebar-resizer:hover {
-  background-color: var(--primary, #3b82f6);
+  background-color: var(--primary);
 }
 
 .sidebar-resizer:active {
-  background-color: var(--primary-hover, #1d4ed8);
+  background-color: var(--primary-hover);
 }
 
 .sidebar-action-list {
@@ -41,16 +41,16 @@
   padding: 8px 12px;
   border-radius: 6px;
   transition: all 0.2s ease;
-  color: var(--text-main, #374151);
+  color: var(--text-main);
   display: block;
 }
 
 .sidebar-action-btn:hover {
-  background-color: var(--bg-hover, rgba(229, 231, 235, 0.5));
+  background-color: var(--bg-hover);
 }
 
 .sidebar-action-icon {
-  color: var(--text-muted, #6b7280);
+  color: var(--text-muted);
 }
 
 .sidebar-project-section {
@@ -67,19 +67,19 @@
 
 .sidebar-section-title {
   font-size: 12px;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   font-weight: 500;
   letter-spacing: 0.05em;
 }
 
 .sidebar-section-actions {
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
 .sidebar-empty-tip {
   font-size: 12px;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   padding: 16px 12px;
   text-align: center;
 }
@@ -100,23 +100,23 @@
 
 .sidebar-project-row.active {
   font-weight: 600;
-  color: var(--primary-color, #1677ff);
+  color: var(--primary-color);
 }
 .sidebar-project-row.active .sidebar-project-folder,
 .sidebar-project-row.active .sidebar-project-chevron {
-  color: var(--primary-color, #1677ff);
+  color: var(--primary-color);
 }
 
 .sidebar-project-row.active:hover {
-  background-color: var(--bg-hover, rgba(229, 231, 235, 0.5));
+  background-color: var(--bg-hover);
 }
 
 .sidebar-project-row.inactive {
-  color: var(--text-muted, #4b5563);
+  color: var(--text-muted);
 }
 
 .sidebar-project-row.inactive:hover {
-  background-color: var(--bg-hover, rgba(229, 231, 235, 0.5));
+  background-color: var(--bg-hover);
 }
 
 .sidebar-project-left {
@@ -125,13 +125,13 @@
 }
 
 .sidebar-project-chevron {
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   flex-shrink: 0;
   transition: transform 0.2s ease;
 }
 
 .sidebar-project-folder {
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
@@ -148,7 +148,7 @@
 
 .sidebar-project-row.active .sidebar-project-hover-actions {
   opacity: 1;
-  background-color: var(--bg-sidebar, #f8f9fa);
+  background-color: var(--bg-sidebar);
 }
 
 .sidebar-project-row.inactive .sidebar-project-hover-actions {
@@ -157,25 +157,25 @@
 
 .sidebar-project-row.inactive:hover .sidebar-project-hover-actions {
   opacity: 1;
-  background-color: var(--bg-hover, #ebedef);
+  background-color: var(--bg-hover);
 }
 
 .sidebar-project-action-btn {
   padding: 4px;
   border-radius: 4px;
-  color: var(--text-muted, #6b7280);
+  color: var(--text-muted);
   transition: all 0.2s ease;
 }
 
 .sidebar-project-action-btn:hover {
-  background-color: var(--bg-hover-heavy, #d1d5db);
-  color: var(--text-main, #111827);
+  background-color: var(--bg-hover-heavy);
+  color: var(--text-main);
 }
 
 .sidebar-project-more-btn {
   padding: 4px;
   border-radius: 4px;
-  color: var(--text-muted, #6b7280);
+  color: var(--text-muted);
   background: transparent;
   border: none;
   cursor: pointer;
@@ -186,13 +186,13 @@
 }
 
 .sidebar-project-more-btn:hover {
-  background-color: var(--bg-hover-heavy, #d1d5db);
-  color: var(--text-main, #111827);
+  background-color: var(--bg-hover-heavy);
+  color: var(--text-main);
 }
 
 .sidebar-sessions-container {
   margin-left: 16px;
-  border-left: 1px solid var(--border-light, rgba(229, 231, 235, 0.7));
+  border-left: 1px solid var(--border-light);
 }
 
 .sidebar-session-item {
@@ -206,22 +206,22 @@
 }
 
 .sidebar-session-item.active {
-  background-color: var(--bg-active, rgba(229, 231, 235, 0.8));
-  color: var(--text-main, #111827);
+  background-color: var(--bg-active);
+  color: var(--text-main);
   font-weight: 500;
 }
 
 .sidebar-session-item.inactive {
-  color: var(--text-muted, #6b7280);
+  color: var(--text-muted);
 }
 
 .sidebar-session-item.inactive:hover {
-  background-color: var(--bg-hover-light, rgba(229, 231, 235, 0.4));
-  color: var(--text-main, #374151);
+  background-color: var(--bg-hover-light);
+  color: var(--text-main);
 }
 
 .sidebar-session-icon {
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
@@ -234,7 +234,7 @@
 
 .sidebar-session-time {
   font-size: 11px;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   flex-shrink: 0;
   margin-left: 4px;
 }
@@ -254,25 +254,25 @@
 .sidebar-session-action-btn-archive {
   padding: 4px;
   border-radius: 4px;
-  color: var(--text-muted, #6b7280);
+  color: var(--text-muted);
   transition: all 0.2s ease;
 }
 
 .sidebar-session-action-btn-archive:hover {
-  background-color: var(--bg-hover-heavy, #d1d5db);
-  color: var(--text-main, #111827);
+  background-color: var(--bg-hover-heavy);
+  color: var(--text-main);
 }
 
 .sidebar-session-action-btn-delete {
   padding: 4px;
   border-radius: 4px;
-  color: var(--text-muted, #6b7280);
+  color: var(--text-muted);
   transition: all 0.2s ease;
 }
 
 .sidebar-session-action-btn-delete:hover {
-  background-color: var(--bg-hover-heavy, #d1d5db);
-  color: var(--text-danger, #dc2626);
+  background-color: var(--bg-hover-heavy);
+  color: var(--text-danger);
 }
 
 .sidebar-session-confirm-bar {
@@ -298,7 +298,7 @@
 
 .sidebar-session-confirm-text {
   font-size: 11px;
-  color: var(--text-main, #4b5563);
+  color: var(--text-main);
   font-weight: 500;
   white-space: nowrap;
 }
@@ -306,23 +306,23 @@
 .sidebar-session-confirm-btn-yes {
   padding: 2px;
   border-radius: 4px;
-  color: var(--text-success, #16a34a);
+  color: var(--text-success);
   transition: background-color 0.2s ease;
 }
 
 .sidebar-session-confirm-btn-yes:hover {
-  background-color: var(--bg-hover-heavy, #d1d5db);
+  background-color: var(--bg-hover-heavy);
 }
 
 .sidebar-session-confirm-btn-no {
   padding: 2px;
   border-radius: 4px;
-  color: var(--text-danger, #ef4444);
+  color: var(--text-danger);
   transition: background-color 0.2s ease;
 }
 
 .sidebar-session-confirm-btn-no:hover {
-  background-color: var(--bg-hover-heavy, #d1d5db);
+  background-color: var(--bg-hover-heavy);
 }
 
 .sidebar-archived-toggle {
@@ -330,13 +330,13 @@
   padding-top: 4px;
   padding-bottom: 4px;
   font-size: 12px;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   cursor: pointer;
   transition: color 0.2s ease;
 }
 
 .sidebar-archived-toggle:hover {
-  color: var(--text-main, #4b5563);
+  color: var(--text-main);
 }
 
 .sidebar-archived-toggle-arrow {
@@ -346,7 +346,7 @@
 
 .sidebar-session-summary-archived {
   text-decoration: line-through;
-  text-decoration-color: var(--border-hover, #d1d5db);
+  text-decoration-color: var(--border-hover);
 }
 
 .sidebar-footer {
@@ -359,12 +359,12 @@
   padding: 8px 12px;
   border-radius: 6px;
   transition: all 0.2s ease;
-  color: var(--text-main, #374151);
+  color: var(--text-main);
   display: block;
 }
 
 .sidebar-footer-settings-btn:hover {
-  background-color: var(--bg-hover, rgba(229, 231, 235, 0.5));
+  background-color: var(--bg-hover);
 }
 
 /* Sidebar Context Menu Portal */

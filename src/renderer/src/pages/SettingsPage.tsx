@@ -8,10 +8,12 @@ import Card from '../components/ui/Card'
 import TrashPanel from '../components/TrashPanel'
 import SettingsSkillsTab from '../components/SettingsSkillsTab'
 import SettingsRulesTab from '../components/SettingsRulesTab'
+import SettingsGeneralTab from '../components/SettingsGeneralTab'
 import './SettingsPage.css'
 
 interface Props {
   onBack: () => void
+  initialTab?: string
 }
 
 // 侧边栏菜单项配置 - 仅保留排期内需要的核心模块
@@ -24,7 +26,7 @@ const GLOBAL_MENU_ITEMS = [
   { id: 'trash', label: '最近删除', icon: <IconTrash /> },
 ]
 
-export default function SettingsPage({ onBack }: Props): React.ReactElement {
+export default function SettingsPage({ onBack, initialTab }: Props): React.ReactElement {
   // Provider 相关的 state
   const providers = useProviderStore((s) => s.providers)
   const activeProviderId = useProviderStore((s) => s.activeProviderId)
@@ -38,7 +40,7 @@ export default function SettingsPage({ onBack }: Props): React.ReactElement {
 
 
   // 面板控制状态
-  const [activeGlobalMenu, setActiveGlobalMenu] = useState('model-config')
+  const [activeGlobalMenu, setActiveGlobalMenu] = useState(initialTab || 'general')
   const [activeTabId, setActiveTabId] = useState<string | 'new' | null>(null)
   const [testResult, setTestResult] = useState<Record<string, { success: boolean; message: string }>>({})
 
@@ -167,6 +169,10 @@ export default function SettingsPage({ onBack }: Props): React.ReactElement {
           )}
         </Flex>
       )
+    }
+
+    if (activeGlobalMenu === 'general') {
+      return <SettingsGeneralTab />
     }
 
     if (activeGlobalMenu === 'trash') {

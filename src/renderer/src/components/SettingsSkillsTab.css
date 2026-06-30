@@ -308,7 +308,7 @@
   left: 2px;
   width: 16px;
   height: 16px;
-  background-color: #ffffff;
+  background-color: var(--bg-panel);
   border-radius: 50%;
   transition: all 0.2s;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);

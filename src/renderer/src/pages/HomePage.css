@@ -15,14 +15,14 @@
 
 .homepage-title {
   font-size: 28px;
-  color: var(--text-main, #1f2937);
+  color: var(--text-main);
   font-weight: 400;
   letter-spacing: 0.025em;
   margin: 0;
 }
 
 .homepage-subtitle {
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   font-size: 15px;
   margin-top: 12px;
   margin-bottom: 0;
@@ -30,7 +30,7 @@
 
 .homepage-welcome-title {
   font-size: 28px;
-  color: var(--text-main, #1f2937);
+  color: var(--text-main);
   font-weight: 400;
   letter-spacing: 0.025em;
   margin-bottom: 32px;
@@ -44,7 +44,7 @@
 
 .homepage-recent-title {
   font-size: 14px;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   font-weight: 500;
   margin-bottom: 12px;
   padding-left: 8px;
@@ -52,8 +52,8 @@
 
 .homepage-recent-card {
   overflow: hidden;
-  border: 1px solid var(--border-light, #f3f4f6);
-  background-color: var(--bg-panel, #ffffff);
+  border: 1px solid var(--border-light);
+  background-color: var(--bg-panel);
 }
 
 .homepage-project-item {
@@ -63,27 +63,27 @@
 }
 
 .homepage-project-item:hover {
-  background-color: var(--bg-hover, #f9fafb);
+  background-color: var(--bg-hover);
 }
 
 .homepage-project-item-border {
-  border-bottom: 1px solid var(--border-light, #f3f4f6);
+  border-bottom: 1px solid var(--border-light);
 }
 
 .homepage-project-icon {
-  color: var(--primary, #3b82f6);
+  color: var(--primary);
   display: flex;
   align-items: center;
 }
 
 .homepage-project-name {
   font-size: 14px;
-  color: var(--text-main, #1f2937);
+  color: var(--text-main);
   font-weight: 500;
 }
 
 .homepage-project-path {
   font-size: 12px;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   margin-top: 2px;
 }

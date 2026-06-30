@@ -84,6 +84,17 @@ export function useSendMessage() {
                 const { isCommand, processedMessage } = parseSlashCommand(c, allSkills)
                 if (isCommand) {
                   c = processedMessage
+                } else {
+                  // If not a skill command, let's look for explicitly referenced files
+                  const fileRegex = /\[([^$\]][^\]]*)\]\(([^)]+)\)/g
+                  const referencedFiles: string[] = []
+                  let match
+                  while ((match = fileRegex.exec(c)) !== null) {
+                    referencedFiles.push(match[2])
+                  }
+                  if (referencedFiles.length > 0) {
+                    c += `\n\n【系统提示：用户在本次交互中明确引用了以下工作区文件：\n${referencedFiles.map(f => `- ${f}`).join('\n')}\n如需了解其详细内容，请主动调用 read_file 工具读取。】`
+                  }
                 }
               }
               mapped.push({ role: 'user', content: c })

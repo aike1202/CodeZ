@@ -51,6 +51,16 @@ export function registerWorkspaceIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC_CHANNELS.GET_ALL_PATHS, async (_event, rootPath: string) => {
+    try {
+      const service = currentWorkspaceService?.getCurrentWorkspace() === rootPath ? currentWorkspaceService : new WorkspaceService(rootPath)
+      return await service.getAllPaths()
+    } catch (error) {
+      console.error('GET_ALL_PATHS error:', error)
+      throw error
+    }
+  })
+
   ipcMain.handle(IPC_CHANNELS.READ_FILE, async (_event, filePath: string, rootPath?: string) => {
     if (!rootPath) {
       return { path: filePath, content: '[错误: 缺少 Workspace 路径]', truncated: false, totalLines: 0 }

@@ -1,0 +1,51 @@
+.settings-general-wrapper {
+  flex: 1;
+  padding: 24px;
+  overflow-y: auto;
+  color: var(--text-main);
+}
+
+.settings-general-title {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 24px;
+}
+
+.settings-general-card {
+  background: var(--bg-panel);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  padding: 0;
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+
+.settings-general-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.settings-general-row:last-child {
+  border-bottom: none;
+}
+
+.settings-general-label {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.settings-general-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.settings-general-control {
+  min-width: 150px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}

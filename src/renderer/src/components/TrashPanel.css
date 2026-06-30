@@ -3,8 +3,8 @@
 .trash-panel-container {
   flex: 1;
   overflow: hidden;
-  background-color: var(--bg-panel, #f3f4f6);
-  border-left: 1px solid var(--border, #e5e7eb);
+  background-color: var(--bg-panel);
+  border-left: 1px solid var(--border);
 }
 
 .trash-panel-header {
@@ -22,7 +22,7 @@
 
 .trash-panel-desc {
   font-size: 13px;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   line-height: 1.625;
 }
 
@@ -37,7 +37,7 @@
 .trash-panel-empty-state {
   padding-top: 64px;
   padding-bottom: 64px;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
 }
 
 .trash-panel-empty-icon {
@@ -50,7 +50,7 @@
 .trash-panel-project-header {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   padding-left: 4px;
   display: flex;
   align-items: center;

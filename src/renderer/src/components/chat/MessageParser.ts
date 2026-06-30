@@ -1,5 +1,14 @@
 import React from 'react'
 import IconPackage from '../icons/IconPackage'
+import { FileIcon, FolderIcon } from '@react-symbols/icons/utils'
+
+const getFileIconElement = (name: string) => {
+  const lowerName = name.toLowerCase()
+  // 简单猜测没有扩展名大概率是目录
+  const isDir = !lowerName.includes('.')
+  if (isDir) return React.createElement(FolderIcon, { folderName: name, className: 'shrink-0', width: 14, height: 14 })
+  return React.createElement(FileIcon, { fileName: name, className: 'shrink-0', width: 14, height: 14 })
+}
 
 /* ---------- file path regex ---------- */
 const EXTENSIONS = ['tsx', 'jsx', 'scss', 'less', 'json', 'html', 'yaml', 'toml', 'svelte', 'java', 'cpp', 'css', 'xml', 'svg', 'yml', 'vue', 'ini', 'cfg', 'bat', 'ps1', 'ts', 'js', 'rs', 'go', 'py', 'sh', 'md', 'c', 'h']
@@ -105,19 +114,55 @@ export function parseInline(
       const fullMatch = first.match[0]
       const linkText = first.match[1]
       const linkUrl = first.match[2]
-      nodes.push(
-        React.createElement(
-          'a',
-          {
-            key: `link-${keyIdx++}`,
-            href: linkUrl,
-            target: '_blank',
-            rel: 'noopener noreferrer',
-            className: 'msg-inline-link'
-          },
-          linkText
+
+      if (linkText.startsWith('$')) {
+        // Skill pill
+        nodes.push(
+          React.createElement(
+            'span',
+            {
+              key: `skill-pill-${keyIdx++}`,
+              className: 'cm-pill-widget msg-pill',
+              onClick: () => {
+                window.dispatchEvent(new CustomEvent('insert-command', { detail: `/${linkText.substring(1)} ` }))
+              },
+              title: `点击在输入框中调用 /${linkText.substring(1)}`
+            },
+            React.createElement('span', { className: 'cm-pill-icon flex items-center justify-center', style: { marginRight: '4px' } }, React.createElement(IconPackage)),
+            React.createElement('span', { className: 'cm-pill-text' }, linkText.substring(1))
+          )
         )
-      )
+      } else if (!linkUrl.startsWith('http://') && !linkUrl.startsWith('https://')) {
+        // File/Folder pill
+        nodes.push(
+          React.createElement(
+            'span',
+            {
+              key: `file-pill-${keyIdx++}`,
+              className: 'cm-pill-widget msg-pill',
+              onClick: () => onFileClick(linkUrl),
+              title: `点击预览 ${linkText}`
+            },
+            React.createElement('span', { className: 'cm-pill-icon flex items-center justify-center', style: { marginRight: '4px' } }, getFileIconElement(linkText)),
+            React.createElement('span', { className: 'cm-pill-text' }, linkText)
+          )
+        )
+      } else {
+        // Normal web link
+        nodes.push(
+          React.createElement(
+            'a',
+            {
+              key: `link-${keyIdx++}`,
+              href: linkUrl,
+              target: '_blank',
+              rel: 'noopener noreferrer',
+              className: 'msg-inline-link'
+            },
+            linkText
+          )
+        )
+      }
       remaining = remaining.slice(fullMatch.length)
     } else if (first.type === 'bold') {
       const nextBold = remaining.indexOf('**', 2)

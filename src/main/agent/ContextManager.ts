@@ -103,8 +103,8 @@ export class ContextManager {
   ): { messages: ChatMessage[], trimmed: boolean, trimmedCount: number, willTrimSoon: boolean } {
     // 根据上下文窗口大小动态调整工具输出截断长度
     const dynamicMaxToolOutput = Math.max(
-      DEFAULT_MIN_TOOL_OUTPUT,
-      Math.min(30000, Math.floor(contextWindowTokens / 100))
+      15000,
+      Math.min(60000, Math.floor(contextWindowTokens / 3))
     )
     const maxToolOutput = options?.maxToolOutputChars ?? dynamicMaxToolOutput
     const keepRecent = options?.keepRecentRounds ?? DEFAULT_KEEP_RECENT_ROUNDS
@@ -161,10 +161,28 @@ export class ContextManager {
   }
 
   /**
-   * 截断单条 tool 输出：保留前 headChars + 后 tailChars，中间替换为摘要标记。
+   * 截断单条 tool 输出：尝试保持 JSON 结构完整，或者返回友好的截断错误。
    */
   static truncateToolOutput(content: string, maxChars: number): string {
     if (content.length <= maxChars) return content
+
+    const truncationMsg = `[System Note: The tool output exceeded the allowed context limit of ${maxChars} chars (original: ${content.length} chars) and was blocked by ContextManager. DO NOT retry the exact same tool call. Please use more restrictive arguments (e.g. use startLine/endLine for files, or maxDepth for directories) to read the data in smaller chunks.]`
+
+    try {
+      const parsed = JSON.parse(content)
+      // 如果这是一个标准的包装后的工具结果 { ok: true/false, data/error: ... }
+      if (parsed !== null && typeof parsed === 'object' && ('ok' in parsed)) {
+        return JSON.stringify({
+          ok: false,
+          error: {
+            code: 'SYSTEM_TRUNCATION',
+            message: truncationMsg
+          }
+        })
+      }
+    } catch {
+      // 非 JSON 或解析失败，按普通字符串切片
+    }
 
     // 头部保留 70%，尾部保留 30%（最少各 200 字符）
     const headChars = Math.max(Math.floor(maxChars * 0.7), 200)
@@ -172,9 +190,8 @@ export class ContextManager {
 
     const head = content.slice(0, headChars)
     const tail = content.slice(-tailChars)
-    const originalSize = content.length
 
-    return `${head}\n\n[... Output Truncated. Original size: ${originalSize} chars ...]\n\n${tail}`
+    return `${head}\n\n${truncationMsg}\n\n${tail}`
   }
 
   /**

@@ -1,12 +1,4 @@
-export * from './ReactIcon'
-export * from './TSIcon'
-export * from './JSIcon'
-export * from './CSSIcon'
-export * from './HTMLIcon'
-export * from './MDIcon'
-export * from './ConfigIcon'
-export * from './FileIcon'
-export * from './FolderIcon'
+// Removed old file icons, using @react-symbols/icons instead
 export * from './ThoughtIcon'
 export * from './SearchIcon'
 export * from './CmdIcon'

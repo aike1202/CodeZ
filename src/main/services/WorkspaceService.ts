@@ -124,6 +124,48 @@ export class WorkspaceService {
     return entries
   }
 
+  async getAllPaths(): Promise<Array<{ name: string; path: string; isDir: boolean }>> {
+    const results: Array<{ name: string; path: string; isDir: boolean }> = []
+    const queue: string[] = [this.rootPath]
+    
+    // Safety check to avoid scanning too many files
+    let scannedCount = 0
+    const MAX_FILES = 50000
+
+    while (queue.length > 0 && scannedCount < MAX_FILES) {
+      const currentDir = queue.shift()!
+      try {
+        const items = await fs.readdir(currentDir, { withFileTypes: true })
+        for (const item of items) {
+          scannedCount++
+          if (DEFAULT_IGNORED_DIRS.includes(item.name)) continue
+          if (item.name.startsWith('.') && item.name !== '.gitignore') continue
+          
+          const fullPath = path.join(currentDir, item.name)
+          const relativePath = path.relative(this.rootPath, fullPath)
+          
+          if (item.isDirectory()) {
+            results.push({ name: item.name, path: relativePath, isDir: true })
+            queue.push(fullPath)
+          } else if (item.isFile()) {
+            const ext = path.extname(item.name).toLowerCase()
+            if (['.exe', '.dll', '.obj', '.o', '.class', '.pyc', '.lock'].includes(ext)) continue
+            results.push({ name: item.name, path: relativePath, isDir: false })
+          }
+        }
+      } catch (error) {
+        // Skip directories we can't read
+      }
+    }
+    
+    // Sort directories first, then alphabetically
+    return results.sort((a, b) => {
+      if (a.isDir && !b.isDir) return -1
+      if (!a.isDir && b.isDir) return 1
+      return a.path.localeCompare(b.path)
+    })
+  }
+
   async readFileContent(filePath: string): Promise<FileContent> {
     const absolutePath = this.validatePath(filePath)
 

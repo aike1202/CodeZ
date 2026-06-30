@@ -18,8 +18,6 @@ import {
 import { buildDiffEditInfo } from '../../utils/editDiffUtils'
 import ExecutionLogDetail from './ExecutionLogDetail'
 import {
-  FileIcon,
-  FolderIcon,
   ThoughtIcon,
   SearchIcon,
   CmdIcon

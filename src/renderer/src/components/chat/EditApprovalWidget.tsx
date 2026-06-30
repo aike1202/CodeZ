@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useChatStore } from '../../stores/chatStore'
-import { FileIcon } from '../svg-icons'
+import { FileIcon } from '@react-symbols/icons/utils'
 import Flex from '../ui/Flex'
 import Stack from '../ui/Stack'
 import Card from '../ui/Card'
@@ -166,8 +166,12 @@ export default function EditApprovalWidget({ msgId, txId, edits, editStatuses = 
                     onClick={() => onFileClick?.(edit.filePath)}
                     title="点击预览整个文件"
                   >
-                    <FileIcon />
-                    <span className="edit-approval-file-name">{fileName}</span>
+                    <div className="flex items-center gap-1.5 min-w-0" style={{ color: 'var(--text-main)' }}>
+                      <FileIcon fileName={edit.filePath} width={14} height={14} className="shrink-0" />
+                      <span className="truncate text-xs font-medium" title={edit.filePath}>
+                        {edit.filePath}
+                      </span>
+                    </div>
                     <Flex 
                       align="center" 
                       gap={1.5} 

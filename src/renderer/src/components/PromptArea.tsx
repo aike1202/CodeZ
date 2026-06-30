@@ -12,8 +12,13 @@ import IconGear from './icons/IconGear'
 import IconStop from './icons/IconStop'
 import IconSend from './icons/IconSend'
 import IconPackage from './icons/IconPackage'
+import { FileIcon, FolderIcon } from '@react-symbols/icons/utils'
+import { ThoughtIcon, SearchIcon, CmdIcon } from './svg-icons'
 import ContextTracker from './ContextTracker'
 import { builtinCommands } from '../commands/SlashCommandParser'
+import CodeMirror from '@uiw/react-codemirror'
+import { EditorView } from '@codemirror/view'
+import { pillDecoration } from './chat/extensions/pillDecoration'
 import './PromptArea.css'
 
 import type { WorkspaceInfo } from '@shared/types/workspace'
@@ -28,7 +33,9 @@ interface PromptAreaProps {
 export default function PromptArea({ onSend, placeholder, onOpenSettings, workspace }: PromptAreaProps): React.ReactElement {
   const [text, setText] = useState('')
   const [dropdownOpen, setDropdownOpen] = useState(false)
+  
   const [dynamicSkills, setDynamicSkills] = useState<any[]>([])
+  const [flattenedFiles, setFlattenedFiles] = useState<{name: string, path: string, isDir: boolean}[]>([])
 
   const providers = useProviderStore((s) => s.providers)
   const activeProviderId = useProviderStore((s) => s.activeProviderId)
@@ -36,10 +43,9 @@ export default function PromptArea({ onSend, placeholder, onOpenSettings, worksp
   const isStreaming = useChatStore((s) => s.streamCleanup !== null)
   const stopStream = useChatStore((s) => s.streamCleanup)
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const viewRef = useRef<EditorView | null>(null)
 
   const activeProvider = providers.find((p) => p.id === activeProviderId)
-
   const [selectedModelName, setSelectedModelName] = useState<string>('')
 
   const models = activeProvider?.models || []
@@ -52,101 +58,138 @@ export default function PromptArea({ onSend, placeholder, onOpenSettings, worksp
   const messages = useChatStore((s) => s.messages)
   const maxContextTokens = models.find(m => m.name === selectedModelName)?.maxContextTokens || 32000
 
+  // Fetch skills and files
   useEffect(() => {
     if (workspace) {
       window.api.skill.getAll(workspace.rootPath).then(setDynamicSkills).catch(() => {})
+      window.api.workspace.getAllPaths(workspace.rootPath).then((paths: any) => {
+        if (Array.isArray(paths)) {
+          setFlattenedFiles(paths)
+        }
+      }).catch(() => {})
     } else {
       setDynamicSkills([])
+      setFlattenedFiles([])
     }
   }, [workspace])
 
-  const activeCommandMatch = text.match(/^\/([a-zA-Z0-9_-]+)\s*/)
-  const activeCommandName = activeCommandMatch ? activeCommandMatch[1] : null
-  const matchedSkill = activeCommandName
-    ? dynamicSkills.find(s => s.id.replace(/^(global|workspace)-/, '').toLowerCase() === activeCommandName.toLowerCase())
-    : null
+  // Contexts for mention/slash dropdown
+  const [activeToken, setActiveToken] = useState<{type: 'slash' | 'mention', text: string, startIndex: number} | null>(null)
+  const [popupSelectedIndex, setPopupSelectedIndex] = useState(0)
 
-  const textareaValue = matchedSkill ? text.replace(/^\/[a-zA-Z0-9_-]+\s*/, '') : text
-
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`
-    }
-  }, [textareaValue])
-
-  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
-
-  useEffect(() => {
-    const handleInsert = (e: Event) => {
-      const cmd = (e as CustomEvent).detail
-      setText(cmd)
-      textareaRef.current?.focus()
-    }
-    window.addEventListener('insert-command', handleInsert)
-    return () => window.removeEventListener('insert-command', handleInsert)
-  }, [])
-
-  const showSlashMenu = text.startsWith('/') && !text.includes(' ')
-
-  const filteredCommands = showSlashMenu
-    ? builtinCommands.filter(c => {
-        const search = text.substring(1).toLowerCase()
-        return c.name.toLowerCase().includes(search) || c.aliases?.some((a: string) => a.toLowerCase().includes(search))
-      })
-    : []
-
-  const filteredSkills = showSlashMenu
-    ? dynamicSkills.map(s => ({
-        id: s.id,
-        name: s.id.replace(/^(global|workspace)-/, ''), // display name
-        displayName: s.name,
-        description: s.description,
-        triggers: s.triggers
-      })).filter(c => {
-        const search = text.substring(1).toLowerCase()
-        return c.name.toLowerCase().includes(search) || c.triggers?.some((a: string) => a.toLowerCase().includes(search))
-      })
-    : []
-
-  const totalItems = [
-    ...filteredCommands.map(c => ({ ...c, type: 'command' as const })),
-    ...filteredSkills.map(s => ({ ...s, type: 'skill' as const }))
-  ]
-
-  useEffect(() => {
-    setSlashSelectedIndex(0)
-  }, [text])
-
-  const handleSend = () => {
-    if (!text.trim()) return
-    onSend(text.trim(), selectedModelName || models[0]?.name || '')
-    setText('')
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Backspace' && matchedSkill && text === `/${activeCommandName} `) {
-      e.preventDefault()
-      setText('')
+  const updateActiveToken = (currentText: string, cursor: number) => {
+    const textBeforeCursor = currentText.slice(0, cursor)
+    
+    const slashMatch = textBeforeCursor.match(/(?:^|\s)\/([a-zA-Z0-9_-]*)$/)
+    if (slashMatch) {
+      setActiveToken({ type: 'slash', text: slashMatch[1], startIndex: slashMatch.index! + (slashMatch[0].startsWith(' ') ? 1 : 0) })
       return
     }
 
-    if (showSlashMenu && totalItems.length > 0) {
+    const mentionMatch = textBeforeCursor.match(/(?:^|\s)@([^\s]*)$/)
+    if (mentionMatch) {
+      setActiveToken({ type: 'mention', text: mentionMatch[1], startIndex: mentionMatch.index! + (mentionMatch[0].startsWith(' ') ? 1 : 0) })
+      return
+    }
+
+    setActiveToken(null)
+  }
+
+  const handleChange = (value: string, viewUpdate: any) => {
+    setText(value)
+    const cursor = viewUpdate.state.selection.main.head
+    updateActiveToken(value, cursor)
+  }
+
+
+
+  const getMentionScore = (f: { name: string, path: string }, query: string) => {
+    if (!query) return 1
+    const lowerName = f.name.toLowerCase()
+    const lowerPath = f.path.toLowerCase()
+    const lowerQuery = query.toLowerCase()
+
+    if (lowerName === lowerQuery) return 100
+    if (lowerName.startsWith(lowerQuery)) return 80 - lowerName.length * 0.01
+    if (lowerName.includes(lowerQuery)) return 60 - lowerName.length * 0.01
+    if (lowerPath.includes(lowerQuery)) return 40 - lowerPath.length * 0.01
+    return 0
+  }
+
+  const getFileIcon = (isDir: boolean, name: string) => {
+    if (isDir) return <FolderIcon folderName={name} className="shrink-0" width={14} height={14} />
+    return <FileIcon fileName={name} className="shrink-0" width={14} height={14} />
+  }
+
+  const filteredMentions = activeToken?.type === 'mention'
+    ? flattenedFiles
+        .map(f => ({ ...f, _score: activeToken.text ? getMentionScore(f, activeToken.text) : 1 }))
+        .filter(f => f._score > 0)
+        .sort((a, b) => b._score - a._score)
+        .slice(0, 50)
+    : []
+
+  const filteredCommands = activeToken?.type === 'slash'
+    ? builtinCommands.filter(c => c.name.toLowerCase().includes(activeToken.text.toLowerCase()) || c.aliases?.some((a: string) => a.toLowerCase().includes(activeToken.text.toLowerCase())))
+    : []
+
+  const filteredSkills = activeToken?.type === 'slash'
+    ? dynamicSkills.map(s => ({ ...s, name: s.id.replace(/^(global|workspace)-/, ''), displayName: s.name })).filter(c => c.name.toLowerCase().includes(activeToken.text.toLowerCase()) || c.triggers?.some((a: string) => a.toLowerCase().includes(activeToken.text.toLowerCase())))
+    : []
+
+  const popupItems = activeToken?.type === 'mention'
+    ? filteredMentions.map(f => ({ ...f, type: 'file' as const }))
+    : activeToken?.type === 'slash'
+      ? [
+          ...filteredCommands.map(c => ({ ...c, type: 'command' as const })),
+          ...filteredSkills.map(s => ({ ...s, type: 'skill' as const }))
+        ]
+      : []
+
+  useEffect(() => {
+    setPopupSelectedIndex(0)
+  }, [activeToken?.text])
+
+  const handleSelectPopupItem = (selected: any) => {
+    if (!activeToken || !viewRef.current) return
+    let markdownPath = selected.path || selected.id || selected.name
+    if (selected.type === 'file' && workspace) {
+      markdownPath = `${workspace.rootPath}/${selected.path}`.replace(/\\/g, '/').replace(/\/\//g, '/')
+    } else if (selected.type === 'skill' && selected.path) {
+      // Escape backslashes for Windows absolute paths
+      markdownPath = selected.path.replace(/\\/g, '\\\\')
+    }
+    const replacement = selected.type === 'file' ? `[${selected.name}](${markdownPath}) ` : `[$${selected.name}](${markdownPath}) `
+    
+    const view = viewRef.current
+    view.dispatch({
+      changes: {
+        from: activeToken.startIndex,
+        to: view.state.selection.main.head,
+        insert: replacement
+      }
+    })
+    view.focus()
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+
+    if (activeToken && popupItems.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        setSlashSelectedIndex((prev) => (prev + 1) % totalItems.length)
+        setPopupSelectedIndex((prev) => (prev + 1) % popupItems.length)
         return
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault()
-        setSlashSelectedIndex((prev) => (prev - 1 + totalItems.length) % totalItems.length)
+        setPopupSelectedIndex((prev) => (prev - 1 + popupItems.length) % popupItems.length)
         return
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault()
-        const selected = totalItems[slashSelectedIndex]
+        const selected = popupItems[popupSelectedIndex]
         if (selected) {
-          setText(`/${selected.name} `)
+          handleSelectPopupItem(selected)
         }
         return
       }
@@ -158,6 +201,14 @@ export default function PromptArea({ onSend, placeholder, onOpenSettings, worksp
     }
   }
 
+  const handleSend = () => {
+    if (!text.trim()) return
+    onSend(text.trim(), selectedModelName || models[0]?.name || '')
+    setText('')
+  }
+
+
+
   const displayLabel = activeProvider
     ? `${activeProvider.name} / ${selectedModelName || models[0]?.name || '?'}`
     : '未配置模型'
@@ -165,22 +216,46 @@ export default function PromptArea({ onSend, placeholder, onOpenSettings, worksp
   return (
     <div className="prompt-area-container">
       <div className="prompt-area-inner relative">
-        {showSlashMenu && totalItems.length > 0 && (
+        {activeToken && popupItems.length > 0 && (
           <div className="prompt-slash-menu">
-            {filteredCommands.length > 0 && (
+            {activeToken.type === 'mention' && filteredMentions.length > 0 && (
+              <>
+                <div className="prompt-slash-section-header">文件</div>
+                {filteredMentions.map((file) => {
+                  const globalIdx = popupItems.findIndex(item => item.type === 'file' && item.path === file.path)
+                  return (
+                    <div
+                      key={file.path}
+                      className={`prompt-slash-item ${globalIdx === popupSelectedIndex ? 'is-selected' : ''}`}
+                      onClick={() => handleSelectPopupItem({ ...file, type: 'file' })}
+                      onMouseEnter={() => setPopupSelectedIndex(globalIdx)}
+                    >
+                      <div className="prompt-slash-item-content">
+                        <span className="prompt-slash-title">
+                          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            {getFileIcon(file.isDir, file.name)}
+                          </span>
+                          <span className="prompt-slash-title-text">@{file.name}</span>
+                        </span>
+                        <span className="prompt-slash-desc">{file.path}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </>
+            )}
+
+            {activeToken.type === 'slash' && filteredCommands.length > 0 && (
               <>
                 <div className="prompt-slash-section-header">命令</div>
                 {filteredCommands.map((cmd) => {
-                  const globalIdx = totalItems.findIndex(item => item.type === 'command' && item.name === cmd.name)
+                  const globalIdx = popupItems.findIndex(item => item.type === 'command' && item.name === cmd.name)
                   return (
                     <div
                       key={cmd.name}
-                      className={`prompt-slash-item ${globalIdx === slashSelectedIndex ? 'is-selected' : ''}`}
-                      onClick={() => {
-                        setText(`/${cmd.name} `)
-                        textareaRef.current?.focus()
-                      }}
-                      onMouseEnter={() => setSlashSelectedIndex(globalIdx)}
+                      className={`prompt-slash-item ${globalIdx === popupSelectedIndex ? 'is-selected' : ''}`}
+                      onClick={() => handleSelectPopupItem({ ...cmd, type: 'command' })}
+                      onMouseEnter={() => setPopupSelectedIndex(globalIdx)}
                     >
                       <div className="prompt-slash-item-content">
                         <span className="prompt-slash-title">/{cmd.name}</span>
@@ -192,20 +267,17 @@ export default function PromptArea({ onSend, placeholder, onOpenSettings, worksp
               </>
             )}
 
-            {filteredSkills.length > 0 && (
+            {activeToken.type === 'slash' && filteredSkills.length > 0 && (
               <>
                 <div className="prompt-slash-section-header">技能</div>
                 {filteredSkills.map((skill) => {
-                  const globalIdx = totalItems.findIndex(item => item.type === 'skill' && item.id === skill.id)
+                  const globalIdx = popupItems.findIndex(item => item.type === 'skill' && item.id === skill.id)
                   return (
                     <div
                       key={skill.id}
-                      className={`prompt-slash-item ${globalIdx === slashSelectedIndex ? 'is-selected' : ''}`}
-                      onClick={() => {
-                        setText(`/${skill.name} `)
-                        textareaRef.current?.focus()
-                      }}
-                      onMouseEnter={() => setSlashSelectedIndex(globalIdx)}
+                      className={`prompt-slash-item ${globalIdx === popupSelectedIndex ? 'is-selected' : ''}`}
+                      onClick={() => handleSelectPopupItem({ ...skill, type: 'skill' })}
+                      onMouseEnter={() => setPopupSelectedIndex(globalIdx)}
                     >
                       <div className="prompt-slash-item-content">
                         <span className="prompt-slash-skill-title">{skill.name}</span>
@@ -219,10 +291,11 @@ export default function PromptArea({ onSend, placeholder, onOpenSettings, worksp
 
             <div className="prompt-slash-menu-footer">
               <span className="prompt-slash-footer-icon">ⓘ</span>
-              <span>输入内容以搜索命令或者技能</span>
+              <span>{activeToken.type === 'slash' ? '输入内容以搜索命令或者技能' : '输入内容以搜索文件'}</span>
             </div>
           </div>
         )}
+
         <Card variant="default" rounded="lg" className="prompt-card">
           <Stack gap={2}>
             {/* 输入框上方的功能扩展栏 */}
@@ -230,41 +303,42 @@ export default function PromptArea({ onSend, placeholder, onOpenSettings, worksp
             </Flex>
 
             <Flex align="start" className="prompt-input-wrapper w-full">
-              {matchedSkill && (
-                <div 
-                  className="prompt-skill-chip"
-                  title="已激活技能工作流"
-                >
-                  <IconPackage className="prompt-skill-chip-icon" />
-                  <span className="prompt-skill-chip-text">{activeCommandName}</span>
-                  <button 
-                    type="button" 
-                    className="prompt-skill-chip-close"
-                    onClick={() => {
-                      const rest = text.replace(/^\/[a-zA-Z0-9_-]+\s*/, '')
-                      setText(rest)
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
-              )}
-              <textarea
-                ref={textareaRef}
-                rows={1}
-                value={matchedSkill ? text.replace(/^\/[a-zA-Z0-9_-]+\s*/, '') : text}
-                onChange={(e) => {
-                  if (matchedSkill) {
-                    setText(`/${activeCommandName} ${e.target.value}`)
-                  } else {
-                    setText(e.target.value)
-                  }
-                }}
-                onKeyDown={handleKeyDown}
-                placeholder={placeholder || '随心输入...'}
-                className="prompt-textarea"
-                style={{ maxHeight: '200px' }}
-              />
+              <div className="prompt-scroll-container" onKeyDownCapture={handleKeyDown}>
+                <CodeMirror
+                  value={text}
+                  onChange={handleChange}
+                  onUpdate={(viewUpdate) => {
+                    if (viewUpdate.selectionSet) {
+                      const cursor = viewUpdate.state.selection.main.head
+                      updateActiveToken(viewUpdate.state.doc.toString(), cursor)
+                    }
+                  }}
+                  placeholder={placeholder || '随心输入...'}
+                  extensions={[pillDecoration, EditorView.lineWrapping]}
+                  onCreateEditor={(view) => {
+                    viewRef.current = view
+                  }}
+                  basicSetup={{
+                    lineNumbers: false,
+                    foldGutter: false,
+                    dropCursor: false,
+                    allowMultipleSelections: false,
+                    indentOnInput: false,
+                    highlightActiveLine: false,
+                    highlightActiveLineGutter: false,
+                    highlightSpecialChars: false,
+                    history: true,
+                    drawSelection: true,
+                    syntaxHighlighting: false,
+                    bracketMatching: false,
+                    closeBrackets: false,
+                    autocompletion: false,
+                    rectangularSelection: false,
+                    crosshairCursor: false,
+                    highlightSelectionMatches: false
+                  }}
+                />
+              </div>
             </Flex>
 
             <Flex align="center" justify="between" className="pt-2">

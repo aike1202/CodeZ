@@ -2,16 +2,8 @@ import React from 'react'
 import type { AgentState, ExecutionTimelineItem, ReasoningTimelineItem, ToolCallState } from '../../stores/chatStore'
 import { parseArgs } from '../../utils/parseArgs'
 import { computeEditStats } from '../../utils/editDiffUtils'
+import { FileIcon, FolderIcon } from '@react-symbols/icons/utils'
 import {
-  ReactIcon,
-  TSIcon,
-  JSIcon,
-  CSSIcon,
-  HTMLIcon,
-  MDIcon,
-  ConfigIcon,
-  FileIcon,
-  FolderIcon,
   ThoughtIcon,
   SearchIcon,
   CmdIcon
@@ -56,33 +48,10 @@ export function getFileExtension(fileName?: string): string {
 }
 
 export function getFileIconComponent(fileName?: string): React.ReactElement {
-  const ext = getFileExtension(fileName)
-  switch (ext) {
-    case 'tsx':
-    case 'jsx':
-      return React.createElement(ReactIcon)
-    case 'ts':
-      return React.createElement(TSIcon)
-    case 'js':
-      return React.createElement(JSIcon)
-    case 'css':
-    case 'scss':
-    case 'less':
-      return React.createElement(CSSIcon)
-    case 'html':
-      return React.createElement(HTMLIcon)
-    case 'md':
-      return React.createElement(MDIcon)
-    case 'json':
-    case 'yaml':
-    case 'yml':
-    case 'toml':
-    case 'ini':
-    case 'xml':
-      return React.createElement(ConfigIcon)
-    default:
-      return React.createElement(FileIcon)
-  }
+  if (!fileName) return React.createElement(FileIcon, { width: 14, height: 14 })
+  const isDir = !fileName.includes('.')
+  if (isDir) return React.createElement(FolderIcon, { folderName: fileName, width: 14, height: 14 })
+  return React.createElement(FileIcon, { fileName, width: 14, height: 14 })
 }
 
 export function getToolTarget(log: ToolCallState): string {
@@ -277,9 +246,17 @@ export function buildUnifiedTimeline(
         const argsObj = parseArgs(tc.args)
         const filePaths = Array.isArray(argsObj.filePaths) ? argsObj.filePaths : []
 
+        const startLine = argsObj.startLine ?? argsObj.StartLine
+        const endLine = argsObj.endLine ?? argsObj.EndLine
+
         let targetText = '多个文件'
         if (filePaths.length === 1) {
           targetText = filePaths[0]
+          if (typeof startLine === 'number' && typeof endLine === 'number') {
+            targetText += ` #L${startLine}-${endLine}`
+          } else if (typeof startLine === 'number') {
+            targetText += ` #L${startLine}-`
+          }
         } else if (filePaths.length > 1) {
           const names = filePaths.map(p => p.split(/[/\\]/).pop()).slice(0, 2)
           targetText = `${filePaths.length} 个文件 (${names.join(', ')}${filePaths.length > 2 ? '...' : ''})`
@@ -367,11 +344,13 @@ export function buildUnifiedTimeline(
         let targetDisplay = target
         let startLine: number | undefined
         let endLine: number | undefined
-        if (tc.name === 'read_file') {
+        if (tc.name === 'read_file' || tc.name === 'view_file') {
           const argsObj = parseArgs(tc.args)
-          if (typeof argsObj.startLine === 'number' && typeof argsObj.endLine === 'number') {
-            startLine = argsObj.startLine
-            endLine = argsObj.endLine
+          const sLine = argsObj.startLine ?? argsObj.StartLine
+          const eLine = argsObj.endLine ?? argsObj.EndLine
+          if (typeof sLine === 'number' && typeof eLine === 'number') {
+            startLine = sLine
+            endLine = eLine
             targetDisplay = `${target} #L${startLine}-${endLine}`
           }
         }

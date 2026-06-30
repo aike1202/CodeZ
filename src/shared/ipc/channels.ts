@@ -3,6 +3,7 @@ export const IPC_CHANNELS = {
   OPEN_DIRECTORY: 'workspace:open-directory',
   SCAN_FILE_TREE: 'workspace:scan-file-tree',
   READ_FILE: 'workspace:read-file',
+  GET_ALL_PATHS: 'workspace:get-all-paths',
   DETECT_PROJECT: 'workspace:detect-project',
   GET_RECENT_PROJECTS: 'workspace:get-recent-projects',
   ADD_RECENT_PROJECT: 'workspace:add-recent-project',
@@ -57,5 +58,9 @@ export const IPC_CHANNELS = {
   RULES_GET_LIST: 'rules:get-list',
   RULES_SAVE: 'rules:save',
   RULES_DELETE: 'rules:delete',
-  RULES_RENAME: 'rules:rename'
+  RULES_RENAME: 'rules:rename',
+
+  // Settings
+  SETTINGS_GET: 'settings:get',
+  SETTINGS_SAVE: 'settings:save'
 } as const
