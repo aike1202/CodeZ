@@ -171,27 +171,27 @@ export default function ExecutionLogDetail({
 
       if (parsedSearch && Array.isArray(parsedSearch.matches) && parsedSearch.matches.length > 0) {
         return (
-          <div className="exe-log-detail-box-mono mt-2 flex flex-col gap-2">
-            <div className="exe-log-files-title text-[11px] font-[500] text-gray-500 uppercase tracking-widest pl-1 mb-1">Search Results ({parsedSearch.matches.length} matches)</div>
+          <div className="exe-log-detail-box-mono exe-log-search-container">
+            <div className="exe-log-search-title">Search Results ({parsedSearch.matches.length} matches)</div>
             {parsedSearch.matches.map((match: any, idx: number) => {
               const name = match.path?.split(/[/\\]/).pop() || match.path || 'unknown'
               return (
-                <div key={idx} className="flex flex-col gap-1.5 p-2 bg-[var(--bg-primary,#ffffff)] dark:bg-[#1a1b1e] rounded border border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700 transition-colors">
+                <div key={idx} className="exe-log-search-item">
                   <div
-                    className="flex items-center gap-2 cursor-pointer group w-fit"
+                    className="exe-log-search-item-header group"
                     onClick={(e) => {
                       e.stopPropagation()
                       if (match.path) onFileClick?.(match.path)
                     }}
                     title="Click to open file"
                   >
-                    <span className="opacity-80 group-hover:opacity-100 transition-opacity flex items-center">{getFileIconComponent(name)}</span>
-                    <span className="text-[12px] font-[500] text-gray-700 dark:text-gray-300 group-hover:text-[var(--primary,#2563eb)] transition-colors">
+                    <span className="exe-log-search-item-icon">{getFileIconComponent(name)}</span>
+                    <span className="exe-log-search-item-path">
                       {match.path}{match.line ? `:${match.line}` : ''}
                     </span>
                   </div>
                   {match.text && (
-                    <div className="text-[11px] font-mono leading-relaxed px-2 py-1.5 bg-gray-50 dark:bg-[#131416] rounded text-gray-600 dark:text-gray-400 overflow-x-auto whitespace-pre">
+                    <div className="exe-log-search-item-text">
                       {match.text.trim()}
                     </div>
                   )}
@@ -199,7 +199,7 @@ export default function ExecutionLogDetail({
               )
             })}
             {parsedSearch.truncated && (
-              <div className="text-[11px] text-orange-500 italic px-2 py-1 mt-1 bg-orange-50/50 dark:bg-orange-500/10 rounded w-fit">
+              <div className="exe-log-search-truncated">
                 ...Results truncated
               </div>
             )}

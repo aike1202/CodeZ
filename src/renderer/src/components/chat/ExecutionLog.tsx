@@ -86,7 +86,11 @@ export default function ExecutionLog({
     if (running) {
       setExpanded(true)
     } else {
-      setExpanded(false)
+      // P2-5: 延迟折叠，让用户看清最后的状态
+      const timer = setTimeout(() => {
+        setExpanded(false)
+      }, 1500)
+      return () => clearTimeout(timer)
     }
   }, [running])
 
