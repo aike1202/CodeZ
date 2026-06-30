@@ -233,6 +233,17 @@ export class SpawnRunner {
     fs.closeSync(errFd)
 
     const pid = proc.pid
+    if (typeof pid !== 'number') {
+      // spawn 失败（极少见）——不留无 pid 的后台登记
+      return Promise.resolve({
+        exitCode: 1,
+        stdout: '',
+        stderr: 'Failed to spawn background process (no pid).',
+        timedOut: false,
+        background: true,
+        truncated: false
+      })
+    }
     getBackgroundTaskRegistry().add({ pid, stdoutFile, stderrFile, startedAt: Date.now(), shellType: opts.shell })
     try { proc.unref() } catch {}
 
