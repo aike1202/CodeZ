@@ -42,8 +42,10 @@ describe('MemoryService', () => {
   })
 
   it('getIndex should return empty string for fresh memory', async () => {
-    await MemoryService.ensureInitialized(testWorkspace)
-    const index = await MemoryService.getIndex(testWorkspace)
+    const freshWs = path.join(testDir, 'fresh_ws')
+    await fs.mkdir(freshWs, { recursive: true })
+    await MemoryService.ensureInitialized(freshWs)
+    const index = await MemoryService.getIndex(freshWs)
     expect(index).toBe('')
   })
 
