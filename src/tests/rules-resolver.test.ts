@@ -28,22 +28,65 @@ describe('RulesResolver', () => {
     await fs.rm(mockHomeDir, { recursive: true, force: true })
   })
 
-  it('should load global and workspace rules and concatenate them', async () => {
-    // Setup workspace rules
-    await fs.writeFile(path.join(mockWorkspace, 'AGENTS.md'), 'Workspace Agent Rule')
-    const codezRulesDir = path.join(mockWorkspace, '.codez', 'rules')
-    await fs.mkdir(codezRulesDir, { recursive: true })
-    await fs.writeFile(path.join(codezRulesDir, 'test-rule.md'), 'Workspace Custom Rule')
+  describe('getGlobalRules', () => {
+    it('should return empty string when no global rules exist', async () => {
+      const rules = await RulesResolver.getGlobalRules()
+      expect(rules).toBe('')
+    })
 
-    // Setup global rules
-    const globalCodezRulesDir = path.join(mockHomeDir, '.codez', 'rules')
-    await fs.mkdir(globalCodezRulesDir, { recursive: true })
-    await fs.writeFile(path.join(globalCodezRulesDir, 'global-test-rule.md'), 'Global Custom Rule')
+    it('should load global rules from ~/.codez/AGENTS.md', async () => {
+      const codezDir = path.join(mockHomeDir, '.codez')
+      await fs.mkdir(codezDir, { recursive: true })
+      await fs.writeFile(path.join(codezDir, 'AGENTS.md'), 'Global Agent Rule')
 
-    const rules = await RulesResolver.getRules(mockWorkspace)
-    
-    expect(rules).toContain('Workspace Agent Rule')
-    expect(rules).toContain('Workspace Custom Rule')
-    expect(rules).toContain('Global Custom Rule')
+      const rules = await RulesResolver.getGlobalRules()
+      expect(rules).toContain('Global Agent Rule')
+    })
+
+    it('should load global rules from ~/.codez/rules/*.md', async () => {
+      const rulesDir = path.join(mockHomeDir, '.codez', 'rules')
+      await fs.mkdir(rulesDir, { recursive: true })
+      await fs.writeFile(path.join(rulesDir, 'style.md'), 'Global Style Rule')
+
+      const rules = await RulesResolver.getGlobalRules()
+      expect(rules).toContain('Global Style Rule')
+    })
+  })
+
+  describe('getWorkspaceRules', () => {
+    it('should return empty string when no workspace rules exist', async () => {
+      const rules = await RulesResolver.getWorkspaceRules(mockWorkspace)
+      expect(rules).toBe('')
+    })
+
+    it('should load workspace AGENTS.md', async () => {
+      await fs.writeFile(path.join(mockWorkspace, 'AGENTS.md'), 'Workspace Agent Rule')
+
+      const rules = await RulesResolver.getWorkspaceRules(mockWorkspace)
+      expect(rules).toContain('Workspace Agent Rule')
+    })
+
+    it('should load .clinerules', async () => {
+      await fs.writeFile(path.join(mockWorkspace, '.clinerules'), 'Cline Rule')
+
+      const rules = await RulesResolver.getWorkspaceRules(mockWorkspace)
+      expect(rules).toContain('Cline Rule')
+    })
+
+    it('should load .cursorrules', async () => {
+      await fs.writeFile(path.join(mockWorkspace, '.cursorrules'), 'Cursor Rule')
+
+      const rules = await RulesResolver.getWorkspaceRules(mockWorkspace)
+      expect(rules).toContain('Cursor Rule')
+    })
+
+    it('should load workspace .codez/rules/*.md', async () => {
+      const rulesDir = path.join(mockWorkspace, '.codez', 'rules')
+      await fs.mkdir(rulesDir, { recursive: true })
+      await fs.writeFile(path.join(rulesDir, 'project.md'), 'Project Rule')
+
+      const rules = await RulesResolver.getWorkspaceRules(mockWorkspace)
+      expect(rules).toContain('Project Rule')
+    })
   })
 })

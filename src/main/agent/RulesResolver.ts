@@ -3,39 +3,40 @@ import * as path from 'path'
 import * as os from 'os'
 
 export class RulesResolver {
-  static async getRules(workspaceRoot: string): Promise<string> {
-    let combinedRules = ''
-
-    // 1. Global Rules
-    const globalRules: string[] = []
+  /**
+   * Load global user rules from ~/.codez/.
+   * Used by <system_reminder> injection.
+   */
+  static async getGlobalRules(): Promise<string> {
     const homeDir = os.homedir()
-    
-    // Global ~/.codez/AGENTS.md
+    const globalRules: string[] = []
+
     globalRules.push(await this.safeReadFile(path.join(homeDir, '.codez', 'AGENTS.md')))
-    // Global ~/.codez/rules/*.md
     globalRules.push(await this.readMarkdownFilesInDir(path.join(homeDir, '.codez', 'rules')))
 
-    const filteredGlobal = globalRules.filter(Boolean)
-    if (filteredGlobal.length > 0) {
-      combinedRules += '=== Global Rules ===\n' + filteredGlobal.join('\n\n') + '\n\n'
-    }
+    const filtered = globalRules.filter(Boolean)
+    if (filtered.length === 0) return ''
 
-    // 2. Workspace Rules
+    return '=== Global Rules ===\n' + filtered.join('\n\n')
+  }
+
+  /**
+   * Load workspace-level rules from the project directory.
+   * Used by <repository_instructions> in system prompt.
+   */
+  static async getWorkspaceRules(workspaceRoot: string): Promise<string> {
     const workspaceRules: string[] = []
-    
+
     workspaceRules.push(await this.safeReadFile(path.join(workspaceRoot, 'AGENTS.md')))
     workspaceRules.push(await this.safeReadFile(path.join(workspaceRoot, '.agents', 'AGENTS.md')))
     workspaceRules.push(await this.safeReadFile(path.join(workspaceRoot, '.clinerules')))
     workspaceRules.push(await this.safeReadFile(path.join(workspaceRoot, '.cursorrules')))
-    // Workspace .codez/rules/*.md
     workspaceRules.push(await this.readMarkdownFilesInDir(path.join(workspaceRoot, '.codez', 'rules')))
 
-    const filteredWorkspace = workspaceRules.filter(Boolean)
-    if (filteredWorkspace.length > 0) {
-      combinedRules += '=== Workspace Rules ===\n' + filteredWorkspace.join('\n\n') + '\n\n'
-    }
+    const filtered = workspaceRules.filter(Boolean)
+    if (filtered.length === 0) return ''
 
-    return combinedRules.trim()
+    return '=== Workspace Rules ===\n' + filtered.join('\n\n')
   }
 
   private static async safeReadFile(filePath: string): Promise<string> {
