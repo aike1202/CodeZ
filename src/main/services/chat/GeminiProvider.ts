@@ -107,10 +107,11 @@ export class GeminiProvider implements IChatProvider {
 
     const thinkingConfig = buildThinkingPayload(thinking, model, baseUrl, !!(tools && tools.length > 0))
 
-    const requestPayload: any = { contents }
+    const requestPayload: any = {}
     if (systemInstructionParts.length > 0) {
       requestPayload.systemInstruction = { parts: systemInstructionParts }
     }
+    requestPayload.contents = contents
     if (geminiTools) {
       requestPayload.tools = geminiTools
     }
