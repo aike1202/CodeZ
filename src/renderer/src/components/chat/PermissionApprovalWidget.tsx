@@ -96,7 +96,7 @@ export default function PermissionApprovalWidget({ msgId, requests, onResolve }:
             
             // Compute diff numbers if it's an edit tool
             let diffNums = null
-            if (['write_to_file', 'replace_file_content', 'multi_replace_file_content', 'apply_patch'].includes(request.toolName)) {
+            if (['Edit', 'Write', 'NotebookEdit'].includes(request.toolName)) {
               let argsObj = request.args
               if (typeof argsObj === 'string') {
                 try { argsObj = JSON.parse(argsObj) } catch {}
@@ -124,6 +124,13 @@ export default function PermissionApprovalWidget({ msgId, requests, onResolve }:
                 } else if (typeof argsObj.newContent === 'string') {
                   additions = argsObj.newContent ? argsObj.newContent.split('\n').length : 0
                 }
+              } else if (request.toolName === 'Edit') {
+                additions = argsObj.new_string ? String(argsObj.new_string).split('\n').length : 0
+                deletions = argsObj.old_string ? String(argsObj.old_string).split('\n').length : 0
+              } else if (request.toolName === 'Write') {
+                additions = argsObj.content ? String(argsObj.content).split('\n').length : 0
+              } else if (request.toolName === 'NotebookEdit') {
+                additions = argsObj.new_source ? String(argsObj.new_source).split('\n').length : 0
               } else if (request.toolName === 'multi_replace_file_content') {
                 const chunks = Array.isArray(argsObj.ReplacementChunks) ? argsObj.ReplacementChunks : (Array.isArray(argsObj.replacementChunks) ? argsObj.replacementChunks : [])
                 chunks.forEach((chunk: any) => {

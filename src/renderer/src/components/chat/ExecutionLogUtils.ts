@@ -76,6 +76,8 @@ export function getToolTarget(log: ToolCallState): string {
   }
 
   const value =
+    args.file_path ||
+    args.command ||
     args.DirectoryPath ||
     args.directoryPath ||
     args.AbsolutePath ||
@@ -242,7 +244,20 @@ export function buildUnifiedTimeline(
       const tc = item.toolCall
       const duration = formatDuration(tc)
 
-      if (tc.name === 'read_files') {
+      if (tc.name === 'Read') {
+        const argsObj = parseArgs(tc.args)
+        const fp = argsObj.file_path || ''
+        const offset = argsObj.offset
+        const limit = argsObj.limit
+        let targetText = fp || '文件'
+        if (typeof offset === 'number') targetText += ` #L${offset}${typeof limit === 'number' ? `-${offset + limit - 1}` : '-'}`
+        list.push({
+          id: tc.id, type: 'tool', timestamp: tc.startedAt, status: tc.status,
+          verb: tc.status === 'running' ? 'Analyzing' : 'Analyzed',
+          target: targetText, realPath: fp, fileName: fp ? fp.split(/[/\\]/).pop() : undefined,
+          args: tc.args, detail: tc.result, duration, toolName: tc.name
+        })
+      } else if (tc.name === 'read_files') {
         const argsObj = parseArgs(tc.args)
         const filePaths = Array.isArray(argsObj.filePaths) ? argsObj.filePaths : []
 
@@ -279,7 +294,7 @@ export function buildUnifiedTimeline(
       } else {
         const target = getToolTarget(tc) || getToolNoun(tc.name)
 
-        if (tc.name === 'write_to_file' || tc.name === 'replace_file_content' || tc.name === 'multi_replace_file_content' || tc.name === 'apply_patch') {
+        if (['Edit', 'Write', 'NotebookEdit'].includes(tc.name)) {
           const { additions, deletions } = computeEditStats(tc.name, tc.args)
 
           list.push({
@@ -288,8 +303,8 @@ export function buildUnifiedTimeline(
             timestamp: tc.startedAt,
             status: tc.status,
             verb: tc.status === 'running'
-              ? (tc.name === 'write_to_file' ? 'Creating' : 'Editing')
-              : (tc.name === 'write_to_file' ? 'Created' : 'Edited'),
+              ? (tc.name === 'Write' ? 'Creating' : 'Editing')
+              : (tc.name === 'Write' ? 'Created' : 'Edited'),
             target: target,
             realPath: target,
             additions: additions,
@@ -329,13 +344,13 @@ export function buildUnifiedTimeline(
         }
 
         let verbDisplay: UnifiedTimelineItem['verb'] = 'Executed'
-        if (tc.name === 'search_text' || tc.name === 'search_code' || tc.name === 'search') {
+        if (tc.name === 'Grep' || tc.name === 'search') {
           verbDisplay = tc.status === 'running' ? 'Searching' : 'Searched'
-        } else if (tc.name === 'list_files' || tc.name === 'list_dir') {
+        } else if (tc.name === 'Glob' || tc.name === 'list_files' || tc.name === 'list_dir') {
           verbDisplay = tc.status === 'running' ? 'Exploring' : 'Explored'
-        } else if (tc.name === 'run_command') {
+        } else if (tc.name === 'Bash' || tc.name === 'PowerShell' || tc.name === 'run_command') {
           verbDisplay = 'Terminal'
-        } else if (tc.name === 'read_file' || tc.name === 'read_files' || tc.name === 'get_project_snapshot' || tc.name === 'fast_context' || tc.name === 'read_url_content' || tc.name === 'view_file') {
+        } else if (tc.name === 'Read' || tc.name === 'read_files' || tc.name === 'get_project_snapshot' || tc.name === 'fast_context') {
           verbDisplay = tc.status === 'running' ? 'Analyzing' : 'Analyzed'
         } else {
           verbDisplay = tc.status === 'running' ? 'Executing' : 'Executed'
@@ -355,10 +370,10 @@ export function buildUnifiedTimeline(
           }
         }
 
-        if (tc.name === 'run_command') {
+        if (tc.name === 'Bash' || tc.name === 'PowerShell' || tc.name === 'run_command') {
           try {
             const cmdArgs = JSON.parse(tc.args)
-            targetDisplay = cmdArgs.commandLine || cmdArgs.command || target
+            targetDisplay = cmdArgs.command || cmdArgs.commandLine || target
           } catch {
             // keep original target
           }
@@ -369,7 +384,7 @@ export function buildUnifiedTimeline(
         
         list.push({
           id: tc.id,
-          type: tc.name === 'run_command' ? 'command' : 'tool',
+          type: (tc.name === 'Bash' || tc.name === 'PowerShell' || tc.name === 'run_command') ? 'command' : 'tool',
           timestamp: tc.startedAt,
           status: isActuallyRunning ? 'running' : tc.status === 'running' ? 'error' : tc.status,
           verb: verbDisplay,

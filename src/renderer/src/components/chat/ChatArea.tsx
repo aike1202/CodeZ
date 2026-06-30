@@ -35,10 +35,7 @@ export function extractMessageEdits(msg: ChatMessage) {
     .filter(Boolean);
 
   const editTools = tools.filter((tc: any) =>
-    tc.name === 'write_to_file' ||
-    tc.name === 'replace_file_content' ||
-    tc.name === 'multi_replace_file_content' ||
-    tc.name === 'apply_patch'
+    ['Edit', 'Write', 'NotebookEdit'].includes(tc.name)
   );
 
   if (editTools.length === 0) return { edits: [], tools: [] };
@@ -59,7 +56,7 @@ export function extractMessageEdits(msg: ChatMessage) {
     let deletions = '-0';
     try {
       const argsObj = parseArgs(tc.args);
-      filePath = argsObj.targetFile || argsObj.TargetFile || argsObj.filePath || argsObj.path || '';
+      filePath = argsObj.file_path || argsObj.targetFile || argsObj.TargetFile || argsObj.filePath || argsObj.path || '';
 
       const matchingDiff = Object.entries(diffByPath).find(([diffPath]) => {
         if (!filePath) return false;

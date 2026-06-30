@@ -65,9 +65,11 @@ export default function ExecutionLogDetail({
       }
     }
 
-    if (item.toolName === 'read_files') {
+    if (item.toolName === 'read_files' || item.toolName === 'Read') {
       const argsObj = parseArgs(item.args || '')
-      const filePaths = Array.isArray(argsObj.filePaths) ? argsObj.filePaths : []
+      const filePaths = Array.isArray(argsObj.filePaths)
+        ? argsObj.filePaths
+        : (argsObj.file_path ? [argsObj.file_path] : [])
       
       if (filePaths.length > 1) {
         return (
@@ -167,7 +169,7 @@ export default function ExecutionLogDetail({
       }
     }
 
-    if (item.toolName === 'search' || item.verb === 'Searched') {
+    if (item.toolName === 'search' || item.toolName === 'Grep' || item.verb === 'Searched') {
       let parsedSearch: any = null
       try {
         if (item.detail) {
@@ -221,7 +223,7 @@ export default function ExecutionLogDetail({
       }
     }
 
-    if (item.toolName === 'run_command' || item.verb === 'Terminal') {
+    if (item.toolName === 'run_command' || item.toolName === 'Bash' || item.toolName === 'PowerShell' || item.verb === 'Terminal') {
       let cmd = ''
       let cwd = ''
       try {

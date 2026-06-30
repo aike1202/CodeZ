@@ -51,6 +51,13 @@ export function computeEditStats(toolName: string, args: string): EditStats {
     } else if (typeof argsObj.newContent === 'string') {
       additions = `+${argsObj.newContent.split('\n').length}`
     }
+  } else if (toolName === 'Edit') {
+    if (typeof argsObj.new_string === 'string') additions = `+${argsObj.new_string.split('\n').length}`
+    if (typeof argsObj.old_string === 'string') deletions = `-${argsObj.old_string.split('\n').length}`
+  } else if (toolName === 'Write') {
+    if (typeof argsObj.content === 'string') additions = `+${argsObj.content.split('\n').length}`
+  } else if (toolName === 'NotebookEdit') {
+    if (typeof argsObj.new_source === 'string') additions = `+${argsObj.new_source.split('\n').length}`
   } else if (toolName === 'multi_replace_file_content') {
     const chunks = Array.isArray(argsObj.ReplacementChunks)
       ? argsObj.ReplacementChunks
@@ -117,6 +124,16 @@ export function buildDiffEditInfo(toolName: string, args: string): DiffEditInfo 
     }
   }
 
+  if (toolName === 'Edit') {
+    return { type: 'replace', targetContent: argsObj.old_string || '', replacementContent: argsObj.new_string || '' }
+  }
+  if (toolName === 'Write') {
+    return { type: 'write', codeContent: argsObj.content || '' }
+  }
+  if (toolName === 'NotebookEdit') {
+    return { type: 'replace', targetContent: '<notebook cell>', replacementContent: argsObj.new_source || '' }
+  }
+
   // replace_file_content (default)
   return {
     type: 'replace',
@@ -137,7 +154,7 @@ function normalizePath(p: string): string {
  */
 function getFilePathFromToolArgs(args: string): string {
   const argsObj = parseArgs(args)
-  return argsObj.targetFile || argsObj.TargetFile || argsObj.filePath || argsObj.path || ''
+  return argsObj.file_path || argsObj.notebook_path || argsObj.targetFile || argsObj.TargetFile || argsObj.filePath || argsObj.path || ''
 }
 
 /**
@@ -153,12 +170,7 @@ export function handleDiffClickForFile(
   const targetNorm = normalizePath(filePath)
 
   const tc = tools.find((t) => {
-    if (
-      t.name !== 'write_to_file' &&
-      t.name !== 'replace_file_content' &&
-      t.name !== 'multi_replace_file_content' &&
-      t.name !== 'apply_patch'
-    ) {
+    if (!['Edit', 'Write', 'NotebookEdit'].includes(t.name)) {
       return false
     }
     const fileArg = getFilePathFromToolArgs(t.args)
