@@ -4,6 +4,7 @@ import * as fs from 'fs/promises'
 import * as path from 'path'
 import { createHash } from 'crypto'
 import { getReadFingerprintStore } from '../ReadFingerprintStore'
+import { parseNotebook, renderNotebook } from './NotebookUtils'
 
 interface ReadArgs {
   file_path?: string
@@ -70,6 +71,17 @@ export class ReadTool extends Tool {
         const store = getReadFingerprintStore()
         if (store.isUnchanged(sessionId, absolutePath, sha)) {
           return 'Wasted call — file unchanged since your last Read. Refer to that earlier tool_result instead.'
+        }
+      }
+
+      // .ipynb 特化：渲染为 <cell id="..."> 文本块（仍是纯文本，不算图片/PDF 入能力）
+      if (absolutePath.toLowerCase().endsWith('.ipynb')) {
+        try {
+          const nb = parseNotebook(buffer.toString('utf-8'))
+          if (sessionId) getReadFingerprintStore().record(sessionId, absolutePath, sha)
+          return `${renderNotebook(nb)}\n\nSHA256: ${sha}`
+        } catch (e: any) {
+          // 解析失败则按普通文本回退（下方逻辑继续）
         }
       }
 
