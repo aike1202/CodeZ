@@ -20,6 +20,7 @@ export function useSendMessage() {
   const finishToolCall = useChatStore((s) => s.finishToolCall)
   const appendReasoningTimelineChunk = useChatStore((s) => s.appendReasoningTimelineChunk)
   const addPermissionRequest = useChatStore((s) => s.addPermissionRequest)
+  const addAskUserRequest = useChatStore((s) => s.addAskUserRequest)
   const setDiffEntries = useChatStore((s) => s.setDiffEntries)
 
   const handleSendMessage = useCallback(
@@ -175,6 +176,9 @@ export function useSendMessage() {
           },
           onPermissionRequest: (request: any) => {
             addPermissionRequest(agentId, request)
+          },
+          onAskUserRequest: (request: any) => {
+            addAskUserRequest(agentId, request)
           }
         }
       )
@@ -200,6 +204,7 @@ export function useSendMessage() {
       finishToolCall,
       appendReasoningTimelineChunk,
       addPermissionRequest,
+      addAskUserRequest,
       setDiffEntries
     ]
   )

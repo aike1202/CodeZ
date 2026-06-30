@@ -1,0 +1,12 @@
+.ask-user-widget { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+.ask-user-question { display: flex; flex-direction: column; gap: 8px; }
+.ask-user-header { font-size: 12px; color: #888; text-transform: uppercase; }
+.ask-user-q { font-size: 14px; font-weight: 600; }
+.ask-user-options { display: flex; flex-direction: column; gap: 6px; }
+.ask-user-option { text-align: left; padding: 8px 10px; border: 1px solid #ddd; border-radius: 8px; background: #fff; cursor: pointer; }
+.ask-user-option.selected { border-color: #4c6ef5; background: #eef2ff; }
+.ask-user-option-label { font-size: 13px; font-weight: 600; }
+.ask-user-option-desc { font-size: 12px; color: #666; }
+.ask-user-other-input { padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; }
+.ask-user-submit { align-self: flex-end; padding: 6px 14px; border: none; border-radius: 6px; background: #4c6ef5; color: #fff; cursor: pointer; }
+.ask-user-submit:disabled { background: #bbb; cursor: not-allowed; }

@@ -27,6 +27,8 @@ export const IPC_CHANNELS = {
   CHAT_REJECT_FILE: 'chat:reject-file',
   CHAT_REQUEST_APPROVAL: 'chat:request-approval',
   CHAT_APPROVAL_RESPONSE: 'chat:approval-response',
+  CHAT_REQUEST_ASK_USER: 'chat:request-ask-user',
+  CHAT_ASK_USER_RESPONSE: 'chat:ask-user-response',
   CHAT_GET_DIFF: 'chat:get-diff',
   
   // Tool Logs

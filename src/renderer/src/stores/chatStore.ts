@@ -84,6 +84,8 @@ export interface ChatMessage {
   diffEntries?: Array<{ path: string; diff: string }>
   /** 等待用户审批的权限请求 */
   permissionRequests?: PermissionRequestState[]
+  /** 等待用户回答的提问请求 */
+  askUserRequests?: AskUserRequestState[]
 }
 
 export interface PermissionRequestState {
@@ -93,6 +95,21 @@ export interface PermissionRequestState {
   description: string
   args: any
   status: 'pending' | 'approved' | 'denied'
+  createdAt: number
+}
+
+export interface AskUserOptionState { label: string; description?: string; preview?: string }
+export interface AskUserQuestionItemState {
+  question: string
+  header: string
+  options: AskUserOptionState[]
+  multiSelect?: boolean
+}
+export interface AskUserRequestState {
+  id: string
+  questions: AskUserQuestionItemState[]
+  status: 'pending' | 'answered'
+  answers?: Array<{ question: string; answer: string | string[] }>
   createdAt: number
 }
 
@@ -143,6 +160,8 @@ interface ChatState {
   setEditStatus: (msgId: string, filePath: string, status: 'accepted' | 'rejected') => void
   addPermissionRequest: (msgId: string, request: Omit<PermissionRequestState, 'status' | 'createdAt'>) => void
   resolvePermissionRequest: (msgId: string, requestId: string, approved: boolean) => void
+  addAskUserRequest: (msgId: string, request: Omit<AskUserRequestState, 'status' | 'createdAt'>) => void
+  resolveAskUserRequest: (msgId: string, requestId: string, answers: Array<{ question: string; answer: string | string[] }>) => void
   persistCurrentSession: () => Promise<void>
   archiveSession: (sessionId: string, archive: boolean) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
@@ -388,6 +407,38 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const sessions = s.sessions.map((session) =>
         session.id === activeId ? { ...session, messages: msgs } : session
       )
+      return { messages: msgs, sessions }
+    })
+    get().persistCurrentSession()
+  },
+
+  addAskUserRequest: (msgId, request) => {
+    set((s) => {
+      const msgs = s.messages.map((m) => {
+        if (m.id !== msgId) return m
+        const existing = m.askUserRequests || []
+        if (existing.some((item) => item.id === request.id)) return m
+        return { ...m, askUserRequests: [...existing, { ...request, status: 'pending' as const, createdAt: Date.now() }] }
+      })
+      const activeId = s.activeSessionId
+      const sessions = s.sessions.map((session) => session.id === activeId ? { ...session, messages: msgs } : session)
+      return { messages: msgs, sessions }
+    })
+    get().persistCurrentSession()
+  },
+  resolveAskUserRequest: (msgId, requestId, answers) => {
+    set((s) => {
+      const msgs = s.messages.map((m) => {
+        if (m.id !== msgId || !m.askUserRequests) return m
+        return {
+          ...m,
+          askUserRequests: m.askUserRequests.map((r) =>
+            r.id === requestId ? { ...r, status: 'answered' as const, answers } : r
+          )
+        }
+      })
+      const activeId = s.activeSessionId
+      const sessions = s.sessions.map((session) => session.id === activeId ? { ...session, messages: msgs } : session)
       return { messages: msgs, sessions }
     })
     get().persistCurrentSession()

@@ -6,6 +6,7 @@ import ExecutionLog from './ExecutionLog'
 import MessageBody from './MessageBody'
 import EditApprovalWidget from './EditApprovalWidget'
 import PermissionApprovalWidget from './PermissionApprovalWidget'
+import AskUserQuestionWidget from './AskUserQuestionWidget'
 import TerminalPanel from './TerminalPanel'
 import Flex from '../ui/Flex'
 import Stack from '../ui/Stack'
@@ -134,6 +135,7 @@ export default function ChatArea({
   const prevSessionIdRef = useRef<string | null>(null)
 
   const resolvePermissionRequest = useChatStore((s) => s.resolvePermissionRequest)
+  const resolveAskUserRequest = useChatStore((s) => s.resolveAskUserRequest)
   const { handleSendMessage } = useSendMessage()
 
   const handleResolvePermission = React.useCallback(async (msgId: string, requestId: string, approved: boolean) => {
@@ -145,6 +147,16 @@ export default function ChatArea({
       resolvePermissionRequest(msgId, requestId, approved)
     }
   }, [resolvePermissionRequest])
+
+  const handleResolveAskUser = React.useCallback(async (msgId: string, requestId: string, answers: Array<{ question: string; answer: string | string[] }>) => {
+    try {
+      await window.api.chat.respondAskUser(requestId, answers)
+    } catch (error) {
+      console.warn('Failed to send ask-user response to backend:', error)
+    } finally {
+      resolveAskUserRequest(msgId, requestId, answers)
+    }
+  }, [resolveAskUserRequest])
 
   // 智能触底滚动逻辑
   useEffect(() => {
@@ -181,9 +193,10 @@ export default function ChatArea({
   const auditMessages = useMemo(() => {
     return messages.filter(m => {
       const hasPendingPermission = m.permissionRequests?.some((r: any) => r.status === 'pending')
+      const hasPendingAskUser = m.askUserRequests?.some((r: any) => r.status === 'pending')
       const { edits } = extractMessageEdits(m)
       const hasPendingEdits = edits.length > 0 && !edits.every((e: any) => m.editStatuses?.[e.filePath])
-      return hasPendingPermission || hasPendingEdits
+      return hasPendingPermission || hasPendingAskUser || hasPendingEdits
     })
   }, [messages])
 
@@ -228,8 +241,10 @@ export default function ChatArea({
               const hasPendingEdits = edits.length > 0 && !edits.every((e: any) => msg.editStatuses?.[e.filePath]);
               const pendingPermissions = msg.permissionRequests?.filter((r: any) => r.status === 'pending') || [];
               const hasPendingPermission = pendingPermissions.length > 0;
+              const pendingAskUser = msg.askUserRequests?.filter((r: any) => r.status === 'pending') || [];
+              const hasPendingAskUser = pendingAskUser.length > 0;
 
-              if (!hasPendingPermission && !hasPendingEdits) return null;
+              if (!hasPendingPermission && !hasPendingEdits && !hasPendingAskUser) return null;
 
               return (
                 <div key={msg.id} style={{ width: '100%', maxWidth: '48rem', margin: '0 auto', padding: '0 16px', marginBottom: '8px', pointerEvents: 'auto' }}>
@@ -242,6 +257,19 @@ export default function ChatArea({
                       />
                     </div>
                   )}
+                  {(() => {
+                    const pendingAsk = msg.askUserRequests?.filter((r: any) => r.status === 'pending') || []
+                    if (pendingAsk.length === 0) return null
+                    return (
+                      <div className="dropdown-shadow rounded-xl mb-2">
+                        <AskUserQuestionWidget
+                          msgId={msg.id}
+                          requests={pendingAsk}
+                          onResolve={handleResolveAskUser}
+                        />
+                      </div>
+                    )
+                  })()}
                   {hasPendingEdits && (
                     <div className="dropdown-shadow rounded-xl">
                       <EditApprovalWidget

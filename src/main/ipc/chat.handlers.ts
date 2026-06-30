@@ -177,6 +177,15 @@ You have access to various tools. Choose the most efficient tool for each task b
                 resolve(approved)
               })
             })
+          },
+          onAskUserRequest: (request) => {
+            return new Promise((resolve) => {
+              sender.send(IPC_CHANNELS.CHAT_REQUEST_ASK_USER, streamId, request)
+              const responseChannel = `${IPC_CHANNELS.CHAT_ASK_USER_RESPONSE}:${request.id}`
+              ipcMain.handleOnce(responseChannel, (_event, answers) => {
+                resolve(answers || [])
+              })
+            })
           }
         }
       ).catch((error) => {

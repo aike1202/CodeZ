@@ -3,12 +3,14 @@ import { ToolManager } from '../tools/ToolManager'
 import { EditTransactionService, getEditTransactionService } from '../services/EditTransactionService'
 import { ContextManager } from './ContextManager'
 import { PermissionManager } from '../services/PermissionManager'
+import { interceptAskUser, type AskUserAnswer, type AskUserRequest } from '../tools/builtin/AskUserQuestionTool'
 import type { ChatMessage, ToolDefinition, ToolCall } from '../../shared/types/provider'
 
 export interface AgentRunnerCallbacks extends StreamCallbacks {
   onToolStart?: (toolCallId: string, name: string, args: string, thoughtSignature?: string) => void
   onToolEnd?: (toolCallId: string, result: string) => void
   onPermissionRequest?: (request: import('../services/PermissionManager').PermissionRequest) => Promise<boolean>
+  onAskUserRequest?: (request: AskUserRequest) => Promise<AskUserAnswer[]>
 }
 
 export interface AgentRunConfig extends ChatRequestConfig {
@@ -327,6 +329,16 @@ export class AgentRunner {
                   }
                 }
                 
+                if (!resultMessage) {
+                  const askIntercept = await interceptAskUser(
+                    name, parsedArgs, permReq.id, callbacks.onAskUserRequest || null
+                  )
+                  if (askIntercept.handled) {
+                    resultMessage = askIntercept.result || ''
+                    if (askIntercept.isError) isError = true
+                  }
+                }
+
                 if (!resultMessage) {
                   resultMessage = await toolInstance.execute(args, {
                     workspaceRoot: config.workspaceRoot,

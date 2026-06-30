@@ -38,12 +38,14 @@ declare global {
             onToolStart?: (toolCallId: string, name: string, args: string, thoughtSignature?: string) => void
             onToolEnd?: (toolCallId: string, result: string) => void
             onPermissionRequest?: (request: any) => void
+            onAskUserRequest?: (request: any) => void
           }
         ) => () => void
         acceptFile: (txId: string, filePath: string) => Promise<boolean>
         rejectFile: (txId: string, filePath: string) => Promise<boolean>
         getDiff: (txId: string) => Promise<Array<{ path: string; diff: string }>>
         respondToApproval: (requestId: string, approved: boolean) => Promise<void>
+        respondAskUser: (requestId: string, answers: any) => Promise<void>
       }
       session: {
         list: () => Promise<any>

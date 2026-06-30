@@ -79,6 +79,7 @@ const api = {
         onToolStart?: (toolCallId: string, name: string, args: string, thoughtSignature?: string) => void
         onToolEnd?: (toolCallId: string, result: string) => void
         onPermissionRequest?: (request: any) => void
+        onAskUserRequest?: (request: any) => void
       }
     ): (() => void) => {
       let activeStreamId: string | null = null
@@ -115,6 +116,15 @@ const api = {
           ipcRenderer.invoke(`${IPC_CHANNELS.CHAT_APPROVAL_RESPONSE}:${request.id}`, false).catch(console.error)
         }
       }
+      const askUserHandler = (_event: unknown, streamId: string, request: any) => {
+        if (streamId !== activeStreamId) return
+        if (callbacks.onAskUserRequest) {
+          callbacks.onAskUserRequest(request)
+        } else {
+          // 无 handler 时回空答案作安全默认，避免主进程卡死
+          ipcRenderer.invoke(`${IPC_CHANNELS.CHAT_ASK_USER_RESPONSE}:${request.id}`, []).catch(console.error)
+        }
+      }
 
       const cleanup = () => {
         if (activeStreamId) {
@@ -126,6 +136,7 @@ const api = {
         ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_TOOL_START, toolStartHandler)
         ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_TOOL_END, toolEndHandler)
         ipcRenderer.removeListener(IPC_CHANNELS.CHAT_REQUEST_APPROVAL, approvalHandler)
+        ipcRenderer.removeListener(IPC_CHANNELS.CHAT_REQUEST_ASK_USER, askUserHandler)
       }
 
       ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_CHUNK, chunkHandler)
@@ -134,6 +145,7 @@ const api = {
       ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_TOOL_START, toolStartHandler)
       ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_TOOL_END, toolEndHandler)
       ipcRenderer.on(IPC_CHANNELS.CHAT_REQUEST_APPROVAL, approvalHandler)
+      ipcRenderer.on(IPC_CHANNELS.CHAT_REQUEST_ASK_USER, askUserHandler)
 
       // 发起请求
       ipcRenderer.invoke(IPC_CHANNELS.CHAT_STREAM_START, { providerId, model, messages, sessionId })
@@ -158,7 +170,10 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.CHAT_GET_DIFF, txId),
       
     respondToApproval: (requestId: string, approved: boolean): Promise<void> =>
-      ipcRenderer.invoke(`${IPC_CHANNELS.CHAT_APPROVAL_RESPONSE}:${requestId}`, approved)
+      ipcRenderer.invoke(`${IPC_CHANNELS.CHAT_APPROVAL_RESPONSE}:${requestId}`, approved),
+
+    respondAskUser: (requestId: string, answers: any): Promise<void> =>
+      ipcRenderer.invoke(`${IPC_CHANNELS.CHAT_ASK_USER_RESPONSE}:${requestId}`, answers)
   },
 
   session: {
