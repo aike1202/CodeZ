@@ -126,6 +126,135 @@
 
 ---
 
+### 3.2 Claude Code 官方工具描述（权威参考 + 本项目适配）
+
+下述引文逐字摘自 Claude Code（cc_version=2.1.196.364）通过 API 声明的 `functionDeclarations[].description`（来源 `ClaudeCodelogs/v101.txt`）。本项目实现这 11 个工具时，`get description()` **必须把这些语义放进 description**；与本项目不一致处用「本项目适配」标注收窄/替换。
+
+---
+
+#### Read（官方）
+> Reads a file from the local filesystem.
+> - `file_path` must be an absolute path.
+> - Reads up to 2000 lines by default.
+> - When you already know which part of the file you need, only read that part.
+> - Results returned using cat -n format, line numbers starting at 1.
+> - Reads images (PNG, JPG, …) and presents them visually. Reads PDFs via the `pages` parameter (max 20 pages/request; required for PDFs over 10 pages). Reads Jupyter notebooks (.ipynb) as cells with outputs.
+> - Reading a directory, a missing file, or an empty file returns an error or system reminder rather than content.
+> - Do NOT re-read a file you just edited to verify — Edit/Write would have errored if the change failed, and the harness tracks file state for you.
+
+**本项目适配**：默认行数用现 `ReadFilesTool` 预算 `maxTotalLines=1200 / maxTotalBytes=120000`，不照搬"2000 lines"常量；图片/PDF **本期不实现**，命中二进制返 `Cannot read binary file.`；新增哈希去重（`Wasted call —…`）须在 description 体现"不要重读未变文件"；`.ipynb` 按 §4.6 渲染为 `<cell id>` 文本。
+
+---
+
+#### Edit（官方）
+> Performs exact string replacement in a file.
+> - You must Read the file in this conversation before editing, or the call will fail.
+> - `old_string` must match the file exactly, including indentation, and be unique — the edit fails otherwise. Strip the Read line prefix (line number + tab) before matching.
+> - `replace_all: true` replaces every occurrence instead.
+
+**本项目适配**：与现 `apply_patch` 的 `edits[]` 单点等价；复用 `EditTransactionService` 与 `expectedHash` 防覆写陈旧；唯一性校验、剥 `数字\t` 前缀沿用官方语义。
+
+---
+
+#### Write（官方）
+> Writes a file to the local filesystem, overwriting if one exists.
+> When to use: creating a new file, or fully replacing one you've already Read. Overwriting an existing file you haven't Read will fail. For partial changes, use Edit instead.
+
+**本项目适配**：等价 `apply_patch` 的 `fullOverwrite+newContent`；新建可直接写，覆盖须本会话先 Read；走事务可回滚；workspace 外拒绝。
+
+---
+
+#### NotebookEdit（官方）
+> Replaces, inserts, or deletes a single cell in a Jupyter notebook (.ipynb file).
+> - You must use the Read tool on the notebook in this conversation before editing — this tool will fail otherwise.
+> - `notebook_path` must be an absolute path.
+> - `cell_id` is the `id` attribute shown in the Read tool's `<cell id="...">` output. It is required for `replace` and `delete`.
+> - `edit_mode` defaults to `replace`. Use `insert` to add a new cell after the given `cell_id` (or at the beginning if omitted) — `cell_type` is required when inserting. Use `delete` to remove the cell.
+
+**本项目适配**：零依赖手写 notebook v4 JSON 读写（无第三方 notebook 库）；Read 对 `.ipynb` 须输出 `<cell id="...">` 文本以供取 id。
+
+---
+
+#### Glob（官方）
+> Fast file pattern matching. Supports glob patterns like `"**/*.js"` or `"src/**/*.ts"`. Returns matching file paths sorted by modification time.
+
+**本项目适配**：引擎用 `@vscode/ripgrep --files`（含 `--glob`），回退 `fast-glob`；`list_files` 仍保留供既有引用（不删）。
+
+---
+
+#### Grep（官方）
+> Content search built on ripgrep. Prefer this over `grep`/`rg` via Bash — results integrate with the permission UI and file links.
+> - Full regex syntax (e.g. "log.*Error", "function\s+\w+"). Ripgrep, not grep — escape literal braces (`interface\{\}`).
+> - Filter with `glob` (e.g. `**/*.tsx`) or `type` (e.g. js, py, rust).
+> - `output_mode`: "content" (matching lines), "files_with_matches" (paths only, default), or "count".
+> - `multiline: true` for patterns that span lines.
+
+**本项目适配**：引擎 `@vscode/ripgrep` 子进程；ripgrep 不可用时返错（不回退纯 JS）；参数补齐 v101 中的 `-A/-B/-C/-n/-i/-o/context/head_limit/offset`；`search` type=text 经 alias 委托给 Grep。
+
+---
+
+#### Bash（官方）
+> Executes a bash command and returns its output.
+> This tool runs Git Bash (POSIX sh), not cmd.exe or PowerShell. Use Unix shell syntax: `/dev/null` not `NUL`, forward slashes, `$VAR` not `%VAR%`. Do not use PowerShell here-strings or backtick continuation — for multi-line strings use a heredoc.
+> - Working directory persists between calls, but prefer absolute paths — `cd` in a compound command can trigger a permission prompt.
+> - Avoid using this tool to run `find`, `grep`, `cat`, etc. — use dedicated tools instead.
+> - `timeout` in ms: default 120000, max 600000.
+> - `run_in_background` runs detached; it keeps running across turns and re-invokes you when it exits.
+> - Git: interactive flags not supported; use `gh` for GitHub ops; commit/push only when asked, branch first if on default branch.
+
+**本项目适配**：引擎检测 Git Bash 可执行→回退 `child_process.spawn("bash")`；timeout 默认 120000/上限 600000 沿用官方；background 走 `BackgroundTaskRegistry`（PID+stdout 文件+task 通知）；**无沙箱**，靠 `PermissionManager.getCommandRisk`→allow/ask；超长输出 head 1000+tail 3000 截断（沿用现 `run_command` 思路）；工作目录会话级持久。
+
+---
+
+#### PowerShell（官方，节选要点）
+> Executes a given PowerShell command with optional timeout. Working directory persists; shell state does not.
+> - For terminal operations: git, npm, docker, PS cmdlets. NOT for file ops — use specialized tools.
+> - Edition: Windows PowerShell 5.1 (powershell.exe). Pipeline chain `&&`/`||` NOT available — use `A; if ($?) { B }`. Ternary `?:`, `??`, `?.` NOT available. No `2>&1` on native exes. Default file encoding UTF-16 LE; pass `-Encoding utf8`. `ConvertFrom-Json` returns PSCustomObject, not hashtable.
+> - Use Glob/Grep/Read/Edit/Write instead of `Get-ChildItem -Recurse`/`Select-String`/`Get-Content`/`Set-Content`.
+> - `-ErrorAction SilentlyContinue` still exits 1 for cmdlet failure; to make non-fatal use `try { ... -ErrorAction Stop } catch {}`.
+> - Interactive/blocking commands (`Read-Host`, `git rebase -i`, etc.) forbidden (tool runs with -NonInteractive).
+> - Multi-line strings to native exes: single-quoted here-string `@'...'@`, `'@` at column 0.
+> - Avoid unnecessary `Start-Sleep`; don't retry failing commands in sleep loops.
+
+**本项目适配**：调 `powershell.exe -NoProfile -NonInteractive -Command`；与 Bash 共用 `SpawnRunner`/`BackgroundTaskRegistry`；5.1 限制写入 description 供模型遵守；offset/timeout/截断/工作目录同 Bash。
+
+---
+
+#### AskUserQuestion（官方要点）
+> Use only when blocked on a decision genuinely the user's to make (one you cannot resolve from the request/code/sensible defaults).
+> - Users can always select "Other" for custom input; multiSelect allows multiple answers.
+> - Recommended option first, label ends with "(Recommended)".
+> - Reserve for decisions where the answer changes what you do next. For choices with a conventional default, pick the obvious option, mention it, and proceed.
+> - `preview` field on options for ASCII mockups / code snippets / diagrams; monospace box; only single-select.
+> - In plan mode, use to clarify approaches BEFORE finalizing a plan; do NOT ask "Is my plan ready?".
+
+**本项目适配**：真实工具 → IPC `CHAT_REQUEST_ASK_USER`/`CHAT_ASK_USER_RESPONSE:<id>`（照抄 §3.1 `CHAT_REQUEST_APPROVAL` 范式）；渲染端新增 `AskUserQuestionWidget`（1-4 问、每问 2-4 选项+Other、preview 侧边对照、multiSelect）；计划模式本期未启用，文案保留但按普通提问处理。
+
+---
+
+#### PushNotification（官方要点）
+> Sends a desktop notification in the user's terminal; if Remote Control connected, also pushes to phone. It pulls their attention — that's the cost. The benefit is they learn something worth knowing now.
+> - Because an unneeded notification is annoying in a way that accumulates, err toward not sending one. Don't notify for routine progress, or to answer something asked seconds ago, or when a quick task completes. Notify when there's a real chance they've walked away and something's worth coming back for — or when explicitly asked.
+> - Keep the message under 200 characters, one line, no markdown. Lead with what they'd act on ("build failed: 2 auth tests" beats "task done" or a status dump).
+> - If the result says the push wasn't sent, that's expected — no action needed.
+
+**本项目适配**：主进程 `Electron Notification` 桌面 toast，点击 `webContents.focus()`；`PushProvider` 接口默认 `DesktopNotificationProvider`，远端通道占位不实现；返 `{sent:boolean}`，`sent:false` 视作预期不重试。
+
+---
+
+#### Skill（官方要点）
+> Execute a skill within the main conversation. When users ask to perform tasks, check if any available skills match.
+> - When users reference `/<something>`, they mean a skill. Set `skill` to the exact name (no leading slash); for plugin-namespaced use `plugin:skill` form. `args` for optional arguments.
+> - Available skills are listed in system-reminder messages.
+> - Only invoke a skill in that list, or one the user explicitly typed as `/<name>`. Never guess names.
+> - When a skill matches the request, this is a BLOCKING REQUIREMENT: invoke the Skill tool BEFORE any other response about the task. Never mention a skill without calling this tool. Don't invoke a skill that is already running.
+> - Not for built-in CLI commands (`/help`, `/clear`, etc.).
+> - If a `<command-name>` tag is in the turn, the skill has ALREADY been loaded — follow instructions directly instead of calling again.
+
+**本项目适配**：`SkillManager.getSkills(workspaceRoot)` 取可用清单（扫描 `~/.codez/skills` + `<workspace>/.skills`，`SKILL.md`/`.skill.md` frontmatter `name/description/triggers`）；`SkillTool.execute(args)` 返回命中 SKILL.md 正文，未命中回错并列出 ≤30 个清单；AgentRunner 对 Skill 一律 `allow` 不二次 ask；**保留**现有 `<skills_instructions>` prompt 提示与 `parseSlashCommand` 的 `/<skill>` 内联路径，二者并存。
+
+---
+
 ## 4. 文件操作设计
 
 ### 4.1 Read
