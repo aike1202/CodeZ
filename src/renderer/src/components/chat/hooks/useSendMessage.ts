@@ -75,7 +75,6 @@ export function useSendMessage() {
         },
         ...currentMsgs
           .filter((m) => !m.streaming)
-          .slice(-40)
           .flatMap((m, index, arr) => {
             const isLastMessage = index === arr.length - 1
             const mapped: Array<{ role: 'system' | 'user' | 'assistant' | 'tool'; content: string; tool_calls?: any[]; tool_call_id?: string; name?: string; thought_signature?: string; provider_specific_fields?: any }> = []

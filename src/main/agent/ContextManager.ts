@@ -85,12 +85,13 @@ export class ContextManager {
     return count
   }
 
-  /** 对单个字符串做 CJK 感知的 Token 估算 */
+  /** 对单个字符串做 CJK 感知的 Token 估算（CJK ≈ 0.8 字/token，非 CJK ≈ 4 字/token） */
   private static estimateStringTokens(text: string): number {
     const cjkMatches = text.match(CJK_REGEX)
     const cjkCount = cjkMatches ? cjkMatches.length : 0
     const otherCount = text.length - cjkCount
-    return Math.ceil(cjkCount / 1.5 + otherCount / 4)
+    // CJK: ~1.25 token/字 = 字/0.8；非 CJK: ~0.25 token/字 = 字/4
+    return Math.ceil(cjkCount / 0.8 + otherCount / 4)
   }
 
   /**
