@@ -102,8 +102,10 @@ export class ContextManager {
     options?: TrimOptions
   ): { messages: ChatMessage[], trimmed: boolean, trimmedCount: number, willTrimSoon: boolean } {
     // 根据上下文窗口大小动态调整工具输出截断长度
+    // 下限 45000 覆盖 Read 内部 maxCharsPerFile=40000，避免 Read 自管预算后的输出
+    // 被外层二次整条拦截（红线职责是兜底防单条巨输出吃爆窗口，非二次截断各工具）。
     const dynamicMaxToolOutput = Math.max(
-      15000,
+      45000,
       Math.min(60000, Math.floor(contextWindowTokens / 3))
     )
     const maxToolOutput = options?.maxToolOutputChars ?? dynamicMaxToolOutput
@@ -161,24 +163,35 @@ export class ContextManager {
   }
 
   /**
-   * 截断单条 tool 输出：尝试保持 JSON 结构完整，或者返回友好的截断错误。
+   * 截断单条 tool 输出：切片保留头尾，而非整条丢弃。
+   *
+   * 对标准包装结果 {ok:true,data:"..."} 切片其 data 字段（保持 ok:true，让模型拿到
+   * 可用内容 + 分页提示）；对 {ok:false,...} 错误结果不截断（错误信息通常很小且不应被改写）；
+   * 对非 JSON 字符串直接头尾切片。
    */
   static truncateToolOutput(content: string, maxChars: number): string {
     if (content.length <= maxChars) return content
 
-    const truncationMsg = `[System Note: The tool output exceeded the allowed context limit of ${maxChars} chars (original: ${content.length} chars) and was blocked by ContextManager. DO NOT retry the exact same tool call. Please use more restrictive arguments (e.g. use startLine/endLine for files, or maxDepth for directories) to read the data in smaller chunks.]`
+    const note = (originalLen: number) =>
+      `[System Note: Tool output truncated to fit context (original: ${originalLen} chars, cap: ${maxChars}). Head + tail kept. Use more restrictive arguments (e.g. offset/limit for files, maxDepth for directories, or head_limit for search) to read smaller chunks.]`
 
     try {
       const parsed = JSON.parse(content)
-      // 如果这是一个标准的包装后的工具结果 { ok: true/false, data/error: ... }
-      if (parsed !== null && typeof parsed === 'object' && ('ok' in parsed)) {
-        return JSON.stringify({
-          ok: false,
-          error: {
-            code: 'SYSTEM_TRUNCATION',
-            message: truncationMsg
-          }
-        })
+      if (parsed !== null && typeof parsed === 'object' && 'ok' in parsed) {
+        // 错误结果不截断（小且不可改写）；仅对成功结果切片 data
+        if (parsed.ok === true && typeof parsed.data === 'string') {
+          const data = parsed.data
+          const headChars = Math.max(Math.floor(maxChars * 0.7), 200)
+          const tailChars = Math.max(Math.floor(maxChars * 0.3), 200)
+          const head = data.slice(0, headChars)
+          const tail = data.slice(-tailChars)
+          return JSON.stringify({
+            ok: true,
+            data: `${head}\n\n${note(data.length)}\n\n${tail}`
+          })
+        }
+        // {ok:false} 或无 data 的包装：原样返回（错误不应被截断改写）
+        return content
       }
     } catch {
       // 非 JSON 或解析失败，按普通字符串切片
@@ -191,7 +204,7 @@ export class ContextManager {
     const head = content.slice(0, headChars)
     const tail = content.slice(-tailChars)
 
-    return `${head}\n\n${truncationMsg}\n\n${tail}`
+    return `${head}\n\n${note(content.length)}\n\n${tail}`
   }
 
   /**
