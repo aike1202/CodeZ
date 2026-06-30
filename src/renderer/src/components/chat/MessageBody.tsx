@@ -19,25 +19,35 @@ export default function MessageBody({
 }): React.ReactElement {
   const validFiles = useWorkspaceStore((s) => s.validFiles)
 
-  // 辅助函数，将子节点中的纯字符串丢给 parseInline，其余保留
-  const renderInline = (children: React.ReactNode, showCursor = false) => {
+  // 极度罕见的字符串作为标记，防止触发 react-markdown 的 markdown 词法解析（如加粗、斜体等）
+  const STREAMING_TOKEN = '▌▌STREAMING_TOKEN▐▐'
+
+  // 辅助函数：深度遍历 React Node，移除 token 并决定是否渲染 cursor，同时将纯文本丢给 parseInline
+  const renderInline = (children: React.ReactNode, forceShowCursor = false): React.ReactNode => {
     if (typeof children === 'string') {
-      return parseInline(children, onFileClick, showCursor, validFiles)
+      const hasToken = children.includes(STREAMING_TOKEN)
+      const cleanStr = children.replace(STREAMING_TOKEN, '')
+      return parseInline(cleanStr, onFileClick, forceShowCursor || hasToken, validFiles)
     }
     if (Array.isArray(children)) {
       return children.map((c, i) => (
-        <React.Fragment key={i}>
-          {typeof c === 'string'
-            ? parseInline(c, onFileClick, showCursor && i === children.length - 1, validFiles)
-            : c}
-        </React.Fragment>
+        <React.Fragment key={i}>{renderInline(c, forceShowCursor)}</React.Fragment>
       ))
+    }
+    // 拦截嵌套的内部元素（如被 react-markdown 解析的 a/strong/em/del），继续向内递归并保留外层 ReactElement 壳
+    if (React.isValidElement(children)) {
+      const el = children as React.ReactElement
+      // 如果元素有 children 属性，则递归处理其 children
+      if (el.props && 'children' in el.props) {
+        return React.cloneElement(el, {
+          ...el.props,
+          children: renderInline(el.props.children, forceShowCursor)
+        })
+      }
     }
     return children
   }
 
-  // 打字机光标标记：在末尾追加不可见的标识字符
-  const STREAMING_TOKEN = ' __STREAMING__ '
   const renderContent = streaming && !content 
     ? '▊' 
     : content + (streaming ? STREAMING_TOKEN : '')
@@ -53,9 +63,10 @@ export default function MessageBody({
             const className = childProps.className || ''
             const match = /language-(\w+)/.exec(className || '')
             const lang = match ? match[1] : 'text'
-            // react-markdown passes an array of strings or single string
+            
+            // 提取代码内容
             const rawText = Array.isArray(childProps.children) ? childProps.children.join('') : String(childProps.children || '')
-            // trim trailing newline that react-markdown might add
+            // 去除 react-markdown 自动追加的换行
             let textContent = rawText.replace(/\n$/, '')
             
             const isLast = streaming && textContent.includes(STREAMING_TOKEN)
@@ -67,9 +78,21 @@ export default function MessageBody({
           code(props: any) {
             const { children, className, node, ...rest } = props
             const textContent = Array.isArray(children) ? children.join('') : String(children || '')
+            const isLast = streaming && textContent.includes(STREAMING_TOKEN)
             const cleanText = textContent.replace(STREAMING_TOKEN, '')
-            return <code className="inline-code" {...rest}>{cleanText}</code>
+            return (
+              <code className="inline-code" {...rest}>
+                {cleanText}
+                {isLast && <span className="streaming-cursor">▊</span>}
+              </code>
+            )
           },
+          // 行内格式劫持 (保证 token 在这些内部也能被安全移除)
+          a: ({ children, ...props }) => <a {...props} className="msg-inline-link">{renderInline(children)}</a>,
+          strong: ({ children, ...props }) => <strong {...props} className="msg-bold">{renderInline(children)}</strong>,
+          em: ({ children, ...props }) => <em {...props} className="msg-italic">{renderInline(children)}</em>,
+          del: ({ children, ...props }) => <del {...props} className="msg-strikethrough">{renderInline(children)}</del>,
+          
           // 标题劫持
           h1: ({ children }) => <h1 className="msg-h1">{renderInline(children)}</h1>,
           h2: ({ children }) => <h2 className="msg-h2">{renderInline(children)}</h2>,
@@ -77,6 +100,7 @@ export default function MessageBody({
           h4: ({ children }) => <h4 className="msg-h3" style={{ fontSize: '15px' }}>{renderInline(children)}</h4>,
           h5: ({ children }) => <h5 className="msg-h3" style={{ fontSize: '14px' }}>{renderInline(children)}</h5>,
           h6: ({ children }) => <h6 className="msg-h3" style={{ fontSize: '13px' }}>{renderInline(children)}</h6>,
+          
           // 表格劫持
           table: ({ children }) => (
             <div className="msg-table-wrapper">
@@ -87,21 +111,10 @@ export default function MessageBody({
           tbody: ({ children }) => <tbody className="msg-table-tbody">{children}</tbody>,
           th: ({ children }) => <th className="msg-table-th">{renderInline(children)}</th>,
           td: ({ children }) => <td className="msg-table-td">{renderInline(children)}</td>,
+          
           // 文本劫持
-          p: ({ children }) => {
-            const isLast = streaming && String(children).includes(STREAMING_TOKEN)
-            const cleanChildren = React.Children.map(children, (child) =>
-              typeof child === 'string' ? child.replace(STREAMING_TOKEN, '') : child
-            )
-            return <p className="msg-p">{renderInline(cleanChildren, isLast)}</p>
-          },
-          li: ({ children }) => {
-            const isLast = streaming && String(children).includes(STREAMING_TOKEN)
-            const cleanChildren = React.Children.map(children, (child) =>
-              typeof child === 'string' ? child.replace(STREAMING_TOKEN, '') : child
-            )
-            return <li className="msg-list-item">{renderInline(cleanChildren, isLast)}</li>
-          },
+          p: ({ children }) => <p className="msg-p">{renderInline(children)}</p>,
+          li: ({ children }) => <li className="msg-list-item"><span className="msg-list-bullet">•</span><span className="msg-list-content">{renderInline(children)}</span></li>,
           blockquote: ({ children }) => (
             <blockquote className="blockquote-block">{children}</blockquote>
           )
