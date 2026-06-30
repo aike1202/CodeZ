@@ -21,17 +21,17 @@
 }
 
 .timeline-header-btn:hover {
-  background-color: var(--bg-hover-light, rgba(243, 244, 246, 0.5));
+  background-color: var(--bg-hover-light);
 }
 
 .timeline-header-text {
   font-size: 13px;
-  color: var(--text-muted, #6b7280);
+  color: var(--text-muted);
 }
 
 .timeline-header-arrow-text {
   font-size: 11px;
-  color: var(--text-light, #9ca3af);
+  color: var(--text-light);
 }
 
 .timeline-list {
@@ -57,7 +57,7 @@
   top: 16px;
   bottom: -16px;
   width: 1px;
-  background-color: var(--border-light, #e5e7eb);
+  background-color: var(--border-light);
   z-index: 0;
 }
 
@@ -72,7 +72,7 @@
 }
 
 .timeline-item-row.interactive:hover {
-  background-color: var(--bg-hover-light, rgba(243, 244, 246, 0.3));
+  background-color: var(--bg-hover-light);
 }
 
 .timeline-item-left {
@@ -83,7 +83,7 @@
 .timeline-icon-box {
   flex-shrink: 0;
   z-index: 10;
-  background-color: var(--bg-panel, #ffffff);
+  background-color: var(--bg-panel);
   width: 16px;
   height: 16px;
   display: flex;
@@ -96,7 +96,7 @@
 }
 
 .timeline-target-link {
-  color: var(--text-main, #374151);
+  color: var(--text-main);
   font-family: var(--font-mono, monospace);
   font-size: 12px;
   cursor: pointer;
@@ -104,15 +104,15 @@
 }
 
 .timeline-target-link:hover {
-  color: var(--primary, #3b82f6);
+  color: var(--primary);
   text-decoration: underline;
 }
 
 .timeline-cmd-code {
-  color: var(--text-main, #374151);
+  color: var(--text-main);
   font-family: var(--font-mono, monospace);
   font-size: 11.5px;
-  background-color: var(--bg-hover, rgba(243, 244, 246, 0.6));
+  background-color: var(--bg-hover);
   padding: 2px 6px;
   border-radius: 4px;
 }
@@ -126,14 +126,14 @@
 }
 
 .timeline-cmd-status-badge.failed {
-  color: var(--text-danger, #e11d48);
-  background-color: var(--bg-danger-light, #fff1f2);
+  color: var(--text-danger);
+  background-color: var(--bg-danger-light);
   border: 1px solid rgba(254, 226, 226, 0.5);
 }
 
 .timeline-cmd-status-badge.success {
-  color: var(--text-success, #059669);
-  background-color: var(--bg-success-light, #ecfdf5);
+  color: var(--text-success);
+  background-color: var(--bg-success-light);
   border: 1px solid rgba(209, 250, 229, 0.5);
 }
 
@@ -156,23 +156,23 @@
 }
 
 .timeline-diff-add {
-  color: var(--text-success, #059669);
+  color: var(--text-success);
   font-weight: 500;
 }
 
 .timeline-diff-del {
-  color: var(--text-danger, #f43f5e);
+  color: var(--text-danger);
   font-weight: 500;
 }
 
 .timeline-expand-arrow {
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   transition: transform 0.15s ease;
   margin-right: 6px;
 }
 
 .timeline-expand-arrow:hover {
-  color: var(--text-main, #4b5563);
+  color: var(--text-main);
 }
 
 .timeline-expand-arrow.expanded {
@@ -183,7 +183,7 @@
   margin-top: 4px;
   margin-left: 24px;
   padding-left: 8px;
-  border-left: 1px solid var(--border-light, #f3f4f6);
+  border-left: 1px solid var(--border-light);
 }
 
 .timeline-detail-status-line {
@@ -191,13 +191,13 @@
   padding-top: 2px;
   padding-bottom: 2px;
   font-size: 13px;
-  color: var(--text-muted, #6b7280);
+  color: var(--text-muted);
   opacity: 0.9;
   line-height: 1.625;
 }
 
 .timeline-detail-working-badge {
-  color: var(--primary, #3b82f6);
+  color: var(--primary);
   font-weight: 500;
   flex-shrink: 0;
   padding-top: 1px;
@@ -216,7 +216,7 @@
   height: 100%;
   width: 100%;
   border-radius: 9999px;
-  background-color: var(--primary, #3b82f6);
+  background-color: var(--primary);
   opacity: 0.75;
 }
 
@@ -225,7 +225,7 @@
   border-radius: 9999px;
   height: 6px;
   width: 6px;
-  background-color: var(--primary, #3b82f6);
+  background-color: var(--primary);
 }
 
 .spin-slow {
@@ -235,7 +235,7 @@
 .exe-log-divider {
   margin-top: 6px;
   padding-top: 6px;
-  border-top: 1px solid var(--border-light, #e5e7eb);
+  border-top: 1px solid var(--border-light);
 }
 
 @keyframes spin {
@@ -251,7 +251,7 @@
   white-space: pre-wrap;
   word-break: break-words;
   line-height: 1.625;
-  color: #6b7280; /* text-gray-500 */
+  color: var(--text-muted); /* text-gray-500 */
   font-family: var(--font-sans, sans-serif);
   padding-right: 8px;
 }
@@ -271,7 +271,7 @@
   padding: 8px;
   font-family: var(--font-mono, monospace);
   font-size: 11.5px;
-  color: #6b7280;
+  color: var(--text-muted);
   border: 1px solid rgba(229, 231, 235, 0.5);
   margin-right: 8px;
   text-align: left;
@@ -287,6 +287,41 @@
   }
 }
 
+.exe-log-dir-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  margin-top: 8px;
+  margin-bottom: 4px;
+  background-color: var(--bg-surface, #f3f4f6);
+  border-radius: 4px;
+  color: var(--text-primary, #111827);
+  font-weight: 500;
+  font-size: 11.5px;
+  font-family: var(--font-sans, sans-serif);
+}
+
+.exe-log-dir-header:first-child {
+  margin-top: 2px;
+}
+
+.exe-log-dir-header svg {
+  width: 14px;
+  height: 14px;
+  color: var(--text-light, #6b7280);
+}
+
+@media (prefers-color-scheme: dark) {
+  .exe-log-dir-header {
+    background-color: rgba(63, 63, 70, 0.4); /* subtle dark background */
+    color: #f4f4f5;
+  }
+  .exe-log-dir-header svg {
+    color: #a1a1aa;
+  }
+}
+
 .exe-log-dir-row {
   display: flex;
   align-items: center;
@@ -299,7 +334,7 @@
 }
 
 .exe-log-dir-row:hover {
-  color: #1f2937; /* hover:text-gray-800 */
+  color: var(--text-main); /* hover:text-gray-800 */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -309,7 +344,7 @@
 }
 
 .exe-log-files-title {
-  color: #9ca3af; /* text-gray-400 */
+  color: var(--text-muted); /* text-gray-400 */
   margin-bottom: 6px;
   font-size: 11px;
   font-family: var(--font-sans, sans-serif);
@@ -349,7 +384,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: #4b5563; /* text-gray-600 */
+  color: var(--text-main); /* text-gray-600 */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -360,7 +395,7 @@
 
 .exe-log-file-row:hover .exe-log-file-path-text {
   text-decoration: underline;
-  color: #2563eb; /* text-blue-500 */
+  color: var(--primary-color); /* text-blue-500 */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -378,7 +413,7 @@
   padding: 10px;
   font-family: var(--font-sans, sans-serif);
   font-size: 12px;
-  color: #4b5563; /* text-gray-600 */
+  color: var(--text-main); /* text-gray-600 */
   border: 1px solid rgba(229, 231, 235, 0.5);
   margin-right: 8px;
   text-align: left;
@@ -400,7 +435,7 @@
 }
 
 .exe-log-snapshot-label {
-  color: #9ca3af;
+  color: var(--text-muted);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -412,7 +447,7 @@
 .exe-log-snapshot-val {
   grid-column: span 2 / span 2;
   font-family: var(--font-mono, monospace);
-  color: #1f2937;
+  color: var(--text-main);
   font-weight: 500;
   word-break: break-all;
 }
@@ -424,7 +459,7 @@
 }
 
 .exe-log-snapshot-sub-title {
-  color: #9ca3af;
+  color: var(--text-muted);
   margin-bottom: 6px;
   font-size: 11.5px;
 }
@@ -445,8 +480,8 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background-color: #ffffff;
-  border: 1px solid #f3f4f6;
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-light);
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 11px;
@@ -461,7 +496,7 @@
 }
 
 .exe-log-script-key {
-  color: #2563eb;
+  color: var(--primary-color);
   font-weight: bold;
 }
 
@@ -472,7 +507,7 @@
 }
 
 .exe-log-script-val {
-  color: #6b7280;
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -494,7 +529,7 @@
   padding-right: 4px;
   font-family: var(--font-mono, monospace);
   font-size: 11px;
-  color: #6b7280;
+  color: var(--text-muted);
   line-height: normal;
   border: 1px solid rgba(229, 231, 235, 0.5);
   padding: 8px;
@@ -511,7 +546,7 @@
 
 .exe-log-tree-line-indent {
   padding-left: 4px;
-  color: #9ca3af;
+  color: var(--text-muted);
 }
 
 .exe-log-tree-row {
@@ -524,7 +559,7 @@
 }
 
 .exe-log-tree-row:hover {
-  color: #1f2937;
+  color: var(--text-main);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -542,7 +577,7 @@
   padding: 8px;
   font-family: var(--font-mono, monospace);
   font-size: 11px;
-  color: #6b7280;
+  color: var(--text-muted);
   border: 1px solid rgba(229, 231, 235, 0.5);
   margin-right: 8px;
   text-align: left;
@@ -592,7 +627,7 @@
 }
 
 .exe-log-terminal-prompt-char {
-  color: #10b981;
+  color: var(--color-success);
   user-select: none;
   font-weight: bold;
 }
@@ -611,7 +646,7 @@
 }
 
 .exe-log-output-label {
-  color: #9ca3af;
+  color: var(--text-muted);
   margin-bottom: 4px;
   display: block;
   user-select: none;
@@ -627,7 +662,7 @@
   white-space: pre-wrap;
   word-break: break-all;
   font-size: 10.5px;
-  color: #4b5563;
+  color: var(--text-main);
   line-height: 1.625;
 }
 
@@ -644,7 +679,7 @@
 }
 
 .exe-log-params-label {
-  color: #9ca3af;
+  color: var(--text-muted);
   user-select: none;
 }
 
@@ -677,7 +712,7 @@
 }
 
 .exe-log-param-key {
-  color: #2563eb;
+  color: var(--primary-color);
   flex-shrink: 0;
   opacity: 0.8;
 }
@@ -689,7 +724,7 @@
 }
 
 .exe-log-param-val {
-  color: #4b5563;
+  color: var(--text-main);
   white-space: pre-wrap;
   word-break: break-all;
 }
@@ -701,7 +736,7 @@
 }
 
 .exe-log-param-args {
-  color: #4b5563;
+  color: var(--text-main);
   white-space: pre-wrap;
   word-break: break-all;
 }
@@ -759,16 +794,16 @@
 
 .timeline-target-filename {
   font-weight: 500;
-  color: var(--text-main, #374151);
+  color: var(--text-main);
   transition: color 0.15s ease;
 }
 
 .timeline-target-link:hover .timeline-target-filename {
-  color: var(--primary, #3b82f6);
+  color: var(--primary);
 }
 
 .timeline-target-dir {
-  color: var(--text-muted, #8c8c8c);
+  color: var(--text-muted);
   font-size: 11px;
   margin-left: 6px;
   font-weight: normal;
@@ -786,4 +821,108 @@
   }
 }
 
+
+
+.exe-log-search-container {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.exe-log-search-title {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding-left: 4px;
+  margin-bottom: 4px;
+}
+
+.exe-log-search-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background-color: var(--bg-primary, #ffffff);
+  border-radius: 4px;
+  border: 1px solid var(--border-light, #e5e7eb);
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+:root[class~="dark"] .exe-log-search-item {
+  background-color: var(--bg-deep, #1a1b1e);
+  border-color: var(--border-dark, #1f2937);
+}
+
+.exe-log-search-item:hover {
+  border-color: var(--border-hover, #d1d5db);
+}
+
+:root[class~="dark"] .exe-log-search-item:hover {
+  border-color: var(--border-hover-dark, #374151);
+}
+
+.exe-log-search-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  width: fit-content;
+}
+
+.exe-log-search-item-icon {
+  display: flex;
+  align-items: center;
+  opacity: 0.8;
+  transition: opacity 0.2s ease;
+}
+
+.exe-log-search-item-header:hover .exe-log-search-item-icon {
+  opacity: 1;
+}
+
+.exe-log-search-item-path {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary, #374151);
+  transition: color 0.2s ease;
+}
+
+:root[class~="dark"] .exe-log-search-item-path {
+  color: var(--text-muted, #d1d5db);
+}
+
+.exe-log-search-item-header:hover .exe-log-search-item-path {
+  color: var(--primary-color, #2563eb);
+}
+
+.exe-log-search-item-text {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  line-height: 1.625;
+  padding: 6px 8px;
+  background-color: var(--bg-hover-light, #f9fafb);
+  border-radius: 4px;
+  color: var(--text-muted, #4b5563);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+:root[class~="dark"] .exe-log-search-item-text {
+  background-color: var(--bg-surface, #131416);
+  color: var(--text-muted, #9ca3af);
+}
+
+.exe-log-search-truncated {
+  font-size: 11px;
+  color: var(--warning-text, #f97316);
+  font-style: italic;
+  padding: 4px 8px;
+  margin-top: 4px;
+  background-color: rgba(249, 115, 22, 0.1);
+  border-radius: 4px;
+  width: fit-content;
+}
 

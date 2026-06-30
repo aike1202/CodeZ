@@ -36,6 +36,19 @@ export default function ExecutionLogDetail({
               const isDir = line.startsWith('[DIR]')
               const isFile = line.startsWith('[FILE]')
               if (!isDir && !isFile) {
+                if (!line.trim()) return null
+
+                // 解析 === Directory: xxx === 或 == Directory: xxx ==
+                const dirMatch = line.match(/^={2,}\s*Directory:\s*(.+?)\s*={2,}$/)
+                if (dirMatch) {
+                  return (
+                    <div key={idx} className="exe-log-dir-header">
+                      <FolderIcon />
+                      <span>{dirMatch[1]}</span>
+                    </div>
+                  )
+                }
+
                 return <div key={idx} className="pl-2">{line}</div>
               }
 
