@@ -4,11 +4,12 @@ import ExecutionLog from './ExecutionLog'
 import MessageBody from './MessageBody'
 import EditApprovalWidget from './EditApprovalWidget'
 import { extractMessageEdits, handleApprovalDiffClick } from './ChatArea' // We might need to move extractMessageEdits to a utils file?
+import type { ChatMessage, ExecutionTimelineItem } from '../../stores/chatStore'
 
 // Wait, I will just export extractMessageEdits from ExecutionLogUtils or somewhere if needed, but for now I can import from ChatArea. Or better, move it to ChatAreaUtils.ts?
 
 export interface AgentMessageContentProps {
-  msg: any
+  msg: ChatMessage
   lastStreamingMsgId: string | null
   handleFileClick: (filePath: string, virtualContent?: string) => Promise<void>
   handleDiffClick: (
@@ -59,7 +60,7 @@ export function AgentMessageContent({
   }
 
   const isStreaming = msg.streaming && msg.id === lastStreamingMsgId
-  let timelineForLog: any[] = []
+  let timelineForLog: ExecutionTimelineItem[] = []
   let finalContent = ''
 
   if (isStreaming) {
@@ -67,12 +68,12 @@ export function AgentMessageContent({
     finalContent = ''
   } else {
     timelineForLog = lastNonTextIdx === -1 ? [] : executionTimeline.slice(0, lastNonTextIdx + 1)
-    timelineForLog = timelineForLog.filter((item: any) => item.type !== 'text')
+    timelineForLog = timelineForLog.filter((item: ExecutionTimelineItem) => item.type !== 'text')
 
     const finalTextItems = lastNonTextIdx === -1 ? executionTimeline : executionTimeline.slice(lastNonTextIdx + 1)
     finalContent = finalTextItems
-      .filter((item: any) => item.type === 'text')
-      .map((item: any) => (item as any).content)
+      .filter((item: ExecutionTimelineItem) => item.type === 'text')
+      .map((item: ExecutionTimelineItem) => (item as any).content)
       .join('')
       .trimStart()
   }
@@ -82,7 +83,7 @@ export function AgentMessageContent({
 
   // Process edits
   const { edits, tools } = extractMessageEdits(msg)
-  const allProcessed = edits.length > 0 && edits.every((e: any) => msg.editStatuses?.[e.filePath])
+  const allProcessed = edits.length > 0 && edits.every((e: { filePath: string }) => msg.editStatuses?.[e.filePath])
 
   return (
     <div className="agent-message-content">

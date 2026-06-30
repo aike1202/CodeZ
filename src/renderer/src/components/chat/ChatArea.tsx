@@ -15,7 +15,7 @@ import { computeEditStats, handleDiffClickForFile } from '../../utils/editDiffUt
 import { parseSlashCommand } from '../../commands/SlashCommandParser'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useProviderStore } from '../../stores/providerStore'
-import { useChatStore } from '../../stores/chatStore'
+import { useChatStore, type ChatMessage } from '../../stores/chatStore'
 
 import { AgentMessageContent } from './AgentMessageContent'
 import { useSendMessage } from './hooks/useSendMessage'
@@ -25,7 +25,7 @@ function genId(): string {
   return '_' + Math.random().toString(36).substring(2, 9)
 }
 
-export function extractMessageEdits(msg: any) {
+export function extractMessageEdits(msg: ChatMessage) {
   if (!msg.txId) return { edits: [], tools: [] };
 
   const tools = msg.toolCalls || (msg.executionTimeline || [])
@@ -90,7 +90,7 @@ export function extractMessageEdits(msg: any) {
 export { handleDiffClickForFile as handleApprovalDiffClick }
 
 export interface ChatAreaProps {
-  messages: any[]
+  messages: ChatMessage[]
   activeSessionId: string | null
   workspace: WorkspaceInfo | null
   terminalOpen: boolean
