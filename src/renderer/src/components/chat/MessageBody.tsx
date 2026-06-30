@@ -34,17 +34,7 @@ export default function MessageBody({
         <React.Fragment key={i}>{renderInline(c, forceShowCursor)}</React.Fragment>
       ))
     }
-    // 拦截嵌套的内部元素（如被 react-markdown 解析的 a/strong/em/del），继续向内递归并保留外层 ReactElement 壳
-    if (React.isValidElement(children)) {
-      const el = children as React.ReactElement
-      // 如果元素有 children 属性，则递归处理其 children
-      if (el.props && 'children' in el.props) {
-        return React.cloneElement(el, {
-          ...el.props,
-          children: renderInline(el.props.children, forceShowCursor)
-        })
-      }
-    }
+
     return children
   }
 
