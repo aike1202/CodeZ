@@ -246,7 +246,7 @@ export default function ChatArea({
                     <div className="dropdown-shadow rounded-xl">
                       <EditApprovalWidget
                         msgId={msg.id}
-                        txId={msg.txId}
+                        txId={msg.txId || ''}
                         edits={edits}
                         editStatuses={msg.editStatuses}
                         onDiffClick={(filePath) => handleDiffClickForFile(filePath, tools, handleDiffClick, handleFileClick)}

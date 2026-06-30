@@ -1,5 +1,4 @@
-import React from 'react'
-import Flex from '../ui/Flex'
+import React, { useMemo } from 'react'
 import ExecutionLog from './ExecutionLog'
 import MessageBody from './MessageBody'
 import EditApprovalWidget from './EditApprovalWidget'
@@ -23,92 +22,115 @@ export interface AgentMessageContentProps {
   ) => void
 }
 
+type TimelineChunk = 
+  | { type: 'text', content: string, streaming: boolean }
+  | { type: 'execution', items: ExecutionTimelineItem[], streaming: boolean }
+
 export function AgentMessageContent({
   msg,
   lastStreamingMsgId,
   handleFileClick,
   handleDiffClick
 }: AgentMessageContentProps): React.ReactElement {
-  if (!msg.executionTimeline || msg.executionTimeline.length === 0) {
-    return (
-      <div className="agent-message-content">
-        <ExecutionLog
-          timeline={[]}
-          reasoning={msg.reasoningContent}
-          agentStates={msg.agentStates}
-          onFileClick={handleFileClick}
-          onDiffClick={handleDiffClick}
-          streaming={msg.streaming && msg.id === lastStreamingMsgId}
-        />
-        <MessageBody
-          content={msg.content}
-          streaming={msg.streaming && msg.id === lastStreamingMsgId}
-          reasoning={msg.reasoningContent}
-          onFileClick={handleFileClick}
-        />
-      </div>
-    )
-  }
+  
+  const isStreaming = Boolean(msg.streaming && msg.id === lastStreamingMsgId)
 
-  const executionTimeline = msg.executionTimeline || []
-  let lastNonTextIdx = -1
-  for (let i = executionTimeline.length - 1; i >= 0; i--) {
-    if (executionTimeline[i].type !== 'text') {
-      lastNonTextIdx = i
-      break
+  const chunks = useMemo(() => {
+    if (!msg.executionTimeline || msg.executionTimeline.length === 0) {
+      if (msg.reasoningContent || (msg.agentStates && msg.agentStates.length > 0)) {
+        return [{ type: 'execution', items: [], streaming: isStreaming }] as TimelineChunk[]
+      }
+      return []
     }
-  }
 
-  const isStreaming = msg.streaming && msg.id === lastStreamingMsgId
-  let timelineForLog: ExecutionTimelineItem[] = []
-  let finalContent = ''
+    const result: TimelineChunk[] = []
+    let currentExecutionChunk: ExecutionTimelineItem[] = []
+    let currentTextChunk: string[] = []
 
-  if (isStreaming) {
-    timelineForLog = executionTimeline
-    finalContent = ''
-  } else {
-    timelineForLog = lastNonTextIdx === -1 ? [] : executionTimeline.slice(0, lastNonTextIdx + 1)
-    timelineForLog = timelineForLog.filter((item: ExecutionTimelineItem) => item.type !== 'text')
+    for (let i = 0; i < msg.executionTimeline.length; i++) {
+      const item = msg.executionTimeline[i]
+      if (item.type === 'text') {
+        if (currentExecutionChunk.length > 0) {
+          result.push({ type: 'execution', items: currentExecutionChunk, streaming: false })
+          currentExecutionChunk = []
+        }
+        currentTextChunk.push((item as any).content)
+      } else {
+        if (currentTextChunk.length > 0) {
+          result.push({ type: 'text', content: currentTextChunk.join('').trimStart(), streaming: false })
+          currentTextChunk = []
+        }
+        currentExecutionChunk.push(item)
+      }
+    }
 
-    const finalTextItems = lastNonTextIdx === -1 ? executionTimeline : executionTimeline.slice(lastNonTextIdx + 1)
-    finalContent = finalTextItems
-      .filter((item: ExecutionTimelineItem) => item.type === 'text')
-      .map((item: ExecutionTimelineItem) => (item as any).content)
-      .join('')
-      .trimStart()
-  }
+    if (currentExecutionChunk.length > 0) {
+      result.push({ type: 'execution', items: currentExecutionChunk, streaming: isStreaming })
+    }
+    if (currentTextChunk.length > 0) {
+      result.push({ type: 'text', content: currentTextChunk.join('').trimStart(), streaming: isStreaming })
+    }
 
-  const hasToolsOrAgentStates =
-    timelineForLog.length > 0 || (msg.agentStates && msg.agentStates.length > 0) || !!msg.reasoningContent
+    return result
+  }, [msg.executionTimeline, msg.reasoningContent, msg.agentStates, isStreaming])
 
-  // Process edits
   const { edits, tools } = extractMessageEdits(msg)
   const allProcessed = edits.length > 0 && edits.every((e: { filePath: string }) => msg.editStatuses?.[e.filePath])
 
+  // Legacy fallback if no executionTimeline but has agentStates or reasoningContent
+  const legacyExecution = (!msg.executionTimeline || msg.executionTimeline.length === 0) && (msg.reasoningContent || (msg.agentStates && msg.agentStates.length > 0))
+
   return (
     <div className="agent-message-content">
-      {hasToolsOrAgentStates && (
-        <div className="app-spacer">
+      {legacyExecution && (
+        <div className="app-spacer mb-4">
           <ExecutionLog
-            timeline={timelineForLog}
+            timeline={[]}
             reasoning={msg.reasoningContent}
             agentStates={msg.agentStates}
             onFileClick={handleFileClick}
             onDiffClick={handleDiffClick}
-            streaming={isStreaming && !finalContent}
+            streaming={isStreaming && !msg.content}
           />
         </div>
       )}
-      {finalContent && (
-        <div className={hasToolsOrAgentStates ? 'mt-4' : ''}>
-          <MessageBody content={finalContent} streaming={false} onFileClick={handleFileClick} />
-        </div>
+
+      {chunks.length === 0 && msg.content && (
+        <MessageBody
+          content={msg.content || ''}
+          streaming={isStreaming}
+          reasoning={msg.reasoningContent}
+          onFileClick={handleFileClick}
+        />
       )}
+
+      {chunks.map((chunk, idx) => {
+        if (chunk.type === 'text') {
+          return (
+            <div key={idx} className="mb-4">
+              <MessageBody content={chunk.content} streaming={chunk.streaming} onFileClick={handleFileClick} />
+            </div>
+          )
+        } else {
+          return (
+            <div key={idx} className="app-spacer mb-4">
+              <ExecutionLog
+                timeline={chunk.items}
+                reasoning={idx === 0 ? msg.reasoningContent : undefined} // Only pass legacy reasoning to first block if any
+                agentStates={idx === 0 ? msg.agentStates : undefined}
+                onFileClick={handleFileClick}
+                onDiffClick={handleDiffClick}
+                streaming={chunk.streaming}
+              />
+            </div>
+          )
+        }
+      })}
 
       {allProcessed && (
         <EditApprovalWidget
           msgId={msg.id}
-          txId={msg.txId}
+          txId={msg.txId || ''}
           edits={edits}
           editStatuses={msg.editStatuses}
           onDiffClick={(filePath) => handleApprovalDiffClick(filePath, tools, handleDiffClick, handleFileClick)}
