@@ -1,6 +1,8 @@
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import IconCheck from '../icons/IconCheck'
 import IconCopy from '../icons/IconCopy'
+import hljs from 'highlight.js'
+import 'highlight.js/styles/github-dark.css' // 引入一套深色主题
 
 interface CodeBlockProps {
   lang: string
@@ -21,6 +23,18 @@ export default function CodeBlock({
     setTimeout(() => setCopied(false), 1500)
   }
 
+  const highlightedCode = useMemo(() => {
+    if (!code) return ''
+    try {
+      // highlight.js 会将不支持的语言作为纯文本处理，但为了安全我们先做个判断
+      const validLang = hljs.getLanguage(lang) ? lang : 'plaintext'
+      return hljs.highlight(code, { language: validLang, ignoreIllegals: true }).value
+    } catch (e) {
+      // 降级：转义 HTML 实体防止 XSS
+      return code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    }
+  }, [code, lang])
+
   return (
     <div className="code-block-wrapper text-left">
       <div className="code-block-header">
@@ -39,11 +53,12 @@ export default function CodeBlock({
           )}
         </button>
       </div>
-      <pre className="code-block-pre">
-        <code>
-          {code}
-          {showCursor && <span className="streaming-cursor">▊</span>}
-        </code>
+      <pre className="code-block-pre hljs">
+        <code
+          dangerouslySetInnerHTML={{
+            __html: highlightedCode + (showCursor ? '<span class="streaming-cursor">▊</span>' : '')
+          }}
+        />
       </pre>
     </div>
   )
