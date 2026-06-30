@@ -19,6 +19,7 @@ import { useChatStore } from '../../stores/chatStore'
 
 import { AgentMessageContent } from './AgentMessageContent'
 import { useSendMessage } from './hooks/useSendMessage'
+import IconBot from '../icons/IconBot'
 
 function genId(): string {
   return '_' + Math.random().toString(36).substring(2, 9)
@@ -203,7 +204,7 @@ export default function ChatArea({
               ) : (
                 <Flex key={msg.id} justify="start" className="w-full max-w-3xl">
                   <Flex align="center" justify="center" className="agent-avatar">
-                    AI
+                    <IconBot width={18} height={18} />
                   </Flex>
                   <AgentMessageContent
                     msg={msg}
