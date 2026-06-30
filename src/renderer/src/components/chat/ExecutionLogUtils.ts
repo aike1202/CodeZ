@@ -48,7 +48,7 @@ export function getFileExtension(fileName?: string): string {
 }
 
 export function getFileIconComponent(fileName?: string): React.ReactElement {
-  if (!fileName) return React.createElement(FileIcon, { width: 14, height: 14 })
+  if (!fileName) return React.createElement(FileIcon, { fileName: '', width: 14, height: 14 })
   const isDir = !fileName.includes('.')
   if (isDir) return React.createElement(FolderIcon, { folderName: fileName, width: 14, height: 14 })
   return React.createElement(FileIcon, { fileName, width: 14, height: 14 })

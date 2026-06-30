@@ -22,6 +22,7 @@ import {
   SearchIcon,
   CmdIcon
 } from '../svg-icons'
+import { FileIcon, FolderIcon } from '@react-symbols/icons/utils'
 import './ExecutionLog.css'
 
 const VERB_TRANSLATIONS: Record<string, string> = {
@@ -143,14 +144,14 @@ export default function ExecutionLog({
         return <SearchIcon />
       }
       if (item.verb === 'Explored' || item.verb === 'Exploring') {
-        return <FolderIcon />
+        return <FolderIcon folderName="" />
       }
       if (item.verb === 'Executed' || item.verb === 'Executing') {
         return <CmdIcon />
       }
       return getFileIconComponent(item.fileName)
     }
-    return <FileIcon />
+    return <FileIcon fileName="" />
   }
 
   const hasDetail = (item: UnifiedTimelineItem) => {

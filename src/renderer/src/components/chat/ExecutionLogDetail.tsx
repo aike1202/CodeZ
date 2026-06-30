@@ -43,7 +43,7 @@ export default function ExecutionLogDetail({
                 if (dirMatch) {
                   return (
                     <div key={idx} className="exe-log-dir-header">
-                      <FolderIcon />
+                      <FolderIcon folderName={dirMatch[1]} />
                       <span>{dirMatch[1]}</span>
                     </div>
                   )
@@ -55,7 +55,7 @@ export default function ExecutionLogDetail({
               const name = line.replace(/^\[(DIR|FILE)\]\s*/u, '')
               return (
                 <div key={idx} className="exe-log-dir-row">
-                  {isDir ? <FolderIcon /> : getFileIconComponent(name)}
+                  {isDir ? <FolderIcon folderName={name} /> : getFileIconComponent(name)}
                   <span>{name}</span>
                 </div>
               )
@@ -153,7 +153,7 @@ export default function ExecutionLogDetail({
 
                       return (
                         <div key={idx} style={{ paddingLeft: pl }} className="exe-log-tree-row">
-                          {isDir ? <FolderIcon /> : getFileIconComponent(name)}
+                          {isDir ? <FolderIcon folderName={name} /> : getFileIconComponent(name)}
                           <span className="truncate">{name}</span>
                         </div>
                       )
