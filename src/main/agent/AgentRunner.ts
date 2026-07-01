@@ -86,18 +86,18 @@ export class AgentRunner {
     let availableTools: ToolDefinition[]
 
     if (config.planMode) {
-      // Read-only tools + ExitPlanMode for plan submission
+      // Read-only tools + SubmitPlan for plan submission
       const readOnly = this.toolManager.getReadOnlyTools()
-      const exitPlanModeTool = this.toolManager.getTool('ExitPlanMode')
-      const exitPlanDef = exitPlanModeTool ? [{
+      const submitPlanTool = this.toolManager.getTool('SubmitPlan')
+      const submitPlanDef = submitPlanTool ? [{
         type: 'function' as const,
         function: {
-          name: exitPlanModeTool.name,
-          description: exitPlanModeTool.description,
-          parameters: exitPlanModeTool.parameters_schema
+          name: submitPlanTool.name,
+          description: submitPlanTool.description,
+          parameters: submitPlanTool.parameters_schema
         }
       }] : []
-      availableTools = [...readOnly, ...exitPlanDef]
+      availableTools = [...readOnly, ...submitPlanDef]
 
       allMessages.push({
         role: 'system',
@@ -105,7 +105,7 @@ export class AgentRunner {
           'You are in Plan Mode (read-only). Your goal:',
           '1. Explore the codebase to understand relevant files and patterns.',
           '2. Design a structured plan with numbered steps.',
-          '3. Call ExitPlanMode with slug, title, and steps to submit for user approval.',
+          '3. Call SubmitPlan with title, description, and steps to submit for user approval.',
           '4. Each step: 50-150 chars, include goal + files + acceptance criteria.',
           '5. Do NOT make any edits, write files, or run commands.',
           'When the user approves the plan, you will enter execution mode.'
@@ -388,8 +388,8 @@ export class AgentRunner {
 
             callbacks.onToolStart?.(toolCallId, name, args)
 
-            // ExitPlanMode 审批拦截：不立即执行，等待前端审批
-            if (name === 'ExitPlanMode') {
+            // SubmitPlan 审批拦截：不立即执行，等待前端审批
+            if (name === 'SubmitPlan') {
               const planData = JSON.parse(args)
               // 先执行 create + submitForReview
               const plan = await PlanService.createPlan(
@@ -414,7 +414,7 @@ export class AgentRunner {
                   await PlanService.requestChanges(config.workspaceRoot, plan.slug, decision.feedback || 'Please revise the plan.')
                   exitResultMsg = JSON.stringify({
                     ok: true,
-                    data: { status: 'revising', slug: plan.slug, feedback: decision.feedback, message: 'Plan needs revision. Update the plan based on the feedback, then call ExitPlanMode again.' }
+                    data: { status: 'revising', slug: plan.slug, feedback: decision.feedback, message: 'Plan needs revision. Update the plan based on the feedback, then call SubmitPlan again.' }
                   })
                 }
               } else {

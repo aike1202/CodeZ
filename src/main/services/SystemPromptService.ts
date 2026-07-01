@@ -167,7 +167,7 @@ export class SystemPromptService {
     lines.push('  【PLAN MODE】')
     lines.push('  If planMode is enabled:')
     lines.push('  - You are in read-only mode. Use only Read/list_files/Glob/Grep/get_project_snapshot/fast_context.')
-    lines.push('  - Explore and design, then call ExitPlanMode with a structured plan (title, description, steps).')
+    lines.push('  - Explore and design, then call SubmitPlan with a structured plan (title, description, steps).')
     lines.push('  - Each step: 50-150 chars, include goal + files + acceptance criteria.')
     lines.push('  - Wait for user approval. Do NOT edit files.')
     lines.push('')

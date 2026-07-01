@@ -1,25 +1,25 @@
 import { Tool, ToolContext } from '../Tool'
 import { PlanService } from '../../services/PlanService'
 
-interface ExitPlanModeStepInput {
+interface SubmitPlanStepInput {
   title: string
   description: string
   files?: string[]
 }
 
-interface ExitPlanModeArgs {
+interface SubmitPlanArgs {
   title: string
   description: string
-  steps: ExitPlanModeStepInput[]
+  steps: SubmitPlanStepInput[]
 }
 
-export class ExitPlanModeTool extends Tool {
+export class SubmitPlanTool extends Tool {
   get name() {
-    return 'ExitPlanMode'
+    return 'SubmitPlan'
   }
 
   get description() {
-    return 'Submit your plan for user approval. Only call this in Plan Mode after exploring and designing. The user will Approve or Request Changes. Provide a clear title, overall description, and structured steps (each step: goal + files + acceptance criteria, 50-150 chars).'
+    return 'Submit a structured plan for user approval. Call this after exploring and designing in Plan Mode. Include a title, description, and steps (each step: goal + files + acceptance criteria, 50-150 chars). The user will Approve or Request Changes. Once approved, use UpdatePlanStep to track progress during execution.'
   }
 
   get parameters_schema() {
@@ -46,9 +46,9 @@ export class ExitPlanModeTool extends Tool {
   }
 
   async execute(args: string, context: ToolContext): Promise<string> {
-    let parsed: ExitPlanModeArgs
+    let parsed: SubmitPlanArgs
     try {
-      parsed = JSON.parse(args) as ExitPlanModeArgs
+      parsed = JSON.parse(args) as SubmitPlanArgs
     } catch {
       return JSON.stringify({
         ok: false,

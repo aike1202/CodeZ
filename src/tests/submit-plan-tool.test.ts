@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { ExitPlanModeTool } from '../main/tools/builtin/ExitPlanModeTool'
+import { SubmitPlanTool } from '../main/tools/builtin/SubmitPlanTool'
 import { PlanService } from '../main/services/PlanService'
 
 vi.mock('../main/services/PlanService', () => {
@@ -11,11 +11,11 @@ vi.mock('../main/services/PlanService', () => {
   }
 })
 
-describe('ExitPlanModeTool', () => {
-  let tool: ExitPlanModeTool
+describe('SubmitPlanTool', () => {
+  let tool: SubmitPlanTool
 
   beforeEach(() => {
-    tool = new ExitPlanModeTool()
+    tool = new SubmitPlanTool()
     vi.clearAllMocks()
   })
 
@@ -26,7 +26,7 @@ describe('ExitPlanModeTool', () => {
       description: 'Test description',
       steps: []
     }
-    
+
     ;(PlanService.createPlan as any).mockResolvedValue(mockPlan)
     ;(PlanService.submitForReview as any).mockResolvedValue({
       ...mockPlan,
@@ -47,7 +47,7 @@ describe('ExitPlanModeTool', () => {
     expect(parsed.ok).toBe(true)
     expect(parsed.data.status).toBe('pending_review')
     expect(parsed.data.plan.slug).toBe('my-plan')
-    
+
     expect(PlanService.createPlan).toHaveBeenCalledWith(
       '/test/ws',
       'My Plan',
