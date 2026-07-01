@@ -15,6 +15,8 @@ import { GetProjectSnapshotTool } from './builtin/GetProjectSnapshotTool'
 import { RollbackLastEditTool } from './builtin/RollbackLastEditTool'
 import { UpdateResumeStateTool } from './builtin/UpdateResumeStateTool'
 import { FastContextTool } from './builtin/FastContextTool'
+import { ExitPlanModeTool } from './builtin/ExitPlanModeTool'
+import { UpdatePlanStepTool } from './builtin/UpdatePlanStepTool'
 import type { ToolDefinition } from '../../shared/types/provider'
 
 export class ToolManager {
@@ -50,7 +52,9 @@ export class ToolManager {
       new GetProjectSnapshotTool(),
       new RollbackLastEditTool(),
       new UpdateResumeStateTool(),
-      new FastContextTool()
+      new FastContextTool(),
+      new ExitPlanModeTool(),
+      new UpdatePlanStepTool()
     ]
     
     for (const tool of builtinTools) {
