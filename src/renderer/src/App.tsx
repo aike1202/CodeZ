@@ -72,6 +72,10 @@ export default function App(): React.ReactElement {
     loadProviders()
     loadSessions()
 
+    // 注册 Task / Plan 模式的 IPC 监听
+    useChatStore.getState().initTaskListener()
+    useChatStore.getState().initPlanStateListener()
+
     // 初始化主题监听
     if (window.api?.theme) {
       window.api.theme.get().then((info) => {
