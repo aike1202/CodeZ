@@ -45,6 +45,13 @@ export const IPC_CHANNELS = {
   TASK_GET_BY_PROJECT: 'task:get-by-project',
   TASK_SAVE: 'task:save',
   TASK_DELETE: 'task:delete',
+  TASK_UPSERT: 'task:upsert',
+  TASK_SYNC: 'task:sync',
+
+  // Plan
+  PLAN_STATE_CHANGED: 'plan:state-changed',
+  PLAN_APPROVE: 'plan:approve',
+  PLAN_REJECT: 'plan:reject',
 
   // Theme
   THEME_GET: 'theme:get',
