@@ -15,6 +15,10 @@ import { GetProjectSnapshotTool } from './builtin/GetProjectSnapshotTool'
 import { RollbackLastEditTool } from './builtin/RollbackLastEditTool'
 import { UpdateResumeStateTool } from './builtin/UpdateResumeStateTool'
 import { FastContextTool } from './builtin/FastContextTool'
+import { TaskCreateTool } from './builtin/TaskCreateTool'
+import { TaskGetTool } from './builtin/TaskGetTool'
+import { TaskListTool } from './builtin/TaskListTool'
+import { TaskUpdateTool } from './builtin/TaskUpdateTool'
 import type { ToolDefinition } from '../../shared/types/provider'
 
 export class ToolManager {
@@ -41,7 +45,11 @@ export class ToolManager {
       new GetProjectSnapshotTool(),
       new RollbackLastEditTool(),
       new UpdateResumeStateTool(),
-      new FastContextTool()
+      new FastContextTool(),
+      new TaskCreateTool(),
+      new TaskGetTool(),
+      new TaskListTool(),
+      new TaskUpdateTool()
     ]
     
     for (const tool of builtinTools) {
