@@ -151,6 +151,12 @@ interface ChatState {
   planMode: boolean
   /** Plan 列表弹窗 */
   planListModalOpen: boolean
+  /** 当前活跃 Plan（executing 状态） */
+  activePlan: any | null
+  /** 待审批 Plan（pending_review 状态） */
+  planReview: { plan: any; status: string } | null
+  /** 当前流的 streamId（用于 Plan 审批 IPC） */
+  activePlanStreamId: string | null
 
   /* actions */
   loadSessions: () => Promise<void>
@@ -185,6 +191,9 @@ interface ChatState {
   togglePlanMode: () => void
   initPlanStateListener: () => void
   setPlanListModalOpen: (open: boolean) => void
+  setActivePlan: (plan: any | null) => void
+  setPlanReview: (review: { plan: any; status: string } | null) => void
+  setActivePlanStreamId: (streamId: string | null) => void
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -195,6 +204,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   expandedCapsule: null,
   planMode: false,
   planListModalOpen: false,
+  activePlan: null,
+  planReview: null,
+  activePlanStreamId: null,
 
   loadSessions: async () => {
     try {
@@ -714,12 +726,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!ipc) return
 
     ipc.on('plan:state-changed', (_event: unknown, data: { state: string; mode: string }) => {
-      // When agent reports idle/normal, sync planMode off
       if (data.mode === 'normal') {
         useChatStore.getState().setPlanMode(false)
       }
     })
+
+    ipc.on('plan:review-request', (_event: unknown, streamId: string, plan: any) => {
+      useChatStore.getState().setActivePlanStreamId(streamId)
+      useChatStore.getState().setPlanReview({ plan, status: 'pending_review' })
+    })
   },
 
-  setPlanListModalOpen: (open) => set({ planListModalOpen: open })
+  setPlanListModalOpen: (open) => set({ planListModalOpen: open }),
+  setActivePlan: (plan) => set({ activePlan: plan }),
+  setPlanReview: (review) => set({ planReview: review }),
+  setActivePlanStreamId: (streamId) => set({ activePlanStreamId: streamId })
 }))
