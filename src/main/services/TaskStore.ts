@@ -4,10 +4,13 @@ import { app } from 'electron'
 
 export interface TaskData {
   id: string
-  projectId: string
-  title: string
-  plan: string
-  status: 'pending' | 'running' | 'completed' | 'failed'
+  sessionId: string
+  subject: string
+  description: string
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
+  blocks: string[]
+  blockedBy: string[]
+  owner: string
   createdAt: string
   updatedAt: string
 }
@@ -35,20 +38,77 @@ export class TaskStore {
   }
 
   getAllByProject(projectId: string): TaskData[] {
-    return this.cache.filter((t) => t.projectId === projectId)
+    return this.cache.filter((t) => (t as any).projectId === projectId)
+  }
+
+  getBySession(sessionId: string): TaskData[] {
+    return this.cache.filter((t) => t.sessionId === sessionId)
+  }
+
+  getById(taskId: string): TaskData | undefined {
+    return this.cache.find((t) => t.id === taskId)
   }
 
   async save(task: TaskData): Promise<void> {
     const idx = this.cache.findIndex((t) => t.id === task.id)
     if (idx >= 0) {
-      this.cache[idx] = task
+      this.cache[idx] = { ...task, updatedAt: new Date().toISOString() }
     } else {
-      this.cache.push(task)
+      this.cache.push({ ...task })
     }
     await this.persist()
   }
 
+  async updateStatus(taskId: string, status: TaskData['status']): Promise<void> {
+    const idx = this.cache.findIndex((t) => t.id === taskId)
+    if (idx < 0) throw new Error(`Task ${taskId} not found`)
+    this.cache[idx] = {
+      ...this.cache[idx],
+      status,
+      updatedAt: new Date().toISOString()
+    }
+    await this.persist()
+  }
+
+  async addDependency(taskId: string, blockedByTaskId: string): Promise<void> {
+    const task = this.cache.find((t) => t.id === taskId)
+    const blocker = this.cache.find((t) => t.id === blockedByTaskId)
+    if (!task || !blocker) throw new Error('Task not found')
+
+    if (!task.blockedBy.includes(blockedByTaskId)) {
+      task.blockedBy.push(blockedByTaskId)
+      task.updatedAt = new Date().toISOString()
+    }
+    if (!blocker.blocks.includes(taskId)) {
+      blocker.blocks.push(taskId)
+      blocker.updatedAt = new Date().toISOString()
+    }
+    await this.persist()
+  }
+
+  async removeDependency(taskId: string, blockedByTaskId: string): Promise<void> {
+    const task = this.cache.find((t) => t.id === taskId)
+    const blocker = this.cache.find((t) => t.id === blockedByTaskId)
+    if (!task || !blocker) throw new Error('Task not found')
+
+    task.blockedBy = task.blockedBy.filter((id) => id !== blockedByTaskId)
+    task.updatedAt = new Date().toISOString()
+    blocker.blocks = blocker.blocks.filter((id) => id !== taskId)
+    blocker.updatedAt = new Date().toISOString()
+    await this.persist()
+  }
+
   async delete(taskId: string): Promise<void> {
+    // Clean up dependencies before deleting
+    const task = this.cache.find((t) => t.id === taskId)
+    if (task) {
+      for (const blockerId of task.blockedBy) {
+        await this.removeDependency(taskId, blockerId).catch(() => {})
+      }
+      for (const blockedId of [...task.blocks]) {
+        await this.removeDependency(blockedId, taskId).catch(() => {})
+      }
+    }
     this.cache = this.cache.filter((t) => t.id !== taskId)
     await this.persist()
   }
