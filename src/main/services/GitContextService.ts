@@ -52,7 +52,7 @@ export class GitContextService {
 
     const status = run('git status --porcelain') || '(unable to read)'
 
-    const recentCommits = run('git log --oneline -5')
+    const recentCommits = run('git --no-pager log --oneline -5')
 
     const lines: string[] = []
     lines.push(`Current branch: ${currentBranch}`)
