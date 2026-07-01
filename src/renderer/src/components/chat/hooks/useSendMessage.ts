@@ -32,6 +32,45 @@ export function useSendMessage() {
         return
       }
 
+      let allSkills: any[] = []
+      try {
+        allSkills = await (window as any).api.skill.getAll(ws.rootPath)
+      } catch (e) {}
+
+      // Parse slash commands to check for client-side actions before anything else
+      const parseResult = parseSlashCommand(message, allSkills)
+      const clientAction = parseResult.clientAction
+
+      if (clientAction) {
+        if (clientAction.type === 'plan:show-list') {
+          useChatStore.getState().setPlanListModalOpen(true)
+          return
+        }
+        if (clientAction.type === 'plan:load') {
+          const slug = clientAction.payload?.slug
+          if (slug) {
+            try {
+              await (window as any).api.plan.load(ws.rootPath, slug)
+              useChatStore.getState().setExpandedCapsule('plan')
+            } catch (err) {
+              console.error('[useSendMessage] Failed to load plan:', err)
+            }
+          }
+          return
+        }
+        if (clientAction.type === 'plan:new') {
+          useChatStore.getState().togglePlanMode()
+          // Send the description as a normal user message to the AI
+          const description = clientAction.payload?.description || message
+          if (!description) return
+          // Use processedMessage from the parse result (the description text)
+          message = parseResult.processedMessage || description
+        }
+        // For other client actions, continue normally (fall through)
+        // but only if processedMessage is not empty
+        if (!parseResult.processedMessage) return
+      }
+
       const provState = useProviderStore.getState()
       const activeProv = provState.providers.find((p) => p.id === provState.activeProviderId)
       if (!activeProv) {
@@ -61,11 +100,6 @@ export function useSendMessage() {
 
       addUserMessage(message)
       const agentId = startStreamingReply()
-
-      let allSkills: any[] = []
-      try {
-        allSkills = await (window as any).api.skill.getAll(ws.rootPath)
-      } catch (e) {}
 
       const model = modelName || activeProv.models[0]?.name || 'gpt-4o'
       const currentMsgs = useChatStore.getState().messages

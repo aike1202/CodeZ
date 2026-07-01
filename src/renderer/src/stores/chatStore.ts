@@ -149,6 +149,8 @@ interface ChatState {
   expandedCapsule: 'task' | 'plan' | null
   /** Plan 模式开关：true=只读探索，false=正常模式 */
   planMode: boolean
+  /** Plan 列表弹窗 */
+  planListModalOpen: boolean
 
   /* actions */
   loadSessions: () => Promise<void>
@@ -182,6 +184,7 @@ interface ChatState {
   setPlanMode: (mode: boolean) => void
   togglePlanMode: () => void
   initPlanStateListener: () => void
+  setPlanListModalOpen: (open: boolean) => void
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -191,6 +194,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamCleanup: null,
   expandedCapsule: null,
   planMode: false,
+  planListModalOpen: false,
 
   loadSessions: async () => {
     try {
@@ -715,5 +719,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         useChatStore.getState().setPlanMode(false)
       }
     })
-  }
+  },
+
+  setPlanListModalOpen: (open) => set({ planListModalOpen: open })
 }))

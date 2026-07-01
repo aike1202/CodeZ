@@ -8,6 +8,7 @@ import { useProviderStore } from './stores/providerStore'
 import { useChatStore } from './stores/chatStore'
 import type { WorkspaceInfo, FileContent } from '@shared/types/workspace'
 import TaskHistoryModal from './components/modals/TaskHistoryModal'
+import PlanListModal from './components/chat/PlanListModal'
 import Flex from './components/ui/Flex'
 import FilePreviewPanel from './components/FilePreviewPanel'
 import ChatArea from './components/chat/ChatArea'
@@ -61,6 +62,9 @@ export default function App(): React.ReactElement {
   const archiveSession = useChatStore((s) => s.archiveSession)
   const deleteSession = useChatStore((s) => s.deleteSession)
   const restoreSession = useChatStore((s) => s.restoreSession)
+
+  const planListModalOpen = useChatStore((s) => s.planListModalOpen)
+  const setPlanListModalOpen = useChatStore((s) => s.setPlanListModalOpen)
 
   /* ---- settings panel ---- */
   const [currentView, setCurrentView] = useState<'home' | 'chat' | 'settings'>('home')
@@ -466,6 +470,11 @@ export default function App(): React.ReactElement {
           onClose={() => setTaskModalOpen(false)}
         />
       )}
+
+      <PlanListModal
+        isOpen={planListModalOpen}
+        onClose={() => setPlanListModalOpen(false)}
+      />
     </>
   )
 }

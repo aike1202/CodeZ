@@ -261,6 +261,13 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET),
     save: (settings: any): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SAVE, settings)
+  },
+
+  plan: {
+    list: (workspaceRoot: string): Promise<any[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PLAN_LIST, workspaceRoot),
+    load: (workspaceRoot: string, slug: string): Promise<any> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PLAN_LOAD, workspaceRoot, slug),
   }
 }
 

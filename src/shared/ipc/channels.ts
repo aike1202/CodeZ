@@ -45,6 +45,8 @@ export const IPC_CHANNELS = {
   PLAN_STATE_CHANGED: 'plan:state-changed',
   PLAN_APPROVE: 'plan:approve',
   PLAN_REJECT: 'plan:reject',
+  PLAN_LIST: 'plan:list',
+  PLAN_LOAD: 'plan:load',
 
   // Theme
   THEME_GET: 'theme:get',

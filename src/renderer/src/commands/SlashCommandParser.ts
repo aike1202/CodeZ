@@ -10,6 +10,19 @@ export interface SlashCommand {
   process: (args: string) => string
 }
 
+export interface ClientAction {
+  type: string
+  payload?: any
+}
+
+export interface ParseResult {
+  isCommand: boolean
+  processedMessage: string
+  commandName?: string
+  /** 客户端本地处理的动作，不需要发送给 AI */
+  clientAction?: ClientAction
+}
+
 export const builtinCommands: SlashCommand[] = [
   {
     name: 'goal',
@@ -26,12 +39,62 @@ export const builtinCommands: SlashCommand[] = [
 export function parseSlashCommand(
   message: string,
   dynamicSkills: SkillDefinition[] = []
-): { isCommand: boolean; processedMessage: string; commandName?: string } {
+): ParseResult {
+  const trimMsg = message.trim()
+
+  // ── Plan commands: /plan, /plan list, /plan new <description> ──
+  if (trimMsg === '/plan' || trimMsg.startsWith('/plan ')) {
+    const rest = trimMsg.slice(5).trim() // after '/plan'
+    if (!rest) {
+      // /plan alone → show plan list modal
+      return {
+        isCommand: true,
+        commandName: 'plan',
+        processedMessage: '',
+        clientAction: { type: 'plan:show-list' }
+      }
+    }
+    if (rest === 'list') {
+      // /plan list → show plan list modal
+      return {
+        isCommand: true,
+        commandName: 'plan',
+        processedMessage: '',
+        clientAction: { type: 'plan:show-list' }
+      }
+    }
+    if (rest.startsWith('new ') || rest.startsWith('new')) {
+      const description = rest.startsWith('new ') ? rest.slice(4).trim() : rest.slice(3).trim()
+      // /plan new <description> → toggle plan mode ON, send description as user message
+      return {
+        isCommand: true,
+        commandName: 'plan',
+        processedMessage: description || rest,
+        clientAction: { type: 'plan:new', payload: { description: description || rest } }
+      }
+    }
+  }
+
+  // ── /<slug> plan loading ──
+  // Match /<kebab-case> patterns that look like plan slugs
+  if (trimMsg.startsWith('/')) {
+    const parts = trimMsg.split(/\s+/)
+    const potentialSlug = parts[0].substring(1) // remove leading '/'
+    // A slug-like pattern: only lowercase, digits, hyphens
+    const slugPattern = /^[a-z][a-z0-9-]*$/
+    if (slugPattern.test(potentialSlug)) {
+      return {
+        isCommand: true,
+        commandName: potentialSlug,
+        processedMessage: '',
+        clientAction: { type: 'plan:load', payload: { slug: potentialSlug } }
+      }
+    }
+  }
+
   let cmdName = ''
   let args = ''
   let found = false
-
-  const trimMsg = message.trim()
 
   // 1. Check for standard /command
   if (trimMsg.startsWith('/')) {
@@ -39,7 +102,7 @@ export function parseSlashCommand(
     cmdName = parts[0].substring(1).toLowerCase()
     args = parts.slice(1).join(' ')
     found = true
-  } 
+  }
   // 2. Check for UI pill format: [$skillName](path)
   else if (trimMsg.startsWith('[$')) {
     const match = trimMsg.match(/^\[\$([^\]]+)\]\([^)]+\)/)
@@ -64,8 +127,8 @@ export function parseSlashCommand(
     }
   }
 
-  const skill = dynamicSkills.find(s => 
-    s.id.toLowerCase() === cmdName || 
+  const skill = dynamicSkills.find(s =>
+    s.id.toLowerCase() === cmdName ||
     s.id.replace(/^(global|workspace)-/, '').toLowerCase() === cmdName ||
     s.triggers?.includes(cmdName)
   )

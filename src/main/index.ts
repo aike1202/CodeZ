@@ -10,6 +10,7 @@ import { registerThemeIpc } from './ipc/theme.handlers'
 import { registerSkillIpc } from './ipc/skill.handlers'
 import { registerRulesIpc } from './ipc/rules.handlers'
 import { registerSettingsIpc } from './ipc/settings.handlers'
+import { registerPlanIpc } from './ipc/plan.handlers'
 import { TerminalService } from './services/TerminalService'
 
 let mainWindow: BrowserWindow | null = null
@@ -82,6 +83,7 @@ app.whenReady().then(() => {
   registerSkillIpc()
   registerRulesIpc()
   registerSettingsIpc()
+  registerPlanIpc()
 
   // Initialize memory system for the current workspace
   import('./services/MemoryService').then(({ MemoryService }) => {
