@@ -149,6 +149,15 @@ export class SystemPromptService {
     lines.push('')
     lines.push('  【CONTEXT MANAGEMENT】')
     lines.push('  When you receive a context trimming notification, you MUST immediately call "update_resume_state" to save your current goal, completed steps, pending steps, and files you\'ve touched. This is critical for maintaining task continuity.')
+    lines.push('')
+    lines.push('  【TASK MANAGEMENT】')
+    lines.push('  When working on complex multi-step tasks:')
+    lines.push('  - Use TaskCreate to record steps before starting.')
+    lines.push('  - Use TaskUpdate to mark progress (pending → in_progress → completed).')
+    lines.push('  - Use TaskList to review what has been done and what remains.')
+    lines.push('  - Only ONE task in_progress at a time.')
+    lines.push('  - A task blocked by an unfinished task cannot start.')
+    lines.push('  - If you cannot complete a task, cancel it with a clear reason in the description.')
 
     // Dynamic verification strategy
     try {
