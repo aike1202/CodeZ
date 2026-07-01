@@ -92,8 +92,8 @@
     },
     "F:\\MyProjectF\\CodeZ": {
       "rootPath": "F:\\MyProjectF\\CodeZ",
-      "packageJsonHash": "6086d0a5489ff3e9ece2f432b507251124e3f79476ecd24b4b501aad356df562",
-      "lockfileHash": "a312e5fad3487834e5abd61f4c44eccf87c70430b7aa817490fcaafd54a0bd6a",
+      "packageJsonHash": "26e23f59ce5de94c2a7268d32853dd70eb3b42e332937c5274cd3254ceb3f102",
+      "lockfileHash": "3d54f935ba803bd783b326925e1b4b231ebd564400c31352697d2f79d54c03c3",
       "options": {
         "dirPaths": [
           "src/main",
@@ -114,15 +114,25 @@
           "package": "npm run build && electron-builder build --win --publish never"
         },
         "dependencies": {
+          "@codemirror/lang-markdown": "^6.5.0",
+          "@codemirror/language-data": "^6.5.2",
           "@electron-toolkit/preload": "^3.0.1",
           "@electron-toolkit/utils": "^3.0.0",
+          "@react-symbols/icons": "^1.4.1",
+          "@uiw/codemirror-theme-vscode": "^4.25.10",
+          "@uiw/react-codemirror": "^4.25.10",
+          "@vscode/ripgrep": "^1.18.0",
           "@xterm/addon-fit": "^0.11.0",
           "@xterm/xterm": "^6.0.0",
+          "fast-glob": "^3.3.3",
+          "highlight.js": "^11.11.1",
           "lodash": "^4.18.1",
           "node-pty": "^1.1.0",
           "prismjs": "^1.30.0",
           "react": "^18.3.1",
           "react-dom": "^18.3.1",
+          "react-markdown": "^10.1.0",
+          "remark-gfm": "^4.0.1",
           "zustand": "^5.0.14"
         },
         "devDependencies": {
@@ -178,9 +188,9 @@
           "src/shared/types/provider.ts"
         ],
         "tree": "=== Directory: src/main ===\nsrc/main\n[DIR] agent\n[DIR] ipc\n[DIR] services\n[DIR] tools\n[FILE] index.ts\n\n=== Directory: src/shared ===\nsrc/shared\n[DIR] constants\n[DIR] ipc\n[DIR] types",
-        "docsTree": "[Documentation Files]\n.agents/AGENTS.md\nCONTEXT_DISTILLER_SCOUT_PLAN.md\ndocs/ai-coding-agent-evolution.md\ndocs/ai-coding-agent-requirements-analysis.md\ndocs/ai-coding-agent-tools-design.md\ndocs/SWARM_ARCHITECTURE_PLAN.md\ndocsv2/00-current-state-and-scope.md\ndocsv2/01-tool-system.md\ndocsv2/02-edit-diff-rollback.md\ndocsv2/03-agent-loop-provider.md\ndocsv2/04-permission-safety.md\ndocsv2/05-verification-loop.md\ndocsv2/06-context-rules-skills.md\ndocsv2/07-goal-context-resume.md\ndocsv2/08-ui-observability.md\ndocsv2/09-mcp-plugins.md\ndocsv2/10-swarm-roadmap.md\nimplementation_plan.md\nimplementation_plan2.md\nREADME.md\ntask.md\nunqualified_code_report.md",
+        "docsTree": "[Documentation Files]\n.agents/AGENTS.md\nClaudeCodelogs/ClaudeCode-Tools-Analysis.md\nCONTEXT_DISTILLER_SCOUT_PLAN.md\ndocs/project_analysis.md\ndocs/superpowers/plans/2026-06-29-context-rules.md\ndocs/superpowers/plans/2026-06-29-general-settings.md\ndocs/superpowers/plans/2026-06-29-markdown-editor-refactor-plan.md\ndocs/superpowers/plans/2026-06-30-claude-tool-alignment.md\ndocs/superpowers/plans/2026-06-30-interleaved-chat.md\ndocs/superpowers/plans/2026-06-30-react-markdown-migration.md\ndocs/superpowers/plans/claude-tool-alignment/HANDOFF.md\ndocs/superpowers/plans/claude-tool-alignment/task-01-read-fingerprint-store.md\ndocs/superpowers/plans/claude-tool-alignment/task-02-read-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-03-edit-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-04-write-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-05-glob-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-06-grep-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-07-notebook-edit-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-08-spawn-runner.md\ndocs/superpowers/plans/claude-tool-alignment/task-09-bash-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-10-powershell-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-11-push-provider.md\ndocs/superpowers/plans/claude-tool-alignment/task-12-push-notification-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-13-skill-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-14-askuserquestion-ipc-tool-widget.md\ndocs/superpowers/plans/claude-tool-alignment/task-15-permission-manager-cleanup.md\ndocs/superpowers/plans/claude-tool-alignment/task-16-register-delete-old-tools.md\ndocs/superpowers/plans/claude-tool-alignment/task-17-renderer-tool-name-wiring.md\ndocs/superpowers/plans/claude-tool-alignment/task-18-regression-and-final-acceptance.md\ndocs/superpowers/specs/2026-06-29-general-settings-design.md\ndocs/superpowers/specs/2026-06-29-markdown-editor-refactor-design.md\ndocs/superpowers/specs/2026-06-29-rules-ui-design.md\ndocs/superpowers/specs/2026-06-30-chat-area-optimization-design.md\ndocs/superpowers/specs/2026-06-30-claude-tool-alignment-design.md\ndocs/superpowers/specs/2026-06-30-context-manager-truncation-design.md\ndocs/superpowers/specs/2026-06-30-interleaved-chat-design.md\ndocs/superpowers/specs/2026-06-30-react-markdown-migration-design.md\ndocs/task.md\ndocsv2/00-current-state-and-scope.md\ndocsv2/01-tool-system.md\ndocsv2/02-edit-diff-rollback.md\ndocsv2/03-agent-loop-provider.md\ndocsv2/04-permission-safety.md\ndocsv2/05-verification-loop.md\ndocsv2/06-context-rules-skills.md\ndocsv2/07-goal-context-resume.md\ndocsv2/08-ui-observability.md\ndocsv2/09-mcp-plugins.md\ndocsv2/10-swarm-roadmap.md\ndocsv2/ai-coding-agent-evolution.md\ndocsv2/ai-coding-agent-requirements-analysis.md\ndocsv2/ai-coding-agent-tools-design.md\ndocsv2/SWARM_ARCHITECTURE_PLAN.md\nimplementation_plan.md\nimplementation_plan2.md\nREADME.md\ntask.md\nunqualified_code_report.md",
         "fromCache": false,
-        "updatedAt": "2026-06-29T09:13:21.791Z"
+        "updatedAt": "2026-06-30T17:17:36.543Z"
       }
     }
   }
