@@ -1,5 +1,6 @@
 import React, { ReactNode } from 'react';
 import Stack from '../ui/Stack';
+import { TaskPanel } from './TaskPanel';
 
 export interface ChatAreaLayoutProps {
   messageArea: ReactNode;
@@ -21,6 +22,7 @@ export const ChatAreaLayout: React.FC<ChatAreaLayoutProps> = ({
   return (
     <>
       <Stack className={`app-chat-column ${panelOpen ? 'app-chat-column--border' : ''}`} ref={containerRef}>
+        <TaskPanel />
         {messageArea}
       </Stack>
       {auditArea}
