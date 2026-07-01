@@ -6,13 +6,17 @@ import { EditTransactionService, getEditTransactionService } from '../services/E
 import { ContextManager } from './ContextManager'
 import { PermissionManager } from '../services/PermissionManager'
 import { interceptAskUser, type AskUserAnswer, type AskUserRequest } from '../tools/builtin/AskUserQuestionTool'
+import { PlanStore } from '../services/PlanStore'
+import { PlanService } from '../services/PlanService'
 import type { ChatMessage, ToolDefinition, ToolCall } from '../../shared/types/provider'
+import type { Plan } from '../../shared/types/plan'
 
 export interface AgentRunnerCallbacks extends StreamCallbacks {
   onToolStart?: (toolCallId: string, name: string, args: string, thoughtSignature?: string) => void
   onToolEnd?: (toolCallId: string, result: string) => void
   onPermissionRequest?: (request: import('../services/PermissionManager').PermissionRequest) => Promise<boolean>
   onAskUserRequest?: (request: AskUserRequest) => Promise<AskUserAnswer[]>
+  onPlanReview?: (plan: Plan) => Promise<{ approved: boolean; feedback?: string }>
 }
 
 export interface AgentRunConfig extends ChatRequestConfig {
@@ -77,20 +81,34 @@ export class AgentRunner {
     let filesModifiedInSession = false
     let lastVerificationResult: { success: boolean; command: string } | null = null
 
-    const availableTools = config.planMode
-      ? this.toolManager.getReadOnlyTools()
-      : (config.tools || this.toolManager.getToolDefinitions())
+    // Plan mode: dynamic tool set + active plan injection
+    const planStore = new PlanStore()
+    let availableTools: ToolDefinition[]
 
-    // Plan mode: inject read-only guidance and notify frontend
     if (config.planMode) {
+      // Read-only tools + ExitPlanMode for plan submission
+      const readOnly = this.toolManager.getReadOnlyTools()
+      const exitPlanModeTool = this.toolManager.getTool('ExitPlanMode')
+      const exitPlanDef = exitPlanModeTool ? [{
+        type: 'function' as const,
+        function: {
+          name: exitPlanModeTool.name,
+          description: exitPlanModeTool.description,
+          parameters: exitPlanModeTool.parameters_schema
+        }
+      }] : []
+      availableTools = [...readOnly, ...exitPlanDef]
+
       allMessages.push({
         role: 'system',
         content: [
           'You are in Plan Mode (read-only). Your goal:',
           '1. Explore the codebase to understand relevant files and patterns.',
-          '2. Present a clear numbered plan for the implementation.',
-          '3. Do NOT make any edits, write files, or run commands.',
-          'When the user turns off Plan Mode, implement the approved plan.'
+          '2. Design a structured plan with numbered steps.',
+          '3. Call ExitPlanMode with slug, title, and steps to submit for user approval.',
+          '4. Each step: 50-150 chars, include goal + files + acceptance criteria.',
+          '5. Do NOT make any edits, write files, or run commands.',
+          'When the user approves the plan, you will enter execution mode.'
         ].join('\n')
       } as any)
 
@@ -100,11 +118,55 @@ export class AgentRunner {
         if (win) {
           win.webContents.send(IPC_CHANNELS.PLAN_STATE_CHANGED, {
             state: 'active',
-            mode: config.planMode ? 'plan' : 'normal'
+            mode: 'plan'
           })
         }
       } catch (e) {
         // ignore
+      }
+    } else {
+      // Execution mode: load active plan and inject as system message
+      availableTools = config.tools || this.toolManager.getToolDefinitions()
+
+      try {
+        const activePlan = await planStore.getActive(config.workspaceRoot)
+        if (activePlan) {
+          // Add UpdatePlanStep tool
+          const stepTool = this.toolManager.getTool('UpdatePlanStep')
+          if (stepTool) {
+            availableTools = [...availableTools, {
+              type: 'function' as const,
+              function: {
+                name: stepTool.name,
+                description: stepTool.description,
+                parameters: stepTool.parameters_schema
+              }
+            }]
+          }
+
+          // Build active_plan system message
+          const stepLines = activePlan.steps.map(s =>
+            `- [${s.status}] ${s.id} ${s.title}`
+          ).join('\n')
+          const currentStep = activePlan.steps.find(s => s.status === 'in_progress')
+          const planMsg = [
+            '<active_plan>',
+            `Plan: ${activePlan.title} (slug: ${activePlan.slug})`,
+            `Status: ${activePlan.status}`,
+            'Steps:',
+            stepLines,
+            `Current step: ${currentStep ? `${currentStep.id} ${currentStep.title}` : 'none'}`,
+            '</active_plan>'
+          ].join('\n')
+
+          // Remove any previous active_plan message, then inject fresh one
+          allMessages = allMessages.filter(m =>
+            !(m.role === 'system' && typeof m.content === 'string' && m.content.includes('<active_plan>'))
+          )
+          allMessages.push({ role: 'system', content: planMsg } as any)
+        }
+      } catch (e) {
+        console.error('[AgentRunner] Failed to load active plan:', e)
       }
     }
 
@@ -325,6 +387,51 @@ export class AgentRunner {
             }
 
             callbacks.onToolStart?.(toolCallId, name, args)
+
+            // ExitPlanMode 审批拦截：不立即执行，等待前端审批
+            if (name === 'ExitPlanMode') {
+              const planData = JSON.parse(args)
+              // 先执行 create + submitForReview
+              const plan = await PlanService.createPlan(
+                config.workspaceRoot,
+                planData.title || '',
+                planData.description || '',
+                planData.steps || []
+              )
+              await PlanService.submitForReview(config.workspaceRoot, plan.slug)
+
+              let exitResultMsg: string
+              // 推到前端审批
+              if (callbacks.onPlanReview) {
+                const decision = await callbacks.onPlanReview(plan)
+                if (decision.approved) {
+                  await PlanService.approve(config.workspaceRoot, plan.slug)
+                  exitResultMsg = JSON.stringify({
+                    ok: true,
+                    data: { status: 'approved', slug: plan.slug, message: 'Plan approved. Now implement the plan. Use UpdatePlanStep to track progress.' }
+                  })
+                } else {
+                  await PlanService.requestChanges(config.workspaceRoot, plan.slug, decision.feedback || 'Please revise the plan.')
+                  exitResultMsg = JSON.stringify({
+                    ok: true,
+                    data: { status: 'revising', slug: plan.slug, feedback: decision.feedback, message: 'Plan needs revision. Update the plan based on the feedback, then call ExitPlanMode again.' }
+                  })
+                }
+              } else {
+                await PlanService.approve(config.workspaceRoot, plan.slug)
+                exitResultMsg = JSON.stringify({
+                  ok: true,
+                  data: { status: 'approved', slug: plan.slug, message: 'Plan auto-approved (no review handler). Now implement.' }
+                })
+              }
+              callbacks.onToolEnd?.(toolCallId, exitResultMsg)
+              return {
+                role: 'tool' as const,
+                tool_call_id: toolCallId,
+                name: name,
+                content: JSON.stringify({ ok: true, data: exitResultMsg })
+              }
+            }
 
             const toolInstance = this.toolManager.getTool(name)
             let resultMessage = ''

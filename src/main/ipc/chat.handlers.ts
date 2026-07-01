@@ -127,6 +127,12 @@ export function registerChatIpc(): void {
                 resolve(answers || [])
               })
             })
+          },
+          onPlanReview: (plan) => {
+            return new Promise((resolve) => {
+              sender.send('plan:review-request', streamId, plan)
+              planReviewResolvers.set(streamId, resolve)
+            })
           }
         }
       ).catch((error) => {
@@ -163,4 +169,29 @@ export function registerChatIpc(): void {
     const svc = getEditTransactionService()
     return await svc.getDiff(txId)
   })
+
+  // Plan 审批 IPC（per-stream 决策）
+  const planReviewResolvers = new Map<string, (decision: { approved: boolean; feedback?: string }) => void>()
+
+  ipcMain.handle(IPC_CHANNELS.PLAN_APPROVE, (_event, streamId: string, planSlug: string) => {
+    const resolver = planReviewResolvers.get(streamId)
+    if (resolver) {
+      resolver({ approved: true })
+      planReviewResolvers.delete(streamId)
+      return true
+    }
+    return false
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PLAN_REJECT, (_event, streamId: string, planSlug: string, feedback: string) => {
+    const resolver = planReviewResolvers.get(streamId)
+    if (resolver) {
+      resolver({ approved: false, feedback })
+      planReviewResolvers.delete(streamId)
+      return true
+    }
+    return false
+  })
+
+  // planReviewResolvers is available via the module scope for AgentRunner use
 }
