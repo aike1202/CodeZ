@@ -10,6 +10,7 @@ interface StreamRequest {
   model: string
   messages: ChatMessage[]
   sessionId?: string
+  planMode?: boolean
 }
 
 import type { AgentRunner } from '../agent/AgentRunner'
@@ -88,7 +89,8 @@ export function registerChatIpc(): void {
           workspaceRoot: currentWorkspace,
           thinking: config.thinking,
           sessionId: request.sessionId || undefined,
-          contextWindowTokens
+          contextWindowTokens,
+          planMode: request.planMode
         },
         {
           onChunk: (delta, reasoningDelta) => {

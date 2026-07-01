@@ -41,13 +41,6 @@ export const IPC_CHANNELS = {
   SESSION_DELETE: 'session:delete',
 
 
-  // Tasks
-  TASK_GET_BY_PROJECT: 'task:get-by-project',
-  TASK_SAVE: 'task:save',
-  TASK_DELETE: 'task:delete',
-  TASK_UPSERT: 'task:upsert',
-  TASK_SYNC: 'task:sync',
-
   // Plan
   PLAN_STATE_CHANGED: 'plan:state-changed',
   PLAN_APPROVE: 'plan:approve',

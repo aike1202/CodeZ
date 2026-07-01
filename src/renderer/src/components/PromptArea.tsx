@@ -43,6 +43,9 @@ export default function PromptArea({ onSend, placeholder, onOpenSettings, worksp
   const isStreaming = useChatStore((s) => s.streamCleanup !== null)
   const stopStream = useChatStore((s) => s.streamCleanup)
 
+  const planMode = useChatStore((s) => s.planMode)
+  const togglePlanMode = useChatStore((s) => s.togglePlanMode)
+
   const viewRef = useRef<EditorView | null>(null)
 
   const activeProvider = providers.find((p) => p.id === activeProviderId)
@@ -300,6 +303,17 @@ export default function PromptArea({ onSend, placeholder, onOpenSettings, worksp
           <Stack gap={2}>
             {/* 输入框上方的功能扩展栏 */}
             <Flex align="center" gap={3} className="prompt-top-toolbar">
+              {!isStreaming && (
+                <button
+                  type="button"
+                  className={`plan-toggle-btn ${planMode ? 'plan-toggle-btn--active' : ''}`}
+                  onClick={() => togglePlanMode()}
+                  title="Plan mode: read-only exploration and design"
+                  aria-pressed={planMode}
+                >
+                  {planMode ? '● Plan' : '○ Plan'}
+                </button>
+              )}
             </Flex>
 
             <Flex align="start" className="prompt-input-wrapper w-full">

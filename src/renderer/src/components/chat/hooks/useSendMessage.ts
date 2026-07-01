@@ -22,6 +22,7 @@ export function useSendMessage() {
   const addPermissionRequest = useChatStore((s) => s.addPermissionRequest)
   const addAskUserRequest = useChatStore((s) => s.addAskUserRequest)
   const setDiffEntries = useChatStore((s) => s.setDiffEntries)
+  const planMode = useChatStore((s) => s.planMode)
 
   const handleSendMessage = useCallback(
     async (message: string, modelName: string) => {
@@ -135,6 +136,7 @@ export function useSendMessage() {
         model,
         chatMessages,
         sid,
+        planMode,
         {
           onChunk: (delta: string, reasoningDelta?: string) => {
             appendStreamChunk(agentId, delta, reasoningDelta)
@@ -204,7 +206,8 @@ export function useSendMessage() {
       appendReasoningTimelineChunk,
       addPermissionRequest,
       addAskUserRequest,
-      setDiffEntries
+      setDiffEntries,
+      planMode
     ]
   )
 

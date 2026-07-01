@@ -1,28 +1,7 @@
 import { create } from 'zustand'
 
-/**
- * Renderer-side mirror of the TaskData shape defined in
- * `src/main/services/TaskStore.ts`. Kept locally (rather than imported across
- * the main/renderer boundary) so the renderer does not pull the main-process
- * module graph (which depends on node built-ins and `electron`) into its
- * type-checking context. The backend remains the source of truth; this
- * interface must stay structurally compatible with it.
- */
-export interface TaskData {
-  id: string
-  sessionId: string
-  subject: string
-  description: string
-  status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
-  blocks: string[]
-  blockedBy: string[]
-  owner: string
-  createdAt: string
-  updatedAt: string
-}
-
-export type AgentStateType = 
-  | 'processing' 
+export type AgentStateType =
+  | 'processing'
   | 'command_running' 
   | 'command_completed' 
   | 'exploration' 
@@ -166,10 +145,10 @@ interface ChatState {
   messages: ChatMessage[]
   /** 流式请求的 cleanup 函数，用于取消 */
   streamCleanup: (() => void) | null
-  /** 当前会话的任务列表（由主进程通过 IPC 推送） */
-  tasks: TaskData[]
   /** 当前展开的胶囊：'task' | 'plan' | null */
   expandedCapsule: 'task' | 'plan' | null
+  /** Plan 模式开关：true=只读探索，false=正常模式 */
+  planMode: boolean
 
   /* actions */
   loadSessions: () => Promise<void>
@@ -200,8 +179,9 @@ interface ChatState {
   finishToolCall: (msgId: string, toolCallId: string, result: string) => void
 
   setExpandedCapsule: (capsule: 'task' | 'plan' | null) => void
-  upsertTask: (task: TaskData) => void
-  initTaskListener: () => void
+  setPlanMode: (mode: boolean) => void
+  togglePlanMode: () => void
+  initPlanStateListener: () => void
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -209,8 +189,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   activeSessionId: null,
   messages: [],
   streamCleanup: null,
-  tasks: [],
   expandedCapsule: null,
+  planMode: false,
 
   loadSessions: async () => {
     try {
@@ -720,32 +700,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setExpandedCapsule: (capsule) => set({ expandedCapsule: capsule }),
 
-  upsertTask: (task) => set((state) => {
-    const idx = state.tasks.findIndex((t) => t.id === task.id)
-    const newTasks = idx >= 0
-      ? [...state.tasks.slice(0, idx), task, ...state.tasks.slice(idx + 1)]
-      : [...state.tasks, task]
-    return { tasks: newTasks }
-  }),
+  setPlanMode: (mode) => set({ planMode: mode }),
 
-  initTaskListener: () => {
+  togglePlanMode: () => set((s) => ({ planMode: !s.planMode })),
+
+  initPlanStateListener: () => {
     const win = window as any
     const ipc = win?.electron?.ipcRenderer
     if (!ipc) return
 
-    const upsertHandler = (_event: unknown, task: TaskData) => {
-      useChatStore.getState().upsertTask(task)
-    }
-    const syncHandler = (
-      _event: unknown,
-      data: { sessionId: string; tasks: TaskData[] }
-    ) => {
-      if (data && Array.isArray(data.tasks)) {
-        set({ tasks: data.tasks })
+    ipc.on('plan:state-changed', (_event: unknown, data: { state: string; mode: string }) => {
+      // When agent reports idle/normal, sync planMode off
+      if (data.mode === 'normal') {
+        useChatStore.getState().setPlanMode(false)
       }
-    }
-
-    ipc.on('task:upsert', upsertHandler)
-    ipc.on('task:sync', syncHandler)
+    })
   }
 }))

@@ -6,7 +6,6 @@ import { registerProviderIpc } from './ipc/provider.handlers'
 import { registerChatIpc } from './ipc/chat.handlers'
 import { registerSessionIpc } from './ipc/session.handlers'
 import { registerTerminalIpc } from './ipc/terminal.handlers'
-import { registerTaskIpc } from './ipc/task.handlers'
 import { registerThemeIpc } from './ipc/theme.handlers'
 import { registerSkillIpc } from './ipc/skill.handlers'
 import { registerRulesIpc } from './ipc/rules.handlers'
@@ -79,7 +78,6 @@ app.whenReady().then(() => {
   registerChatIpc()
   registerSessionIpc()
   registerTerminalIpc()
-  registerTaskIpc()
   registerThemeIpc()
   registerSkillIpc()
   registerRulesIpc()

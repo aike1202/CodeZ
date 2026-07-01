@@ -72,6 +72,7 @@ const api = {
       model: string,
       messages: ChatMessage[],
       sessionId: string | null,
+      planMode: boolean = false,
       callbacks: {
         onChunk: (delta: string, reasoningDelta?: string) => void
         onDone: (fullContent: string, stopReason?: string, txId?: string) => void
@@ -148,7 +149,7 @@ const api = {
       ipcRenderer.on(IPC_CHANNELS.CHAT_REQUEST_ASK_USER, askUserHandler)
 
       // 发起请求
-      ipcRenderer.invoke(IPC_CHANNELS.CHAT_STREAM_START, { providerId, model, messages, sessionId })
+      ipcRenderer.invoke(IPC_CHANNELS.CHAT_STREAM_START, { providerId, model, messages, sessionId, planMode })
         .then((streamId) => {
           activeStreamId = streamId
         })
@@ -185,19 +186,6 @@ const api = {
 
     delete: (sessionId: string): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.SESSION_DELETE, sessionId)
-  },
-
-
-
-  task: {
-    getByProject: (projectId: string): Promise<any[]> =>
-      ipcRenderer.invoke(IPC_CHANNELS.TASK_GET_BY_PROJECT, projectId),
-
-    save: (task: any): Promise<void> =>
-      ipcRenderer.invoke(IPC_CHANNELS.TASK_SAVE, task),
-
-    delete: (taskId: string): Promise<void> =>
-      ipcRenderer.invoke(IPC_CHANNELS.TASK_DELETE, taskId)
   },
 
   terminal: {

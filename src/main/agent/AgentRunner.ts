@@ -1,3 +1,5 @@
+import { BrowserWindow } from 'electron'
+import { IPC_CHANNELS } from '../../shared/ipc/channels'
 import { ChatService, ChatRequestConfig, StreamCallbacks } from '../services/ChatService'
 import { ToolManager } from '../tools/ToolManager'
 import { EditTransactionService, getEditTransactionService } from '../services/EditTransactionService'
@@ -18,6 +20,7 @@ export interface AgentRunConfig extends ChatRequestConfig {
   tools?: ToolDefinition[]
   sessionId?: string
   contextWindowTokens?: number
+  planMode?: boolean
 }
 
 export function isToolErrorResult(resultMessage: string): boolean {
@@ -74,7 +77,36 @@ export class AgentRunner {
     let filesModifiedInSession = false
     let lastVerificationResult: { success: boolean; command: string } | null = null
 
-    const availableTools = config.tools || this.toolManager.getToolDefinitions()
+    const availableTools = config.planMode
+      ? this.toolManager.getReadOnlyTools()
+      : (config.tools || this.toolManager.getToolDefinitions())
+
+    // Plan mode: inject read-only guidance and notify frontend
+    if (config.planMode) {
+      allMessages.push({
+        role: 'system',
+        content: [
+          'You are in Plan Mode (read-only). Your goal:',
+          '1. Explore the codebase to understand relevant files and patterns.',
+          '2. Present a clear numbered plan for the implementation.',
+          '3. Do NOT make any edits, write files, or run commands.',
+          'When the user turns off Plan Mode, implement the approved plan.'
+        ].join('\n')
+      } as any)
+
+      // Notify renderer of plan state
+      try {
+        const win = BrowserWindow.getAllWindows()[0]
+        if (win) {
+          win.webContents.send(IPC_CHANNELS.PLAN_STATE_CHANGED, {
+            state: 'active',
+            mode: config.planMode ? 'plan' : 'normal'
+          })
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
 
     // 开启修改事务
     const sessionId = config.sessionId || `session_${Date.now()}`
