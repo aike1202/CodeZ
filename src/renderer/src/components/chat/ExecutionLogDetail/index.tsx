@@ -1,15 +1,8 @@
 import React from 'react'
-import {
-  type UnifiedTimelineItem,
-  getFileIconComponent
-} from './ExecutionLogUtils'
+import { getFileIconComponent } from '../ExecutionLogUtils'
 import { FolderIcon } from '@react-symbols/icons/utils'
-import { parseArgs } from '../../utils/parseArgs'
-
-interface ExecutionLogDetailProps {
-  item: UnifiedTimelineItem
-  onFileClick?: (filePath: string, virtualContent?: string) => void
-}
+import { parseArgs } from '../../../utils/parseArgs'
+import type { ExecutionLogDetailProps } from './types'
 
 export default function ExecutionLogDetail({
   item,
@@ -38,7 +31,6 @@ export default function ExecutionLogDetail({
               if (!isDir && !isFile) {
                 if (!line.trim()) return null
 
-                // 解析 === Directory: xxx === 或 == Directory: xxx ==
                 const dirMatch = line.match(/^={2,}\s*Directory:\s*(.+?)\s*={2,}$/)
                 if (dirMatch) {
                   return (
@@ -70,7 +62,7 @@ export default function ExecutionLogDetail({
       const filePaths = Array.isArray(argsObj.filePaths)
         ? argsObj.filePaths
         : (argsObj.file_path ? [argsObj.file_path] : [])
-      
+
       if (filePaths.length > 1) {
         return (
           <div className="exe-log-detail-box-mono">
@@ -133,40 +125,10 @@ export default function ExecutionLogDetail({
                   </div>
                 </div>
               )}
-              {parsed.tree && typeof parsed.tree === 'string' && (
-                <div className="exe-log-divider">
-                  <div className="exe-log-snapshot-sub-title">项目目录结构 (Depth: 3)</div>
-                  <div className="exe-log-tree-box">
-                    {parsed.tree.split('\n').map((line: string, idx: number) => {
-                      const isDir = line.includes('[DIR]')
-                      const isFile = line.includes('[FILE]')
-                      if (!isDir && !isFile) {
-                        return <div key={idx} className="exe-log-tree-line-indent">{line}</div>
-                      }
-
-                      const match = line.match(/^(\s*)\[(?:DIR|FILE)\]\s*(.*)/u)
-                      if (!match) return <div key={idx} className="pl-1">{line}</div>
-
-                      const indent = match[1].length
-                      const name = match[2]
-                      const pl = `${indent * 6 + 4}px`
-
-                      return (
-                        <div key={idx} style={{ paddingLeft: pl }} className="exe-log-tree-row">
-                          {isDir ? <FolderIcon folderName={name} /> : getFileIconComponent(name)}
-                          <span className="truncate">{name}</span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
             </div>
           )
         }
-      } catch {
-        // fail safe to fallback
-      }
+      } catch {}
     }
 
     if (item.toolName === 'search' || item.toolName === 'Grep' || item.verb === 'Searched') {
@@ -180,9 +142,7 @@ export default function ExecutionLogDetail({
             parsedSearch = rawParsed
           }
         }
-      } catch {
-        // fail safe
-      }
+      } catch {}
 
       if (parsedSearch && Array.isArray(parsedSearch.matches) && parsedSearch.matches.length > 0) {
         return (
@@ -205,19 +165,10 @@ export default function ExecutionLogDetail({
                       {match.path}{match.line ? `:${match.line}` : ''}
                     </span>
                   </div>
-                  {match.text && (
-                    <div className="exe-log-search-item-text">
-                      {match.text.trim()}
-                    </div>
-                  )}
+                  {match.text && <div className="exe-log-search-item-text">{match.text.trim()}</div>}
                 </div>
               )
             })}
-            {parsedSearch.truncated && (
-              <div className="exe-log-search-truncated">
-                ...Results truncated
-              </div>
-            )}
           </div>
         )
       }
@@ -265,9 +216,7 @@ export default function ExecutionLogDetail({
       if (item.args) {
         parsedArgs = JSON.parse(item.args)
       }
-    } catch {
-      // fail safe
-    }
+    } catch {}
 
     return (
       <div className="exe-log-cmd-details-box">
@@ -314,3 +263,5 @@ export default function ExecutionLogDetail({
 
   return null
 }
+
+export type { ExecutionLogDetailProps } from './types'
