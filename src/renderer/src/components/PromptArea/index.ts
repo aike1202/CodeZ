@@ -1,2 +1,3 @@
-export { default } from './PromptArea'
+import PromptArea from './PromptArea'
+export default PromptArea
 export type { PromptAreaProps } from './types'
