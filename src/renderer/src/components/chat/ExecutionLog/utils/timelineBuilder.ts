@@ -1,194 +1,13 @@
-import React from 'react'
-import type { AgentState, ExecutionTimelineItem, ReasoningTimelineItem, ToolCallState } from '../../stores/chatStore'
-import { parseArgs } from '../../utils/parseArgs'
-import { computeEditStats } from '../../utils/editDiffUtils'
-import { FileIcon, FolderIcon } from '@react-symbols/icons/utils'
-import {
-  ThoughtIcon,
-  SearchIcon,
-  CmdIcon
-} from '../svg-icons'
+import type { ExecutionTimelineItem, ReasoningTimelineItem } from '../../../../stores/chatStore'
+import { parseArgs } from '../../../../utils/parseArgs'
+import { computeEditStats } from '../../../../utils/editDiffUtils'
+import type { CommandItem, EditItemWithStatus, UnifiedTimelineItem } from './types'
+import { getToolTarget, getToolNoun, formatDuration, formatReasoningDuration } from './itemParsers'
 
-export type CommandItem = {
-  id: string
-  title: string
-  status: 'running' | 'success' | 'error'
-  timestamp: number
-}
-
-export type EditItem = {
-  id: string
-  filePath: string
-  additions: string
-  deletions: string
-  timestamp: number
-}
-
-export interface UnifiedTimelineItem {
-  id: string
-  type: 'reasoning' | 'tool' | 'command' | 'edit' | 'text'
-  timestamp: number
-  status: 'running' | 'success' | 'error'
-  verb: 'Thought' | 'Analyzed' | 'Analyzing' | 'Explored' | 'Exploring' | 'Searched' | 'Searching' | 'Terminal' | 'Edited' | 'Created' | 'Editing' | 'Creating' | 'Executed' | 'Executing'
-  target: string
-  detail?: string
-  args?: string
-  duration?: string
-  additions?: string
-  deletions?: string
-  fileName?: string
-  toolName?: string
-  realPath?: string
-}
-
-export function getFileExtension(fileName?: string): string {
-  if (!fileName) return ''
-  const parts = fileName.split('.')
-  return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : ''
-}
-
-export function getFileIconComponent(fileName?: string): React.ReactElement {
-  if (!fileName) return React.createElement(FileIcon, { fileName: '', width: 14, height: 14 })
-  const isDir = !fileName.includes('.')
-  if (isDir) return React.createElement(FolderIcon, { folderName: fileName, width: 14, height: 14 })
-  return React.createElement(FileIcon, { fileName, width: 14, height: 14 })
-}
-
-export function getToolTarget(log: ToolCallState): string {
-  const args = parseArgs(log.args)
-
-  const targetPathsObj = args.targetPaths || args.TargetPaths || args.dirPaths || args.DirPaths
-  if (Array.isArray(targetPathsObj) && targetPathsObj.length > 0) {
-    const paths = targetPathsObj as string[]
-    if (paths.length === 1) return paths[0]
-    const names = paths.map(p => p.split(/[/\\]/).pop()).slice(0, 3)
-    return `${paths.length} 个目标 (${names.join(', ')}${paths.length > 3 ? '...' : ''})`
-  }
-
-  if (log.name === 'grep_search' || log.name === 'search_code' || log.name === 'search_text') {
-    const query = args.Query || args.query || args.pattern || args.regex || ''
-    const pathValue = args.SearchPath || args.DirectoryPath || args.path || args.dirPath || ''
-    if (pathValue) {
-      const pathName = pathValue.split(/[/\\]/).pop() || pathValue
-      return `"${query}" (在 ${pathName})`
-    }
-    return `"${query}"`
-  }
-
-  const value =
-    args.file_path ||
-    args.command ||
-    args.DirectoryPath ||
-    args.directoryPath ||
-    args.AbsolutePath ||
-    args.absolutePath ||
-    args.SearchPath ||
-    args.searchPath ||
-    args.targetFile ||
-    args.TargetFile ||
-    args.path ||
-    args.dirPath ||
-    args.filePath ||
-    args.directory ||
-    args.Directory ||
-    args.query ||
-    args.Query ||
-    args.pattern ||
-    args.Pattern ||
-    args.regex ||
-    args.Regex
-
-  return typeof value === 'string' ? value : ''
-}
-
-export function getToolNoun(toolName: string): string {
-  switch (toolName) {
-    case 'read_file':
-      return '文件'
-    case 'list_files':
-    case 'list_dir':
-      return '目录'
-    case 'search_text':
-      return '文本搜索'
-    case 'get_project_snapshot':
-      return '项目快照'
-    case 'read_files':
-      return '文件'
-    case 'search_code':
-      return '代码搜索'
-    case 'get_symbol_map':
-      return '符号索引'
-    case 'fast_context':
-      return '快速上下文'
-    default:
-      return toolName
-  }
-}
-
-export function formatDuration(log: ToolCallState): string {
-  if (!log.completedAt) return ''
-  return `${Math.max(log.completedAt - log.startedAt, 1)}ms`
-}
-
-export function formatReasoningDuration(item: ReasoningTimelineItem): string {
-  const end = item.completedAt || item.updatedAt
-  const duration = Math.max(end - item.startedAt, 1)
-  if (duration < 1000) return `${duration}ms`
-  return `${Math.round(duration / 1000)}s`
-}
-
-export function normalizeCommandTitle(title: string): string {
-  return title
-    .replace(/^正在运行\s*/u, '')
-    .replace(/^已运行\s*/u, '')
-    .replace(/^正在执行\s*/u, '')
-    .replace(/^已执行\s*/u, '')
-    .trim()
-}
-
-export function buildCommandItems(states: AgentState[]): CommandItem[] {
-  return states
-    .filter((state) => state.type === 'command_running' || state.type === 'command_completed')
-    .sort((a, b) => a.timestamp - b.timestamp)
-    .map((state) => ({
-      id: state.id,
-      title: normalizeCommandTitle(state.title),
-      status: state.type === 'command_running' ? 'running' : state.status === 'error' ? 'error' : 'success',
-      timestamp: state.timestamp
-    }))
-}
-
-export function parseEditDetail(detail: string | undefined): { additions: string; deletions: string } {
-  if (!detail) return { additions: '+0', deletions: '-0' }
-
-  return {
-    additions: detail.match(/\+\d+/u)?.[0] || '+0',
-    deletions: detail.match(/-\d+/u)?.[0] || '-0'
-  }
-}
-
-export type EditItemWithStatus = EditItem & { status: 'running' | 'success' | 'error', isRunning: boolean }
-
-export function buildEditItems(states: AgentState[]): EditItemWithStatus[] {
-  return states
-    .filter((state) => state.type === 'edit')
-    .sort((a, b) => a.timestamp - b.timestamp)
-    .map((state) => {
-      const detail = parseEditDetail(state.detail)
-      const isRunning = state.status === 'pending' || state.title.startsWith('正在编辑')
-      return {
-        id: state.id,
-        filePath: state.title.replace(/^正在编辑\s*/u, '').replace(/^已编辑\s*/u, '').trim(),
-        additions: detail.additions,
-        deletions: detail.deletions,
-        timestamp: state.timestamp,
-        status: state.status === 'error' ? 'error' : (isRunning ? 'running' : 'success'),
-        isRunning
-      }
-    })
-}
-
-export function buildFallbackTimeline(timeline: ExecutionTimelineItem[] | undefined, reasoning?: string): ExecutionTimelineItem[] {
+export function buildFallbackTimeline(
+  timeline: ExecutionTimelineItem[] | undefined,
+  reasoning?: string
+): ExecutionTimelineItem[] {
   if (timeline && timeline.length > 0) return timeline
   if (!reasoning?.trim()) return []
 
@@ -215,7 +34,6 @@ export function buildUnifiedTimeline(
 ): UnifiedTimelineItem[] {
   const list: UnifiedTimelineItem[] = []
 
-  // 1. 处理 timeline (思考与工具调用)
   timeline.forEach((item) => {
     if (item.type === 'reasoning') {
       const durationStr = formatReasoningDuration(item)
@@ -250,12 +68,21 @@ export function buildUnifiedTimeline(
         const offset = argsObj.offset
         const limit = argsObj.limit
         let targetText = fp || '文件'
-        if (typeof offset === 'number') targetText += ` #L${offset}${typeof limit === 'number' ? `-${offset + limit - 1}` : '-'}`
+        if (typeof offset === 'number')
+          targetText += ` #L${offset}${typeof limit === 'number' ? `-${offset + limit - 1}` : '-'}`
         list.push({
-          id: tc.id, type: 'tool', timestamp: tc.startedAt, status: tc.status,
+          id: tc.id,
+          type: 'tool',
+          timestamp: tc.startedAt,
+          status: tc.status,
           verb: tc.status === 'running' ? 'Analyzing' : 'Analyzed',
-          target: targetText, realPath: fp, fileName: fp ? fp.split(/[/\\]/).pop() : undefined,
-          args: tc.args, detail: tc.result, duration, toolName: tc.name
+          target: targetText,
+          realPath: fp,
+          fileName: fp ? fp.split(/[/\\]/).pop() : undefined,
+          args: tc.args,
+          detail: tc.result,
+          duration,
+          toolName: tc.name
         })
       } else if (tc.name === 'read_files') {
         const argsObj = parseArgs(tc.args)
@@ -273,7 +100,7 @@ export function buildUnifiedTimeline(
             targetText += ` #L${startLine}-`
           }
         } else if (filePaths.length > 1) {
-          const names = filePaths.map(p => p.split(/[/\\]/).pop()).slice(0, 2)
+          const names = filePaths.map((p) => p.split(/[/\\]/).pop()).slice(0, 2)
           targetText = `${filePaths.length} 个文件 (${names.join(', ')}${filePaths.length > 2 ? '...' : ''})`
         }
 
@@ -302,9 +129,14 @@ export function buildUnifiedTimeline(
             type: 'edit',
             timestamp: tc.startedAt,
             status: tc.status,
-            verb: tc.status === 'running'
-              ? (tc.name === 'Write' ? 'Creating' : 'Editing')
-              : (tc.name === 'Write' ? 'Created' : 'Edited'),
+            verb:
+              tc.status === 'running'
+                ? tc.name === 'Write'
+                  ? 'Creating'
+                  : 'Editing'
+                : tc.name === 'Write'
+                  ? 'Created'
+                  : 'Edited',
             target: target,
             realPath: target,
             additions: additions,
@@ -350,7 +182,12 @@ export function buildUnifiedTimeline(
           verbDisplay = tc.status === 'running' ? 'Exploring' : 'Explored'
         } else if (tc.name === 'Bash' || tc.name === 'PowerShell' || tc.name === 'run_command') {
           verbDisplay = 'Terminal'
-        } else if (tc.name === 'Read' || tc.name === 'read_files' || tc.name === 'get_project_snapshot' || tc.name === 'fast_context') {
+        } else if (
+          tc.name === 'Read' ||
+          tc.name === 'read_files' ||
+          tc.name === 'get_project_snapshot' ||
+          tc.name === 'fast_context'
+        ) {
           verbDisplay = tc.status === 'running' ? 'Analyzing' : 'Analyzed'
         } else {
           verbDisplay = tc.status === 'running' ? 'Executing' : 'Executed'
@@ -381,10 +218,10 @@ export function buildUnifiedTimeline(
 
         const cleanRealPath = getToolTarget(tc)
         const isActuallyRunning = tc.status === 'running' && isStreaming !== false
-        
+
         list.push({
           id: tc.id,
-          type: (tc.name === 'Bash' || tc.name === 'PowerShell' || tc.name === 'run_command') ? 'command' : 'tool',
+          type: tc.name === 'Bash' || tc.name === 'PowerShell' || tc.name === 'run_command' ? 'command' : 'tool',
           timestamp: tc.startedAt,
           status: isActuallyRunning ? 'running' : tc.status === 'running' ? 'error' : tc.status,
           verb: verbDisplay,
@@ -400,7 +237,6 @@ export function buildUnifiedTimeline(
     }
   })
 
-  // 2. 处理 commands
   commands.forEach((cmd) => {
     const isActuallyRunning = cmd.status === 'running' && isStreaming !== false
     list.push({
@@ -414,7 +250,6 @@ export function buildUnifiedTimeline(
     })
   })
 
-  // 3. 处理 edits
   edits.forEach((edit) => {
     const isActuallyRunning = edit.status === 'running' && isStreaming !== false
     list.push({
@@ -433,7 +268,18 @@ export function buildUnifiedTimeline(
   const hasReasoningInTimeline = timeline.some((item) => item.type === 'reasoning')
   if (!hasReasoningInTimeline && reasoning?.trim()) {
     const fallbackTimestamp = timeline.length > 0 ? timeline[0].startedAt - 1000 : Date.now()
-    const isStillRunning = Boolean(isStreaming) || timeline.some((item) => item.type === 'reasoning' ? item.status === 'running' : item.type === 'tool' ? item.toolCall.status === 'running' : item.type === 'text' ? item.status === 'running' : false) || commands.some((cmd) => cmd.status === 'running')
+    const isStillRunning =
+      Boolean(isStreaming) ||
+      timeline.some((item) =>
+        item.type === 'reasoning'
+          ? item.status === 'running'
+          : item.type === 'tool'
+            ? item.toolCall.status === 'running'
+            : item.type === 'text'
+              ? item.status === 'running'
+              : false
+      ) ||
+      commands.some((cmd) => cmd.status === 'running')
     const duration = Math.max(Date.now() - fallbackTimestamp, 1)
     const durationStr = duration < 1000 ? `${duration}ms` : `${Math.round(duration / 1000)}s`
 
@@ -474,23 +320,4 @@ export function buildUnifiedTimeline(
   })
 
   return list
-}
-
-export function buildSummaryText(items: UnifiedTimelineItem[], running: boolean): string {
-  const readCount = items.filter((i) => i.type === 'tool' && i.verb === 'Analyzed').length
-  const dirCount = items.filter((i) => i.type === 'tool' && i.verb === 'Explored').length
-  const searchCount = items.filter((i) => i.verb === 'Searched').length
-  const cmdCount = items.filter((i) => i.type === 'command').length
-  const editCount = items.filter((i) => i.type === 'edit').length
-
-  const parts = [
-    readCount > 0 ? `${readCount} 个文件` : '',
-    dirCount > 0 ? `${dirCount} 个目录` : '',
-    searchCount > 0 ? `${searchCount} 次搜索` : '',
-    cmdCount > 0 ? `${cmdCount} 条命令` : '',
-    editCount > 0 ? `${editCount} 处修改` : ''
-  ].filter(Boolean)
-
-  const prefix = running ? '正在处理: ' : '已探索: '
-  return parts.length > 0 ? `${prefix}${parts.join(', ')}` : running ? '运行中...' : '已完成'
 }

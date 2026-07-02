@@ -10,7 +10,7 @@ import {
   buildEditItems,
   buildUnifiedTimeline,
   buildSummaryText
-} from '../ExecutionLogUtils'
+} from './utils'
 import './ExecutionLog.css'
 import type { ExecutionLogProps } from './types'
 import { LogItemRow } from './components/LogItemRow'

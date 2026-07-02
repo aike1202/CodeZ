@@ -3,7 +3,7 @@ import Flex from '../../../ui/Flex'
 import {
   type UnifiedTimelineItem,
   getFileIconComponent
-} from '../../ExecutionLogUtils'
+} from '../utils'
 import { buildDiffEditInfo } from '../../../../utils/editDiffUtils'
 import ExecutionLogDetail from '../../ExecutionLogDetail'
 import { ThoughtIcon, SearchIcon, CmdIcon } from '../../../svg-icons'

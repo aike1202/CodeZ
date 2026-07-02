@@ -1,4 +1,4 @@
-import type { UnifiedTimelineItem } from '../ExecutionLogUtils'
+import type { UnifiedTimelineItem } from '../ExecutionLog/utils'
 
 export interface ExecutionLogDetailProps {
   item: UnifiedTimelineItem
