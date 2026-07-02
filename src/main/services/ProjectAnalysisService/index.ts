@@ -1,15 +1,11 @@
 import * as fs from 'fs/promises'
 import * as path from 'path'
-import { createHash } from 'crypto'
 import { app } from 'electron'
 import {
   DEFAULT_IGNORED_DIRS,
-  DEFAULT_IGNORED_EXTENSIONS,
-  MAX_FILE_READ_BYTES,
   MAX_FILE_READ_LINES,
-  MAX_FILE_REJECT_BYTES,
-  BINARY_EXTENSIONS,
-} from '../../shared/constants/ignored'
+  MAX_FILE_REJECT_BYTES
+} from '../../../shared/constants/ignored'
 import type {
   ProjectSnapshot,
   ProjectSnapshotOptions,
@@ -17,76 +13,33 @@ import type {
   SearchCodeOptions,
   CodeSearchResult,
   SymbolMapOptions,
-  SymbolMapResult,
-} from '../../shared/types/project-analysis'
+  SymbolMapResult
+} from '../../../shared/types/project-analysis'
 
-const SNAPSHOT_CACHE_FILE = 'project-snapshots.json'
+import {
+  PackageJsonShape,
+  isSameOptions,
+  isPathSafe,
+  toPosixPath,
+  shouldIgnoreName,
+  isIgnoredFile,
+  isTextLikeFile,
+  stableRecord
+} from './types'
+import {
+  SNAPSHOT_CACHE_FILE,
+  hashOptionalFile,
+  hashFirstExisting,
+  readCache,
+  writeCache
+} from './snapshotCache'
+
 const DEFAULT_TREE_DEPTH = 3
 const DEFAULT_MAX_TREE_ENTRIES = 300
 const DEFAULT_MAX_SEARCH_RESULTS = 80
 const DEFAULT_CONTEXT_LINES = 2
 const DEFAULT_SYMBOL_LIMIT = 300
 const DEFAULT_MAX_CHARS_PER_FILE = 40_000
-
-interface PackageJsonShape {
-  scripts?: Record<string, string>
-  dependencies?: Record<string, string>
-  devDependencies?: Record<string, string>
-  main?: string
-}
-
-interface SnapshotCacheEntry {
-  rootPath: string
-  packageJsonHash?: string
-  lockfileHash?: string
-  options?: ProjectSnapshotOptions
-  snapshot: ProjectSnapshot
-}
-
-interface SnapshotCacheFile {
-  entries: Record<string, SnapshotCacheEntry>
-}
-
-function isSameOptions(opt1?: ProjectSnapshotOptions, opt2?: ProjectSnapshotOptions): boolean {
-  if (!opt1 || !opt2) return opt1 === opt2
-  const paths1 = Array.isArray(opt1.dirPaths) ? opt1.dirPaths.slice().sort().join(',') : (opt1.dirPath || '.')
-  const paths2 = Array.isArray(opt2.dirPaths) ? opt2.dirPaths.slice().sort().join(',') : (opt2.dirPath || '.')
-  return (
-    paths1 === paths2 &&
-    (opt1.maxDepth ?? 3) === (opt2.maxDepth ?? 3) &&
-    (opt1.includeFiles !== false) === (opt2.includeFiles !== false)
-  )
-}
-
-function isPathSafe(workspaceRoot: string, targetPath: string): boolean {
-  const resolvedRoot = path.resolve(workspaceRoot)
-  const resolvedTarget = path.resolve(targetPath)
-  return resolvedTarget === resolvedRoot || resolvedTarget.startsWith(resolvedRoot + path.sep)
-}
-
-function toPosixPath(value: string): string {
-  return value.split(path.sep).join('/')
-}
-
-function shouldIgnoreName(name: string): boolean {
-  return DEFAULT_IGNORED_DIRS.includes(name) || name === '.continue' || name.startsWith('.git')
-}
-
-function isIgnoredFile(filePath: string): boolean {
-  const ext = path.extname(filePath).toLowerCase()
-  return DEFAULT_IGNORED_EXTENSIONS.includes(ext) || BINARY_EXTENSIONS.includes(ext)
-}
-
-function isTextLikeFile(filePath: string): boolean {
-  const ext = path.extname(filePath).toLowerCase()
-  if (!ext) return false
-  return !isIgnoredFile(filePath)
-}
-
-function stableRecord(value: unknown): Record<string, string> {
-  if (!value || typeof value !== 'object') return {}
-  return value as Record<string, string>
-}
 
 export class ProjectAnalysisService {
   private rootPath: string
@@ -107,15 +60,25 @@ export class ProjectAnalysisService {
   }
 
   async getProjectSnapshot(options: ProjectSnapshotOptions = {}): Promise<ProjectSnapshot> {
-    const packageJsonHash = await this.hashOptionalFile('package.json')
-    const lockfileHash = await this.hashFirstExisting(['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'])
-    const cached = await this.readCache()
+    const packageJsonHash = await hashOptionalFile((p) => this.validatePath(p), 'package.json')
+    const lockfileHash = await hashFirstExisting((p) => this.validatePath(p), [
+      'package-lock.json',
+      'pnpm-lock.yaml',
+      'yarn.lock'
+    ])
+    const cached = await readCache(this.cacheFilePath)
     const cacheEntry = cached.entries[this.rootPath]
 
-    if (!options.forceRefresh && cacheEntry && cacheEntry.packageJsonHash === packageJsonHash && cacheEntry.lockfileHash === lockfileHash && isSameOptions(cacheEntry.options, options)) {
+    if (
+      !options.forceRefresh &&
+      cacheEntry &&
+      cacheEntry.packageJsonHash === packageJsonHash &&
+      cacheEntry.lockfileHash === lockfileHash &&
+      isSameOptions(cacheEntry.options, options)
+    ) {
       return {
         ...cacheEntry.snapshot,
-        fromCache: true,
+        fromCache: true
       }
     }
 
@@ -134,12 +97,11 @@ export class ProjectAnalysisService {
       'vite.config.js',
       'tsconfig.json',
       'vitest.config.ts',
-      'jest.config.js',
+      'jest.config.js'
     ])
     const entrypoints = await this.findEntrypoints(packageJson)
     const recommendedFiles = await this.findRecommendedFiles(projectType, entrypoints)
 
-    // 支持批量目录快照
     let targetPaths: string[] = []
     if (Array.isArray(options.dirPaths)) {
       targetPaths = options.dirPaths
@@ -151,7 +113,11 @@ export class ProjectAnalysisService {
 
     const treeParts: string[] = []
     for (const dir of targetPaths) {
-      const dirTree = await this.buildTree(dir, options.maxDepth || DEFAULT_TREE_DEPTH, options.includeFiles !== false)
+      const dirTree = await this.buildTree(
+        dir,
+        options.maxDepth || DEFAULT_TREE_DEPTH,
+        options.includeFiles !== false
+      )
       if (targetPaths.length > 1) {
         treeParts.push(`=== Directory: ${dir} ===\n${dirTree}`)
       } else {
@@ -159,7 +125,6 @@ export class ProjectAnalysisService {
       }
     }
     const tree = treeParts.join('\n\n')
-
     const docsTree = await this.buildDocsTree()
 
     const snapshot: ProjectSnapshot = {
@@ -176,7 +141,7 @@ export class ProjectAnalysisService {
       tree,
       docsTree,
       fromCache: false,
-      updatedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     }
 
     cached.entries[this.rootPath] = {
@@ -184,19 +149,23 @@ export class ProjectAnalysisService {
       packageJsonHash,
       lockfileHash,
       options,
-      snapshot,
+      snapshot
     }
-    await this.writeCache(cached)
+    await writeCache(this.cacheFilePath, cached)
 
     return snapshot
   }
 
-  async getFastContext(targetPaths: string[], maxDepth: number = 2, maxCharsPerFile: number = 12000): Promise<string> {
+  async getFastContext(
+    targetPaths: string[],
+    maxDepth: number = 2,
+    maxCharsPerFile: number = 12000
+  ): Promise<string> {
     const tasks = targetPaths.map(async (targetPath) => {
       try {
         const absolutePath = this.validatePath(targetPath)
         const stat = await fs.stat(absolutePath)
-        
+
         if (stat.isDirectory()) {
           const tree = await this.buildTree(targetPath, maxDepth, true)
           return `\n=== Directory: ${targetPath} ===\n[Directory Tree]\n${tree}\n`
@@ -209,19 +178,21 @@ export class ProjectAnalysisService {
       }
       return ''
     })
-    
+
     const results = await Promise.all(tasks)
     return results.join('\n').trim()
   }
 
-  async readManyFiles(filePaths: string[], maxCharsPerFile: number = DEFAULT_MAX_CHARS_PER_FILE): Promise<ReadManyFilesResult> {
+  async readManyFiles(
+    filePaths: string[],
+    maxCharsPerFile: number = DEFAULT_MAX_CHARS_PER_FILE
+  ): Promise<ReadManyFilesResult> {
     const files = await Promise.all(filePaths.map(async (filePath) => this.readOneFile(filePath, maxCharsPerFile)))
     return { files }
   }
 
   private async getAllFiles(startDir: string): Promise<string[]> {
     const filePaths: string[] = []
-    
     const scan = async (dir: string) => {
       const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => [])
       const tasks = entries.map(async (entry) => {
@@ -236,7 +207,7 @@ export class ProjectAnalysisService {
       })
       await Promise.all(tasks)
     }
-    
+
     await scan(startDir)
     return filePaths
   }
@@ -274,19 +245,17 @@ export class ProjectAnalysisService {
                 line: index + 1,
                 text: line,
                 before: lines.slice(beforeStart, index),
-                after: lines.slice(index + 1, afterEnd),
+                after: lines.slice(index + 1, afterEnd)
               })
             })
-          } catch {
-            // skip
-          }
+          } catch {}
         })
       )
     }
 
     return {
       matches: results,
-      truncated: results.length >= maxResults,
+      truncated: results.length >= maxResults
     }
   }
 
@@ -317,24 +286,25 @@ export class ProjectAnalysisService {
                 symbols.push({
                   ...symbol,
                   path: relativePath,
-                  line: index + 1,
+                  line: index + 1
                 })
               })
             })
-          } catch {
-            // skip
-          }
+          } catch {}
         })
       )
     }
 
     return {
       symbols,
-      truncated: symbols.length >= maxResults,
+      truncated: symbols.length >= maxResults
     }
   }
 
-  private async readOneFile(filePath: string, maxCharsPerFile: number): Promise<ReadManyFilesResult['files'][number]> {
+  private async readOneFile(
+    filePath: string,
+    maxCharsPerFile: number
+  ): Promise<ReadManyFilesResult['files'][number]> {
     try {
       const absolutePath = this.validatePath(filePath)
       const stat = await fs.stat(absolutePath)
@@ -343,7 +313,7 @@ export class ProjectAnalysisService {
           path: filePath,
           content: `[文件过大，无法读取] ${(stat.size / 1024 / 1024).toFixed(1)} MB`,
           truncated: true,
-          totalLines: 0,
+          totalLines: 0
         }
       }
       if (isIgnoredFile(absolutePath)) {
@@ -351,7 +321,7 @@ export class ProjectAnalysisService {
           path: filePath,
           content: '[二进制文件或忽略类型，跳过读取]',
           truncated: false,
-          totalLines: 0,
+          totalLines: 0
         }
       }
 
@@ -361,7 +331,7 @@ export class ProjectAnalysisService {
           path: filePath,
           content: '[二进制文件/编码不支持，无法读取]',
           truncated: false,
-          totalLines: 0,
+          totalLines: 0
         }
       }
 
@@ -381,7 +351,7 @@ export class ProjectAnalysisService {
         path: filePath,
         content,
         truncated,
-        totalLines: allLines.length,
+        totalLines: allLines.length
       }
     } catch (error) {
       return {
@@ -389,7 +359,7 @@ export class ProjectAnalysisService {
         content: '',
         truncated: false,
         totalLines: 0,
-        error: error instanceof Error ? error.message : String(error),
+        error: error instanceof Error ? error.message : String(error)
       }
     }
   }
@@ -408,7 +378,7 @@ export class ProjectAnalysisService {
     if (!packageJson) return 'unknown'
     const dependencies = {
       ...stableRecord(packageJson.dependencies),
-      ...stableRecord(packageJson.devDependencies),
+      ...stableRecord(packageJson.devDependencies)
     }
     const hasElectron = Boolean(dependencies.electron || dependencies['electron-vite'])
     const hasReact = Boolean(dependencies.react || dependencies['@vitejs/plugin-react'])
@@ -437,19 +407,22 @@ export class ProjectAnalysisService {
       'src/renderer/src/App.tsx',
       'src/renderer/src/main.tsx',
       'src/renderer/src/main.ts',
-      'src/shared/ipc/channels.ts',
+      'src/shared/ipc/channels.ts'
     ].filter(Boolean) as string[]
     return this.findExistingFiles(candidates)
   }
 
-  private async findRecommendedFiles(projectType: string, entrypoints: string[]): Promise<string[]> {
+  private async findRecommendedFiles(
+    projectType: string,
+    entrypoints: string[]
+  ): Promise<string[]> {
     const common = [
       'package.json',
       'README.md',
       'electron.vite.config.ts',
       'vite.config.ts',
       'tsconfig.json',
-      'vitest.config.ts',
+      'vitest.config.ts'
     ]
     const electronReact = [
       'src/main/agent/AgentRunner.ts',
@@ -462,15 +435,20 @@ export class ProjectAnalysisService {
       'src/renderer/src/stores/chatStore.ts',
       'src/renderer/src/stores/providerStore.ts',
       'src/renderer/src/components/chat/ExecutionLog.tsx',
-      'src/shared/types/provider.ts',
+      'src/shared/types/provider.ts'
     ]
-    const candidates = projectType === 'electron-react'
-      ? [...common, ...entrypoints, ...electronReact]
-      : [...common, ...entrypoints]
+    const candidates =
+      projectType === 'electron-react'
+        ? [...common, ...entrypoints, ...electronReact]
+        : [...common, ...entrypoints]
     return this.findExistingFiles(Array.from(new Set(candidates)))
   }
 
-  private async buildTree(dirPath: string, maxDepth: number, includeFiles: boolean): Promise<string> {
+  private async buildTree(
+    dirPath: string,
+    maxDepth: number,
+    includeFiles: boolean
+  ): Promise<string> {
     const rootDir = this.validatePath(dirPath)
     const lines: string[] = [toPosixPath(path.relative(this.rootPath, rootDir)) || '.']
     let count = 0
@@ -483,7 +461,10 @@ export class ProjectAnalysisService {
           if (entry.isDirectory()) return !shouldIgnoreName(entry.name)
           return includeFiles && entry.isFile() && !isIgnoredFile(entry.name)
         })
-        .sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))
+        .sort(
+          (a, b) =>
+            Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name)
+        )
 
       for (const entry of filtered) {
         if (count >= DEFAULT_MAX_TREE_ENTRIES) break
@@ -532,20 +513,6 @@ export class ProjectAnalysisService {
     return lines.length > 1 ? lines.join('\n') : '[No markdown files found]'
   }
 
-  private async walkFiles(startDir: string, onFile: (absolutePath: string) => Promise<void>): Promise<void> {
-    const entries = await fs.readdir(startDir, { withFileTypes: true }).catch(() => [])
-    for (const entry of entries) {
-      const absolutePath = path.join(startDir, entry.name)
-      if (entry.isDirectory()) {
-        if (shouldIgnoreName(entry.name)) continue
-        await this.walkFiles(absolutePath, onFile)
-        continue
-      }
-      if (!entry.isFile() || !isTextLikeFile(entry.name)) continue
-      await onFile(absolutePath)
-    }
-  }
-
   private createMatcher(query: string): (line: string) => boolean {
     try {
       const regex = new RegExp(query, 'i')
@@ -573,7 +540,7 @@ export class ProjectAnalysisService {
       { kind: 'function', regex: /(?:export\s+)?function\s+(\w+)/g },
       { kind: 'const', regex: /(?:export\s+)?const\s+(\w+)\s*=/g },
       { kind: 'ipc', regex: /ipcMain\.handle\(\s*([^,)]+)/g },
-      { kind: 'preload-api', regex: /contextBridge\.exposeInMainWorld\(\s*([^,)]+)/g },
+      { kind: 'preload-api', regex: /contextBridge\.exposeInMainWorld\(\s*([^,)]+)/g }
     ]
 
     for (const pattern of patterns) {
@@ -604,37 +571,6 @@ export class ProjectAnalysisService {
       return false
     }
   }
-
-  private async hashOptionalFile(relativePath: string): Promise<string | undefined> {
-    try {
-      const content = await fs.readFile(this.validatePath(relativePath))
-      return createHash('sha256').update(content).digest('hex')
-    } catch {
-      return undefined
-    }
-  }
-
-  private async hashFirstExisting(filePaths: string[]): Promise<string | undefined> {
-    for (const filePath of filePaths) {
-      const hash = await this.hashOptionalFile(filePath)
-      if (hash) return hash
-    }
-    return undefined
-  }
-
-  private async readCache(): Promise<SnapshotCacheFile> {
-    try {
-      const content = await fs.readFile(this.cacheFilePath, 'utf-8')
-      const parsed = JSON.parse(content) as SnapshotCacheFile
-      return { entries: parsed.entries || {} }
-    } catch {
-      return { entries: {} }
-    }
-  }
-
-  private async writeCache(cache: SnapshotCacheFile): Promise<void> {
-    const dir = path.dirname(this.cacheFilePath)
-    await fs.mkdir(dir, { recursive: true })
-    await fs.writeFile(this.cacheFilePath, JSON.stringify(cache, null, 2), 'utf-8')
-  }
 }
+
+export * from './types'
