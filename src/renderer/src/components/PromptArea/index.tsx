@@ -180,3 +180,5 @@ export default function PromptArea({
     </div>
   )
 }
+
+export type { PromptAreaProps } from './types'
