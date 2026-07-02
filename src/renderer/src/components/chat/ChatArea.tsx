@@ -205,6 +205,13 @@ export default function ChatArea({
         hasMessages ? (
           <Stack gap={6} className="app-message-list">
             {messages.map((msg) => {
+              if (msg.role === 'system') {
+                return (
+                  <div key={msg.id} className="w-full text-center my-4" style={{ color: 'var(--text-muted, #9ca3af)', fontSize: '0.75rem' }}>
+                    {msg.content}
+                  </div>
+                )
+              }
               return msg.role === 'user' ? (
                 <Flex key={msg.id} justify="end" className="w-full">
                   <div className="user-message-bubble">

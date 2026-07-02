@@ -22,10 +22,9 @@ export function useSendMessage() {
   const addPermissionRequest = useChatStore((s) => s.addPermissionRequest)
   const addAskUserRequest = useChatStore((s) => s.addAskUserRequest)
   const setDiffEntries = useChatStore((s) => s.setDiffEntries)
-  const planMode = useChatStore((s) => s.planMode)
 
   const handleSendMessage = useCallback(
-    async (message: string, modelName: string) => {
+    async (message: string, modelName: string, isSystem: boolean = false) => {
       const ws = useWorkspaceStore.getState().workspace
       if (!ws) {
         alert('请先选择或打开一个项目工作区才能发送消息！')
@@ -38,8 +37,12 @@ export function useSendMessage() {
       } catch (e) {}
 
       // Parse slash commands to check for client-side actions before anything else
-      const parseResult = parseSlashCommand(message, allSkills)
-      const clientAction = parseResult.clientAction
+      let clientAction = null
+      let parseResult: any = {}
+      if (!isSystem) {
+        parseResult = parseSlashCommand(message, allSkills)
+        clientAction = parseResult.clientAction
+      }
 
       if (clientAction) {
         if (clientAction.type === 'plan:show-list') {
@@ -50,7 +53,8 @@ export function useSendMessage() {
           const slug = clientAction.payload?.slug
           if (slug) {
             try {
-              await (window as any).api.plan.load(ws.rootPath, slug)
+              const plan = await (window as any).api.plan.load(ws.rootPath, slug)
+              useChatStore.getState().setActivePlan(plan)
               useChatStore.getState().setExpandedCapsule('plan')
             } catch (err) {
               console.error('[useSendMessage] Failed to load plan:', err)
@@ -59,7 +63,7 @@ export function useSendMessage() {
           return
         }
         if (clientAction.type === 'plan:new') {
-          useChatStore.getState().togglePlanMode()
+          // agent 将在收到 slash 命令后自动判断是否发起 Plan 提案
           // Send the description as a normal user message to the AI
           const description = clientAction.payload?.description || message
           if (!description) return
@@ -74,7 +78,11 @@ export function useSendMessage() {
       const provState = useProviderStore.getState()
       const activeProv = provState.providers.find((p) => p.id === provState.activeProviderId)
       if (!activeProv) {
-        const userMsg = addUserMessage(message)
+        if (isSystem) {
+          useChatStore.getState().addSystemMessage(message)
+        } else {
+          addUserMessage(message)
+        }
         const agentId = startStreamingReply()
         const simText = `请先配置模型 Provider 才能进行 AI 对话。\n\n点击输入框左侧齿轮图标打开设置，添加一个 OpenAI-compatible Provider（如 OpenAI、Ollama、DeepSeek 等）。\n\n配置完成后，输入消息即可获得 AI 实时流式回复。`
 
@@ -96,9 +104,18 @@ export function useSendMessage() {
       let sid = useChatStore.getState().activeSessionId
       if (!sid) {
         sid = createSession(ws.id)
+        
+        const currentPlan = useChatStore.getState().activePlan
+        if (currentPlan) {
+          useChatStore.getState().linkPlanToSession(sid, currentPlan.slug)
+        }
       }
 
-      addUserMessage(message)
+      if (isSystem) {
+        useChatStore.getState().addSystemMessage(message)
+      } else {
+        addUserMessage(message)
+      }
       const agentId = startStreamingReply()
 
       const model = modelName || activeProv.models[0]?.name || 'gpt-4o'
@@ -133,6 +150,8 @@ export function useSendMessage() {
                 }
               }
               mapped.push({ role: 'user', content: c })
+            } else if (m.role === 'system' as any) {
+              mapped.push({ role: 'user', content: `[System] ${m.content}` })
             } else {
               const assistantMsg: any = { role: 'assistant', content: m.content || '' }
               if (m.toolCalls && m.toolCalls.length > 0) {
@@ -170,7 +189,6 @@ export function useSendMessage() {
         model,
         chatMessages,
         sid,
-        planMode,
         {
           onChunk: (delta: string, reasoningDelta?: string) => {
             appendStreamChunk(agentId, delta, reasoningDelta)
@@ -240,8 +258,7 @@ export function useSendMessage() {
       appendReasoningTimelineChunk,
       addPermissionRequest,
       addAskUserRequest,
-      setDiffEntries,
-      planMode
+      setDiffEntries
     ]
   )
 

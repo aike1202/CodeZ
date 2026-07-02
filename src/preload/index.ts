@@ -72,7 +72,6 @@ const api = {
       model: string,
       messages: ChatMessage[],
       sessionId: string | null,
-      planMode: boolean = false,
       callbacks: {
         onChunk: (delta: string, reasoningDelta?: string) => void
         onDone: (fullContent: string, stopReason?: string, txId?: string) => void
@@ -149,7 +148,7 @@ const api = {
       ipcRenderer.on(IPC_CHANNELS.CHAT_REQUEST_ASK_USER, askUserHandler)
 
       // 发起请求
-      ipcRenderer.invoke(IPC_CHANNELS.CHAT_STREAM_START, { providerId, model, messages, sessionId, planMode })
+      ipcRenderer.invoke(IPC_CHANNELS.CHAT_STREAM_START, { providerId, model, messages, sessionId })
         .then((streamId) => {
           activeStreamId = streamId
         })
@@ -268,6 +267,8 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.PLAN_LIST, workspaceRoot),
     load: (workspaceRoot: string, slug: string): Promise<any> =>
       ipcRenderer.invoke(IPC_CHANNELS.PLAN_LOAD, workspaceRoot, slug),
+    getActive: (workspaceRoot: string): Promise<any> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PLAN_GET_ACTIVE, workspaceRoot),
   }
 }
 

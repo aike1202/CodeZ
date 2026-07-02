@@ -7,24 +7,26 @@ describe('PermissionManager', () => {
   const workspaceRoot = path.resolve('/tmp/codez-workspace')
 
   it('应正确识别安全验证命令', () => {
-    expect(pm.getCommandRisk('npm test')).toBe('safe')
-    expect(pm.getCommandRisk('npm run test')).toBe('safe')
-    expect(pm.getCommandRisk('npm run typecheck')).toBe('safe')
-    expect(pm.getCommandRisk('npm run build')).toBe('safe')
     expect(pm.getCommandRisk('git status')).toBe('safe')
     expect(pm.getCommandRisk('git diff -- src/main.ts')).toBe('safe')
+    expect(pm.getCommandRisk('git log')).toBe('safe')
   })
 
   it('应正确识别写入、网络和破坏性命令', () => {
-    expect(pm.getCommandRisk('npm install')).toBe('write')
-    expect(pm.getCommandRisk('npm i lodash')).toBe('write')
-    expect(pm.getCommandRisk('yarn add react')).toBe('write')
-    expect(pm.getCommandRisk('pnpm add react')).toBe('write')
+    expect(pm.getCommandRisk('npm test')).toBe('write')
+    expect(pm.getCommandRisk('npm run test')).toBe('write')
+    expect(pm.getCommandRisk('npm run typecheck')).toBe('unknown')
+    expect(pm.getCommandRisk('npm run build')).toBe('write')
+    expect(pm.getCommandRisk('npm install')).toBe('network')
+    expect(pm.getCommandRisk('npm i lodash')).toBe('network')
+    expect(pm.getCommandRisk('yarn add react')).toBe('network')
+    expect(pm.getCommandRisk('pnpm add react')).toBe('network')
     expect(pm.getCommandRisk('curl https://example.com')).toBe('network')
     expect(pm.getCommandRisk('wget https://example.com/file')).toBe('network')
     expect(pm.getCommandRisk('rm -rf dist')).toBe('destructive')
     expect(pm.getCommandRisk('git reset --hard HEAD')).toBe('destructive')
     expect(pm.getCommandRisk('git clean -fd')).toBe('destructive')
+    expect(pm.getCommandRisk('npm test && rm -rf /')).toBe('destructive') // Injection guard
   })
 
   it('Bash 支持 command 参数名', () => {

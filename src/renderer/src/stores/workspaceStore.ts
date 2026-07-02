@@ -22,9 +22,10 @@ interface WorkspaceState {
   setRecentProjects: (projects: WorkspaceInfo[]) => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
+  setPermissionMode: (mode: 'ask' | 'auto-approve-safe' | 'full-access') => Promise<void>
 }
 
-export const useWorkspaceStore = create<WorkspaceState>((set) => ({
+export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   currentView: 'home',
   workspace: null,
   fileTree: [],
@@ -44,7 +45,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
       nodes.forEach(n => {
         if (n.type === 'file') {
           valid.add(n.name)
-          // Store both absolute/relative variations by taking the basename and path
           valid.add(n.path)
         }
         if (n.children) traverse(n.children)
@@ -58,5 +58,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   setFileContent: (content) => set({ fileContent: content }),
   setRecentProjects: (projects) => set({ recentProjects: projects }),
   setLoading: (loading) => set({ loading }),
-  setError: (error) => set({ error })
+  setError: (error) => set({ error }),
+  setPermissionMode: async (mode) => {
+    const currentWorkspace = get().workspace
+    if (!currentWorkspace) return
+    const updated = { ...currentWorkspace, permissionMode: mode }
+    // @ts-ignore
+    if (window.api?.workspace?.updateProject) {
+      // @ts-ignore
+      await window.api.workspace.updateProject(updated)
+    }
+    set({ workspace: updated })
+  }
 }))

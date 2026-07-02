@@ -147,8 +147,7 @@ export default function SettingsPage({ onBack, initialTab }: Props): React.React
                 name: activeProvider.name,
                 baseUrl: activeProvider.baseUrl,
                 apiFormat: activeProvider.apiFormat,
-                apiKey: '',
-                apiKeyMasked: activeProvider.apiKeyMasked,
+                apiKey: activeProvider.apiKey,
                 models: activeProvider.models,
                 thinking: activeProvider.thinking || { enabled: true, mode: 'openai' }
               }}

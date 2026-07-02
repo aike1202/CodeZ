@@ -25,6 +25,8 @@ export interface GeneralSettings {
   archiveRetentionDays: number;
   dataStoragePath: string;
   experienceOptimization: boolean;
+  // Security
+  workspaceMode: 'ask' | 'auto-approve-safe' | 'full-access';
 }
 
 export const defaultSettings: GeneralSettings = {
@@ -44,5 +46,6 @@ export const defaultSettings: GeneralSettings = {
   autoArchiveTasks: false,
   archiveRetentionDays: 7,
   dataStoragePath: '',
-  experienceOptimization: true
+  experienceOptimization: true,
+  workspaceMode: 'auto-approve-safe'
 };

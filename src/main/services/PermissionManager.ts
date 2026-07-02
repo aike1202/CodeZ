@@ -1,6 +1,7 @@
+import { PermissionRuleStore } from './PermissionRuleStore'
+import { CommandAnalyzer, CommandRisk } from './CommandAnalyzer'
 import * as path from 'path'
 
-export type CommandRisk = 'safe' | 'write' | 'network' | 'destructive' | 'unknown'
 export type PermissionResult = 'allow' | 'ask' | 'deny'
 
 export interface PermissionRequest {
@@ -28,23 +29,12 @@ export class PermissionManager {
   }
 
   public getCommandRisk(command: string): CommandRisk {
-    const safeCmds = ['npm test', 'npm run test', 'npm run typecheck', 'npm run build', 'git status', 'git diff', 'git log']
-    const writeCmds = ['npm install', 'npm i', 'npm run package', 'yarn install', 'yarn add', 'pnpm install', 'pnpm add']
-    const networkCmds = ['curl', 'wget']
-    const destructiveCmds = ['rm', 'del', 'git reset --hard', 'git clean', 'rmdir', 'rd']
-
-    const lowerCmd = command.toLowerCase().trim()
-    
-    if (safeCmds.some(c => lowerCmd === c || lowerCmd.startsWith(`${c} `))) return 'safe'
-    if (destructiveCmds.some(c => lowerCmd === c || lowerCmd.startsWith(`${c} `))) return 'destructive'
-    if (writeCmds.some(c => lowerCmd === c || lowerCmd.startsWith(`${c} `))) return 'write'
-    if (networkCmds.some(c => lowerCmd === c || lowerCmd.startsWith(`${c} `))) return 'network'
-    
-    return 'unknown'
+    return CommandAnalyzer.analyze(command)
   }
 
-  public checkToolPermission(toolName: string, parsedArgs: any, workspaceRoot: string): PermissionResult {
-    if (['list_files', 'get_project_snapshot', 'fast_context', 'update_resume_state', 'Read', 'NotebookEdit', 'Glob', 'Grep', 'Skill', 'PushNotification', 'AskUserQuestion'].includes(toolName)) {
+  public checkToolPermission(toolName: string, parsedArgs: any, workspaceRoot: string, workspaceMode: 'ask' | 'auto-approve-safe' | 'full-access' = 'auto-approve-safe'): PermissionResult {
+    // 0. Base safe tools
+    if (['list_files', 'get_project_snapshot', 'fast_context', 'update_resume_state', 'UpdatePlanStep', 'ExitPlanMode', 'Read', 'NotebookEdit', 'Glob', 'Grep', 'Skill', 'PushNotification', 'AskUserQuestion', 'view_file', 'grep_search'].includes(toolName)) {
       return 'allow'
     }
 
@@ -52,28 +42,61 @@ export class PermissionManager {
       return 'ask'
     }
 
-    // 2. 写入类工具：安全边界内拦截，符合边界则直接允许，超出边界直接拒绝
-    if (['Edit', 'Write'].includes(toolName)) {
-      // workspace check
+    // 1. Terminal Commands
+    if (toolName === 'Bash' || toolName === 'PowerShell' || toolName === 'run_command') {
+      const command = this.getCommandFromArgs(parsedArgs)
+      const risk = this.getCommandRisk(command)
+
+      // User request: full-access should also ask for dangerous commands
+      if (workspaceMode === 'full-access' && risk !== 'destructive') {
+        return 'allow'
+      }
+
+      // Check Whitelist first
+      if (PermissionRuleStore.getInstance().isCommandWhitelisted(command)) {
+        return 'allow'
+      }
+
+      if (risk === 'destructive') return 'ask' // always ask for destructive
+      if (risk === 'safe') return 'allow' // safe commands are allowed in all modes
+
+      if (workspaceMode === 'ask') return 'ask'
+
+      // auto-approve-safe logic for terminal
+      if (risk === 'write') return 'allow'
+      if (risk === 'network') return 'ask'
+
+      return 'ask'
+    }
+
+    // 2. File Write/Edit Tools
+    if (['Edit', 'Write', 'write_to_file', 'replace_file_content', 'multi_replace_file_content'].includes(toolName)) {
       let targetPath = parsedArgs?.filePath || parsedArgs?.TargetFile || parsedArgs?.file_path || parsedArgs?.path
       if (targetPath) {
         if (!path.isAbsolute(targetPath)) {
           targetPath = path.resolve(workspaceRoot, targetPath)
         }
-        // Convert backward slashes to forward for uniform comparison if needed, or just case insensitive startswith
-        const normalizedTarget = targetPath.replace(/\\/g, '/').toLowerCase()
-        const normalizedRoot = workspaceRoot.replace(/\\/g, '/').toLowerCase()
-        if (!normalizedTarget.startsWith(normalizedRoot)) {
-          return 'deny'
+        
+        if (PermissionRuleStore.getInstance().isPathWhitelisted(targetPath)) {
+          return 'allow'
+        }
+
+        // Secure boundary check
+        const relativePath = path.relative(workspaceRoot, targetPath)
+        if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+          return 'deny' // Escape attempt
         }
       }
-      return 'allow'
+
+      if (workspaceMode === 'full-access') {
+        return 'allow'
+      }
+
+      return workspaceMode === 'ask' ? 'ask' : 'allow'
     }
 
-    if (toolName === 'Bash' || toolName === 'PowerShell') {
-      const risk = this.getCommandRisk(this.getCommandFromArgs(parsedArgs))
-      if (risk === 'safe') return 'allow'
-      return 'ask'
+    if (workspaceMode === 'full-access') {
+      return 'allow'
     }
 
     return 'ask'
@@ -83,11 +106,11 @@ export class PermissionManager {
     let risk: CommandRisk = 'unknown'
     let description = `Requesting permission to run tool ${toolName}`
 
-    if (toolName === 'Bash' || toolName === 'PowerShell') {
+    if (toolName === 'Bash' || toolName === 'PowerShell' || toolName === 'run_command') {
       const cmd = this.getCommandFromArgs(parsedArgs)
       risk = this.getCommandRisk(cmd)
       description = `Execute command: ${cmd}`
-    } else if (['Edit', 'Write'].includes(toolName)) {
+    } else if (['Edit', 'Write', 'write_to_file', 'replace_file_content', 'multi_replace_file_content'].includes(toolName)) {
       const targetPath = parsedArgs?.file_path || parsedArgs?.filePath || parsedArgs?.TargetFile || parsedArgs?.path || 'unknown path'
       risk = 'write'
       description = `Modify file: ${targetPath}`

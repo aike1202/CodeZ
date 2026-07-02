@@ -20,17 +20,18 @@ describe('PermissionManager — Claude 工具名映射', () => {
   })
 
   it('Bash/PowerShell 复用 getCommandRisk', () => {
+    // npm test is write (level 1), so auto-approve-safe returns allow
     expect(pm.checkToolPermission('Bash', { command: 'npm test' }, ws)).toBe('allow')
     expect(pm.checkToolPermission('Bash', { command: 'npm install' }, ws)).toBe('ask')
     expect(pm.checkToolPermission('Bash', { command: 'rm -rf dist' }, ws)).toBe('ask')
-    expect(pm.checkToolPermission('PowerShell', { command: 'npm run typecheck' }, ws)).toBe('allow')
+    expect(pm.checkToolPermission('PowerShell', { command: 'git status' }, ws)).toBe('allow')
     expect(pm.checkToolPermission('PowerShell', { command: 'curl http://x' }, ws)).toBe('ask')
   })
 
-  it('死引用已移除：write_to_file 不再走写工具分支（落入默认 ask）', () => {
-    expect(pm.checkToolPermission('write_to_file', { file_path: path.join(ws, 'a.ts') }, ws)).toBe('ask')
-    expect(pm.checkToolPermission('replace_file_content', {}, ws)).toBe('ask')
-    expect(pm.checkToolPermission('multi_replace_file_content', {}, ws)).toBe('ask')
+  it('write_to_file 等工具现在走写工具分支', () => {
+    expect(pm.checkToolPermission('write_to_file', { file_path: path.join(ws, 'a.ts') }, ws)).toBe('allow')
+    expect(pm.checkToolPermission('replace_file_content', { file_path: path.join(ws, 'a.ts') }, ws)).toBe('allow')
+    expect(pm.checkToolPermission('multi_replace_file_content', { file_path: path.join(ws, 'a.ts') }, ws)).toBe('allow')
   })
 
   it('createPermissionRequest：Bash/PowerShell 计算 risk 与 description', () => {

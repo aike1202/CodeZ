@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { useWorkspaceStore } from './workspaceStore'
 
 export type AgentStateType =
   | 'processing'
@@ -64,7 +65,7 @@ export type ExecutionTimelineItem = ReasoningTimelineItem | ToolTimelineItem | T
 
 export interface ChatMessage {
   id: string
-  role: 'user' | 'agent'
+  role: 'user' | 'agent' | 'system'
   content: string
   /** 是否正在流式接收中 */
   streaming?: boolean
@@ -122,6 +123,7 @@ export interface ChatSession {
   isArchived?: boolean
   isDeleted?: boolean
   deletedAt?: number
+  linkedPlanSlug?: string
 }
 
 function genId(): string {
@@ -147,8 +149,8 @@ interface ChatState {
   streamCleanup: (() => void) | null
   /** 当前展开的胶囊：'task' | 'plan' | null */
   expandedCapsule: 'task' | 'plan' | null
-  /** Plan 模式开关：true=只读探索，false=正常模式 */
-  planMode: boolean
+  /** Plan SubAgent 执行状态 */
+  subAgentStatus: 'idle' | 'running' | 'completed' | 'failed'
   /** Plan 列表弹窗 */
   planListModalOpen: boolean
   /** 当前活跃 Plan（executing 状态） */
@@ -157,12 +159,16 @@ interface ChatState {
   planReview: { plan: any; status: string } | null
   /** 当前流的 streamId（用于 Plan 审批 IPC） */
   activePlanStreamId: string | null
+  /** 待发送给 AI 的初始提示词 */
+  pendingPrompt: string | null
 
   /* actions */
   loadSessions: () => Promise<void>
   createSession: (projectId: string) => string
-  selectSession: (sessionId: string) => void
+  selectSession: (sessionId: string) => Promise<void>
+  linkPlanToSession: (sessionId: string, planSlug: string | null) => Promise<void>
   addUserMessage: (content: string) => ChatMessage
+  addSystemMessage: (content: string) => ChatMessage
   startStreamingReply: () => string  // 返回 agent 消息 id
   appendStreamChunk: (msgId: string, delta: string, reasoningDelta?: string) => void
   finishStreaming: (msgId: string) => void
@@ -187,13 +193,13 @@ interface ChatState {
   finishToolCall: (msgId: string, toolCallId: string, result: string) => void
 
   setExpandedCapsule: (capsule: 'task' | 'plan' | null) => void
-  setPlanMode: (mode: boolean) => void
-  togglePlanMode: () => void
+  setSubAgentStatus: (status: 'idle' | 'running' | 'completed' | 'failed') => void
   initPlanStateListener: () => void
   setPlanListModalOpen: (open: boolean) => void
   setActivePlan: (plan: any | null) => void
   setPlanReview: (review: { plan: any; status: string } | null) => void
   setActivePlanStreamId: (streamId: string | null) => void
+  setPendingPrompt: (prompt: string | null) => void
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -202,11 +208,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   streamCleanup: null,
   expandedCapsule: null,
-  planMode: false,
+  subAgentStatus: 'idle',
   planListModalOpen: false,
   activePlan: null,
   planReview: null,
   activePlanStreamId: null,
+  pendingPrompt: null,
 
   loadSessions: async () => {
     try {
@@ -236,13 +243,51 @@ export const useChatStore = create<ChatState>((set, get) => ({
     return id
   },
 
-  selectSession: (sessionId: string) => {
+  selectSession: async (sessionId: string) => {
     const session = get().sessions.find((s) => s.id === sessionId)
     if (session) {
       set({
         activeSessionId: sessionId,
-        messages: session.messages
+        messages: session.messages,
+        activePlan: null // 先清空，避免串场
       })
+      if (session.linkedPlanSlug) {
+        try {
+          const workspace = useWorkspaceStore.getState().workspace
+          if (workspace) {
+            const plan = await (window as any).api.plan.load(workspace.rootPath, session.linkedPlanSlug)
+            if (get().activeSessionId === sessionId) {
+              set({ activePlan: plan })
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+  },
+
+  linkPlanToSession: async (sessionId: string, planSlug: string | null) => {
+    set((s) => ({
+      sessions: s.sessions.map((sess) =>
+        sess.id === sessionId ? { ...sess, linkedPlanSlug: planSlug || undefined } : sess
+      )
+    }))
+    if (get().activeSessionId === sessionId) {
+      if (!planSlug) {
+        set({ activePlan: null })
+      } else {
+        try {
+          const workspace = useWorkspaceStore.getState().workspace
+          if (workspace) {
+            const plan = await (window as any).api.plan.load(workspace.rootPath, planSlug)
+            set({ activePlan: plan })
+          }
+        } catch {
+          // ignore
+        }
+      }
+      await get().persistCurrentSession()
     }
   },
 
@@ -250,6 +295,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const msg: ChatMessage = {
       id: genId(),
       role: 'user',
+      content
+    }
+    set((s) => {
+      const nextMsgs = [...s.messages, msg]
+      const activeId = s.activeSessionId
+      const sessions = s.sessions.map((session) =>
+        session.id === activeId ? { ...session, messages: nextMsgs } : session
+      )
+      return { messages: nextMsgs, sessions }
+    })
+    get().persistCurrentSession()
+    return msg
+  },
+
+  addSystemMessage: (content: string) => {
+    const msg: ChatMessage = {
+      id: genId(),
+      role: 'system',
       content
     }
     set((s) => {
@@ -639,7 +702,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               item.id === toolCall.id ? { ...item, name: toolCall.name, args: toolCall.args, thoughtSignature: toolCall.thoughtSignature || item.thoughtSignature } : item
             ),
             executionTimeline: timeline.map((item) =>
-              item.id === `tool_${toolCall.id}` && item.type === 'tool'
+              item.id === ('tool_' + toolCall.id) && item.type === 'tool'
                 ? {
                     ...item,
                     toolCall: { ...item.toolCall, name: toolCall.name, args: toolCall.args },
@@ -657,7 +720,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           sequence: existing.length
         }
         const nextTimelineItem: ToolTimelineItem = {
-          id: `tool_${toolCall.id}`,
+          id: 'tool_' + toolCall.id,
           type: 'tool',
           toolCall: nextToolCall,
           startedAt: now,
@@ -716,29 +779,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setExpandedCapsule: (capsule) => set({ expandedCapsule: capsule }),
 
-  setPlanMode: (mode) => set({ planMode: mode }),
-
-  togglePlanMode: () => set((s) => ({ planMode: !s.planMode })),
+  setSubAgentStatus: (status) => set({ subAgentStatus: status }),
 
   initPlanStateListener: () => {
     const win = window as any
     const ipc = win?.electron?.ipcRenderer
     if (!ipc) return
 
-    ipc.on('plan:state-changed', (_event: unknown, data: { state: string; mode: string }) => {
-      if (data.mode === 'normal') {
-        useChatStore.getState().setPlanMode(false)
-      }
+    ipc.on('plan:subagent-progress', (_event: unknown, data: { status: 'idle' | 'running' | 'completed' | 'failed' }) => {
+      useChatStore.getState().setSubAgentStatus(data.status)
     })
 
     ipc.on('plan:review-request', (_event: unknown, streamId: string, plan: any) => {
       useChatStore.getState().setActivePlanStreamId(streamId)
       useChatStore.getState().setPlanReview({ plan, status: 'pending_review' })
     })
+
+    ipc.on('plan:state-changed', (_event: unknown, plan: any) => {
+      useChatStore.getState().setActivePlan(plan)
+    })
+
+    ipc.on('plan:linked', (_event: unknown, data: { sessionId: string; plan: any }) => {
+      useChatStore.getState().linkPlanToSession(data.sessionId, data.plan.slug)
+      useChatStore.getState().setActivePlan(data.plan)
+    })
   },
 
   setPlanListModalOpen: (open) => set({ planListModalOpen: open }),
   setActivePlan: (plan) => set({ activePlan: plan }),
   setPlanReview: (review) => set({ planReview: review }),
-  setActivePlanStreamId: (streamId) => set({ activePlanStreamId: streamId })
+  setActivePlanStreamId: (streamId) => set({ activePlanStreamId: streamId }),
+  setPendingPrompt: (prompt) => set({ pendingPrompt: prompt })
 }))

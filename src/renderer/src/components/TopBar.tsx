@@ -14,6 +14,7 @@ import IconClose from './icons/IconClose'
 import IconSun from './icons/IconSun'
 import IconMoon from './icons/IconMoon'
 import IconMonitor from './icons/IconMonitor'
+
 import './TopBar.css'
 
 interface TopBarProps {
@@ -288,8 +289,8 @@ export default function TopBar({
         )}
       </div>
 
-      {/* 中间：搜索栏 */}
-      <div className="topbar-center">
+      {/* 中间：搜索栏与 Plan 胶囊 */}
+      <div className="topbar-center" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
         <Input
           className="global-search"
           type="text"

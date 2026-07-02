@@ -47,6 +47,11 @@ export const IPC_CHANNELS = {
   PLAN_REJECT: 'plan:reject',
   PLAN_LIST: 'plan:list',
   PLAN_LOAD: 'plan:load',
+  PLAN_GET_ACTIVE: 'plan:get-active',
+  PLAN_ENTER_REQUEST: 'plan:enter-request',
+  PLAN_ENTER_RESPONSE: 'plan:enter-response',
+  PLAN_SUBAGENT_PROGRESS: 'plan:subagent-progress',
+  PLAN_LINKED: 'plan:linked',
 
   // Theme
   THEME_GET: 'theme:get',

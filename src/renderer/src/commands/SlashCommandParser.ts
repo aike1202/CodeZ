@@ -42,9 +42,9 @@ export function parseSlashCommand(
 ): ParseResult {
   const trimMsg = message.trim()
 
-  // ── Plan commands: /plan, /plan list, /plan new <description> ──
-  if (trimMsg === '/plan' || trimMsg.startsWith('/plan ')) {
-    const rest = trimMsg.slice(5).trim() // after '/plan'
+  // ── Plan commands: /plan, /plans, /plan list, /plan new <description> ──
+  if (trimMsg === '/plan' || trimMsg === '/plans' || trimMsg.startsWith('/plan ')) {
+    const rest = trimMsg.startsWith('/plans') ? trimMsg.slice(6).trim() : trimMsg.slice(5).trim() // after '/plan' or '/plans'
     if (!rest) {
       // /plan alone → show plan list modal
       return {

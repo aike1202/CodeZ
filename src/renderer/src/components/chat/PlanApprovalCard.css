@@ -1,0 +1,152 @@
+.plan-approval-card {
+  margin: 16px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+}
+
+.plan-approval-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--bg-surface-hover);
+  border-bottom: 1px solid var(--border);
+}
+
+.plan-approval-icon {
+  font-size: 1.2rem;
+  margin-right: 8px;
+}
+
+.plan-approval-header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.plan-approval-body {
+  padding: 16px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.plan-approval-body h4 {
+  margin: 0 0 8px 0;
+  font-size: 1rem;
+  color: var(--text-primary);
+}
+
+.plan-approval-desc {
+  margin: 0 0 16px 0;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.plan-approval-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.plan-approval-steps li {
+  padding: 12px;
+  background: var(--bg-surface-hover);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.plan-approval-steps strong {
+  display: block;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.step-desc {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.step-files {
+  margin-top: 8px;
+  font-size: 0.8rem;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.plan-approval-feedback {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.plan-approval-feedback textarea {
+  width: 100%;
+  min-height: 60px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.85rem;
+  resize: vertical;
+}
+
+.plan-approval-feedback textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.plan-approval-actions {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-surface-hover);
+  justify-content: flex-end;
+}
+
+.btn-approve, .btn-request-changes {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.2s, background-color 0.2s;
+}
+
+.btn-approve {
+  background: var(--accent);
+  color: white;
+}
+
+.btn-approve:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.btn-request-changes {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.btn-request-changes:hover:not(:disabled) {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.btn-approve:disabled, .btn-request-changes:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

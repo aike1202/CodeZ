@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useProviderStore } from '../stores/providerStore'
 import { useChatStore } from '../stores/chatStore'
+import { useWorkspaceStore } from '../stores/workspaceStore'
 import Button from './ui/Button'
 import Flex from './ui/Flex'
 import Stack from './ui/Stack'
@@ -12,6 +13,9 @@ import IconGear from './icons/IconGear'
 import IconStop from './icons/IconStop'
 import IconSend from './icons/IconSend'
 import IconPackage from './icons/IconPackage'
+import IconShieldAsk from './icons/IconShieldAsk'
+import IconShieldApprove from './icons/IconShieldApprove'
+import IconShieldAlert from './icons/IconShieldAlert'
 import { FileIcon, FolderIcon } from '@react-symbols/icons/utils'
 import { ThoughtIcon, SearchIcon, CmdIcon } from './svg-icons'
 import ContextTracker from './ContextTracker'
@@ -30,9 +34,51 @@ interface PromptAreaProps {
   workspace?: WorkspaceInfo | null
 }
 
+const permissionLabels = {
+  'ask': '请求批准',
+  'auto-approve-safe': '替我审批',
+  'full-access': '完全访问'
+}
+
+const PERMISSION_MODES = [
+  {
+    id: 'ask',
+    title: '请求批准',
+    subtitle: '每次执行系统命令或写入文件时都会询问。推荐新手使用。'
+  },
+  {
+    id: 'auto-approve-safe',
+    title: '替我审批',
+    subtitle: '自动放行安全操作，仅拦截修改与风险命令。'
+  },
+  {
+    id: 'full-access',
+    title: '完全访问',
+    subtitle: '减少确认次数。赋予极高权限，仅拦截极端危险命令。'
+  }
+]
+
+const getPermissionIcon = (id: string) => {
+  if (id === 'ask') {
+    return <IconShieldAsk />
+  }
+  if (id === 'auto-approve-safe') {
+    return <IconShieldApprove />
+  }
+  return <IconShieldAlert />
+}
+
 export default function PromptArea({ onSend, placeholder, onOpenSettings, workspace }: PromptAreaProps): React.ReactElement {
   const [text, setText] = useState('')
+  
   const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [permDropdownOpen, setPermDropdownOpen] = useState(false)
+  const [plusDropdownOpen, setPlusDropdownOpen] = useState(false)
+  
+  const currentWorkspace = useWorkspaceStore((s: any) => s.workspace)
+  const setPermissionMode = useWorkspaceStore((s: any) => s.setPermissionMode)
+  const mode = currentWorkspace?.permissionMode || 'auto-approve-safe'
+
   
   const [dynamicSkills, setDynamicSkills] = useState<any[]>([])
   const [flattenedFiles, setFlattenedFiles] = useState<{name: string, path: string, isDir: boolean}[]>([])
@@ -42,9 +88,24 @@ export default function PromptArea({ onSend, placeholder, onOpenSettings, worksp
 
   const isStreaming = useChatStore((s) => s.streamCleanup !== null)
   const stopStream = useChatStore((s) => s.streamCleanup)
+  
+  const pendingPrompt = useChatStore((s) => s.pendingPrompt)
+  const setPendingPrompt = useChatStore((s) => s.setPendingPrompt)
 
-  const planMode = useChatStore((s) => s.planMode)
-  const togglePlanMode = useChatStore((s) => s.togglePlanMode)
+  useEffect(() => {
+    if (pendingPrompt) {
+      setText(pendingPrompt)
+      setPendingPrompt(null)
+      setTimeout(() => {
+        if (viewRef.current) {
+          viewRef.current.focus()
+          viewRef.current.dispatch({
+            selection: { anchor: pendingPrompt.length, head: pendingPrompt.length }
+          })
+        }
+      }, 50)
+    }
+  }, [pendingPrompt, setPendingPrompt])
 
   const viewRef = useRef<EditorView | null>(null)
 
@@ -65,11 +126,13 @@ export default function PromptArea({ onSend, placeholder, onOpenSettings, worksp
   useEffect(() => {
     if (workspace) {
       window.api.skill.getAll(workspace.rootPath).then(setDynamicSkills).catch(() => {})
-      window.api.workspace.getAllPaths(workspace.rootPath).then((paths: any) => {
+      ;(window as any).api.workspace.getAllPaths(workspace.rootPath).then((paths: any) => {
         if (Array.isArray(paths)) {
           setFlattenedFiles(paths)
         }
       }).catch(() => {})
+
+
     } else {
       setDynamicSkills([])
       setFlattenedFiles([])
@@ -301,21 +364,7 @@ export default function PromptArea({ onSend, placeholder, onOpenSettings, worksp
 
         <Card variant="default" rounded="lg" className="prompt-card">
           <Stack gap={2}>
-            {/* 输入框上方的功能扩展栏 */}
-            <Flex align="center" gap={3} className="prompt-top-toolbar">
-              {!isStreaming && (
-                <button
-                  type="button"
-                  className={`plan-toggle-btn ${planMode ? 'plan-toggle-btn--active' : ''}`}
-                  onClick={() => togglePlanMode()}
-                  title="Plan mode: read-only exploration and design"
-                  aria-pressed={planMode}
-                >
-                  {planMode ? '● Plan' : '○ Plan'}
-                </button>
-              )}
-            </Flex>
-
+            {/* 输入框上方的功能扩展栏已被移除（Plan 模式由 Agent 主动触发） */}
             <Flex align="start" className="prompt-input-wrapper w-full">
               <div className="prompt-scroll-container" onKeyDownCapture={handleKeyDown}>
                 <CodeMirror
@@ -357,12 +406,90 @@ export default function PromptArea({ onSend, placeholder, onOpenSettings, worksp
 
             <Flex align="center" justify="between" className="pt-2">
               <Flex align="center" gap={3} className="prompt-actions-left">
-                <Button variant="ghost" size="none" className="prompt-plus-btn">
-                  <IconPlus />
-                </Button>
-                <Button variant="ghost" size="none" className="prompt-approve-btn">
-                  <IconMore /> 请求批准 <IconChevronDown />
-                </Button>
+                <div className="relative">
+                  <Button 
+                    variant="ghost" 
+                    size="none" 
+                    className="prompt-plus-btn"
+                    onClick={() => {
+                      setPlusDropdownOpen(!plusDropdownOpen)
+                      setPermDropdownOpen(false)
+                      setDropdownOpen(false)
+                    }}
+                  >
+                    <IconPlus />
+                  </Button>
+                  {plusDropdownOpen && (
+                    <>
+                      <div className="fixed inset-0 z-[40]" onClick={() => setPlusDropdownOpen(false)}></div>
+                      <Card variant="default" className="prompt-dropdown-card" style={{left: 0, bottom: '100%', marginBottom: '8px', minWidth: '180px'}}>
+                        <div 
+                          className="prompt-dropdown-provider" 
+                          onClick={() => {
+                            setPlusDropdownOpen(false)
+                            useChatStore.getState().setPlanListModalOpen(true)
+                          }}
+                          style={{ cursor: 'pointer', padding: '10px 14px' }}
+                        >
+                          <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
+                            <span style={{ fontSize: '1.1em' }}>📋</span> 绑定开发计划
+                          </span>
+                        </div>
+                      </Card>
+                    </>
+                  )}
+                </div>
+                <div className="relative">
+                  <Button 
+                    variant="ghost" 
+                    size="none" 
+                    className="prompt-approve-btn"
+                    onClick={() => {
+                      setPermDropdownOpen(!permDropdownOpen)
+                      setPlusDropdownOpen(false)
+                      setDropdownOpen(false)
+                    }}
+                    style={{ color: mode === 'full-access' ? 'var(--error-color, #ef4444)' : 'inherit' }}
+                  >
+                    <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {getPermissionIcon(mode)}
+                    </span> 
+                    <span style={{ marginLeft: '4px' }}>
+                      {PERMISSION_MODES.find(m => m.id === mode)?.title}
+                    </span> 
+                    <IconChevronDown />
+                  </Button>
+                  
+                  {permDropdownOpen && (
+                    <>
+                      <div className="fixed inset-0 z-[40]" onClick={() => setPermDropdownOpen(false)}></div>
+                      <Card variant="default" className="prompt-dropdown-card" style={{left: 0, bottom: '100%', marginBottom: '8px', minWidth: '240px', padding: '0'}}>
+                        <div className="prompt-dropdown-header" style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-muted)', borderBottom: '1px solid var(--border-color)' }}>权限级别</div>
+                        {PERMISSION_MODES.map(m => (
+                          <div
+                            key={m.id}
+                            className={`prompt-dropdown-provider ${mode === m.id ? 'is-active' : ''}`}
+                            onClick={() => { setPermissionMode(m.id); setPermDropdownOpen(false) }}
+                            style={{ display: 'flex', gap: '12px', padding: '12px 16px', cursor: 'pointer', alignItems: 'flex-start' }}
+                          >
+                            <div style={{ color: mode === m.id ? 'var(--primary-color)' : 'var(--text-muted)', marginTop: '2px', flexShrink: 0, display: 'flex', width: '20px', height: '20px', alignItems: 'center', justifyContent: 'center' }}>
+                              {getPermissionIcon(m.id)}
+                            </div>
+                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                              <div style={{ fontSize: '14px', fontWeight: 500, color: mode === m.id ? 'var(--primary-color)' : 'var(--text-main)' }}>{m.title}</div>
+                              <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.4 }}>{m.subtitle}</div>
+                            </div>
+                            {mode === m.id && (
+                              <div style={{ color: 'var(--primary-color)', flexShrink: 0, marginTop: '2px', display: 'flex', width: '20px', height: '20px', alignItems: 'center', justifyContent: 'center' }}>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </Card>
+                    </>
+                  )}
+                </div>
               </Flex>
 
               <Flex align="center" gap={3} className="prompt-actions-right">
@@ -389,7 +516,11 @@ export default function PromptArea({ onSend, placeholder, onOpenSettings, worksp
                     variant="ghost"
                     size="none"
                     className="prompt-model-selector-btn"
-                    onClick={() => setDropdownOpen(!dropdownOpen)}
+                    onClick={() => {
+                      setDropdownOpen(!dropdownOpen)
+                      setPlusDropdownOpen(false)
+                      setPermDropdownOpen(false)
+                    }}
                   >
                     <span className="truncate">{displayLabel}</span>
                     <IconChevronDown />

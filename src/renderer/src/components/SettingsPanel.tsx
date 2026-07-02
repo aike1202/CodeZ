@@ -17,7 +17,6 @@ interface ProviderFormData {
   baseUrl: string
   apiKey: string
   apiFormat?: ApiFormat
-  apiKeyMasked?: string
   models: ModelFormData[]
   thinking: ThinkingConfig
 }
@@ -64,7 +63,6 @@ export default function SettingsPanel({
   const canSave =
     (name || '').trim() !== '' &&
     (baseUrl || '').trim() !== '' &&
-    (initialData.apiKeyMasked || (apiKey || '').trim() !== '') &&
     models.some((m) => (m?.name || '').trim() !== '')
 
   const handleSave = async () => {
@@ -150,7 +148,7 @@ export default function SettingsPanel({
           {/* API Key */}
           <div>
             <label className="settings-label">
-              API Key {initialData.apiKeyMasked ? '(已设置，留空保留原有)' : ''}
+              API Key
             </label>
             <div className="settings-apikey-wrapper">
               <Input

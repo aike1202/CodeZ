@@ -51,6 +51,15 @@ export class RecentProjectsStore {
     }
   }
 
+  
+  async updateProject(project: WorkspaceInfo): Promise<void> {
+    const index = this.cache.findIndex((p) => p.id === project.id)
+    if (index !== -1) {
+      this.cache[index] = { ...this.cache[index], ...project }
+      await this.save()
+    }
+  }
+
   private async save(): Promise<void> {
     try {
       const dir = path.dirname(this.filePath)

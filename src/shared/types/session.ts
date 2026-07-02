@@ -7,4 +7,5 @@ export interface SessionData {
   isArchived?: boolean
   isDeleted?: boolean
   deletedAt?: number
+  linkedPlanSlug?: string
 }

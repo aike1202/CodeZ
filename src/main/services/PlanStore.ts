@@ -2,7 +2,9 @@ import * as fs from 'fs/promises'
 import * as path from 'path'
 import * as os from 'os'
 import { createHash } from 'crypto'
+import { BrowserWindow } from 'electron'
 import matter from 'gray-matter'
+import { IPC_CHANNELS } from '../../shared/ipc/channels'
 import type { Plan, PlanStep } from '../../shared/types/plan'
 
 /**
@@ -66,6 +68,11 @@ export class PlanStore {
     const filePath = path.join(dir, `${plan.slug}.md`)
     const content = this.serialize(plan)
     await fs.writeFile(filePath, content, 'utf-8')
+
+    // 广播状态更新
+    BrowserWindow.getAllWindows().forEach((win) => {
+      win.webContents.send(IPC_CHANNELS.PLAN_STATE_CHANGED, plan)
+    })
   }
 
   /**

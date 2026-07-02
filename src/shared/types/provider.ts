@@ -41,8 +41,8 @@ export interface ProviderInfo {
   name: string
   baseUrl: string
   apiFormat?: ApiFormat
-  /** 脱敏后的 API Key 片段（如 sk-****abc） */
-  apiKeyMasked: string
+  /** API Key 明文 */
+  apiKey: string
   models: ModelConfig[]
   thinking: ThinkingConfig
   enabled: boolean

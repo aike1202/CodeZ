@@ -1,6 +1,7 @@
 import React, { ReactNode } from 'react';
 import Stack from '../ui/Stack';
-import { PlanPanel } from './PlanPanel';
+import { PlanApprovalCard } from './PlanApprovalCard';
+import { PlanCapsule } from '../PlanCapsule';
 import { useChatStore } from '../../stores/chatStore';
 
 export interface ChatAreaLayoutProps {
@@ -20,12 +21,11 @@ export const ChatAreaLayout: React.FC<ChatAreaLayoutProps> = ({
   panelOpen,
   containerRef
 }) => {
-  const planMode = useChatStore((s) => s.planMode)
-
   return (
     <>
       <Stack className={`app-chat-column ${panelOpen ? 'app-chat-column--border' : ''}`} ref={containerRef}>
-        {planMode && <PlanPanel />}
+        <PlanCapsule />
+        <PlanApprovalCard />
         {messageArea}
       </Stack>
       {auditArea}

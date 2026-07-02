@@ -14,10 +14,7 @@ function genModelId(): string {
   return `m_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
 }
 
-function maskApiKey(key: string): string {
-  if (key.length <= 8) return '****'
-  return `${key.slice(0, 3)}${'*'.repeat(Math.min(key.length - 7, 12))}${key.slice(-4)}`
-}
+
 
 function normalizeThinkingConfig(value: unknown): ThinkingConfig {
   if (value && typeof value === 'object') {
@@ -112,7 +109,7 @@ export class ProviderService {
       name: c.name,
       baseUrl: c.baseUrl,
       apiFormat: c.apiFormat || 'openai',
-      apiKeyMasked: maskApiKey(this.decryptApiKey(c.apiKeyRef, c.encryption)),
+      apiKey: this.decryptApiKey(c.apiKeyRef, c.encryption),
       models: c.models,
       thinking: normalizeThinkingConfig(c.thinking),
       enabled: c.enabled,

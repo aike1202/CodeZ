@@ -6,6 +6,7 @@ import { IPC_CHANNELS } from '../../shared/ipc/channels'
 import { WorkspaceService } from '../services/WorkspaceService'
 import { RecentProjectsStore } from '../services/RecentProjectsStore'
 import type { WorkspaceInfo } from '../../shared/types/workspace'
+import { PermissionRuleStore } from '../services/PermissionRuleStore'
 
 let recentStore: RecentProjectsStore | null = null
 let currentWorkspaceService: WorkspaceService | null = null
@@ -107,6 +108,16 @@ export function registerWorkspaceIpc(): void {
       console.error('Failed to open path in explorer:', error)
       return false
     }
+  })
+
+  
+  ipcMain.handle('workspace:update-project', async (_event, project: WorkspaceInfo): Promise<void> => {
+    await store.updateProject(project)
+  })
+
+  
+  ipcMain.handle('permissions:addRule', async (_event, rule: string, scope: 'session' | 'global') => {
+    await PermissionRuleStore.getInstance().addRule(rule, scope)
   })
 
   ipcMain.handle('workspace:rename-recent-project', async (_event, id: string, newName: string): Promise<void> => {

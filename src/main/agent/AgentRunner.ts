@@ -8,6 +8,8 @@ import { PermissionManager } from '../services/PermissionManager'
 import { interceptAskUser, type AskUserAnswer, type AskUserRequest } from '../tools/builtin/AskUserQuestionTool'
 import { PlanStore } from '../services/PlanStore'
 import { PlanService } from '../services/PlanService'
+import { SubAgentManager } from './SubAgentManager'
+import { PlanSubAgent } from './definitions/PlanSubAgent'
 import type { ChatMessage, ToolDefinition, ToolCall } from '../../shared/types/provider'
 import type { Plan } from '../../shared/types/plan'
 
@@ -24,7 +26,6 @@ export interface AgentRunConfig extends ChatRequestConfig {
   tools?: ToolDefinition[]
   sessionId?: string
   contextWindowTokens?: number
-  planMode?: boolean
 }
 
 export function isToolErrorResult(resultMessage: string): boolean {
@@ -55,6 +56,8 @@ export function buildToolError(resultMessage: string) {
   }
 }
 
+import { getSessionStore } from '../ipc/session.handlers'
+
 export class AgentRunner {
   private chatService: ChatService
   private toolManager: ToolManager
@@ -66,6 +69,11 @@ export class AgentRunner {
     this.chatService = new ChatService()
     this.toolManager = new ToolManager()
     this.editTransactionService = getEditTransactionService()
+    
+    // 确保注册 PlanSubAgent
+    if (!SubAgentManager.getDefinition('Plan')) {
+      SubAgentManager.register(PlanSubAgent)
+    }
   }
 
   async run(config: AgentRunConfig, callbacks: AgentRunnerCallbacks): Promise<void> {
@@ -81,57 +89,28 @@ export class AgentRunner {
     let filesModifiedInSession = false
     let lastVerificationResult: { success: boolean; command: string } | null = null
 
-    // Plan mode: dynamic tool set + active plan injection
+    // Load tools and active plan injection
     const planStore = new PlanStore()
-    let availableTools: ToolDefinition[]
+    let availableTools: ToolDefinition[] = config.tools || this.toolManager.getToolDefinitions()
 
-    if (config.planMode) {
-      // Read-only tools + SubmitPlan for plan submission
-      const readOnly = this.toolManager.getReadOnlyTools()
-      const submitPlanTool = this.toolManager.getTool('SubmitPlan')
-      const submitPlanDef = submitPlanTool ? [{
-        type: 'function' as const,
-        function: {
-          name: submitPlanTool.name,
-          description: submitPlanTool.description,
-          parameters: submitPlanTool.parameters_schema
+    const sessionId = config.sessionId || `session_${Date.now()}`
+
+    try {
+      const sessionStore = getSessionStore()
+      const session = sessionStore.getAll().find((s: any) => s.id === sessionId)
+      let activePlan: any = null
+      
+      if (session && session.linkedPlanSlug) {
+        activePlan = await planStore.getBySlug(config.workspaceRoot, session.linkedPlanSlug)
+        if (activePlan && activePlan.status === 'suspended') {
+          const { PlanService } = require('../services/PlanService')
+          activePlan = await PlanService.resume(config.workspaceRoot, activePlan.slug)
         }
-      }] : []
-      availableTools = [...readOnly, ...submitPlanDef]
-
-      allMessages.push({
-        role: 'system',
-        content: [
-          'You are in Plan Mode (read-only). Your goal:',
-          '1. Explore the codebase to understand relevant files and patterns.',
-          '2. Design a structured plan with numbered steps.',
-          '3. Call SubmitPlan with title, description, and steps to submit for user approval.',
-          '4. Each step: 50-150 chars, include goal + files + acceptance criteria.',
-          '5. Do NOT make any edits, write files, or run commands.',
-          'When the user approves the plan, you will enter execution mode.'
-        ].join('\n')
-      } as any)
-
-      // Notify renderer of plan state
-      try {
-        const win = BrowserWindow.getAllWindows()[0]
-        if (win) {
-          win.webContents.send(IPC_CHANNELS.PLAN_STATE_CHANGED, {
-            state: 'active',
-            mode: 'plan'
-          })
-        }
-      } catch (e) {
-        // ignore
       }
-    } else {
-      // Execution mode: load active plan and inject as system message
-      availableTools = config.tools || this.toolManager.getToolDefinitions()
 
-      try {
-        const activePlan = await planStore.getActive(config.workspaceRoot)
-        if (activePlan) {
-          // Add UpdatePlanStep tool
+      if (activePlan) {
+        // Add UpdatePlanStep tool dynamically if not present
+        if (!availableTools.find(t => t.function.name === 'UpdatePlanStep')) {
           const stepTool = this.toolManager.getTool('UpdatePlanStep')
           if (stepTool) {
             availableTools = [...availableTools, {
@@ -143,35 +122,34 @@ export class AgentRunner {
               }
             }]
           }
-
-          // Build active_plan system message
-          const stepLines = activePlan.steps.map(s =>
-            `- [${s.status}] ${s.id} ${s.title}`
-          ).join('\n')
-          const currentStep = activePlan.steps.find(s => s.status === 'in_progress')
-          const planMsg = [
-            '<active_plan>',
-            `Plan: ${activePlan.title} (slug: ${activePlan.slug})`,
-            `Status: ${activePlan.status}`,
-            'Steps:',
-            stepLines,
-            `Current step: ${currentStep ? `${currentStep.id} ${currentStep.title}` : 'none'}`,
-            '</active_plan>'
-          ].join('\n')
-
-          // Remove any previous active_plan message, then inject fresh one
-          allMessages = allMessages.filter(m =>
-            !(m.role === 'system' && typeof m.content === 'string' && m.content.includes('<active_plan>'))
-          )
-          allMessages.push({ role: 'system', content: planMsg } as any)
         }
-      } catch (e) {
-        console.error('[AgentRunner] Failed to load active plan:', e)
+
+        // Build active_plan system message
+        const stepLines = activePlan.steps.map((s: any) =>
+          `- [${s.status}] ${s.id} ${s.title}`
+        ).join('\n')
+        const currentStep = activePlan.steps.find((s: any) => s.status === 'in_progress')
+        const planMsg = [
+          '<active_plan>',
+          `Plan: ${activePlan.title} (slug: ${activePlan.slug})`,
+          `Status: ${activePlan.status}`,
+          'Steps:',
+          stepLines,
+          `Current step: ${currentStep ? `${currentStep.id} ${currentStep.title}` : 'none'}`,
+          '</active_plan>'
+        ].join('\n')
+
+        // Remove any previous active_plan message, then inject fresh one
+        allMessages = allMessages.filter(m =>
+          !(m.role === 'system' && typeof m.content === 'string' && m.content.includes('<active_plan>'))
+        )
+        allMessages.push({ role: 'system', content: planMsg } as any)
       }
+    } catch (e) {
+      console.error('[AgentRunner] Failed to load active plan:', e)
     }
 
     // 开启修改事务
-    const sessionId = config.sessionId || `session_${Date.now()}`
     let txId: string | null = null
     try {
       txId = await this.editTransactionService.beginTransaction(sessionId)
@@ -388,48 +366,130 @@ export class AgentRunner {
 
             callbacks.onToolStart?.(toolCallId, name, args)
 
-            // SubmitPlan 审批拦截：不立即执行，等待前端审批
-            if (name === 'SubmitPlan') {
-              const planData = JSON.parse(args)
-              // 先执行 create + submitForReview
-              const plan = await PlanService.createPlan(
-                config.workspaceRoot,
-                planData.title || '',
-                planData.description || '',
-                planData.steps || []
-              )
-              await PlanService.submitForReview(config.workspaceRoot, plan.slug)
+            // EnterPlanMode 拦截：弹出确认，若同意则启动 SubAgent
+            if (name === 'EnterPlanMode') {
+              if (!callbacks.onAskUserRequest) {
+                const msg = JSON.stringify({ ok: false, error: 'UI handler for AskUserRequest not available.' })
+                callbacks.onToolEnd?.(toolCallId, msg)
+                return { role: 'tool' as const, tool_call_id: toolCallId, name, content: msg }
+              }
 
-              let exitResultMsg: string
-              // 推到前端审批
-              if (callbacks.onPlanReview) {
-                const decision = await callbacks.onPlanReview(plan)
-                if (decision.approved) {
-                  await PlanService.approve(config.workspaceRoot, plan.slug)
-                  exitResultMsg = JSON.stringify({
+              // 向用户发送确认请求
+              const answers = await callbacks.onAskUserRequest({
+                id: `plan_confirm_${Date.now()}`,
+                questions: [{
+                  question: 'Agent 建议进入 Plan 模式以探索代码并设计技术方案，是否同意？',
+                  header: '🏗️ Agent 建议进入 Plan 模式',
+                  options: [
+                    { label: '进入规划', description: '启动 Plan SubAgent 进行分析设计', preview: 'approve' },
+                    { label: '跳过，直接执行', description: 'Agent 将继续在当前模式下直接工作', preview: 'skip' }
+                  ],
+                  multiSelect: false
+                }]
+              })
+
+              const ans = answers?.[0]?.answer as string
+              if (ans === 'approve') {
+                try {
+                  // 提取最新的 task prompt 作为 parentPrompt
+                  const lastUserMsg = [...allMessages].reverse().find(m => m.role === 'user')
+                  const parentPrompt = lastUserMsg ? (typeof lastUserMsg.content === 'string' ? lastUserMsg.content : JSON.stringify(lastUserMsg.content)) : 'Create an implementation plan.'
+                  
+                  // 发送事件告知前端进入 Plan 探索状态
+                  const win = BrowserWindow.getAllWindows()[0]
+                  if (win) {
+                    win.webContents.send(IPC_CHANNELS.PLAN_SUBAGENT_PROGRESS, { status: 'running' })
+                  }
+
+                  const result = await SubAgentManager.spawn('Plan', {
+                    workspaceRoot: config.workspaceRoot,
+                    sessionId: config.sessionId || 'session_default',
+                    parentPrompt,
+                    apiConfig: {
+                      baseUrl: config.baseUrl || '',
+                      apiKey: config.apiKey || '',
+                      apiFormat: config.apiFormat || 'openai',
+                      model: config.model || '',
+                      thinking: config.thinking as any
+                    }
+                  }, callbacks)
+
+                  if (win) {
+                    win.webContents.send(IPC_CHANNELS.PLAN_SUBAGENT_PROGRESS, { status: 'completed' })
+                  }
+
+                  // 重新加载 activePlan 注入到当前 messages 中，以便后续执行
+                  const activePlan = await planStore.getActive(config.workspaceRoot)
+                  if (activePlan) {
+                    const sessionStore = getSessionStore()
+                    const session = sessionStore.getAll().find((s: any) => s.id === config.sessionId)
+                    if (session) {
+                      session.linkedPlanSlug = activePlan.slug
+                      await sessionStore.save(session)
+                      
+                      const win = BrowserWindow.getAllWindows()[0]
+                      if (win) {
+                        win.webContents.send(IPC_CHANNELS.PLAN_LINKED, { sessionId: config.sessionId, plan: activePlan })
+                      }
+                    }
+                    const stepLines = activePlan.steps.map(s => `- [${s.status}] ${s.id} ${s.title}`).join('\n')
+                    const planMsg = [
+                      '<active_plan>',
+                      `Plan: ${activePlan.title} (slug: ${activePlan.slug})`,
+                      `Status: ${activePlan.status}`,
+                      'Steps:',
+                      stepLines,
+                      '</active_plan>'
+                    ].join('\n')
+
+                    allMessages = allMessages.filter(m =>
+                      !(m.role === 'system' && typeof m.content === 'string' && m.content.includes('<active_plan>'))
+                    )
+                    allMessages.push({ role: 'system', content: planMsg } as any)
+                    
+                    // Add UpdatePlanStep Tool dynamically if not present
+                    if (!availableTools.find(t => t.function.name === 'UpdatePlanStep')) {
+                      const stepTool = this.toolManager.getTool('UpdatePlanStep')
+                      if (stepTool) {
+                        availableTools.push({
+                          type: 'function' as const,
+                          function: {
+                            name: stepTool.name,
+                            description: stepTool.description,
+                            parameters: stepTool.parameters_schema
+                          }
+                        })
+                      }
+                    }
+                  }
+
+                  const exitResultMsg = JSON.stringify({
                     ok: true,
-                    data: { status: 'approved', slug: plan.slug, message: 'Plan approved. Now implement the plan. Use UpdatePlanStep to track progress.' }
+                    data: {
+                      status: 'plan_completed',
+                      message: 'Plan mode completed. If a plan was approved, an <active_plan> has been injected. Please execute the plan now.',
+                      subAgentResult: result
+                    }
                   })
-                } else {
-                  await PlanService.requestChanges(config.workspaceRoot, plan.slug, decision.feedback || 'Please revise the plan.')
-                  exitResultMsg = JSON.stringify({
-                    ok: true,
-                    data: { status: 'revising', slug: plan.slug, feedback: decision.feedback, message: 'Plan needs revision. Update the plan based on the feedback, then call SubmitPlan again.' }
-                  })
+                  
+                  callbacks.onToolEnd?.(toolCallId, exitResultMsg)
+                  return { role: 'tool' as const, tool_call_id: toolCallId, name, content: exitResultMsg }
+
+                } catch (err: any) {
+                  const win = BrowserWindow.getAllWindows()[0]
+                  if (win) win.webContents.send(IPC_CHANNELS.PLAN_SUBAGENT_PROGRESS, { status: 'failed' })
+                  
+                  const errMsg = JSON.stringify({ ok: false, error: 'Plan SubAgent execution failed: ' + err.message })
+                  callbacks.onToolEnd?.(toolCallId, errMsg)
+                  return { role: 'tool' as const, tool_call_id: toolCallId, name, content: errMsg }
                 }
               } else {
-                await PlanService.approve(config.workspaceRoot, plan.slug)
-                exitResultMsg = JSON.stringify({
+                const exitResultMsg = JSON.stringify({
                   ok: true,
-                  data: { status: 'approved', slug: plan.slug, message: 'Plan auto-approved (no review handler). Now implement.' }
+                  data: { status: 'skipped', message: 'User chose to skip planning. Proceed directly.' }
                 })
-              }
-              callbacks.onToolEnd?.(toolCallId, exitResultMsg)
-              return {
-                role: 'tool' as const,
-                tool_call_id: toolCallId,
-                name: name,
-                content: JSON.stringify({ ok: true, data: exitResultMsg })
+                callbacks.onToolEnd?.(toolCallId, exitResultMsg)
+                return { role: 'tool' as const, tool_call_id: toolCallId, name, content: exitResultMsg }
               }
             }
 
@@ -450,7 +510,9 @@ export class AgentRunner {
                 
                 const pm = PermissionManager.getInstance()
                 const permReq = pm.createPermissionRequest(name, parsedArgs)
-                const permResult = pm.checkToolPermission(name, parsedArgs, config.workspaceRoot)
+                const settingsService = require('../services/SettingsService').SettingsService.getInstance()
+                const workspaceMode = settingsService.getSettings().workspaceMode || 'auto-approve-safe'
+                const permResult = pm.checkToolPermission(name, parsedArgs, config.workspaceRoot, workspaceMode)
                 
                 if (permResult === 'deny') {
                   resultMessage = `Error: Tool execution denied by security policy.`

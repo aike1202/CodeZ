@@ -12,7 +12,7 @@ interface ProviderInfo {
   name: string
   baseUrl: string
   apiFormat?: ApiFormat
-  apiKeyMasked: string
+  apiKey: string
   models: ModelConfig[]
   thinking: ThinkingConfig
   enabled: boolean

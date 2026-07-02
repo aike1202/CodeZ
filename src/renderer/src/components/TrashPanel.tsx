@@ -42,7 +42,7 @@ export default function TrashPanel(): React.ReactElement {
     return {
       projectId: pid,
       projectName: proj ? proj.name : (pid === 'unknown' ? '未知项目' : '已移除项目'),
-      sessions: groupedSessions[pid].sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0))
+      sessions: groupedSessions[pid].sort((a: any, b: any) => (b.deletedAt || 0) - (a.deletedAt || 0))
     }
   })
 
@@ -71,7 +71,7 @@ export default function TrashPanel(): React.ReactElement {
                   <span className="trash-panel-count-badge">({group.sessions.length})</span>
                 </Flex>
                 <Stack gap={2}>
-                  {group.sessions.map(session => (
+                  {group.sessions.map((session: any) => (
                     <TrashItem
                       key={session.id}
                       id={session.id}
