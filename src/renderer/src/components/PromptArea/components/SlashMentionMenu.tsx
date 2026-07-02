@@ -2,7 +2,7 @@ import React from 'react'
 import { FileIcon, FolderIcon } from '@react-symbols/icons/utils'
 
 interface SlashMentionMenuProps {
-  activeToken: { type: 'slash' | 'at'; query: string } | null
+  activeToken: { type: 'slash' | 'mention'; text: string; startIndex: number } | null
   popupItems: any[]
   popupSelectedIndex: number
   setPopupSelectedIndex: (idx: number) => void
@@ -28,7 +28,7 @@ export default function SlashMentionMenu({
 
   return (
     <div className="prompt-slash-menu shadow-2xl">
-      {activeToken.type === 'at' && (
+      {activeToken.type === 'mention' && (
         <>
           <div className="prompt-slash-section-header">文件 / 文件夹</div>
           {filteredFiles.map((file) => {
@@ -42,9 +42,9 @@ export default function SlashMentionMenu({
               >
                 <span className="prompt-slash-file-icon">
                   {file.isDir ? (
-                    <FolderIcon folderName={file.name} size={16} />
+                    <FolderIcon folderName={file.name} width={14} height={14} />
                   ) : (
-                    <FileIcon fileName={file.name} size={16} />
+                    <FileIcon fileName={file.name} width={14} height={14} />
                   )}
                 </span>
                 <div className="prompt-slash-item-content">

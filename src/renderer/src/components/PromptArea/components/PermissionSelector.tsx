@@ -98,7 +98,7 @@ export default function PermissionSelector({
                     width: '20px',
                     height: '20px',
                     alignItems: 'center',
-                    justify: 'center'
+                    justifyContent: 'center'
                   }}
                 >
                   {getPermissionIcon(m.id)}
@@ -127,7 +127,7 @@ export default function PermissionSelector({
                       width: '20px',
                       height: '20px',
                       alignItems: 'center',
-                      justify: 'center'
+                      justifyContent: 'center'
                     }}
                   >
                     <svg

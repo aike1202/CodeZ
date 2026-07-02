@@ -11,23 +11,25 @@ interface ModelSelectorProps {
   setIsOpen: (open: boolean) => void
   onOpenSettings?: () => void
   onCloseOthers: () => void
+  selectedModelName: string
+  setSelectedModelName: (modelName: string) => void
 }
 
 export default function ModelSelector({
   isOpen,
   setIsOpen,
   onOpenSettings,
-  onCloseOthers
+  onCloseOthers,
+  selectedModelName,
+  setSelectedModelName
 }: ModelSelectorProps): React.ReactElement {
-  const providers = useProviderStore((s) => s.providers)
-  const activeProviderId = useProviderStore((s) => s.activeProviderId)
+  const providers = useProviderStore((s: any) => s.providers)
+  const activeProviderId = useProviderStore((s: any) => s.activeProviderId)
 
-  const activeProvider = providers.find((p) => p.id === activeProviderId)
-  const activeModel = activeProvider?.models.find((m) => m.isDefault) || activeProvider?.models[0]
-  const selectedModelName = activeProvider?.selectedModelName || activeModel?.name || ''
+  const activeProvider = providers.find((p: any) => p.id === activeProviderId)
   const displayLabel = activeProvider
-    ? `${activeProvider.name} (${selectedModelName || '无模型'})`
-    : '未选择 Provider'
+    ? `${activeProvider.name} / ${selectedModelName || activeProvider.models[0]?.name || '?'}`
+    : '未配置模型'
 
   return (
     <div className="relative">
@@ -53,7 +55,7 @@ export default function ModelSelector({
             {providers.length === 0 ? (
               <div className="prompt-dropdown-empty">暂无 Provider</div>
             ) : (
-              providers.map((p) => (
+              providers.map((p: any) => (
                 <div key={p.id}>
                   <Flex
                     align="center"
@@ -70,7 +72,7 @@ export default function ModelSelector({
                   </Flex>
                   {p.id === activeProviderId && p.models.length > 0 && (
                     <div className="prompt-dropdown-model-list">
-                      {p.models.map((m) => (
+                      {p.models.map((m: any) => (
                         <Flex
                           key={m.id}
                           align="center"
@@ -79,7 +81,7 @@ export default function ModelSelector({
                             selectedModelName === m.name ? 'is-selected' : ''
                           }`}
                           onClick={() => {
-                            useProviderStore.getState().setSelectedModelName(p.id, m.name)
+                            setSelectedModelName(m.name)
                             setIsOpen(false)
                           }}
                         >

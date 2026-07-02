@@ -37,6 +37,8 @@ export default function PromptArea({
   const {
     text,
     viewRef,
+    selectedModelName,
+    setSelectedModelName,
     activeToken,
     popupSelectedIndex,
     setPopupSelectedIndex,
@@ -145,6 +147,8 @@ export default function PromptArea({
                   setIsOpen={setDropdownOpen}
                   onOpenSettings={onOpenSettings}
                   onCloseOthers={closeAllDropdowns}
+                  selectedModelName={selectedModelName}
+                  setSelectedModelName={setSelectedModelName}
                 />
 
                 {isStreaming ? (
