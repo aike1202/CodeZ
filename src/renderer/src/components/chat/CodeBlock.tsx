@@ -2,7 +2,6 @@ import React, { useState, useMemo } from 'react'
 import IconCheck from '../icons/IconCheck'
 import IconCopy from '../icons/IconCopy'
 import hljs from 'highlight.js'
-import 'highlight.js/styles/github-dark.css' // 引入一套深色主题
 
 interface CodeBlockProps {
   lang: string

@@ -448,102 +448,170 @@ textarea::placeholder {
 }
 
 /* ============================================
-   PrismJS 语法高亮自定义主题 (微调优雅配色)
+   Highlight.js 语法高亮主题 (智能自适应浅色 / 深色模式)
    ============================================ */
-.token.comment,
-.token.prolog,
-.token.doctype,
-.token.cdata {
-  color: #71717a;
+.code-block-pre.hljs {
+  background-color: var(--bg-app);
+  color: var(--text-main);
+}
+
+/* 浅色模式高亮 Token 配色 */
+.hljs-comment,
+.hljs-quote {
+  color: #57606a;
   font-style: italic;
 }
 
-.token.punctuation {
-  color: #52525b;
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-subst {
+  color: #cf222e;
+  font-weight: 600;
 }
 
-.token.property,
-.token.tag,
-.token.boolean,
-.token.number,
-.token.constant,
-.token.symbol,
-.token.deleted {
-  color: #ea580c;
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-attribute,
+.hljs-meta .hljs-string {
+  color: #0a3069;
 }
 
-.token.selector,
-.token.attr-name,
-.token.string,
-.token.char,
-.token.builtin,
-.token.inserted {
-  color: #15803d;
+.hljs-number,
+.hljs-literal,
+.hljs-variable.language_,
+.hljs-template-variable,
+.hljs-tag .hljs-attr {
+  color: #0550ae;
 }
 
-.token.operator,
-.token.entity,
-.token.url,
-.language-css .token.string,
-.style .token.string {
-  color: #1d4ed8;
+.hljs-title,
+.hljs-title.function_,
+.hljs-section,
+.hljs-selector-id {
+  color: #8250df;
+  font-weight: 600;
 }
 
-.token.atrule,
-.token.attr-value,
-.token.keyword {
-  color: #6d28d9;
-  font-weight: 500;
+.hljs-title.class_,
+.hljs-class .hljs-title,
+.hljs-type {
+  color: #953800;
+  font-weight: 600;
 }
 
-.token.function,
-.token.class-name {
-  color: #b91c1c;
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link,
+.hljs-meta,
+.hljs-selector-class {
+  color: #116329;
 }
 
-.token.regex,
-.token.important,
-.token.variable {
-  color: #c2410c;
+.hljs-built_in,
+.hljs-doctag {
+  color: #116329;
 }
 
-/* Dark Mode 适配 */
-.dark .token.punctuation {
-  color: #a1a1aa;
+.hljs-property,
+.hljs-attr,
+.hljs-variable,
+.hljs-params {
+  color: #24292f;
 }
-.dark .token.property,
-.dark .token.tag,
-.dark .token.boolean,
-.dark .token.number,
-.dark .token.constant,
-.dark .token.symbol {
-  color: #fbbf24;
+
+.hljs-punctuation,
+.hljs-operator {
+  color: #57606a;
 }
-.dark .token.selector,
-.dark .token.attr-name,
-.dark .token.string,
-.dark .token.char,
-.dark .token.builtin {
-  color: #34d399;
+
+.hljs-deletion {
+  color: #82071e;
+  background-color: #ffebe9;
 }
-.dark .token.operator,
-.dark .token.entity,
-.dark .token.url {
-  color: #60a5fa;
+
+.hljs-emphasis {
+  font-style: italic;
 }
-.dark .token.atrule,
-.dark .token.attr-value,
-.dark .token.keyword {
-  color: #a78bfa;
+
+.hljs-strong {
+  font-weight: bold;
 }
-.dark .token.function,
-.dark .token.class-name {
-  color: #f472b6;
+
+/* 深色模式下 Adapt 暗色风格 */
+.dark .code-block-pre.hljs {
+  background-color: #141416;
+  color: #e1e4e8;
 }
-.dark .token.regex,
-.dark .token.important,
-.dark .token.variable {
-  color: #fb923c;
+
+.dark .hljs-comment,
+.dark .hljs-quote {
+  color: #8b949e;
+}
+
+.dark .hljs-keyword,
+.dark .hljs-selector-tag,
+.dark .hljs-subst {
+  color: #ff7b72;
+}
+
+.dark .hljs-string,
+.dark .hljs-regexp,
+.dark .hljs-addition,
+.dark .hljs-attribute,
+.dark .meta .hljs-string {
+  color: #a5d6ff;
+}
+
+.dark .hljs-number,
+.dark .hljs-literal,
+.dark .hljs-variable.language_,
+.dark .hljs-template-variable,
+.dark .hljs-tag .hljs-attr {
+  color: #79c0ff;
+}
+
+.dark .hljs-title,
+.dark .hljs-title.function_,
+.dark .hljs-section,
+.dark .hljs-selector-id {
+  color: #d2a8ff;
+}
+
+.dark .hljs-title.class_,
+.dark .hljs-class .hljs-title,
+.dark .hljs-type {
+  color: #ffa657;
+}
+
+.dark .hljs-symbol,
+.dark .hljs-bullet,
+.dark .hljs-link,
+.dark .hljs-meta,
+.dark .hljs-selector-class {
+  color: #7ee787;
+}
+
+.dark .hljs-built_in,
+.dark .hljs-doctag {
+  color: #7ee787;
+}
+
+.dark .hljs-property,
+.dark .hljs-attr,
+.dark .hljs-variable,
+.dark .hljs-params {
+  color: #c9d1d9;
+}
+
+.dark .hljs-punctuation,
+.dark .hljs-operator {
+  color: #8b949e;
+}
+
+.dark .hljs-deletion {
+  color: #ffdcd7;
+  background-color: #78191b;
 }
 
 
