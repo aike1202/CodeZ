@@ -250,10 +250,11 @@ export class SystemPromptService {
     const lines: string[] = []
     lines.push('<skills_instructions>')
     lines.push('Below is the list of active skills. Each entry includes a name, description, and the file path.')
-    lines.push('IMPORTANT: Before using a skill, you MUST use the "Read" tool to read the markdown file at its path to understand the detailed instructions.')
+    lines.push('IMPORTANT: Before using a skill, you MUST use the "ReadSkills" tool to read the markdown file to understand the detailed instructions. (Or use the "Read" tool on the file path, but "ReadSkills" is preferred). If you automatically decide to use a skill, you can use "ReadSkills" multiple skill names to load them.')
+    lines.push('If the user manually triggers a skill using /<skill-name>, it has ALREADY been loaded into the conversation history as <command-message> and you DO NOT need to read it again. Instead, look for <command-message> in recent messages to understand the skill instructions.')
     lines.push('')
     for (const skill of activeSkills) {
-      lines.push(`- ${skill.name}: ${skill.description}`)
+      lines.push(`- ${skill.name} (id: ${skill.id}): ${skill.description}`)
       lines.push(`  Path: ${skill.path || 'Unknown'}`)
     }
     lines.push('</skills_instructions>')

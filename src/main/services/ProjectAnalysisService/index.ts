@@ -86,7 +86,7 @@ export class ProjectAnalysisService {
     const scripts = stableRecord(packageJson?.scripts)
     const dependencies = stableRecord(packageJson?.dependencies)
     const devDependencies = stableRecord(packageJson?.devDependencies)
-    const projectType = this.detectProjectType(packageJson)
+    const projectType = await this.detectProjectType(packageJson)
     const packageManager = await this.detectPackageManager()
     const configFiles = await this.findExistingFiles([
       'package.json',
@@ -97,7 +97,13 @@ export class ProjectAnalysisService {
       'vite.config.js',
       'tsconfig.json',
       'vitest.config.ts',
-      'jest.config.js'
+      'jest.config.js',
+      'requirements.txt',
+      'pyproject.toml',
+      'pom.xml',
+      'build.gradle',
+      'go.mod',
+      'Cargo.toml'
     ])
     const entrypoints = await this.findEntrypoints(packageJson)
     const recommendedFiles = await this.findRecommendedFiles(projectType, entrypoints)
@@ -374,19 +380,30 @@ export class ProjectAnalysisService {
     }
   }
 
-  private detectProjectType(packageJson: PackageJsonShape | null): string {
-    if (!packageJson) return 'unknown'
-    const dependencies = {
-      ...stableRecord(packageJson.dependencies),
-      ...stableRecord(packageJson.devDependencies)
-    }
-    const hasElectron = Boolean(dependencies.electron || dependencies['electron-vite'])
-    const hasReact = Boolean(dependencies.react || dependencies['@vitejs/plugin-react'])
-    const hasVite = Boolean(dependencies.vite || dependencies['@vitejs/plugin-react'])
+  private async detectProjectType(packageJson: PackageJsonShape | null): Promise<string> {
+    if (packageJson) {
+      const dependencies = {
+        ...stableRecord(packageJson.dependencies),
+        ...stableRecord(packageJson.devDependencies)
+      }
+      const hasElectron = Boolean(dependencies.electron || dependencies['electron-vite'])
+      const hasReact = Boolean(dependencies.react || dependencies['@vitejs/plugin-react'])
+      const hasVite = Boolean(dependencies.vite || dependencies['@vitejs/plugin-react'])
 
-    if (hasElectron && hasReact) return 'electron-react'
-    if (hasReact && hasVite) return 'react-vite'
-    return 'nodejs'
+      if (hasElectron && hasReact) return 'electron-react'
+      if (hasReact && hasVite) return 'react-vite'
+      return 'nodejs'
+    }
+
+    if (await this.exists('requirements.txt') || await this.exists('pyproject.toml') || await this.exists('setup.py')) return 'python'
+    if (await this.exists('pom.xml') || await this.exists('build.gradle')) return 'java'
+    if (await this.exists('go.mod')) return 'go'
+    if (await this.exists('Cargo.toml')) return 'rust'
+    if (await this.exists('CMakeLists.txt') || await this.exists('Makefile')) return 'c/c++'
+    if (await this.exists('Gemfile')) return 'ruby'
+    if (await this.exists('composer.json')) return 'php'
+
+    return 'unknown'
   }
 
   private async detectPackageManager(): Promise<string> {
@@ -394,6 +411,13 @@ export class ProjectAnalysisService {
     if (await this.exists('yarn.lock')) return 'yarn'
     if (await this.exists('package-lock.json')) return 'npm'
     if (await this.exists('package.json')) return 'npm'
+    
+    if (await this.exists('requirements.txt') || await this.exists('pyproject.toml')) return 'pip'
+    if (await this.exists('pom.xml')) return 'maven'
+    if (await this.exists('build.gradle')) return 'gradle'
+    if (await this.exists('go.mod')) return 'go modules'
+    if (await this.exists('Cargo.toml')) return 'cargo'
+
     return 'unknown'
   }
 
@@ -407,7 +431,12 @@ export class ProjectAnalysisService {
       'src/renderer/src/App.tsx',
       'src/renderer/src/main.tsx',
       'src/renderer/src/main.ts',
-      'src/shared/ipc/channels.ts'
+      'src/shared/ipc/channels.ts',
+      'main.py',
+      'app.py',
+      'main.go',
+      'src/main.rs',
+      'src/main/java/Main.java'
     ].filter(Boolean) as string[]
     return this.findExistingFiles(candidates)
   }
@@ -422,7 +451,13 @@ export class ProjectAnalysisService {
       'electron.vite.config.ts',
       'vite.config.ts',
       'tsconfig.json',
-      'vitest.config.ts'
+      'vitest.config.ts',
+      'requirements.txt',
+      'pyproject.toml',
+      'pom.xml',
+      'build.gradle',
+      'go.mod',
+      'Cargo.toml'
     ]
     const electronReact = [
       'src/main/agent/AgentRunner.ts',

@@ -17,8 +17,8 @@ x64:
     - out/**/*
 nsis:
   script: |-
-    !include "F:\MyProjectF\MyAgent\node_modules\app-builder-lib\templates\nsis\include\StdUtils.nsh"
-    !addincludedir "F:\MyProjectF\MyAgent\node_modules\app-builder-lib\templates\nsis\include"
+    !include "F:\MyProjectF\CodeZ\node_modules\app-builder-lib\templates\nsis\include\StdUtils.nsh"
+    !addincludedir "F:\MyProjectF\CodeZ\node_modules\app-builder-lib\templates\nsis\include"
     !macro _isUpdated _a _b _t _f
       ${StdUtils.TestParameter} $R9 "updated"
       StrCmp "$R9" "true" `${_t}` `${_f}`
@@ -90,8 +90,8 @@ nsis:
       !insertmacro MUI_LANGUAGE "Vietnamese"
     !macroend
 
-    !include "C:\Users\asus\AppData\Local\Temp\t-BH1XKp\1-messages.nsh"
-    !include "C:\Users\asus\AppData\Local\Temp\t-BH1XKp\2-messages.nsh"
+    !include "C:\Users\asus\AppData\Local\Temp\t-3y1CZP\1-messages.nsh"
+    !include "C:\Users\asus\AppData\Local\Temp\t-3y1CZP\2-messages.nsh"
     !addplugindir /x86-unicode "C:\Users\asus\AppData\Local\electron-builder\Cache\nsis-resources-3.4.1\nsis-resources-3.4.1-2jx2y\plugins\x86-unicode"
 
     Var newStartMenuLink

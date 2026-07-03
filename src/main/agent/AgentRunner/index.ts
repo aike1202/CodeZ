@@ -13,6 +13,7 @@ import type { AgentRunConfig, AgentRunnerCallbacks } from './types'
 import { isToolErrorResult, buildToolError } from './agentErrorHandler'
 import { handleEnterPlanMode } from './planRunnerHelper'
 import { getSessionStore } from '../../ipc/session.handlers'
+import { getSettingsService } from '../../ipc/settings.handlers'
 
 export class AgentRunner {
   private chatService: ChatService
@@ -363,7 +364,7 @@ export class AgentRunner {
 
                   const pm = PermissionManager.getInstance()
                   const permReq = pm.createPermissionRequest(name, parsedArgs)
-                  const settingsService = require('../../services/SettingsService').SettingsService.getInstance()
+                  const settingsService = getSettingsService()
                   const workspaceMode = settingsService.getSettings().workspaceMode || 'auto-approve-safe'
                   const permResult = pm.checkToolPermission(
                     name,

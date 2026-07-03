@@ -11,13 +11,14 @@ export class GeminiProvider implements IChatProvider {
         .replace(/\/v1\/?$/, '')
         .replace(/\/v1beta\/?$/, '')
         .replace(/\/$/, '')
-      url = `${cleanBase}/v1beta/models/${model}:streamGenerateContent?key=${apiKey}`
+      url = `${cleanBase}/v1beta/models/${model}:streamGenerateContent?key=${apiKey}&alt=sse`
     } else {
       url = url.replace(/\/$/, '')
       if (!url.includes(':streamGenerateContent')) {
         url = `${url}:streamGenerateContent`
       }
-      url = `${url}?key=${apiKey}`
+      const separator = url.includes('?') ? '&' : '?'
+      url = `${url}${separator}key=${apiKey}&alt=sse`
     }
 
     let fullContent = ''
