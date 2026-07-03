@@ -149,16 +149,18 @@ export function useAppWorkspace() {
 
   const sessionsByProject: Record<
     string,
-    Array<{ id: string; summary: string; relativeTime: string; isArchived?: boolean; isDeleted?: boolean }>
+    Array<{ id: string; summary: string; relativeTime: string; isArchived?: boolean; isDeleted?: boolean; isStreaming?: boolean }>
   > = {}
   for (const s of sessions) {
     if (!sessionsByProject[s.projectId]) sessionsByProject[s.projectId] = []
+    const isStreaming = s.messages && s.messages.length > 0 && s.messages[s.messages.length - 1].streaming
     sessionsByProject[s.projectId].push({
       id: s.id,
       summary: s.summary,
       relativeTime: s.relativeTime,
       isArchived: s.isArchived,
-      isDeleted: s.isDeleted
+      isDeleted: s.isDeleted,
+      isStreaming
     })
   }
 
@@ -170,7 +172,8 @@ export function useAppWorkspace() {
       summary: s.summary,
       relativeTime: s.relativeTime,
       isArchived: s.isArchived,
-      isDeleted: s.isDeleted
+      isDeleted: s.isDeleted,
+      isStreaming: s.isStreaming
     }))
   }))
 

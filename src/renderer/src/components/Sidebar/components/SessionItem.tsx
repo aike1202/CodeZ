@@ -26,6 +26,7 @@ export default function SessionItem({
   isArchivedOrDeleted = false
 }: SessionItemProps): React.ReactElement {
   const isConfirming = confirmState?.sessionId === session.id
+  const isStreaming = session.isStreaming
 
   return (
     <Flex
@@ -38,7 +39,13 @@ export default function SessionItem({
         onSelectSession(session.id)
       }}
     >
-      <span className="sidebar-session-icon"><Message /></span>
+      <span className="sidebar-session-icon">
+        {isStreaming ? (
+          <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse outline outline-2 outline-blue-500/30" />
+        ) : (
+          <Message />
+        )}
+      </span>
       <span className="sidebar-session-summary">{session.summary}</span>
 
       {!isConfirming && (

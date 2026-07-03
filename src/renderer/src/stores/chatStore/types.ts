@@ -140,7 +140,7 @@ export interface ChatState {
   addSystemMessage: (content: string) => ChatMessage
   startStreamingReply: () => string
   appendStreamChunk: (msgId: string, delta: string, reasoningDelta?: string) => void
-  finishStreaming: (msgId: string) => void
+  finishStreaming: (msgId: string, txId?: string) => void
   setStreamCleanup: (cleanup: (() => void) | null) => void
   setTransactionId: (msgId: string, txId: string) => void
   setDiffEntries: (msgId: string, diffEntries: Array<{ path: string; diff: string }>) => void
@@ -154,6 +154,7 @@ export interface ChatState {
     answers: Array<{ question: string; answer: string | string[] }>
   ) => void
   persistCurrentSession: () => Promise<void>
+  persistSession: (sessionId: string) => Promise<void>
   archiveSession: (sessionId: string, archive: boolean) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
   restoreSession: (sessionId: string) => Promise<void>

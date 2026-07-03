@@ -11,7 +11,6 @@ import { PowerShellTool } from './builtin/PowerShellTool'
 import { AskUserQuestionTool } from './builtin/AskUserQuestionTool'
 import { PushNotificationTool } from './builtin/PushNotificationTool'
 import { SkillTool } from './builtin/SkillTool'
-import { ReadSkillsTool } from './builtin/ReadSkillsTool'
 import { GetProjectSnapshotTool } from './builtin/GetProjectSnapshotTool'
 import { RollbackLastEditTool } from './builtin/RollbackLastEditTool'
 import { UpdateResumeStateTool } from './builtin/UpdateResumeStateTool'
@@ -51,7 +50,6 @@ export class ToolManager {
       new AskUserQuestionTool(),
       new PushNotificationTool(),
       new SkillTool(),
-      new ReadSkillsTool(),
       new GetProjectSnapshotTool(),
       new RollbackLastEditTool(),
       new UpdateResumeStateTool(),

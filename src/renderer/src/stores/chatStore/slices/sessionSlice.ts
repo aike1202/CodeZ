@@ -14,6 +14,7 @@ export interface SessionSlice {
   selectSession: (sessionId: string) => Promise<void>
   linkPlanToSession: (sessionId: string, planSlug: string | null) => Promise<void>
   persistCurrentSession: () => Promise<void>
+  persistSession: (sessionId: string) => Promise<void>
   archiveSession: (sessionId: string, archive: boolean) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
   restoreSession: (sessionId: string) => Promise<void>
@@ -102,6 +103,18 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
   persistCurrentSession: async () => {
     const { sessions, activeSessionId } = get()
     const session = sessions.find((s) => s.id === activeSessionId)
+    if (session) {
+      try {
+        await window.api.session.save(session)
+      } catch {
+        // 静默失败
+      }
+    }
+  },
+
+  persistSession: async (sessionId: string) => {
+    const { sessions } = get()
+    const session = sessions.find((s) => s.id === sessionId)
     if (session) {
       try {
         await window.api.session.save(session)

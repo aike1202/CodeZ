@@ -195,7 +195,7 @@ export function useSendMessage() {
             appendReasoningTimelineChunk(agentId, reasoningDelta || '')
           },
           onDone: async (fullContent: string, _stopReason?: string, txId?: string) => {
-            finishStreaming(agentId)
+            finishStreaming(agentId, txId)
             if (txId) {
               useChatStore.getState().setTransactionId(agentId, txId)
               try {
@@ -207,13 +207,13 @@ export function useSendMessage() {
                 console.warn('Failed to load transaction diff:', err)
               }
             }
-            persistCurrentSession()
+            useChatStore.getState().persistSession(sid)
             setStreamCleanup(null)
           },
           onError: (error: string) => {
             appendStreamChunk(agentId, `\n\n错误：${error}`)
             finishStreaming(agentId)
-            persistCurrentSession()
+            useChatStore.getState().persistSession(sid)
             setStreamCleanup(null)
           },
           onToolStart: (toolCallId: string, name: string, args: string, thoughtSignature?: string) => {
@@ -223,9 +223,12 @@ export function useSendMessage() {
               args,
               thoughtSignature
             })
+            // Persist periodically during long tool execution
+            useChatStore.getState().persistSession(sid)
           },
           onToolEnd: (toolCallId: string, result: string) => {
             finishToolCall(agentId, toolCallId, result)
+            useChatStore.getState().persistSession(sid)
           },
           onPermissionRequest: (request: any) => {
             addPermissionRequest(agentId, request)
@@ -239,7 +242,7 @@ export function useSendMessage() {
       const wrappedCleanup = () => {
         cleanup()
         finishStreaming(agentId)
-        persistCurrentSession()
+        useChatStore.getState().persistSession(sid)
         setStreamCleanup(null)
       }
 

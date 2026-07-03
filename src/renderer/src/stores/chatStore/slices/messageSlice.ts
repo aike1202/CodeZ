@@ -5,7 +5,8 @@ import type {
   AgentState,
   ToolCallState,
   ToolTimelineItem,
-  ReasoningTimelineItem
+  ReasoningTimelineItem,
+  ChatSession
 } from '../types'
 
 function genId(): string {
@@ -46,6 +47,44 @@ export interface MessageSlice {
   setPlanReview: (review: { plan: any; status: string } | null) => void
   setActivePlanStreamId: (streamId: string | null) => void
   setPendingPrompt: (prompt: string | null) => void
+}
+
+export function updateMessageInState(
+  s: ChatState,
+  msgId: string,
+  updater: (m: ChatMessage) => ChatMessage,
+  sessionUpdater?: (session: ChatSession, updatedMessages: ChatMessage[]) => ChatSession
+): Partial<ChatState> {
+  let foundSessionId: string | null = null
+  const sessions = s.sessions.map((session) => {
+    if (session.messages.some((m) => m.id === msgId)) {
+      foundSessionId = session.id
+      const updatedMessages = session.messages.map((m) => (m.id === msgId ? updater(m) : m))
+      let updatedSession = { ...session, messages: updatedMessages }
+      if (sessionUpdater) {
+        updatedSession = sessionUpdater(updatedSession, updatedMessages)
+      }
+      return updatedSession
+    }
+    return session
+  })
+
+  // If not found in sessions, check active messages (fallback)
+  if (!foundSessionId) {
+    if (s.messages.some((m) => m.id === msgId)) {
+      return { messages: s.messages.map((m) => (m.id === msgId ? updater(m) : m)) }
+    }
+    return {}
+  }
+
+  const result: Partial<ChatState> = { sessions }
+  if (foundSessionId === s.activeSessionId) {
+    const actSession = sessions.find((x) => x.id === foundSessionId)
+    if (actSession) {
+      result.messages = actSession.messages
+    }
+  }
+  return result
 }
 
 export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> = (set, get) => ({
@@ -115,51 +154,47 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
   },
 
   appendStreamChunk: (msgId: string, delta: string, reasoningDelta?: string) => {
-    set((s) => ({
-      messages: s.messages.map((m) => {
-        if (m.id === msgId) {
-          const newContent = m.content + (delta || '')
-          const newReasoning = m.reasoningContent
-            ? m.reasoningContent + (reasoningDelta || '')
-            : reasoningDelta || undefined
+    set((s) => updateMessageInState(s, msgId, (m) => {
+      const newContent = m.content + (delta || '')
+      const newReasoning = m.reasoningContent
+        ? m.reasoningContent + (reasoningDelta || '')
+        : reasoningDelta || undefined
 
-          let timeline = m.executionTimeline || []
-          if (delta) {
-            const now = Date.now()
-            const last = timeline[timeline.length - 1]
-            if (last?.type === 'text') {
-              timeline = timeline.map((item) =>
-                item.id === last.id && item.type === 'text'
-                  ? { ...item, content: item.content + delta, updatedAt: now }
-                  : item
-              )
-            } else {
-              timeline = [
-                ...timeline,
-                {
-                  id: genId(),
-                  type: 'text',
-                  content: delta,
-                  status: 'running',
-                  startedAt: now,
-                  updatedAt: now,
-                  sequence: timeline.length
-                }
-              ]
+      let timeline = m.executionTimeline || []
+      if (delta) {
+        const now = Date.now()
+        const last = timeline[timeline.length - 1]
+        if (last?.type === 'text') {
+          timeline = timeline.map((item) =>
+            item.id === last.id && item.type === 'text'
+              ? { ...item, content: item.content + delta, updatedAt: now }
+              : item
+          )
+        } else {
+          timeline = [
+            ...timeline,
+            {
+              id: genId(),
+              type: 'text',
+              content: delta,
+              status: 'running',
+              startedAt: now,
+              updatedAt: now,
+              sequence: timeline.length
             }
-          }
-
-          return { ...m, content: newContent, reasoningContent: newReasoning, executionTimeline: timeline }
+          ]
         }
-        return m
-      })
+      }
+
+      return { ...m, content: newContent, reasoningContent: newReasoning, executionTimeline: timeline }
     }))
   },
 
   finishStreaming: (msgId: string, txId?: string) => {
-    set((s) => {
-      const msgs = s.messages.map((m) => {
-        if (m.id !== msgId) return m
+    set((s) => updateMessageInState(
+      s,
+      msgId,
+      (m) => {
         const now = Date.now()
         const timeline = (m.executionTimeline || []).map((item) =>
           item.type === 'text' && item.status === 'running'
@@ -167,231 +202,192 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
             : item
         )
         return { ...m, streaming: false, txId, executionTimeline: timeline }
+      },
+      (session, updatedMessages) => ({
+        ...session,
+        summary: updatedMessages[0]?.content.slice(0, 60) || '新会话',
+        relativeTime: '刚刚'
       })
-      const activeId = s.activeSessionId
-      const sessions = s.sessions.map((session) =>
-        session.id === activeId
-          ? { ...session, messages: msgs, summary: msgs[0]?.content.slice(0, 60) || '新会话', relativeTime: '刚刚' }
-          : session
-      )
-      return { messages: msgs, sessions }
-    })
+    ))
   },
 
   setStreamCleanup: (cleanup) => set({ streamCleanup: cleanup }),
 
   setTransactionId: (msgId, txId) => {
-    set((s) => ({
-      messages: s.messages.map((m) => (m.id === msgId ? { ...m, txId } : m))
-    }))
+    set((s) => updateMessageInState(s, msgId, (m) => ({ ...m, txId })))
   },
 
   setDiffEntries: (msgId, diffEntries) => {
-    set((s) => {
-      const msgs = s.messages.map((m) => (m.id === msgId ? { ...m, diffEntries } : m))
-      const activeId = s.activeSessionId
-      const sessions = s.sessions.map((session) =>
-        session.id === activeId ? { ...session, messages: msgs } : session
-      )
-      return { messages: msgs, sessions }
-    })
+    set((s) => updateMessageInState(s, msgId, (m) => ({ ...m, diffEntries })))
     get().persistCurrentSession()
   },
 
   setEditStatus: (msgId: string, filePath: string, status: 'accepted' | 'rejected') => {
-    set((s) => {
-      const msgs = s.messages.map((m) => {
-        if (m.id === msgId) {
-          const newStatuses = { ...(m.editStatuses || {}) }
-          newStatuses[filePath] = status
-          return { ...m, editStatuses: newStatuses }
-        }
-        return m
-      })
-      const activeId = s.activeSessionId
-      const sessions = s.sessions.map((session) =>
-        session.id === activeId ? { ...session, messages: msgs } : session
-      )
-      return { messages: msgs, sessions }
-    })
+    set((s) => updateMessageInState(s, msgId, (m) => {
+      const newStatuses = { ...(m.editStatuses || {}) }
+      newStatuses[filePath] = status
+      return { ...m, editStatuses: newStatuses }
+    }))
     get().persistCurrentSession()
   },
 
   appendAgentState: (msgId: string, state: AgentState) => {
-    set((s) => ({
-      messages: s.messages.map((m) =>
-        m.id === msgId ? { ...m, agentStates: [...(m.agentStates || []), state] } : m
-      )
-    }))
+    set((s) => updateMessageInState(s, msgId, (m) => ({ ...m, agentStates: [...(m.agentStates || []), state] })))
   },
 
   updateAgentState: (msgId: string, stateId: string, updates: Partial<AgentState>) => {
-    set((s) => ({
-      messages: s.messages.map((m) => {
-        if (m.id === msgId && m.agentStates) {
-          return {
-            ...m,
-            agentStates: m.agentStates.map((st) => (st.id === stateId ? { ...st, ...updates } : st))
-          }
+    set((s) => updateMessageInState(s, msgId, (m) => {
+      if (m.agentStates) {
+        return {
+          ...m,
+          agentStates: m.agentStates.map((st) => (st.id === stateId ? { ...st, ...updates } : st))
         }
-        return m
-      })
+      }
+      return m
     }))
   },
 
   appendReasoningTimelineChunk: (msgId: string, delta: string) => {
     if (!delta) return
 
-    set((s) => ({
-      messages: s.messages.map((m) => {
-        if (m.id !== msgId) return m
+    set((s) => updateMessageInState(s, msgId, (m) => {
+      const now = Date.now()
+      const timeline = m.executionTimeline || []
+      const last = timeline[timeline.length - 1]
 
-        const now = Date.now()
-        const timeline = m.executionTimeline || []
-        const last = timeline[timeline.length - 1]
-
-        if (last?.type === 'reasoning') {
-          return {
-            ...m,
-            executionTimeline: timeline.map((item) => {
-              if (item.id !== last.id || item.type !== 'reasoning') return item
-              return { ...item, content: item.content + delta, status: 'running', updatedAt: now }
-            })
-          }
-        }
-
-        const nextItem: ReasoningTimelineItem = {
-          id: genId(),
-          type: 'reasoning',
-          content: delta,
-          status: 'running',
-          startedAt: now,
-          updatedAt: now,
-          sequence: timeline.length
-        }
-
+      if (last?.type === 'reasoning') {
         return {
           ...m,
-          executionTimeline: [...timeline, nextItem]
+          executionTimeline: timeline.map((item) => {
+            if (item.id !== last.id || item.type !== 'reasoning') return item
+            return { ...item, content: item.content + delta, status: 'running', updatedAt: now }
+          })
         }
-      })
+      }
+
+      const nextItem: ReasoningTimelineItem = {
+        id: genId(),
+        type: 'reasoning',
+        content: delta,
+        status: 'running',
+        startedAt: now,
+        updatedAt: now,
+        sequence: timeline.length
+      }
+
+      return {
+        ...m,
+        executionTimeline: [...timeline, nextItem]
+      }
     }))
   },
 
   completeReasoningTimeline: (msgId: string) => {
-    set((s) => ({
-      messages: s.messages.map((m) => {
-        if (m.id !== msgId || !m.executionTimeline) return m
+    set((s) => updateMessageInState(s, msgId, (m) => {
+      if (!m.executionTimeline) return m
 
-        const now = Date.now()
-        return {
-          ...m,
-          executionTimeline: m.executionTimeline.map((item) =>
-            item.type === 'reasoning' && item.status === 'running'
-              ? { ...item, status: 'success', updatedAt: now, completedAt: now }
-              : item
-          )
-        }
-      })
+      const now = Date.now()
+      return {
+        ...m,
+        executionTimeline: m.executionTimeline.map((item) =>
+          item.type === 'reasoning' && item.status === 'running'
+            ? { ...item, status: 'success', updatedAt: now, completedAt: now }
+            : item
+        )
+      }
     }))
   },
 
   startToolCall: (msgId: string, toolCall: Omit<ToolCallState, 'status' | 'startedAt' | 'sequence'>) => {
-    set((s) => ({
-      messages: s.messages.map((m) => {
-        if (m.id !== msgId) return m
+    set((s) => updateMessageInState(s, msgId, (m) => {
+      const existing = m.toolCalls || []
+      const timeline = m.executionTimeline || []
+      const now = Date.now()
 
-        const existing = m.toolCalls || []
-        const timeline = m.executionTimeline || []
-        const now = Date.now()
-
-        const alreadyExists = existing.some((item) => item.id === toolCall.id)
-        if (alreadyExists) {
-          return {
-            ...m,
-            toolCalls: existing.map((item) =>
-              item.id === toolCall.id
-                ? {
-                    ...item,
-                    name: toolCall.name,
-                    args: toolCall.args,
-                    thoughtSignature: toolCall.thoughtSignature || item.thoughtSignature
-                  }
-                : item
-            ),
-            executionTimeline: timeline.map((item) =>
-              item.id === 'tool_' + toolCall.id && item.type === 'tool'
-                ? {
-                    ...item,
-                    toolCall: { ...item.toolCall, name: toolCall.name, args: toolCall.args },
-                    updatedAt: now
-                  }
-                : item
-            )
-          }
-        }
-
-        const nextToolCall: ToolCallState = {
-          ...toolCall,
-          status: 'running',
-          startedAt: now,
-          sequence: existing.length
-        }
-        const nextTimelineItem: ToolTimelineItem = {
-          id: 'tool_' + toolCall.id,
-          type: 'tool',
-          toolCall: nextToolCall,
-          startedAt: now,
-          updatedAt: now,
-          sequence: timeline.length
-        }
-
+      const alreadyExists = existing.some((item) => item.id === toolCall.id)
+      if (alreadyExists) {
         return {
           ...m,
-          toolCalls: [...existing, nextToolCall].sort((a, b) => a.sequence - b.sequence),
-          executionTimeline: [...timeline, nextTimelineItem].sort((a, b) => a.sequence - b.sequence)
+          toolCalls: existing.map((item) =>
+            item.id === toolCall.id
+              ? {
+                  ...item,
+                  name: toolCall.name,
+                  args: toolCall.args,
+                  thoughtSignature: toolCall.thoughtSignature || item.thoughtSignature
+                }
+              : item
+          ),
+          executionTimeline: timeline.map((item) =>
+            item.id === 'tool_' + toolCall.id && item.type === 'tool'
+              ? {
+                  ...item,
+                  toolCall: { ...item.toolCall, name: toolCall.name, args: toolCall.args },
+                  updatedAt: now
+                }
+              : item
+          )
         }
-      })
+      }
+
+      const nextToolCall: ToolCallState = {
+        ...toolCall,
+        status: 'running',
+        startedAt: now,
+        sequence: existing.length
+      }
+      const nextTimelineItem: ToolTimelineItem = {
+        id: 'tool_' + toolCall.id,
+        type: 'tool',
+        toolCall: nextToolCall,
+        startedAt: now,
+        updatedAt: now,
+        sequence: timeline.length
+      }
+
+      return {
+        ...m,
+        toolCalls: [...existing, nextToolCall].sort((a, b) => a.sequence - b.sequence),
+        executionTimeline: [...timeline, nextTimelineItem].sort((a, b) => a.sequence - b.sequence)
+      }
     }))
   },
 
   finishToolCall: (msgId: string, toolCallId: string, result: string) => {
-    set((s) => ({
-      messages: s.messages.map((m) => {
-        if (m.id !== msgId || !m.toolCalls) return m
+    set((s) => updateMessageInState(s, msgId, (m) => {
+      if (!m.toolCalls) return m
 
-        const now = Date.now()
-        const updateToolCall = (toolCall: ToolCallState): ToolCallState => {
-          if (toolCall.id !== toolCallId) return toolCall
+      const now = Date.now()
+      const updateToolCall = (toolCall: ToolCallState): ToolCallState => {
+        if (toolCall.id !== toolCallId) return toolCall
 
-          let hasStructuredError = false
-          try {
-            const parsed = JSON.parse(result)
-            hasStructuredError = parsed?.ok === false || Boolean(parsed?.error && !parsed?.data)
-          } catch {
-            hasStructuredError = false
-          }
-
-          return {
-            ...toolCall,
-            result,
-            status: result.startsWith('Error:') || hasStructuredError ? 'error' : 'success',
-            completedAt: now
-          }
+        let hasStructuredError = false
+        try {
+          const parsed = JSON.parse(result)
+          hasStructuredError = parsed?.ok === false || Boolean(parsed?.error && !parsed?.data)
+        } catch {
+          hasStructuredError = false
         }
-
-        const nextToolCalls = m.toolCalls.map(updateToolCall)
 
         return {
-          ...m,
-          toolCalls: nextToolCalls,
-          executionTimeline: (m.executionTimeline || []).map((item) =>
-            item.type === 'tool' && item.toolCall.id === toolCallId
-              ? { ...item, toolCall: updateToolCall(item.toolCall), updatedAt: now }
-              : item
-          )
+          ...toolCall,
+          result,
+          status: result.startsWith('Error:') || hasStructuredError ? 'error' : 'success',
+          completedAt: now
         }
-      })
+      }
+
+      const nextToolCalls = m.toolCalls.map(updateToolCall)
+
+      return {
+        ...m,
+        toolCalls: nextToolCalls,
+        executionTimeline: (m.executionTimeline || []).map((item) =>
+          item.type === 'tool' && item.toolCall.id === toolCallId
+            ? { ...item, toolCall: updateToolCall(item.toolCall), updatedAt: now }
+            : item
+        )
+      }
     }))
   },
 

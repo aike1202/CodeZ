@@ -4,6 +4,7 @@ export interface SidebarSession {
   relativeTime: string
   isArchived?: boolean
   isDeleted?: boolean
+  isStreaming?: boolean
 }
 
 export interface SidebarProject {

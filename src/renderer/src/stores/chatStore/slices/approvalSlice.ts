@@ -1,5 +1,6 @@
 import type { StateCreator } from 'zustand'
 import type { ChatState, PermissionRequestState, AskUserRequestState } from '../types'
+import { updateMessageInState } from './messageSlice'
 
 export interface ApprovalSlice {
   addPermissionRequest: (
@@ -20,91 +21,61 @@ export interface ApprovalSlice {
 
 export const createApprovalSlice: StateCreator<ChatState, [], [], ApprovalSlice> = (set, get) => ({
   addPermissionRequest: (msgId: string, request: Omit<PermissionRequestState, 'status' | 'createdAt'>) => {
-    set((s) => {
-      const msgs = s.messages.map((m) => {
-        if (m.id !== msgId) return m
-        const existing = m.permissionRequests || []
-        if (existing.some((item) => item.id === request.id)) return m
-        return {
-          ...m,
-          permissionRequests: [
-            ...existing,
-            {
-              ...request,
-              status: 'pending' as const,
-              createdAt: Date.now()
-            }
-          ]
-        }
-      })
-      const activeId = s.activeSessionId
-      const sessions = s.sessions.map((session) =>
-        session.id === activeId ? { ...session, messages: msgs } : session
-      )
-      return { messages: msgs, sessions }
-    })
+    set((s) => updateMessageInState(s, msgId, (m) => {
+      const existing = m.permissionRequests || []
+      if (existing.some((item) => item.id === request.id)) return m
+      return {
+        ...m,
+        permissionRequests: [
+          ...existing,
+          {
+            ...request,
+            status: 'pending' as const,
+            createdAt: Date.now()
+          }
+        ]
+      }
+    }))
     get().persistCurrentSession()
   },
 
   resolvePermissionRequest: (msgId: string, requestId: string, approved: boolean) => {
-    set((s) => {
-      const msgs = s.messages.map((m) => {
-        if (m.id !== msgId || !m.permissionRequests) return m
-        return {
-          ...m,
-          permissionRequests: m.permissionRequests.map((request) =>
-            request.id === requestId
-              ? { ...request, status: approved ? ('approved' as const) : ('denied' as const) }
-              : request
-          )
-        }
-      })
-      const activeId = s.activeSessionId
-      const sessions = s.sessions.map((session) =>
-        session.id === activeId ? { ...session, messages: msgs } : session
-      )
-      return { messages: msgs, sessions }
-    })
+    set((s) => updateMessageInState(s, msgId, (m) => {
+      if (!m.permissionRequests) return m
+      return {
+        ...m,
+        permissionRequests: m.permissionRequests.map((req) =>
+          req.id === requestId
+            ? { ...req, status: approved ? ('approved' as const) : ('denied' as const) }
+            : req
+        )
+      }
+    }))
     get().persistCurrentSession()
   },
 
   addAskUserRequest: (msgId, request) => {
-    set((s) => {
-      const msgs = s.messages.map((m) => {
-        if (m.id !== msgId) return m
-        const existing = m.askUserRequests || []
-        if (existing.some((item) => item.id === request.id)) return m
-        return {
-          ...m,
-          askUserRequests: [...existing, { ...request, status: 'pending' as const, createdAt: Date.now() }]
-        }
-      })
-      const activeId = s.activeSessionId
-      const sessions = s.sessions.map((session) =>
-        session.id === activeId ? { ...session, messages: msgs } : session
-      )
-      return { messages: msgs, sessions }
-    })
+    set((s) => updateMessageInState(s, msgId, (m) => {
+      const existing = m.askUserRequests || []
+      if (existing.some((item) => item.id === request.id)) return m
+      return {
+        ...m,
+        askUserRequests: [...existing, { ...request, status: 'pending' as const, createdAt: Date.now() }]
+      }
+    }))
     get().persistCurrentSession()
   },
 
   resolveAskUserRequest: (msgId, requestId, answers) => {
-    set((s) => {
-      const msgs = s.messages.map((m) => {
-        if (m.id !== msgId || !m.askUserRequests) return m
-        return {
-          ...m,
-          askUserRequests: m.askUserRequests.map((r) =>
-            r.id === requestId ? { ...r, status: 'answered' as const, answers } : r
-          )
-        }
-      })
-      const activeId = s.activeSessionId
-      const sessions = s.sessions.map((session) =>
-        session.id === activeId ? { ...session, messages: msgs } : session
-      )
-      return { messages: msgs, sessions }
-    })
+    set((s) => updateMessageInState(s, msgId, (m) => {
+      if (!m.askUserRequests) return m
+      return {
+        ...m,
+        askUserRequests: m.askUserRequests.map((r) =>
+          r.id === requestId ? { ...r, status: 'answered' as const, answers } : r
+        )
+      }
+    }))
     get().persistCurrentSession()
   }
 })
