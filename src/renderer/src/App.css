@@ -41,6 +41,40 @@
   border-right: 1px solid var(--border-color);
 }
 
+.scroll-to-bottom-btn {
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 9999px;
+  background-color: var(--bg-panel);
+  color: var(--text-main);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+}
+
+.scroll-to-bottom-btn:hover {
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.scroll-to-bottom-btn:active {
+  transform: translateY(1px);
+}
+
 .app-chat-scroll-area {
   flex: 1;
   overflow-y: auto;

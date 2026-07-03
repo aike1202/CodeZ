@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useMemo, useCallback, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { WorkspaceInfo } from '@shared/types/workspace'
 import HomePage from '../../../pages/HomePage'
 import PromptArea from '../../PromptArea'
@@ -248,9 +249,29 @@ export default function ChatArea({
     })
   }, [messages])
 
+  const scrollToBottomButton =
+    containerMounted && containerRef.current && !isFollowing
+      ? createPortal(
+          <button
+            type="button"
+            className="scroll-to-bottom-btn"
+            onClick={() => {
+              setIsFollowing(true)
+              scrollToBottom()
+            }}
+            aria-label="回到最新"
+          >
+            ↓ 回到最新
+          </button>,
+          containerRef.current
+        )
+      : null
+
   return (
-    <ChatAreaLayout
-      containerRef={containerRef}
+    <>
+      {scrollToBottomButton}
+      <ChatAreaLayout
+        containerRef={containerRef}
       panelOpen={panelOpen}
       onScroll={handleScroll}
       messageArea={
@@ -356,6 +377,7 @@ export default function ChatArea({
           />
         ) : undefined
       }
-    />
+      />
+    </>
   )
 }
