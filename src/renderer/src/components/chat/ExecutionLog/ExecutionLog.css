@@ -34,13 +34,26 @@
   color: var(--text-light);
 }
 
+.timeline-list-wrapper {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.25s ease;
+}
+
+.timeline-list-wrapper--expanded {
+  grid-template-rows: 1fr;
+}
+
+.timeline-list-wrapper > .timeline-list {
+  overflow: hidden;
+  min-height: 0;
+}
+
 .timeline-list {
   margin-top: 10px;
   margin-left: 10px;
   position: relative;
   text-align: left;
-  max-height: 300px;
-  overflow-y: auto;
   padding-right: 6px;
 }
 

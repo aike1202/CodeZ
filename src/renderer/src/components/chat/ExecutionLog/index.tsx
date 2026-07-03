@@ -133,7 +133,7 @@ export default function ExecutionLog({
         <span className="timeline-header-arrow-text">{expanded ? '收起' : '展开'}</span>
       </button>
 
-      {expanded && (
+      <div className={`timeline-list-wrapper ${expanded ? 'timeline-list-wrapper--expanded' : ''}`}>
         <Stack className="timeline-list">
           {unifiedItems.map((item, idx) => (
             <LogItemRow
@@ -148,7 +148,7 @@ export default function ExecutionLog({
             />
           ))}
         </Stack>
-      )}
+      </div>
     </div>
   )
 }
