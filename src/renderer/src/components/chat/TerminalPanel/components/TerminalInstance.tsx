@@ -87,7 +87,7 @@ export function TerminalInstance({
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 13,
-      fontFamily: 'Cascadia Code, Fira Code, Consolas, monospace',
+      fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--font-mono') || 'Cascadia Code, Consolas, monospace',
       theme: {
         background: '#f8f9fa',
         foreground: '#24292f',

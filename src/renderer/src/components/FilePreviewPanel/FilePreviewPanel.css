@@ -274,3 +274,10 @@
     color: #52525b; /* dark:text-zinc-600 */
   }
 }
+
+/* 覆盖 @uiw/react-codemirror 内联硬编码的 fontFamily: "monospace",
+   避免文件预览代码区退回 Courier New 产生锯齿 */
+.preview-pre-wrapper .cm-editor .cm-content,
+.preview-pre-wrapper .cm-editor .cm-scroller {
+  font-family: var(--font-mono) !important;
+}

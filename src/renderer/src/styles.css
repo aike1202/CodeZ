@@ -396,7 +396,7 @@ textarea::placeholder {
   margin: 0;
   padding: 12px;
   overflow-x: auto;
-  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.5;
   color: #27272a;
@@ -409,7 +409,7 @@ textarea::placeholder {
    Codex 时间线（Timeline）样式
    ============================================ */
 .timeline-container {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--font-sans);
 }
 
 /* 动词配色 */
