@@ -11,6 +11,7 @@ export interface ChatAreaLayoutProps {
   terminalPanel?: ReactNode;
   panelOpen?: boolean;
   containerRef?: React.RefObject<HTMLDivElement>;
+  onScroll?: (e: React.UIEvent<HTMLDivElement>) => void;
 }
 
 export const ChatAreaLayout: React.FC<ChatAreaLayoutProps> = ({
@@ -19,11 +20,16 @@ export const ChatAreaLayout: React.FC<ChatAreaLayoutProps> = ({
   promptArea,
   terminalPanel,
   panelOpen,
-  containerRef
+  containerRef,
+  onScroll
 }) => {
   return (
     <>
-      <Stack className={`app-chat-column ${panelOpen ? 'app-chat-column--border' : ''}`} ref={containerRef}>
+      <Stack
+        className={`app-chat-column ${panelOpen ? 'app-chat-column--border' : ''}`}
+        ref={containerRef}
+        onScroll={onScroll}
+      >
         <PlanCapsule />
         <PlanApprovalCard />
         {messageArea}
