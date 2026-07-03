@@ -140,36 +140,48 @@ export default function ChatArea({
 }: ChatAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const prevSessionIdRef = useRef<string | null>(null)
-  const isProgrammaticScroll = useRef(false)
+  // 程序自动滚动期间为 true,用于在 onScroll 中区分程序滚动与用户滚动。
+  // 用 ref + 时间戳:置 true 时记录时刻,onScroll 判断"距上次程序滚动是否在短窗口内"。
+  const programmaticScrollUntil = useRef(0)
+  // 上一次 onScroll 记录的 scrollTop,用于判断用户滚动方向。
+  const lastScrollTop = useRef<number | null>(null)
   const [isFollowing, setIsFollowing] = useState(true)
   const [containerMounted, setContainerMounted] = useState(false)
 
   // containerRef.current 存在后才渲染 portal 按钮
   useEffect(() => {
-    if (containerRef.current) setContainerMounted(true)
+    if (containerRef.current) {
+      setContainerMounted(true)
+      lastScrollTop.current = containerRef.current.scrollTop
+    }
   }, [])
 
   const scrollToBottom = useCallback(() => {
     const container = containerRef.current
     if (!container) return
-    isProgrammaticScroll.current = true
+    // 标记"现在起到未来一小段时间内,滚动事件视为程序触发"。
+    // 用 80ms 窗口覆盖 rAF 执行 + 浏览器派发 scroll 事件的一两帧。
+    programmaticScrollUntil.current = performance.now() + 80
     requestAnimationFrame(() => {
       container.scrollTop = container.scrollHeight
-      // 下一帧再置回 false,确保本帧触发的 scroll 事件被忽略
-      requestAnimationFrame(() => {
-        isProgrammaticScroll.current = false
-      })
     })
   }, [])
 
   const handleScroll = useCallback(() => {
-    // 程序自动滚产生的事件:忽略,不改变跟随态
-    if (isProgrammaticScroll.current) return
     const container = containerRef.current
     if (!container) return
+    const now = performance.now()
+    const isProgrammatic = now < programmaticScrollUntil.current
+    const prevTop = lastScrollTop.current
+    lastScrollTop.current = container.scrollTop
+    // 程序滚动产生的事件:不改变跟随态,但仍刷新基线。
+    if (isProgrammatic) return
+    // 用户主动滚动:向上滚(离开底部)即暂停跟随。
+    // 向下滚到接近底部则恢复跟随。
     if (isNearBottom(container)) {
       setIsFollowing(true)
-    } else {
+    } else if (prevTop !== null && container.scrollTop < prevTop) {
+      // 用户向上滚 → 立即暂停
       setIsFollowing(false)
     }
   }, [])
