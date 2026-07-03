@@ -3,7 +3,7 @@ import { ContextManager, ResumeState } from '../../agent/ContextManager'
 
 export class UpdateResumeStateTool extends Tool {
   get name() { return 'update_resume_state' }
-  get description() { return '更新任务的核心上下文状态，包括当前目标、阶段、步骤、下一步、触碰文件与待验证项。长期任务推进或关键节点完成时应调用，防止对话历史被裁剪后丢失方向。' }
+  get description() { return 'Update the core context state of the task: current goal, phase, step, next action, files touched, and items pending verification. Call this when advancing a long-running task or completing a key milestone, so direction is not lost when conversation history is trimmed.' }
   
   get parameters_schema() {
     return {

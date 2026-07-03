@@ -53,7 +53,7 @@ export class BashTool extends Tool {
   }
 
   get description() {
-    return 'Executes a bash command and returns its output. Runs Git Bash (POSIX sh), not cmd.exe or PowerShell — use Unix shell syntax (/dev/null not NUL, forward slashes, $VAR not %VAR%); for multi-line strings use a heredoc. Working directory persists between calls. Avoid using this for find/grep/cat/head/tail/sed/awk/echo — use dedicated tools (Glob/Grep/Read). timeout in ms (default 120000, max 600000). run_in_background runs detached and keeps running across turns. Interactive flags (e.g. git rebase -i) are not supported; commit/push only when asked. To stop a background process, run `kill <pid>` in a later Bash call.'
+    return 'Executes a bash command and returns its output. Runs Git Bash (POSIX sh), not cmd.exe or PowerShell — use Unix shell syntax (/dev/null not NUL, forward slashes, $VAR not %VAR%); for multi-line strings use a heredoc. Working directory persists between calls, but prefer absolute paths — `cd` in a compound command can trigger a permission prompt. Shell state (env vars, functions) does not persist; the shell is initialized from the user\'s profile. Avoid using this for find/grep/cat/head/tail/sed/awk/echo — use dedicated tools (Glob/Grep/Read). timeout in ms (default 120000, max 600000). run_in_background runs detached and keeps running across turns. Interactive flags (e.g. git rebase -i) are not supported; commit/push only when asked. To stop a background process, run `kill <pid>` in a later Bash call.'
   }
 
   get parameters_schema() {

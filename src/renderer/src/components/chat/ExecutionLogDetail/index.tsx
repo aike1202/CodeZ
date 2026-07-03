@@ -89,48 +89,6 @@ export default function ExecutionLogDetail({
       }
     }
 
-    if (item.toolName === 'get_project_snapshot') {
-      try {
-        const parsed = item.detail ? JSON.parse(item.detail) : null
-        if (parsed && typeof parsed === 'object') {
-          return (
-            <div className="exe-log-snapshot-box">
-              <div className="exe-log-snapshot-grid">
-                <span className="exe-log-snapshot-label">项目名称</span>
-                <span className="exe-log-snapshot-val">{parsed.rootName || '-'}</span>
-
-                <span className="exe-log-snapshot-label">项目类型</span>
-                <span className="exe-log-snapshot-val">{parsed.projectType || '-'}</span>
-
-                <span className="exe-log-snapshot-label">包管理器</span>
-                <span className="exe-log-snapshot-val">{parsed.packageManager || '-'}</span>
-
-                {parsed.rootPath && (
-                  <>
-                    <span className="exe-log-snapshot-label">根目录</span>
-                    <span className="exe-log-snapshot-val">{parsed.rootPath}</span>
-                  </>
-                )}
-              </div>
-              {parsed.scripts && typeof parsed.scripts === 'object' && Object.keys(parsed.scripts).length > 0 && (
-                <div className="exe-log-divider">
-                  <div className="exe-log-snapshot-sub-title">项目内置脚本</div>
-                  <div className="exe-log-snapshot-scripts">
-                    {Object.entries(parsed.scripts).map(([key, cmd]) => (
-                      <div key={key} className="exe-log-script-item" title={String(cmd)}>
-                        <span className="exe-log-script-key">{key}:</span>
-                        <span className="exe-log-script-val">{String(cmd)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )
-        }
-      } catch {}
-    }
-
     if (item.toolName === 'search' || item.toolName === 'Grep' || item.verb === 'Searched') {
       let parsedSearch: any = null
       try {

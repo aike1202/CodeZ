@@ -185,7 +185,6 @@ export function buildUnifiedTimeline(
         } else if (
           tc.name === 'Read' ||
           tc.name === 'read_files' ||
-          tc.name === 'get_project_snapshot' ||
           tc.name === 'fast_context'
         ) {
           verbDisplay = tc.status === 'running' ? 'Analyzing' : 'Analyzed'

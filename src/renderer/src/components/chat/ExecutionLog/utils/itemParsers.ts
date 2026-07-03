@@ -58,8 +58,6 @@ export function getToolNoun(toolName: string): string {
       return '目录'
     case 'search_text':
       return '文本搜索'
-    case 'get_project_snapshot':
-      return '项目快照'
     case 'read_files':
       return '文件'
     case 'search_code':

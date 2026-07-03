@@ -24,7 +24,7 @@ export class ReadTool extends Tool {
   }
 
   get description() {
-    return 'Reads a file from the local filesystem. file_path is absolute (or relative to workspace). Returns content in cat -n format (line numbers starting at 1). When you already know which part you need, use offset/limit to read only that part. Do NOT re-read a file you just edited or one whose content has not changed — a repeated Read of an unchanged file returns "Wasted call" and no content. Binary files return "Cannot read binary file."; images/PDFs are not supported this period. Reading a directory, missing file, or empty file returns an error.'
+    return 'Reads a file from the local filesystem. file_path is absolute (or relative to workspace). Returns content in cat -n format (line numbers starting at 1). When you already know which part you need, use offset/limit to read only that part — range reads also bypass the unchanged-file dedup, so they are the way to re-fetch content after context trimming. Do NOT re-read a file you just edited or one whose content has not changed — a default full-file Read of an unchanged file returns "Wasted call" and no content. Binary files return "Cannot read binary file." Images and PDFs are not supported (the pages parameter is reserved and ignored). Jupyter notebooks (.ipynb) are supported and rendered as <cell id="..."> blocks with outputs. Reading a directory, a missing file, or an empty file returns an error.'
   }
 
   get parameters_schema() {

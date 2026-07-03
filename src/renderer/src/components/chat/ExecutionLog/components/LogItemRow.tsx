@@ -66,10 +66,8 @@ export function LogItemRow({
     return <FileIcon fileName="" />
   }
 
-  const isSnapshotItem =
-    item.type === 'tool' && (item.toolName === 'get_project_snapshot' || item.target === '项目快照')
   const isFileItem =
-    item.type === 'edit' || (item.type === 'tool' && item.verb === 'Analyzed' && (item.fileName || isSnapshotItem))
+    item.type === 'edit' || (item.type === 'tool' && item.verb === 'Analyzed' && item.fileName)
 
   return (
     <div className="timeline-item-wrapper" style={{ display: 'flex', flexDirection: 'column' }}>
@@ -111,30 +109,6 @@ export function LogItemRow({
                         if (diffInfo) {
                           onDiffClick?.(item.target, diffInfo)
                         }
-                      } else if (isSnapshotItem) {
-                        let markdownContent = ''
-                        try {
-                          const parsed = item.detail ? JSON.parse(item.detail) : null
-                          if (parsed && typeof parsed === 'object') {
-                            const parts: string[] = []
-                            parts.push(`# 项目快照\n`)
-                            parts.push(`- **根目录**: \`${parsed.rootPath || '-'}\``)
-                            parts.push(`- **项目类型**: \`${parsed.projectType || '-'}\``)
-                            parts.push(`- **包管理器**: \`${parsed.packageManager || '-'}\``)
-                            parts.push(`- **生成时间**: \`${parsed.updatedAt || '-'}\` ${parsed.fromCache ? '(缓存命中)' : ''}\n`)
-                            if (parsed.scripts && Object.keys(parsed.scripts).length > 0) {
-                              parts.push(`### 项目内置脚本`)
-                              for (const [name, cmd] of Object.entries(parsed.scripts)) {
-                                parts.push(`- \`${name}\`: \`${cmd}\``)
-                              }
-                              parts.push('')
-                            }
-                            markdownContent = parts.join('\n')
-                          }
-                        } catch {
-                          markdownContent = item.detail || ''
-                        }
-                        onFileClick?.('project_snapshot.md', markdownContent)
                       } else {
                         onFileClick?.(item.target)
                       }

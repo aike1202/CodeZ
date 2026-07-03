@@ -11,7 +11,6 @@ import { PowerShellTool } from './builtin/PowerShellTool'
 import { AskUserQuestionTool } from './builtin/AskUserQuestionTool'
 import { PushNotificationTool } from './builtin/PushNotificationTool'
 import { SkillTool } from './builtin/SkillTool'
-import { GetProjectSnapshotTool } from './builtin/GetProjectSnapshotTool'
 import { RollbackLastEditTool } from './builtin/RollbackLastEditTool'
 import { UpdateResumeStateTool } from './builtin/UpdateResumeStateTool'
 import { FastContextTool } from './builtin/FastContextTool'
@@ -28,7 +27,6 @@ export class ToolManager {
     'list_files',
     'Glob',
     'Grep',
-    'get_project_snapshot',
     'fast_context'
   ])
 
@@ -50,7 +48,6 @@ export class ToolManager {
       new AskUserQuestionTool(),
       new PushNotificationTool(),
       new SkillTool(),
-      new GetProjectSnapshotTool(),
       new RollbackLastEditTool(),
       new UpdateResumeStateTool(),
       new FastContextTool(),
