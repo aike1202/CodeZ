@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useMemo, useCallback } from 'react'
+import React, { useEffect, useRef, useMemo, useCallback, useState } from 'react'
 import type { WorkspaceInfo } from '@shared/types/workspace'
 import HomePage from '../../../pages/HomePage'
 import PromptArea from '../../PromptArea'
@@ -12,6 +12,16 @@ import { computeEditStats, handleDiffClickForFile } from '../../../utils/editDif
 import { useChatStore, type ChatMessage } from '../../../stores/chatStore'
 import { useSendMessage } from '../hooks/useSendMessage'
 import { ChatMessageList } from './components/ChatMessageList'
+
+/** 距底部小于视口高度的此比例算"在底部" */
+const SCROLL_BOTTOM_RATIO = 0.15
+/** "在底部"阈值的最小像素值(小视口保护) */
+const SCROLL_BOTTOM_MIN_PX = 100
+
+function isNearBottom(container: HTMLElement): boolean {
+  const distance = container.scrollHeight - container.scrollTop - container.clientHeight
+  return distance < Math.max(container.clientHeight * SCROLL_BOTTOM_RATIO, SCROLL_BOTTOM_MIN_PX)
+}
 
 export function extractMessageEdits(msg: ChatMessage) {
   if (!msg.txId) return { edits: [], tools: [] }
@@ -129,6 +139,39 @@ export default function ChatArea({
 }: ChatAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const prevSessionIdRef = useRef<string | null>(null)
+  const isProgrammaticScroll = useRef(false)
+  const [isFollowing, setIsFollowing] = useState(true)
+  const [containerMounted, setContainerMounted] = useState(false)
+
+  // containerRef.current 存在后才渲染 portal 按钮
+  useEffect(() => {
+    if (containerRef.current) setContainerMounted(true)
+  }, [])
+
+  const scrollToBottom = useCallback(() => {
+    const container = containerRef.current
+    if (!container) return
+    isProgrammaticScroll.current = true
+    requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight
+      // 下一帧再置回 false,确保本帧触发的 scroll 事件被忽略
+      requestAnimationFrame(() => {
+        isProgrammaticScroll.current = false
+      })
+    })
+  }, [])
+
+  const handleScroll = useCallback(() => {
+    // 程序自动滚产生的事件:忽略,不改变跟随态
+    if (isProgrammaticScroll.current) return
+    const container = containerRef.current
+    if (!container) return
+    if (isNearBottom(container)) {
+      setIsFollowing(true)
+    } else {
+      setIsFollowing(false)
+    }
+  }, [])
 
   const resolvePermissionRequest = useChatStore((s) => s.resolvePermissionRequest)
   const resolveAskUserRequest = useChatStore((s) => s.resolveAskUserRequest)
@@ -167,20 +210,22 @@ export default function ChatArea({
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
+    if (messages.length === 0) return
 
     const lastMsg = messages[messages.length - 1]
     const isUserLast = lastMsg?.role === 'user'
     const isSessionChanged = prevSessionIdRef.current !== activeSessionId
     prevSessionIdRef.current = activeSessionId
 
-    const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150
-
-    if (isUserLast || isSessionChanged || isAtBottom) {
-      requestAnimationFrame(() => {
-        container.scrollTop = container.scrollHeight
-      })
+    const forceFollow = isUserLast || isSessionChanged
+    if (forceFollow) {
+      setIsFollowing(true)
     }
-  }, [messages, activeSessionId])
+
+    if (forceFollow || isFollowing) {
+      scrollToBottom()
+    }
+  }, [messages, activeSessionId, isFollowing, scrollToBottom])
 
   const hasMessages = messages.length > 0
 
@@ -207,6 +252,7 @@ export default function ChatArea({
     <ChatAreaLayout
       containerRef={containerRef}
       panelOpen={panelOpen}
+      onScroll={handleScroll}
       messageArea={
         hasMessages ? (
           <ChatMessageList
