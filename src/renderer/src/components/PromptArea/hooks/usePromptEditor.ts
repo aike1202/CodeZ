@@ -10,7 +10,18 @@ export function usePromptEditor(
   workspace?: WorkspaceInfo | null
 ) {
   const [text, setText] = useState('')
-  const [selectedModelName, setSelectedModelName] = useState<string>('')
+  const [selectedModelName, setSelectedModelNameState] = useState<string>('')
+  const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const setSelectedModelName = (name: string) => {
+    setSelectedModelNameState(name)
+    const activeId = useProviderStore.getState().activeProviderId
+    if (activeId) {
+      localStorage.setItem(`codez:activeModelName:${activeId}`, name)
+      if (activeSessionId) {
+        localStorage.setItem(`codez:session:${activeSessionId}:activeModelName`, name)
+      }
+    }
+  }
   const [dynamicSkills, setDynamicSkills] = useState<any[]>([])
   const [flattenedFiles, setFlattenedFiles] = useState<{ name: string; path: string; isDir: boolean }[]>([])
   const [activeToken, setActiveToken] = useState<{ type: 'slash' | 'mention'; text: string; startIndex: number } | null>(null)
@@ -42,10 +53,51 @@ export function usePromptEditor(
   }, [pendingPrompt, setPendingPrompt])
 
   useEffect(() => {
-    if (models.length > 0 && !models.find((m) => m.name === selectedModelName)) {
-      setSelectedModelName(models[0].name)
+    if (!activeSessionId) return
+    const sessionProviderId = localStorage.getItem(`codez:session:${activeSessionId}:activeProviderId`)
+    const sessionModelName = localStorage.getItem(`codez:session:${activeSessionId}:activeModelName`)
+    
+    if (sessionProviderId && providers.some((p) => p.id === sessionProviderId)) {
+      if (activeProviderId !== sessionProviderId) {
+        useProviderStore.getState().setActiveProvider(sessionProviderId)
+      }
     }
-  }, [activeProviderId, models, selectedModelName])
+    
+    if (sessionModelName) {
+      setSelectedModelNameState(sessionModelName)
+    }
+  }, [activeSessionId, providers])
+
+  useEffect(() => {
+    if (activeSessionId && activeProviderId) {
+      localStorage.setItem(`codez:session:${activeSessionId}:activeProviderId`, activeProviderId)
+    }
+  }, [activeSessionId, activeProviderId])
+
+  useEffect(() => {
+    if (!activeProviderId || models.length === 0) return
+    
+    if (!selectedModelName || !models.some((m) => m.name === selectedModelName)) {
+      const sessionStored = activeSessionId ? localStorage.getItem(`codez:session:${activeSessionId}:activeModelName`) : null
+      if (sessionStored && models.some((m) => m.name === sessionStored)) {
+        setSelectedModelNameState(sessionStored)
+      } else {
+        const providerStored = localStorage.getItem(`codez:activeModelName:${activeProviderId}`)
+        if (providerStored && models.some((m) => m.name === providerStored)) {
+          setSelectedModelNameState(providerStored)
+          if (activeSessionId) {
+            localStorage.setItem(`codez:session:${activeSessionId}:activeModelName`, providerStored)
+          }
+        } else {
+          setSelectedModelNameState(models[0].name)
+          localStorage.setItem(`codez:activeModelName:${activeProviderId}`, models[0].name)
+          if (activeSessionId) {
+            localStorage.setItem(`codez:session:${activeSessionId}:activeModelName`, models[0].name)
+          }
+        }
+      }
+    }
+  }, [activeProviderId, models, selectedModelName, activeSessionId])
 
   useEffect(() => {
     if (workspace) {
