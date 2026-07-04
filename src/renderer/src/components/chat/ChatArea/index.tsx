@@ -139,12 +139,8 @@ export default function ChatArea({
   onOpenSettings
 }: ChatAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
   const prevSessionIdRef = useRef<string | null>(null)
-  // 程序自动滚动期间为 true,用于在 onScroll 中区分程序滚动与用户滚动。
-  // 用 ref + 时间戳:置 true 时记录时刻,onScroll 判断"距上次程序滚动是否在短窗口内"。
-  const programmaticScrollUntil = useRef(0)
-  // 上一次 onScroll 记录的 scrollTop,用于判断用户滚动方向。
-  const lastScrollTop = useRef<number | null>(null)
   const [isFollowing, setIsFollowing] = useState(true)
   const [containerMounted, setContainerMounted] = useState(false)
 
@@ -152,16 +148,12 @@ export default function ChatArea({
   useEffect(() => {
     if (containerRef.current) {
       setContainerMounted(true)
-      lastScrollTop.current = containerRef.current.scrollTop
     }
   }, [])
 
   const scrollToBottom = useCallback(() => {
     const container = containerRef.current
     if (!container) return
-    // 标记"现在起到未来一小段时间内,滚动事件视为程序触发"。
-    // 用 80ms 窗口覆盖 rAF 执行 + 浏览器派发 scroll 事件的一两帧。
-    programmaticScrollUntil.current = performance.now() + 80
     requestAnimationFrame(() => {
       container.scrollTop = container.scrollHeight
     })
@@ -170,20 +162,17 @@ export default function ChatArea({
   const handleScroll = useCallback(() => {
     const container = containerRef.current
     if (!container) return
-    const now = performance.now()
-    const isProgrammatic = now < programmaticScrollUntil.current
-    const prevTop = lastScrollTop.current
-    lastScrollTop.current = container.scrollTop
-    // 程序滚动产生的事件:不改变跟随态,但仍刷新基线。
-    if (isProgrammatic) return
-    // 用户主动滚动:向上滚(离开底部)即暂停跟随。
-    // 向下滚到接近底部则恢复跟随。
     if (isNearBottom(container)) {
       setIsFollowing(true)
-    } else if (prevTop !== null && container.scrollTop < prevTop) {
-      // 用户向上滚 → 立即暂停
-      setIsFollowing(false)
     }
+  }, [])
+
+  const handleWheel = useCallback(() => {
+    setIsFollowing(false)
+  }, [])
+
+  const handleTouchStart = useCallback(() => {
+    setIsFollowing(false)
   }, [])
 
   const resolvePermissionRequest = useChatStore((s) => s.resolvePermissionRequest)
@@ -220,9 +209,8 @@ export default function ChatArea({
     [resolveAskUserRequest]
   )
 
+  // Listen for activeSessionId change to force scroll
   useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
     if (messages.length === 0) return
 
     const lastMsg = messages[messages.length - 1]
@@ -230,15 +218,26 @@ export default function ChatArea({
     const isSessionChanged = prevSessionIdRef.current !== activeSessionId
     prevSessionIdRef.current = activeSessionId
 
-    const forceFollow = isUserLast || isSessionChanged
-    if (forceFollow) {
+    if (isUserLast || isSessionChanged) {
       setIsFollowing(true)
-    }
-
-    if (forceFollow || isFollowing) {
       scrollToBottom()
     }
-  }, [messages, activeSessionId, isFollowing, scrollToBottom])
+  }, [messages, activeSessionId, scrollToBottom])
+
+  // Observe content height changes
+  useEffect(() => {
+    const content = contentRef.current
+    if (!content) return
+
+    const observer = new ResizeObserver(() => {
+      if (isFollowing) {
+        scrollToBottom()
+      }
+    })
+    
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [isFollowing, scrollToBottom])
 
   const hasMessages = messages.length > 0
 
@@ -284,20 +283,24 @@ export default function ChatArea({
       {scrollToBottomButton}
       <ChatAreaLayout
         containerRef={containerRef}
-      panelOpen={panelOpen}
-      onScroll={handleScroll}
-      messageArea={
-        hasMessages ? (
-          <ChatMessageList
-            messages={messages}
-            lastStreamingMsgId={lastStreamingMsgId}
-            handleFileClick={handleFileClick}
-            handleDiffClick={handleDiffClick}
-          />
-        ) : (
-          <HomePage onOpenRecentProject={handleOpenRecentProject} />
-        )
-      }
+        panelOpen={panelOpen}
+        onScroll={handleScroll}
+        onWheel={handleWheel}
+        onTouchStart={handleTouchStart}
+        messageArea={
+          hasMessages ? (
+            <div ref={contentRef} style={{ width: '100%', flexShrink: 0 }}>
+              <ChatMessageList
+                messages={messages}
+                lastStreamingMsgId={lastStreamingMsgId}
+                handleFileClick={handleFileClick}
+                handleDiffClick={handleDiffClick}
+              />
+            </div>
+          ) : (
+            <HomePage onOpenRecentProject={handleOpenRecentProject} />
+          )
+        }
       auditArea={
         auditMessages.length > 0 ? (
           <div style={{ width: '100%', flexShrink: 0, zIndex: 60, marginBottom: '-16px' }}>

@@ -1,5 +1,7 @@
 import React, { useState } from 'react'
 import { useChatStore } from '../../stores/chatStore'
+import { useProviderStore } from '../../stores/providerStore'
+import type { ThinkingEffort } from '@shared/types/provider'
 import Button from '../ui/Button'
 import Flex from '../ui/Flex'
 import Stack from '../ui/Stack'
@@ -7,6 +9,7 @@ import Card from '../ui/Card'
 import IconGear from '../icons/IconGear'
 import IconStop from '../icons/IconStop'
 import IconSend from '../icons/IconSend'
+import Select from '../ui/Select'
 import ContextTracker from '../ContextTracker'
 import CodeMirror from '@uiw/react-codemirror'
 import { EditorView } from '@codemirror/view'
@@ -55,6 +58,22 @@ export default function PromptArea({
     maxContextTokens,
     dynamicSkills
   } = usePromptEditor(onSend, workspace)
+
+  const activeProviderId = useProviderStore((s) => s.activeProviderId)
+  const providers = useProviderStore((s) => s.providers)
+  const activeProvider = providers.find((p) => p.id === activeProviderId)
+  const updateProvider = useProviderStore((s) => s.updateProvider)
+
+  const handleEffortChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    if (activeProvider) {
+      updateProvider(activeProvider.id, {
+        thinking: {
+          ...activeProvider.thinking,
+          effort: e.target.value as ThinkingEffort
+        }
+      })
+    }
+  }
 
   const closeAllDropdowns = () => {
     setDropdownOpen(false)
@@ -152,6 +171,20 @@ export default function PromptArea({
                   selectedModelName={selectedModelName}
                   setSelectedModelName={setSelectedModelName}
                 />
+
+                {activeProvider?.thinking?.enabled && (
+                  <Select
+                    className="prompt-effort-select"
+                    value={activeProvider.thinking.effort || 'custom'}
+                    onChange={handleEffortChange}
+                  >
+                    <option value="auto">Auto</option>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="custom">Custom</option>
+                  </Select>
+                )}
 
                 {isStreaming ? (
                   <Button

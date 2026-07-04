@@ -81,12 +81,14 @@ export function registerChatIpc(): void {
       runner.run(
         {
           baseUrl: config.baseUrl,
-          apiFormat: config.apiFormat,
+          apiFormat: modelConfig?.apiFormat || config.apiFormat,
           apiKey,
           model: request.model,
           messages,
           workspaceRoot: currentWorkspace,
-          thinking: config.thinking,
+          thinking: modelConfig?.thinkingMode 
+            ? { ...config.thinking, mode: modelConfig.thinkingMode }
+            : config.thinking,
           sessionId: request.sessionId || undefined,
           contextWindowTokens
         },

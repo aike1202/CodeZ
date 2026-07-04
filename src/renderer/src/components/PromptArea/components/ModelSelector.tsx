@@ -87,7 +87,7 @@ export default function ModelSelector({
                         >
                           <span>{m.name}</span>
                           <span className="prompt-model-context-tokens">
-                            {m.maxContextTokens > 0 ? `${(m.maxContextTokens / 1024).toFixed(0)}K` : '-'}
+                            {m.maxContextTokens > 0 ? `${m.maxContextTokens % 10000 === 0 ? m.maxContextTokens / 10000 : parseFloat((m.maxContextTokens / 10000).toFixed(2))}万` : '-'}
                           </span>
                         </Flex>
                       ))}

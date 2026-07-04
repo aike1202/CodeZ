@@ -185,6 +185,14 @@ export function useSendMessage() {
                       name: tc.name,
                       content: tc.result || ''
                     })
+                  } else {
+                    // Inject a mock response for interrupted tool calls to keep API sequence valid
+                    mapped.push({
+                      role: 'tool',
+                      tool_call_id: tc.id,
+                      name: tc.name,
+                      content: '{"ok":false,"error":"Execution interrupted or incomplete."}'
+                    })
                   }
                 }
               }

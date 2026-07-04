@@ -54,11 +54,17 @@ export class AnthropicProvider implements IChatProvider {
       input_schema: t.function.parameters
     }))
 
+    const thinkingPayload = await import('./utils').then(m => m.buildThinkingPayload(thinking, model, baseUrl, !!(tools && tools.length > 0)))
     const requestPayload: any = {
       model,
       messages: anthropicMessages,
       max_tokens: 8192,
-      stream: true
+      stream: true,
+      ...thinkingPayload
+    }
+    
+    if ((thinkingPayload as any).thinking?.budget_tokens) {
+      requestPayload.max_tokens = Math.max(8192, (thinkingPayload as any).thinking.budget_tokens + 4096)
     }
     
     if (systemPrompt) {

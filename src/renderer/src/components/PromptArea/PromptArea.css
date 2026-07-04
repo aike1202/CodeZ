@@ -202,6 +202,20 @@
   position: relative;
 }
 
+.prompt-effort-select {
+  height: 28px;
+  font-size: 12px;
+  padding: 0 24px 0 8px;
+  background-color: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.prompt-effort-select:hover {
+  background-color: var(--bg-hover);
+}
+
 .prompt-gear-btn {
   padding: 6px;
   color: var(--text-muted);

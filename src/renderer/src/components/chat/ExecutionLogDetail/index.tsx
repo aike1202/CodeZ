@@ -4,6 +4,7 @@ import { getFileIconComponent } from '../ExecutionLog/utils'
 import { FolderIcon } from '@react-symbols/icons/utils'
 import { parseArgs } from '../../../utils/parseArgs'
 import type { ExecutionLogDetailProps } from './types'
+import './ExecutionLogDetail.css'
 
 export default function ExecutionLogDetail({
   item,

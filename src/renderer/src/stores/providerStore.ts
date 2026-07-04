@@ -1,11 +1,5 @@
 import { create } from 'zustand'
-import type { ThinkingConfig, ApiFormat } from '@shared/types/provider'
-
-export interface ModelConfig {
-  id: string
-  name: string
-  maxContextTokens: number
-}
+import type { ThinkingConfig, ApiFormat, ModelConfig } from '@shared/types/provider'
 
 interface ProviderInfo {
   id: string

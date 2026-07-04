@@ -10,6 +10,7 @@ import { BashTool } from './builtin/BashTool'
 import { PowerShellTool } from './builtin/PowerShellTool'
 import { AskUserQuestionTool } from './builtin/AskUserQuestionTool'
 import { PushNotificationTool } from './builtin/PushNotificationTool'
+import { TaskTool } from './builtin/TaskTool'
 import { SkillTool } from './builtin/SkillTool'
 import { RollbackLastEditTool } from './builtin/RollbackLastEditTool'
 import { UpdateResumeStateTool } from './builtin/UpdateResumeStateTool'
@@ -17,6 +18,7 @@ import { FastContextTool } from './builtin/FastContextTool'
 import { EnterPlanModeTool } from './builtin/EnterPlanModeTool'
 import { ExitPlanModeTool } from './builtin/ExitPlanModeTool'
 import { UpdatePlanStepTool } from './builtin/UpdatePlanStepTool'
+
 import type { ToolDefinition } from '../../shared/types/provider'
 
 export class ToolManager {
@@ -53,7 +55,8 @@ export class ToolManager {
       new FastContextTool(),
       new EnterPlanModeTool(),
       new ExitPlanModeTool(),
-      new UpdatePlanStepTool()
+      new UpdatePlanStepTool(),
+      new TaskTool()
     ]
     
     for (const tool of builtinTools) {

@@ -8,6 +8,7 @@ import { buildDiffEditInfo } from '../../../../utils/editDiffUtils'
 import ExecutionLogDetail from '../../ExecutionLogDetail'
 import { ThoughtIcon, SearchIcon, CmdIcon, AskIcon } from '../../../svg-icons'
 import { FileIcon, FolderIcon } from '@react-symbols/icons/utils'
+import './LogItemRow.css'
 
 const VERB_TRANSLATIONS: Record<string, string> = {
   Thought: '思考',

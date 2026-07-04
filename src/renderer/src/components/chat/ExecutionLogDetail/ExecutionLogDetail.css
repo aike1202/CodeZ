@@ -1,0 +1,506 @@
+/* ExecutionLogDetail — Expandable detail panel */
+
+/* ---- Shared box pattern ---- */
+.exe-log-detail-box-mono,
+.exe-log-cmd-details-box {
+  display: flex;
+  flex-direction: column;
+  border-radius: 6px;
+  padding: 8px;
+  font-family: var(--font-mono, monospace);
+  border: 1px solid rgba(229, 231, 235, 0.5);
+  margin-right: 8px;
+  text-align: left;
+}
+
+.exe-log-detail-box-mono {
+  gap: 2px;
+  background: rgba(249, 250, 251, 0.5);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  max-height: 192px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.exe-log-cmd-details-box {
+  gap: 6px;
+  background: rgba(249, 250, 251, 0.5);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ---- Reasoning ---- */
+.exe-log-reasoning-detail {
+  white-space: pre-wrap;
+  word-break: break-words;
+  line-height: 1.625;
+  color: var(--text-muted);
+  font-family: var(--font-sans, sans-serif);
+  padding-right: 8px;
+}
+
+/* ---- Directory listing ---- */
+.exe-log-dir-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 4px 4px;
+  margin: 10px 0 4px;
+  color: var(--text-primary, #111827);
+  font-weight: 600;
+  font-size: 11.5px;
+  font-family: var(--font-sans, sans-serif);
+
+  &:first-child { margin-top: 0; }
+
+  svg {
+    width: 14px;
+    height: 14px;
+    color: var(--text-light, #6b7280);
+  }
+}
+
+.exe-log-dir-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0 3px 24px;
+  user-select: none;
+  transition: color 0.15s;
+
+  &:hover { color: var(--text-main); }
+}
+
+/* ---- File list ---- */
+.exe-log-files-title {
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-family: var(--font-sans, sans-serif);
+  user-select: none;
+  padding-left: 4px;
+}
+
+.exe-log-file-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0 6px 4px;
+  user-select: none;
+  cursor: pointer;
+  transition: color 0.2s;
+
+  &:hover {
+    color: #111827;
+
+    .exe-log-file-path-text {
+      text-decoration: underline;
+      color: var(--primary-color);
+    }
+  }
+}
+
+.exe-log-file-path-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-main);
+}
+
+/* ---- Search results ---- */
+.exe-log-search-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.exe-log-search-title {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding-left: 4px;
+  margin-bottom: 4px;
+}
+
+.exe-log-search-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--bg-primary, #fff);
+  border-radius: 4px;
+  border: 1px solid var(--border-light, #e5e7eb);
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+
+  &:hover { border-color: var(--border-hover, #d1d5db); }
+}
+
+.exe-log-search-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  width: fit-content;
+
+  &:hover {
+    .exe-log-search-item-icon { opacity: 1; }
+    .exe-log-search-item-path { color: var(--primary-color, #2563eb); }
+  }
+}
+
+.exe-log-search-item-icon {
+  display: flex;
+  align-items: center;
+  opacity: 0.8;
+  transition: opacity 0.2s ease;
+}
+
+.exe-log-search-item-path {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary, #374151);
+  transition: color 0.2s ease;
+}
+
+.exe-log-search-item-text {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  line-height: 1.625;
+  padding: 6px 8px;
+  background: var(--bg-hover-light, #f9fafb);
+  border-radius: 4px;
+  color: var(--text-muted, #4b5563);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* ---- Terminal ---- */
+.exe-log-terminal-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-radius: 6px;
+  background: #1e1e1e;
+  padding: 10px;
+  color: #d4d4d8;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  overflow: hidden;
+}
+
+.exe-log-dir-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #60a5fa;
+  user-select: none;
+  opacity: 0.9;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(55, 65, 81, 0.6);
+}
+
+.exe-log-dir-icon {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.exe-log-dir-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exe-log-terminal-cmdline {
+  display: flex;
+  gap: 8px;
+  font-size: 11.5px;
+  margin-top: 2px;
+}
+
+.exe-log-terminal-prompt-char {
+  color: var(--color-success);
+  user-select: none;
+  font-weight: bold;
+}
+
+.exe-log-terminal-command-text {
+  color: #f4f4f5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.exe-log-terminal-output-container {
+  max-height: 192px;
+  overflow: auto;
+  padding-top: 6px;
+  margin-top: 2px;
+}
+
+.exe-log-output-label {
+  display: block;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  user-select: none;
+}
+
+.exe-log-output-pre {
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 10.5px;
+  color: var(--text-main);
+  line-height: 1.625;
+}
+
+/* ---- Raw output ---- */
+.exe-log-cmd-raw-output {
+  border-radius: 6px;
+  background: #1e1e1e;
+  padding: 10px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  color: #d4d4d8;
+  border: 1px solid rgba(63, 63, 70, 0.3);
+  margin-right: 8px;
+  text-align: left;
+  max-height: 192px;
+  overflow-y: auto;
+}
+
+/* ---- Parameters ---- */
+.exe-log-params-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.exe-log-params-label {
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.exe-log-params-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 4px;
+  padding: 6px;
+  border: 1px solid rgba(229, 231, 235, 0.5);
+}
+
+.exe-log-param-row {
+  display: flex;
+  gap: 8px;
+}
+
+.exe-log-param-key {
+  color: var(--primary-color);
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.exe-log-param-val,
+.exe-log-param-args {
+  color: var(--text-main);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.exe-log-params-output-container {
+  max-height: 144px;
+  overflow: auto;
+  border-top: 1px solid rgba(229, 231, 235, 0.5);
+  padding-top: 6px;
+  margin-top: 2px;
+}
+
+/* ---- AskUserQuestion ---- */
+.exe-log-ask-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.exe-log-ask-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.exe-log-ask-header {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.exe-log-ask-question {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  line-height: 1.5;
+}
+
+.exe-log-ask-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.exe-log-ask-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  font-size: 12px;
+  color: var(--text-muted);
+
+  &.chosen {
+    border-color: var(--primary-color);
+    background: var(--primary-outline);
+    color: var(--text-main);
+    font-weight: 500;
+  }
+}
+
+.exe-log-ask-option-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--primary-color);
+  flex-shrink: 0;
+}
+
+.exe-log-ask-option-label { color: inherit; }
+
+.exe-log-ask-option-desc {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-left: 2px;
+}
+
+.exe-log-ask-answer {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: var(--primary-outline);
+  color: var(--text-main);
+  width: fit-content;
+
+  &.is-ignored {
+    background: rgba(255, 77, 79, 0.08);
+    color: var(--color-error);
+
+    .exe-log-ask-answer-val { color: var(--color-error); }
+  }
+
+  &.is-pending {
+    background: var(--bg-hover);
+    color: var(--text-muted);
+  }
+}
+
+.exe-log-ask-answer-val {
+  font-weight: 600;
+  color: var(--primary-color);
+}
+
+.exe-log-ask-pending-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary-color);
+  animation: exe-log-ask-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes exe-log-ask-pulse {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .exe-log-ask-pending-dot { animation: none; }
+}
+
+/* ============================================================
+   Dark Mode
+   ============================================================ */
+
+.dark {
+  .exe-log-reasoning-detail { color: #a1a1aa; }
+
+  .exe-log-detail-box-mono,
+  .exe-log-cmd-details-box {
+    background-color: rgba(24, 24, 27, 0.5);
+    border-color: rgba(63, 63, 70, 0.5);
+  }
+
+  .exe-log-dir-header {
+    color: #e4e4e7;
+    svg { color: #a1a1aa; }
+  }
+
+  .exe-log-dir-row:hover { color: #e4e4e7; }
+
+  .exe-log-files-title { color: #71717a; }
+
+  .exe-log-file-row:hover {
+    color: #f4f4f5;
+    .exe-log-file-path-text { color: #60a5fa; }
+  }
+
+  .exe-log-file-path-text { color: #a1a1aa; }
+
+  .exe-log-search-item {
+    background-color: var(--bg-deep, #1a1b1e);
+    border-color: var(--border-dark, #1f2937);
+    &:hover { border-color: var(--border-hover-dark, #374151); }
+  }
+
+  .exe-log-search-item-path { color: var(--text-muted, #d1d5db); }
+
+  .exe-log-search-item-text {
+    background-color: var(--bg-surface, #131416);
+    color: var(--text-muted, #9ca3af);
+  }
+
+  .exe-log-terminal-screen { background-color: #111; }
+
+  .exe-log-dir-item {
+    color: #60a5fa;
+    border-bottom-color: rgba(55, 65, 81, 0.4);
+  }
+
+  .exe-log-output-label { color: #52525b; }
+  .exe-log-output-pre { color: #a1a1aa; }
+
+  .exe-log-params-label { color: #71717a; }
+
+  .exe-log-params-box {
+    background-color: rgba(24, 24, 27, 0.3);
+    border-color: rgba(63, 63, 70, 0.5);
+  }
+
+  .exe-log-param-key { color: #60a5fa; }
+
+  .exe-log-param-val,
+  .exe-log-param-args { color: #a1a1aa; }
+
+  .exe-log-params-output-container { border-top-color: #27272a; }
+
+  .exe-log-cmd-raw-output { background-color: #111; }
+}

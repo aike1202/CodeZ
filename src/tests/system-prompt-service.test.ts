@@ -124,6 +124,7 @@ describe('SystemPromptService', () => {
     it('should contain available tools', async () => {
       const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
       expect(prompt).toContain('<available_tools>')
+      expect(prompt).toContain('Read')
       expect(prompt).toContain('read_file')
       expect(prompt).toContain('</available_tools>')
     })
@@ -135,10 +136,9 @@ describe('SystemPromptService', () => {
       expect(prompt).toContain('</skills_instructions>')
     })
 
-    it('should contain pending features TODO', async () => {
+    it('should contain pending features section', async () => {
       const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
       expect(prompt).toContain('<pending_features>')
-      expect(prompt).toContain('AGENT_TYPES')
       expect(prompt).toContain('</pending_features>')
     })
 

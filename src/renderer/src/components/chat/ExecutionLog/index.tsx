@@ -9,7 +9,8 @@ import {
   buildCommandItems,
   buildEditItems,
   buildUnifiedTimeline,
-  buildSummaryText
+  buildSummaryText,
+  extractAskSummary
 } from './utils'
 import './ExecutionLog.css'
 import type { ExecutionLogProps } from './types'
@@ -85,6 +86,7 @@ export default function ExecutionLog({
   if (unifiedItems.length === 0) return null
 
   const summary = buildSummaryText(unifiedItems, running)
+  const askSummary = useMemo(() => extractAskSummary(unifiedItems), [unifiedItems])
 
   const hasDetail = (item: UnifiedTimelineItem) => {
     const isFileItem = item.type === 'edit' || (item.type === 'tool' && item.verb === 'Analyzed' && item.fileName)
@@ -117,19 +119,33 @@ export default function ExecutionLog({
         className="timeline-header-btn"
         onClick={() => setExpanded((val) => !val)}
       >
-        <Flex align="center" gap={2} className="timeline-header-text">
-          {running ? (
-            <IconLoading width="12" height="12" className="spin-slow" />
-          ) : (
-            <IconCheck
-              width="12"
-              height="12"
-              className="timeline-icon-success"
-              style={{ color: 'var(--text-success, #059669)' }}
-            />
+        <div className="timeline-header-content">
+          <Flex align="center" gap={2} className="timeline-header-text">
+            {running ? (
+              <IconLoading width="12" height="12" className="spin-slow" />
+            ) : (
+              <IconCheck
+                width="12"
+                height="12"
+                className="timeline-icon-success"
+                style={{ color: 'var(--text-success, #059669)' }}
+              />
+            )}
+            <span>{askSummary ? `已提问：${askSummary.question}` : summary}</span>
+          </Flex>
+          {askSummary && (
+            <div className="timeline-header-answer">
+              {askSummary.answer ? (
+                <>
+                  <span className="timeline-header-answer-label">用户回答：</span>
+                  <span className="timeline-header-answer-val">{askSummary.answer}</span>
+                </>
+              ) : (
+                <span className="timeline-header-answer-pending">等待用户回答…</span>
+              )}
+            </div>
           )}
-          <span>{summary}</span>
-        </Flex>
+        </div>
         <span className="timeline-header-arrow-text">{expanded ? '收起' : '展开'}</span>
       </button>
 

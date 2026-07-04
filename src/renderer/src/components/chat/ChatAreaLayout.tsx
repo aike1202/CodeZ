@@ -12,6 +12,8 @@ export interface ChatAreaLayoutProps {
   panelOpen?: boolean;
   containerRef?: React.RefObject<HTMLDivElement>;
   onScroll?: (e: React.UIEvent<HTMLDivElement>) => void;
+  onWheel?: (e: React.WheelEvent<HTMLDivElement>) => void;
+  onTouchStart?: (e: React.TouchEvent<HTMLDivElement>) => void;
 }
 
 export const ChatAreaLayout: React.FC<ChatAreaLayoutProps> = ({
@@ -21,7 +23,9 @@ export const ChatAreaLayout: React.FC<ChatAreaLayoutProps> = ({
   terminalPanel,
   panelOpen,
   containerRef,
-  onScroll
+  onScroll,
+  onWheel,
+  onTouchStart
 }) => {
   return (
     <>
@@ -29,6 +33,8 @@ export const ChatAreaLayout: React.FC<ChatAreaLayoutProps> = ({
         className={`app-chat-column ${panelOpen ? 'app-chat-column--border' : ''}`}
         ref={containerRef}
         onScroll={onScroll}
+        onWheel={onWheel}
+        onTouchStart={onTouchStart}
       >
         <PlanCapsule />
         <PlanApprovalCard />

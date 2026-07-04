@@ -263,7 +263,11 @@ export class AgentRunner {
               }
             },
             this.abortController!.signal
-          )
+          ).catch((err) => {
+            gotError = true
+            callbacks.onError(err instanceof Error ? err.message : String(err))
+            resolve()
+          })
         })
 
         if (gotError || this.abortController?.signal.aborted) {

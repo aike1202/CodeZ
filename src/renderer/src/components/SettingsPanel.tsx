@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import type { ThinkingConfig, ThinkingMode, ApiFormat } from '@shared/types/provider'
+import type { ThinkingConfig, ThinkingMode, ThinkingEffort, ApiFormat } from '@shared/types/provider'
 import { IconAdd, IconEye, IconEyeOff, IconTrash, IconClose } from './Icons'
 import Button from './ui/Button'
 import Input from './ui/Input'
@@ -10,6 +10,8 @@ export interface ModelFormData {
   id: string
   name: string
   maxContextTokens: number
+  apiFormat?: "openai" | "anthropic" | "gemini" | string
+  thinkingMode?: "auto" | "openai" | "deepseek" | "anthropic" | "qwen" | string
 }
 
 interface ProviderFormData {
@@ -35,7 +37,7 @@ function genModelId(): string {
 }
 
 function getDefaultThinking(): ThinkingConfig {
-  return { enabled: true, mode: 'openai' }
+  return { enabled: true, mode: 'openai', effort: 'auto' }
 }
 
 export default function SettingsPanel({
@@ -55,7 +57,7 @@ export default function SettingsPanel({
   const [models, setModels] = useState<ModelFormData[]>(
     Array.isArray(initialData.models) && initialData.models.length > 0
       ? initialData.models
-      : [{ id: genModelId(), name: '', maxContextTokens: 8192 }]
+      : [{ id: genModelId(), name: '', maxContextTokens: 128000 }]
   )
 
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
@@ -77,7 +79,7 @@ export default function SettingsPanel({
   }
 
   const addModel = () => {
-    setModels([...models, { id: genModelId(), name: '', maxContextTokens: 8192 }])
+    setModels([...models, { id: genModelId(), name: '', maxContextTokens: 128000 }])
   }
 
   const removeModel = (idx: number) => {
@@ -196,7 +198,7 @@ export default function SettingsPanel({
                 <option value="none">不发送思考参数</option>
               </Select>
               <p className="settings-thinking-desc">
-                该设置会在请求中注入对应思考参数，并仅展示模型真实返回的 reasoning/thinking 内容。
+                全局思考模式。如果未在模型列表中单独覆盖，则使用此默认配置。
               </p>
             </div>
           </div>
@@ -206,29 +208,56 @@ export default function SettingsPanel({
             <label className="settings-label">模型列表</label>
             <div className="settings-models-box">
               {models.map((m, idx) => m ? (
-                <div key={m.id || idx} className="settings-model-row">
-                  <div className="settings-model-name-wrapper">
-                    <Input
-                      variant="borderless"
-                      className="settings-model-input"
-                      placeholder="模型名，如 gpt-4o"
-                      value={m.name || ''}
-                      onChange={(e) => updateModel(idx, 'name', e.target.value)}
-                    />
+                <div key={m.id || idx} className="settings-model-card">
+                  <div className="settings-model-row">
+                    <div className="settings-model-name-wrapper">
+                      <Input
+                        variant="borderless"
+                        className="settings-model-input"
+                        placeholder="模型名，如 gpt-4o"
+                        value={m.name || ''}
+                        onChange={(e) => updateModel(idx, 'name', e.target.value)}
+                      />
+                    </div>
+                    <div className="settings-model-tokens-wrapper">
+                      <Input
+                        variant="borderless"
+                        type="number"
+                        step="0.1"
+                        className="settings-tokens-input"
+                        placeholder="上下文"
+                        value={m.maxContextTokens ? m.maxContextTokens / 10000 : ''}
+                        onChange={(e) => updateModel(idx, 'maxContextTokens', Math.round((parseFloat(e.target.value) || 0) * 10000))}
+                      />
+                      <span className="settings-tokens-unit">万Tokens</span>
+                      <Button type="text" danger size="none" className="settings-remove-model-btn" onClick={() => removeModel(idx)}>
+                        <IconClose />
+                      </Button>
+                    </div>
                   </div>
-                  <div className="settings-model-tokens-wrapper">
-                    <Input
-                      variant="borderless"
-                      type="number"
-                      className="settings-tokens-input"
-                      placeholder="上下文"
-                      value={m.maxContextTokens || ''}
-                      onChange={(e) => updateModel(idx, 'maxContextTokens', parseInt(e.target.value) || 0)}
-                    />
-                    <span className="settings-tokens-unit">Tokens</span>
-                    <Button type="text" danger size="none" className="settings-remove-model-btn" onClick={() => removeModel(idx)}>
-                      <IconClose />
-                    </Button>
+                  <div className="settings-model-advanced-row">
+                    <Select
+                      className="settings-model-advanced-select"
+                      value={m.apiFormat || ''}
+                      onChange={(e) => updateModel(idx, 'apiFormat', e.target.value === '' ? undefined : e.target.value)}
+                    >
+                      <option value="">继承全局协议格式</option>
+                      <option value="openai">OpenAI 格式</option>
+                      <option value="anthropic">Anthropic 格式</option>
+                      <option value="gemini">Gemini 格式</option>
+                    </Select>
+                    <Select
+                      className="settings-model-advanced-select"
+                      value={m.thinkingMode || ''}
+                      onChange={(e) => updateModel(idx, 'thinkingMode', e.target.value === '' ? undefined : e.target.value)}
+                    >
+                      <option value="">继承全局思考模式</option>
+                      <option value="auto">自动适配</option>
+                      <option value="openai">OpenAI 格式</option>
+                      <option value="deepseek">DeepSeek 格式</option>
+                      <option value="anthropic">Anthropic 格式</option>
+                      <option value="qwen">Qwen 格式</option>
+                    </Select>
                   </div>
                 </div>
               ) : null)}

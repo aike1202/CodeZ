@@ -1,16 +1,23 @@
 export type ThinkingMode = 'auto' | 'none' | 'openai' | 'deepseek' | 'qwen' | 'anthropic' | 'gemini' | 'openrouter'
 
+export type ThinkingEffort = 'auto' | 'low' | 'medium' | 'high' | 'custom'
+
 export interface ThinkingConfig {
   enabled: boolean
   mode: ThinkingMode
+  effort?: ThinkingEffort
+  budgetTokens?: number
 }
 
-/** 单个模型配置 */
 export interface ModelConfig {
   id: string
   name: string
   /** 最大上下文长度（tokens），0 表示不限制 */
   maxContextTokens: number
+  /** 单独覆盖该模型使用的接口协议 */
+  apiFormat?: ApiFormat
+  /** 单独覆盖该模型使用的思考模式 */
+  thinkingMode?: ThinkingMode
 }
 
 export type ApiFormat = 'openai' | 'anthropic' | 'gemini' | 'ollama' | 'azure'

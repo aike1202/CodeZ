@@ -57,10 +57,18 @@ export class GeminiProvider implements IChatProvider {
         }
         if (hasToolCalls) {
           for (const tc of msg.tool_calls!) {
+            let parsedArgs = {}
+            try {
+              parsedArgs = typeof tc.function.arguments === 'string' 
+                ? (tc.function.arguments ? JSON.parse(tc.function.arguments) : {}) 
+                : (tc.function.arguments || {})
+            } catch (e) {
+              parsedArgs = {}
+            }
             parts.push({
               functionCall: {
                 name: tc.function.name,
-                args: typeof tc.function.arguments === 'string' ? JSON.parse(tc.function.arguments) : tc.function.arguments
+                args: parsedArgs
               }
             })
           }

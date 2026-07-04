@@ -112,7 +112,7 @@ describe('ChatService - buildThinkingPayload (自动适配与推导)', () => {
       'deepseek-r1-chat',
       'https://api.deepseek.com/v1'
     )
-    expect(payload).toEqual({ reasoning: { enabled: true } })
+    expect(payload).toEqual({ reasoning: { enabled: true }, thinking: { type: 'enabled' }, max_completion_tokens: undefined })
   })
 
   it('应当在 mode 为 auto 时，基于 model 自动选用 qwen 配置', () => {
@@ -121,7 +121,7 @@ describe('ChatService - buildThinkingPayload (自动适配与推导)', () => {
       'qwen-max-thinking',
       'https://dashscope.aliyuncs.com/api/v1'
     )
-    expect(payload).toEqual({ enable_thinking: true })
+    expect(payload).toEqual({ enable_thinking: true, max_completion_tokens: undefined })
   })
 
   it('应当直接输出显式指定的模式配置，不进行推导', () => {
@@ -130,6 +130,48 @@ describe('ChatService - buildThinkingPayload (自动适配与推导)', () => {
       'gemini-3.5-flash-high',
       'http://127.0.0.1:8045/v1'
     )
-    expect(payload).toEqual({ reasoning: { enabled: true } })
+    expect(payload).toEqual({ reasoning: { enabled: true }, thinking: { type: 'enabled' }, max_completion_tokens: undefined })
+  })
+
+  it('应当在设置了 budgetTokens 时注入相应参数', () => {
+    const payload = buildThinkingPayload(
+      { enabled: true, mode: 'deepseek', budgetTokens: 2000, effort: 'custom' },
+      'deepseek-r1-chat',
+      'https://api.deepseek.com/v1'
+    )
+    expect(payload).toEqual({ reasoning: { enabled: true }, thinking: { type: 'enabled' }, max_completion_tokens: 2000 })
+
+    const payloadAnthropic = buildThinkingPayload(
+      { enabled: true, mode: 'anthropic', budgetTokens: 2000, effort: 'custom' },
+      'claude-3-7-sonnet',
+      'https://api.anthropic.com/v1'
+    )
+    expect(payloadAnthropic).toEqual({ thinking: { type: 'enabled', budget_tokens: 2000 } })
+  })
+
+  it('应当在配置了 effort 级别时自动映射对应的 Tokens', () => {
+    // Low -> 1024
+    const payloadLow = buildThinkingPayload(
+      { enabled: true, mode: 'anthropic', effort: 'low' },
+      'claude-3-7-sonnet',
+      'https://api.anthropic.com/v1'
+    )
+    expect(payloadLow).toEqual({ thinking: { type: 'enabled', budget_tokens: 1024 }, output_config: { effort: 'low' } })
+
+    // Medium -> 4096 (Deepseek mode)
+    const payloadMedium = buildThinkingPayload(
+      { enabled: true, mode: 'deepseek', effort: 'medium' },
+      'deepseek-r1',
+      'https://api.deepseek.com/v1'
+    )
+    expect(payloadMedium).toEqual({ reasoning: { enabled: true }, thinking: { type: 'enabled' }, max_completion_tokens: 4096, reasoning_effort: 'medium' })
+
+    // High -> 16384 (Qwen mode)
+    const payloadHigh = buildThinkingPayload(
+      { enabled: true, mode: 'qwen', effort: 'high' },
+      'qwen-max-thinking',
+      'https://dashscope.aliyuncs.com/api/v1'
+    )
+    expect(payloadHigh).toEqual({ enable_thinking: true, max_completion_tokens: 16384, reasoning_effort: 'high' })
   })
 })
