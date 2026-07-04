@@ -11,15 +11,18 @@ export class CommandAnalyzer {
     'java -version', 'javac -version',
     'npm config get', 'node -v', 
     'pip freeze', 'pip show',
-    'ls', 'pwd', 'echo', 'cat', 'Get-ChildItem', 'Get-Location'
+    'ls', 'pwd', 'echo', 'cat', 'Get-ChildItem', 'Get-Location',
+    'tree', 'find', 'less', 'head', 'tail', 'grep', 'awk', 'sed', 'which', 'uname'
   ]
 
   // Level 1: Workspace Write
   private static readonly WRITE_PREFIXES = [
-    'npm run build', 'npm run test', 'yarn build', 'pnpm build', 'pnpm test',
+    'npm run build', 'npm run test', 'npm run dev', 'npm start', 'npm run lint', 'npm run format', 'npm run typecheck',
+    'yarn build', 'yarn dev', 'yarn lint', 'yarn typecheck',
+    'pnpm build', 'pnpm test', 'pnpm dev', 'pnpm lint', 'pnpm typecheck',
     'mvn compile', 'mvn test', 'mvn package',
     'gradle build', 'gradle test', 'gradle assemble',
-    'python test.py', 'pytest',
+    'python', 'pytest', 'node', 'make',
     'git add', 'git commit', 'git checkout', 'git merge', 'git rebase', 'git stash',
     'mkdir', 'touch', 'cp', 'mv', 'New-Item', 'Copy-Item'
   ]
@@ -28,6 +31,7 @@ export class CommandAnalyzer {
   private static readonly NETWORK_PREFIXES = [
     'npm install', 'npm i', 'npm add', 'yarn add', 'pnpm install', 'pnpm add',
     'pip install', 'mvn install', 'gradle sync',
+    'apt-get', 'apt', 'brew',
     'git push', 'git fetch', 'git pull', 'git clone',
     'curl', 'wget', 'Invoke-WebRequest'
   ]
@@ -37,7 +41,8 @@ export class CommandAnalyzer {
     'rm', 'rmdir', 'rd', 'Remove-Item', 'del',
     'git reset --hard', 'git clean', 'git push --force',
     'mvn clean', 'gradle clean',
-    'sudo', 'chmod', 'chown', 'kill', 'Stop-Process',
+    'sudo', 'su', 'chmod', 'chown', 'kill', 'pkill', 'Stop-Process',
+    'reboot', 'shutdown', 'systemctl', 'iptables',
     'format', 'mkfs', 'dd'
   ]
 
