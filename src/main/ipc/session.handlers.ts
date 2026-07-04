@@ -19,6 +19,10 @@ export function registerSessionIpc(): void {
     return svc.getAll()
   })
 
+  ipcMain.handle(IPC_CHANNELS.SESSION_GET, async (_event, sessionId: string) => {
+    return svc.get(sessionId) || null
+  })
+
   ipcMain.handle(IPC_CHANNELS.SESSION_SAVE, async (_event, session) => {
     await svc.save(session)
   })

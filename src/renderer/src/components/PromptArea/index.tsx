@@ -30,8 +30,10 @@ export default function PromptArea({
   const [permDropdownOpen, setPermDropdownOpen] = useState(false)
   const [plusDropdownOpen, setPlusDropdownOpen] = useState(false)
 
-  const isStreaming = useChatStore((s) => s.streamCleanup !== null)
-  const stopStream = useChatStore((s) => s.streamCleanup)
+  const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const streamCleanups = useChatStore((s) => s.streamCleanups)
+  const isStreaming = activeSessionId ? !!streamCleanups[activeSessionId] : false
+  const stopStream = activeSessionId ? streamCleanups[activeSessionId] ?? null : null
   const messages = useChatStore((s) => s.messages)
 
   const {

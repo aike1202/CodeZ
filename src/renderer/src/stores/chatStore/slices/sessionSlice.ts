@@ -6,6 +6,9 @@ function genId(): string {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 }
 
+// 防竞态：每次 selectSession 分配递增序号，IPC 返回时检查是否仍是最新请求
+let _selectSessionSeq = 0
+
 export interface SessionSlice {
   sessions: ChatSession[]
   activeSessionId: string | null
@@ -28,10 +31,17 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     try {
       const sessions = await window.api.session.list()
       if (Array.isArray(sessions) && sessions.length > 0) {
-        set({ sessions })
+        // 愈合崩溃残留：将 streaming:true 的消息标记为 interrupted
+        const healedSessions = sessions.map((session) => ({
+          ...session,
+          messages: session.messages.map((m: any) =>
+            m.streaming ? { ...m, streaming: false, interrupted: true } : m
+          )
+        }))
+        set({ sessions: healedSessions })
       }
-    } catch {
-      // 静默失败
+    } catch (err) {
+      console.error('[sessionSlice.loadSessions] Failed:', err)
     }
   },
 
@@ -49,10 +59,49 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
       activeSessionId: id,
       messages: []
     }))
+    get().persistCurrentSession()
     return id
   },
 
   selectSession: async (sessionId: string) => {
+    const seq = ++_selectSessionSeq
+    // 优先从主进程获取最新数据，避免使用内存中的旧快照
+    try {
+      const freshSession = await window.api.session.get(sessionId)
+      // 防止竞态：IPC 返回时用户可能已切换到其他会话
+      if (seq !== _selectSessionSeq) return
+      if (freshSession) {
+        set((s) => {
+          const sessions = s.sessions.map((sess) =>
+            sess.id === sessionId ? { ...sess, ...freshSession, messages: freshSession.messages } : sess
+          )
+          return {
+            sessions,
+            activeSessionId: sessionId,
+            messages: freshSession.messages,
+            activePlan: null
+          }
+        })
+        if (freshSession.linkedPlanSlug) {
+          try {
+            const workspace = useWorkspaceStore.getState().workspace
+            if (workspace) {
+              const plan = await (window as any).api.plan.load(workspace.rootPath, freshSession.linkedPlanSlug)
+              if (get().activeSessionId === sessionId) {
+                set({ activePlan: plan })
+              }
+            }
+          } catch {
+            // ignore
+          }
+        }
+        return
+      }
+    } catch (err) {
+      console.error('[sessionSlice.selectSession] Failed to load from disk:', err)
+    }
+
+    // Fallback: 从内存中查找
     const session = get().sessions.find((s) => s.id === sessionId)
     if (session) {
       set({
@@ -106,8 +155,8 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     if (session) {
       try {
         await window.api.session.save(session)
-      } catch {
-        // 静默失败
+      } catch (err) {
+        console.error('[sessionSlice.persistCurrentSession] Failed:', err)
       }
     }
   },
@@ -118,8 +167,8 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     if (session) {
       try {
         await window.api.session.save(session)
-      } catch {
-        // 静默失败
+      } catch (err) {
+        console.error('[sessionSlice.persistSession] Failed:', err)
       }
     }
   },
@@ -135,11 +184,20 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     if (session) {
       try {
         await window.api.session.save(session)
-      } catch {}
+      } catch (err) {
+        console.error('[sessionSlice] persist failed:', err)
+      }
     }
   },
 
   deleteSession: async (sessionId: string) => {
+    // 如果该会话有活跃流，先停止
+    const activeCleanup = get().streamCleanups[sessionId]
+    if (activeCleanup) {
+      activeCleanup()
+      get().setStreamCleanup(sessionId, null)
+    }
+
     let isAlreadyDeleted = false
     set((s) => {
       const session = s.sessions.find((x) => x.id === sessionId)
@@ -162,7 +220,9 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     })
     try {
       await window.api.session.delete(sessionId)
-    } catch {}
+    } catch (err) {
+      console.error('[sessionSlice.deleteSession] Failed:', err)
+    }
   },
 
   restoreSession: async (sessionId: string) => {
@@ -176,7 +236,9 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     if (session) {
       try {
         await window.api.session.save(session)
-      } catch {}
+      } catch (err) {
+        console.error('[sessionSlice] persist failed:', err)
+      }
     }
   }
 })

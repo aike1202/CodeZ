@@ -180,6 +180,9 @@ const api = {
     list: (): Promise<SessionData[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.SESSION_LIST),
 
+    get: (sessionId: string): Promise<SessionData | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SESSION_GET, sessionId),
+
     save: (session: SessionData): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.SESSION_SAVE, session),
 

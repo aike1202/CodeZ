@@ -12,6 +12,7 @@ export function useAppWorkspace() {
   const recentProjects = useWorkspaceStore((s: any) => s.recentProjects)
   const workspace = useWorkspaceStore((s: any) => s.workspace)
   const sessions = useChatStore((s: any) => s.sessions)
+  const streamCleanups = useChatStore((s: any) => s.streamCleanups)
   const createSession = useChatStore((s: any) => s.createSession)
   const selectSession = useChatStore((s: any) => s.selectSession)
 
@@ -153,7 +154,7 @@ export function useAppWorkspace() {
   > = {}
   for (const s of sessions) {
     if (!sessionsByProject[s.projectId]) sessionsByProject[s.projectId] = []
-    const isStreaming = s.messages && s.messages.length > 0 && s.messages[s.messages.length - 1].streaming
+    const isStreaming = !!streamCleanups[s.id]
     sessionsByProject[s.projectId].push({
       id: s.id,
       summary: s.summary,

@@ -101,6 +101,7 @@ export interface ChatMessage {
   role: 'user' | 'agent' | 'system'
   content: string
   streaming?: boolean
+  interrupted?: boolean
   reasoningContent?: string
   agentStates?: AgentState[]
   toolCalls?: ToolCallState[]
@@ -128,7 +129,7 @@ export interface ChatState {
   sessions: ChatSession[]
   activeSessionId: string | null
   messages: ChatMessage[]
-  streamCleanup: (() => void) | null
+  streamCleanups: Record<string, (() => void) | null>
   expandedCapsule: 'task' | 'plan' | null
   subAgentStatus: 'idle' | 'running' | 'completed' | 'failed'
   planListModalOpen: boolean
@@ -146,7 +147,7 @@ export interface ChatState {
   startStreamingReply: () => string
   appendStreamChunk: (msgId: string, delta: string, reasoningDelta?: string) => void
   finishStreaming: (msgId: string, txId?: string) => void
-  setStreamCleanup: (cleanup: (() => void) | null) => void
+  setStreamCleanup: (sessionId: string, cleanup: (() => void) | null) => void
   setTransactionId: (msgId: string, txId: string) => void
   setDiffEntries: (msgId: string, diffEntries: Array<{ path: string; diff: string }>) => void
   setEditStatus: (msgId: string, filePath: string, status: 'accepted' | 'rejected') => void

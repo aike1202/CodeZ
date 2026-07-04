@@ -41,6 +41,10 @@ export class SessionStore {
     }
   }
 
+  get(sessionId: string): SessionData | undefined {
+    return this.cache.find((s) => s.id === sessionId)
+  }
+
   getAll(): SessionData[] {
     return [...this.cache]
   }
@@ -52,7 +56,9 @@ export class SessionStore {
     } else {
       this.cache.unshift(session)
       if (this.cache.length > MAX_SESSIONS) {
+        const removed = this.cache.slice(MAX_SESSIONS)
         this.cache = this.cache.slice(0, MAX_SESSIONS)
+        console.warn(`[SessionStore] 会话数超过 ${MAX_SESSIONS}，已移除最旧会话:`, removed.map(s => s.id))
       }
     }
     await this.persist()

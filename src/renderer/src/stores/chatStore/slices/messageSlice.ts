@@ -13,9 +13,19 @@ function genId(): string {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 }
 
+// 流式持久化防抖：避免每个 chunk 都落盘，但保证崩溃后最多丢失 500ms 的内容
+let _persistTimer: ReturnType<typeof setTimeout> | null = null
+function schedulePersist(get: () => ChatState) {
+  if (_persistTimer) clearTimeout(_persistTimer)
+  _persistTimer = setTimeout(() => {
+    get().persistCurrentSession()
+    _persistTimer = null
+  }, 500)
+}
+
 export interface MessageSlice {
   messages: ChatMessage[]
-  streamCleanup: (() => void) | null
+  streamCleanups: Record<string, (() => void) | null>
   expandedCapsule: 'task' | 'plan' | null
   subAgentStatus: 'idle' | 'running' | 'completed' | 'failed'
   planListModalOpen: boolean
@@ -29,7 +39,7 @@ export interface MessageSlice {
   startStreamingReply: () => string
   appendStreamChunk: (msgId: string, delta: string, reasoningDelta?: string) => void
   finishStreaming: (msgId: string, txId?: string) => void
-  setStreamCleanup: (cleanup: (() => void) | null) => void
+  setStreamCleanup: (sessionId: string, cleanup: (() => void) | null) => void
   setTransactionId: (msgId: string, txId: string) => void
   setDiffEntries: (msgId: string, diffEntries: Array<{ path: string; diff: string }>) => void
   setEditStatus: (msgId: string, filePath: string, status: 'accepted' | 'rejected') => void
@@ -89,7 +99,7 @@ export function updateMessageInState(
 
 export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> = (set, get) => ({
   messages: [],
-  streamCleanup: null,
+  streamCleanups: {},
   expandedCapsule: null,
   subAgentStatus: 'idle',
   planListModalOpen: false,
@@ -188,9 +198,15 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
 
       return { ...m, content: newContent, reasoningContent: newReasoning, executionTimeline: timeline }
     }))
+    schedulePersist(get)
   },
 
   finishStreaming: (msgId: string, txId?: string) => {
+    // 清除流式防抖 timer，因为 onDone/onError 会立即做完整持久化
+    if (_persistTimer) {
+      clearTimeout(_persistTimer)
+      _persistTimer = null
+    }
     set((s) => updateMessageInState(
       s,
       msgId,
@@ -211,7 +227,17 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
     ))
   },
 
-  setStreamCleanup: (cleanup) => set({ streamCleanup: cleanup }),
+  setStreamCleanup: (sessionId, cleanup) => {
+    set((s) => {
+      const next = { ...s.streamCleanups }
+      if (cleanup === null) {
+        delete next[sessionId]
+      } else {
+        next[sessionId] = cleanup
+      }
+      return { streamCleanups: next }
+    })
+  },
 
   setTransactionId: (msgId, txId) => {
     set((s) => updateMessageInState(s, msgId, (m) => ({ ...m, txId })))
@@ -280,6 +306,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
         executionTimeline: [...timeline, nextItem]
       }
     }))
+    schedulePersist(get)
   },
 
   completeReasoningTimeline: (msgId: string) => {

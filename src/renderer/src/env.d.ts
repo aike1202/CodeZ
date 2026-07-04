@@ -49,6 +49,7 @@ declare global {
       }
       session: {
         list: () => Promise<any>
+        get: (sessionId: string) => Promise<any | null>
         save: (session: any) => Promise<void>
         delete: (sessionId: string) => Promise<void>
       }

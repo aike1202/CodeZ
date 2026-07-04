@@ -86,6 +86,11 @@ export function useSendMessage() {
         const agentId = startStreamingReply()
         const simText = `请先配置模型 Provider 才能进行 AI 对话。\n\n点击输入框左侧齿轮图标打开设置，添加一个 OpenAI-compatible Provider（如 OpenAI、Ollama、DeepSeek 等）。\n\n配置完成后，输入消息即可获得 AI 实时流式回复。`
 
+        let simSid = useChatStore.getState().activeSessionId
+        if (!simSid) {
+          simSid = createSession(ws.id)
+        }
+
         let i = 0
         const interval = setInterval(() => {
           if (i < simText.length) {
@@ -97,7 +102,7 @@ export function useSendMessage() {
             persistCurrentSession()
           }
         }, 15)
-        setStreamCleanup(() => () => clearInterval(interval))
+        setStreamCleanup(simSid, () => () => clearInterval(interval))
         return
       }
 
@@ -126,7 +131,11 @@ export function useSendMessage() {
           content: `你是一个 AI 编程助手，运行在 Codez 桌面应用中。当前项目：${ws.name}（${ws.projectType}）。请用中文回复，保持简洁专业。`
         },
         ...currentMsgs
-          .filter((m) => !m.streaming)
+          .filter((m) => {
+            // 过滤崩溃残留的空壳 assistant 消息（content 为空且无 toolCalls）
+            if (m.role === 'agent' && !m.content && !m.toolCalls?.length) return false
+            return true
+          })
           .flatMap((m, index, arr) => {
             const isLastMessage = index === arr.length - 1
             const mapped: Array<{ role: 'system' | 'user' | 'assistant' | 'tool'; content: string; tool_calls?: any[]; tool_call_id?: string; name?: string; thought_signature?: string; provider_specific_fields?: any }> = []
@@ -208,13 +217,13 @@ export function useSendMessage() {
               }
             }
             useChatStore.getState().persistSession(sid)
-            setStreamCleanup(null)
+            setStreamCleanup(sid, null)
           },
           onError: (error: string) => {
             appendStreamChunk(agentId, `\n\n错误：${error}`)
             finishStreaming(agentId)
             useChatStore.getState().persistSession(sid)
-            setStreamCleanup(null)
+            setStreamCleanup(sid, null)
           },
           onToolStart: (toolCallId: string, name: string, args: string, thoughtSignature?: string) => {
             startToolCall(agentId, {
@@ -243,10 +252,10 @@ export function useSendMessage() {
         cleanup()
         finishStreaming(agentId)
         useChatStore.getState().persistSession(sid)
-        setStreamCleanup(null)
+        setStreamCleanup(sid, null)
       }
 
-      setStreamCleanup(wrappedCleanup)
+      setStreamCleanup(sid, wrappedCleanup)
     },
     [
       addUserMessage,

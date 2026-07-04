@@ -37,6 +37,7 @@ export const IPC_CHANNELS = {
 
   // Session
   SESSION_LIST: 'session:list',
+  SESSION_GET: 'session:get',
   SESSION_SAVE: 'session:save',
   SESSION_DELETE: 'session:delete',
 
