@@ -936,3 +936,128 @@
   width: fit-content;
 }
 
+/* ---------- AskUserQuestion 详情 ---------- */
+.exe-log-ask-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.exe-log-ask-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.exe-log-ask-header {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.exe-log-ask-question {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  line-height: 1.5;
+}
+
+.exe-log-ask-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.exe-log-ask-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.exe-log-ask-option.chosen {
+  border-color: var(--primary-color);
+  background: var(--primary-outline);
+  color: var(--text-main);
+  font-weight: 500;
+}
+
+.exe-log-ask-option-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--primary-color);
+  flex-shrink: 0;
+}
+
+.exe-log-ask-option-label {
+  color: inherit;
+}
+
+.exe-log-ask-option-desc {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-left: 2px;
+}
+
+.exe-log-ask-answer {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: var(--primary-outline);
+  color: var(--text-main);
+  width: fit-content;
+}
+
+.exe-log-ask-answer.is-ignored {
+  background: rgba(255, 77, 79, 0.08);
+  color: var(--color-error);
+}
+
+.exe-log-ask-answer-val {
+  font-weight: 600;
+  color: var(--primary-color);
+}
+
+.exe-log-ask-answer.is-ignored .exe-log-ask-answer-val {
+  color: var(--color-error);
+}
+
+.exe-log-ask-answer.is-pending {
+  background: var(--bg-hover);
+  color: var(--text-muted);
+}
+
+.exe-log-ask-pending-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary-color);
+  animation: exe-log-ask-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes exe-log-ask-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .exe-log-ask-pending-dot {
+    animation: none;
+  }
+}
+

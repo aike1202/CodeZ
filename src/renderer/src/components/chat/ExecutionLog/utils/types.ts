@@ -33,6 +33,8 @@ export interface UnifiedTimelineItem {
     | 'Creating'
     | 'Executed'
     | 'Executing'
+    | 'Asked'
+    | 'Asking'
   target: string
   detail?: string
   args?: string

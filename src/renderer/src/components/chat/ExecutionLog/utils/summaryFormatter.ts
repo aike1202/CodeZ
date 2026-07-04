@@ -6,13 +6,15 @@ export function buildSummaryText(items: UnifiedTimelineItem[], running: boolean)
   const searchCount = items.filter((i) => i.verb === 'Searched').length
   const cmdCount = items.filter((i) => i.type === 'command').length
   const editCount = items.filter((i) => i.type === 'edit').length
+  const askCount = items.filter((i) => i.verb === 'Asked' || i.verb === 'Asking').length
 
   const parts = [
     readCount > 0 ? `${readCount} 个文件` : '',
     dirCount > 0 ? `${dirCount} 个目录` : '',
     searchCount > 0 ? `${searchCount} 次搜索` : '',
     cmdCount > 0 ? `${cmdCount} 条命令` : '',
-    editCount > 0 ? `${editCount} 处修改` : ''
+    editCount > 0 ? `${editCount} 处修改` : '',
+    askCount > 0 ? `${askCount} 次提问` : ''
   ].filter(Boolean)
 
   const prefix = running ? '正在处理: ' : '已探索: '

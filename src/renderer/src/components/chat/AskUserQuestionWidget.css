@@ -172,16 +172,24 @@
 }
 
 .ask-user-other-input {
+  display: block;
+  width: calc(100% - 20px);
+  min-height: 56px;
+  max-height: 120px;
   margin: 0 10px 10px;
-  padding: 7px 10px;
+  padding: 8px 10px;
   border: 1px solid var(--border-color);
   border-radius: 6px;
   background: var(--bg-input);
   color: var(--text-main);
   font-size: 13px;
+  line-height: 1.5;
   font-family: var(--font-sans);
   outline: none;
-  transition: all 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
+  resize: none;
+  overflow-y: auto;
+  transition: border-color 0.2s cubic-bezier(0.645, 0.045, 0.355, 1),
+              box-shadow 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
 }
 
 .ask-user-other-input:focus {
@@ -232,6 +240,17 @@
 
 .ask-user-detail-content p:last-child {
   margin-bottom: 0;
+}
+
+/* markdown 引擎加载中的纯文本预览：复用等宽样式，避免布局跳动 */
+.ask-user-detail-fallback {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-main);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .ask-user-detail-content ul,

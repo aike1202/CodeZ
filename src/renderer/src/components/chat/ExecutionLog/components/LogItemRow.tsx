@@ -6,7 +6,7 @@ import {
 } from '../utils'
 import { buildDiffEditInfo } from '../../../../utils/editDiffUtils'
 import ExecutionLogDetail from '../../ExecutionLogDetail'
-import { ThoughtIcon, SearchIcon, CmdIcon } from '../../../svg-icons'
+import { ThoughtIcon, SearchIcon, CmdIcon, AskIcon } from '../../../svg-icons'
 import { FileIcon, FolderIcon } from '@react-symbols/icons/utils'
 
 const VERB_TRANSLATIONS: Record<string, string> = {
@@ -23,7 +23,9 @@ const VERB_TRANSLATIONS: Record<string, string> = {
   Created: '已创建',
   Creating: '正在创建',
   Executed: '已执行',
-  Executing: '正在执行'
+  Executing: '正在执行',
+  Asked: '已提问',
+  Asking: '正在提问'
 }
 
 interface LogItemRowProps {
@@ -60,6 +62,7 @@ export function LogItemRow({
     if (item.type === 'tool') {
       if (item.verb === 'Searched' || item.verb === 'Searching') return <SearchIcon />
       if (item.verb === 'Explored' || item.verb === 'Exploring') return <FolderIcon folderName="" />
+      if (item.verb === 'Asked' || item.verb === 'Asking') return <AskIcon />
       if (item.verb === 'Executed' || item.verb === 'Executing') return <CmdIcon />
       return getFileIconComponent(item.fileName)
     }

@@ -188,6 +188,8 @@ export function buildUnifiedTimeline(
           tc.name === 'fast_context'
         ) {
           verbDisplay = tc.status === 'running' ? 'Analyzing' : 'Analyzed'
+        } else if (tc.name === 'AskUserQuestion') {
+          verbDisplay = tc.status === 'running' ? 'Asking' : 'Asked'
         } else {
           verbDisplay = tc.status === 'running' ? 'Executing' : 'Executed'
         }
@@ -210,6 +212,21 @@ export function buildUnifiedTimeline(
           try {
             const cmdArgs = JSON.parse(tc.args)
             targetDisplay = cmdArgs.command || cmdArgs.commandLine || target
+          } catch {
+            // keep original target
+          }
+        }
+
+        // AskUserQuestion：折叠态展示首个问题的 header 作为标题
+        if (tc.name === 'AskUserQuestion') {
+          try {
+            const askArgs = JSON.parse(tc.args)
+            const firstQ = Array.isArray(askArgs.questions) ? askArgs.questions[0] : null
+            if (firstQ) {
+              const qCount = askArgs.questions.length
+              targetDisplay = firstQ.header || firstQ.question || '用户问题'
+              if (qCount > 1) targetDisplay += ` 等 ${qCount} 个问题`
+            }
           } catch {
             // keep original target
           }

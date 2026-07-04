@@ -1,4 +1,5 @@
 import React from 'react'
+import { Check, X, MessageCircleQuestion } from 'lucide-react'
 import { getFileIconComponent } from '../ExecutionLog/utils'
 import { FolderIcon } from '@react-symbols/icons/utils'
 import { parseArgs } from '../../../utils/parseArgs'
@@ -165,6 +166,79 @@ export default function ExecutionLogDetail({
               </pre>
             </div>
           )}
+        </div>
+      )
+    }
+
+    // AskUserQuestion：展示问题、选项与用户回答
+    if (item.toolName === 'AskUserQuestion') {
+      let questions: any[] = []
+      let answers: Array<{ question: string; answer: string | string[] }> = []
+      try {
+        const parsedArgs = JSON.parse(item.args || '{}')
+        if (Array.isArray(parsedArgs.questions)) questions = parsedArgs.questions
+      } catch {}
+      try {
+        if (item.detail) {
+          const parsed = JSON.parse(item.detail)
+          if (Array.isArray(parsed)) answers = parsed
+        }
+      } catch {}
+
+      return (
+        <div className="exe-log-ask-detail">
+          {questions.map((q: any, qi: number) => {
+            const ans = answers.find((a) => a.question === q.question)
+            const isIgnored = ans && (ans.answer === '__IGNORED__' || (Array.isArray(ans.answer) && ans.answer.includes('__IGNORED__')))
+            const answerArr = ans && !isIgnored
+              ? (Array.isArray(ans.answer) ? ans.answer : [ans.answer])
+              : []
+            return (
+              <div key={qi} className="exe-log-ask-item">
+                {q.header && <div className="exe-log-ask-header">{q.header}</div>}
+                <div className="exe-log-ask-question">{q.question}</div>
+                {Array.isArray(q.options) && q.options.length > 0 && (
+                  <div className="exe-log-ask-options">
+                    {q.options.map((opt: any, oi: number) => {
+                      const chosen = answerArr.includes(opt.label)
+                      return (
+                        <div
+                          key={oi}
+                          className={`exe-log-ask-option${chosen ? ' chosen' : ''}`}
+                        >
+                          <span className="exe-log-ask-option-mark" aria-hidden="true">
+                            {chosen ? <Check size={12} /> : null}
+                          </span>
+                          <span className="exe-log-ask-option-label">{opt.label}</span>
+                          {opt.description && <span className="exe-log-ask-option-desc">{opt.description}</span>}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+                {/* 回答区 */}
+                {ans ? (
+                  isIgnored ? (
+                    <div className="exe-log-ask-answer is-ignored">
+                      <X size={12} />
+                      <span>用户忽略了此问题</span>
+                    </div>
+                  ) : (
+                    <div className="exe-log-ask-answer">
+                      <MessageCircleQuestion size={12} />
+                      <span>用户回答：</span>
+                      <span className="exe-log-ask-answer-val">{answerArr.join('、')}</span>
+                    </div>
+                  )
+                ) : item.status === 'running' ? (
+                  <div className="exe-log-ask-answer is-pending">
+                    <span className="exe-log-ask-pending-dot" />
+                    <span>等待用户回答…</span>
+                  </div>
+                ) : null}
+              </div>
+            )
+          })}
         </div>
       )
     }

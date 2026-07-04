@@ -1,8 +1,7 @@
 import { useState, useMemo } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { Check, Pencil, RotateCcw } from 'lucide-react'
 import './AskUserQuestionWidget.css'
+import MarkdownDetail from './MarkdownDetail'
 import type { AskUserRequestState } from '../../stores/chatStore'
 
 /** 用户点击"忽略"时返回的哨兵值，与主进程 ASK_USER_IGNORED 保持一致 */
@@ -208,17 +207,22 @@ function QuestionBlock({ question, onSubmit }: {
           </span>
         </button>
         {showOther && (
-          <input
-            type="text"
+          <textarea
             className={`ask-user-other-input${otherError ? ' has-error' : ''}`}
-            placeholder={multiSelect ? '输入自定义答案（可与其他项组合）' : '输入自定义答案'}
+            placeholder={multiSelect ? '输入自定义答案（可与其他项组合）' : '输入自定义答案，回车提交'}
             value={other}
+            rows={2}
             onChange={(e) => {
               setOther(e.target.value)
               setOtherError(false)
+              // 自动增高：跟随内容调整高度，上限 5 行
+              const el = e.target
+              el.style.height = 'auto'
+              el.style.height = `${Math.min(el.scrollHeight, 120)}px`
             }}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !multiSelect) {
+              // 单选：Enter 提交（Shift+Enter 换行）；多选：仅 Shift+Enter 换行
+              if (e.key === 'Enter' && !e.shiftKey && !multiSelect) {
                 e.preventDefault()
                 if (other.trim()) handleSubmit()
                 else setOtherError(true)
@@ -254,7 +258,7 @@ function QuestionBlock({ question, onSubmit }: {
             ) : null}
             {detailOption?.detail ? (
               <div className="ask-user-detail-content markdown-body">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{detailOption.detail}</ReactMarkdown>
+                <MarkdownDetail content={detailOption.detail} />
               </div>
             ) : (
               <div className="ask-user-detail-empty">选择左侧选项查看详情</div>
