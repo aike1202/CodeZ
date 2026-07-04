@@ -73,7 +73,8 @@ export interface PermissionRequestState {
 export interface AskUserOptionState {
   label: string
   description?: string
-  preview?: string
+  /** 选项的详细说明（markdown），前端按内容动态展示 */
+  detail?: string
 }
 
 export interface AskUserQuestionItemState {
@@ -81,6 +82,10 @@ export interface AskUserQuestionItemState {
   header: string
   options: AskUserOptionState[]
   multiSelect?: boolean
+  /** 自定义"忽略"按钮文案，默认"忽略" */
+  ignoreLabel?: string
+  /** 自定义"提交"按钮文案，默认"提交" */
+  submitLabel?: string
 }
 
 export interface AskUserRequestState {

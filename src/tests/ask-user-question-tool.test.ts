@@ -29,6 +29,21 @@ describe('validateAskUserRequest', () => {
   it('缺 question：error', () => {
     expect(validateAskUserRequest({ questions: [{ header: 'h', options: [{ label: 'a' }, { label: 'b' }] }] }).ok).toBe(false)
   })
+  it('ignoreLabel/submitLabel 合法：保留', () => {
+    const r = validateAskUserRequest({ questions: [{ question: 'q', header: 'h', options: [{ label: 'a' }, { label: 'b' }], ignoreLabel: '跳过', submitLabel: '确定' }] })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.questions[0].ignoreLabel).toBe('跳过')
+  })
+  it('ignoreLabel 过长：被剔除', () => {
+    const r = validateAskUserRequest({ questions: [{ question: 'q', header: 'h', options: [{ label: 'a' }, { label: 'b' }], ignoreLabel: 'x'.repeat(20) }] })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.questions[0].ignoreLabel).toBeUndefined()
+  })
+  it('submitLabel 空串：被剔除', () => {
+    const r = validateAskUserRequest({ questions: [{ question: 'q', header: 'h', options: [{ label: 'a' }, { label: 'b' }], submitLabel: '   ' }] })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.questions[0].submitLabel).toBeUndefined()
+  })
 })
 
 describe('interceptAskUser', () => {

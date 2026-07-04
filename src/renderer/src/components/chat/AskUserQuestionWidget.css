@@ -1,12 +1,413 @@
-.ask-user-widget { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
-.ask-user-question { display: flex; flex-direction: column; gap: 8px; }
-.ask-user-header { font-size: 12px; color: #888; text-transform: uppercase; }
-.ask-user-q { font-size: 14px; font-weight: 600; }
-.ask-user-options { display: flex; flex-direction: column; gap: 6px; }
-.ask-user-option { text-align: left; padding: 8px 10px; border: 1px solid #ddd; border-radius: 8px; background: #fff; cursor: pointer; }
-.ask-user-option.selected { border-color: #4c6ef5; background: #eef2ff; }
-.ask-user-option-label { font-size: 13px; font-weight: 600; }
-.ask-user-option-desc { font-size: 12px; color: #666; }
-.ask-user-other-input { padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; }
-.ask-user-submit { align-self: flex-end; padding: 6px 14px; border: none; border-radius: 6px; background: #4c6ef5; color: #fff; cursor: pointer; }
-.ask-user-submit:disabled { background: #bbb; cursor: not-allowed; }
+/* ============================================================
+   AskUserQuestionWidget —— 套用全局 design tokens
+   - 圆角 / 尺寸 / 动效曲线与 Button.css 保持一致
+   - 颜色全部走 CSS 变量，原生支持深浅主题
+   - 单/多选统一选项卡 + 底部两步确认按钮（提交 / 忽略）
+   - detail: 任一选项含 detail 时左右分栏（单/多选均生效），右栏 markdown 渲染
+   ============================================================ */
+
+.ask-user-widget {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--bg-panel);
+}
+
+.ask-user-question {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ---------- 标题区 ---------- */
+.ask-user-header {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ask-user-q {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main);
+  line-height: 1.5;
+}
+
+/* ---------- 主体：默认竖排；has-detail 时左右分栏 ---------- */
+.ask-user-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ask-user-question.has-detail .ask-user-body {
+  flex-direction: row;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.ask-user-question.has-detail .ask-user-options {
+  flex: 0 0 42%;
+  min-width: 0;
+}
+
+.ask-user-question.has-detail .ask-user-detail {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---------- 选项区 ---------- */
+.ask-user-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ask-user-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--text-main);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.ask-user-option:hover {
+  border-color: var(--primary-hover);
+  background: var(--bg-hover);
+}
+
+.ask-user-option:active {
+  transform: translateY(1px);
+}
+
+.ask-user-option.selected {
+  border-color: var(--primary-color);
+  background: var(--primary-outline);
+}
+
+.ask-user-option.selected:hover {
+  border-color: var(--primary-hover);
+  background: var(--primary-outline);
+}
+
+/* detail 模式下：当前展示详情的选项（非选中也有视觉强调，引导用户对应左栏） */
+.ask-user-question.has-detail .ask-user-option.active {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 1px var(--primary-color);
+}
+
+/* 选中态左侧勾选标记，不依赖颜色 alone */
+.ask-user-option-check {
+  flex: 0 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: 50%;
+  color: #fff;
+  background: transparent;
+  border: 1.5px solid var(--border-color);
+  transition: all 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.ask-user-option.selected .ask-user-option-check {
+  background: var(--primary-color);
+  border-color: var(--primary-color);
+}
+
+.ask-user-option-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ask-user-option-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  line-height: 1.4;
+}
+
+.ask-user-option-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* ---------- "其他"选项 ---------- */
+.ask-user-option-other {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.ask-user-option-other .ask-user-option-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.ask-user-option-other .ask-user-option-main:hover {
+  background: var(--bg-hover);
+}
+
+.ask-user-other-input {
+  margin: 0 10px 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text-main);
+  font-size: 13px;
+  font-family: var(--font-sans);
+  outline: none;
+  transition: all 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.ask-user-other-input:focus {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px var(--primary-outline);
+}
+
+.ask-user-other-input.has-error {
+  border-color: var(--color-error);
+  box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.12);
+}
+
+/* ---------- detail 右栏：markdown 渲染区 ---------- */
+.ask-user-detail {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-app);
+  padding: 12px;
+  min-height: 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
+  max-height: 60vh;
+}
+
+.ask-user-detail-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+/* detail 内 markdown：等宽优先（含代码块），正文走 sans，整体偏紧凑 */
+.ask-user-detail-content {
+  flex: 1;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-main);
+  word-break: break-word;
+  overflow-x: auto;
+}
+
+.ask-user-detail-content p {
+  margin: 0 0 8px;
+}
+
+.ask-user-detail-content p:last-child {
+  margin-bottom: 0;
+}
+
+.ask-user-detail-content ul,
+.ask-user-detail-content ol {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.ask-user-detail-content li {
+  margin-bottom: 2px;
+}
+
+.ask-user-detail-content pre {
+  margin: 0 0 8px;
+  padding: 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  overflow-x: auto;
+}
+
+.ask-user-detail-content pre code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-main);
+  background: transparent;
+  padding: 0;
+}
+
+.ask-user-detail-content code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-hover);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.ask-user-detail-content strong {
+  font-weight: 600;
+}
+
+.ask-user-detail-content a {
+  color: var(--primary-color);
+  text-decoration: none;
+}
+
+.ask-user-detail-content a:hover {
+  text-decoration: underline;
+}
+
+.ask-user-detail-content blockquote {
+  margin: 0 0 8px;
+  padding: 4px 12px;
+  border-left: 3px solid var(--border-color);
+  color: var(--text-muted);
+}
+
+.ask-user-detail-content table {
+  border-collapse: collapse;
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+
+.ask-user-detail-content th,
+.ask-user-detail-content td {
+  border: 1px solid var(--border-color);
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.ask-user-detail-empty {
+  color: var(--text-light);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: auto;
+}
+
+/* ---------- 底部操作栏：普通单次点击按钮 ---------- */
+.ask-user-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.ask-user-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+  outline: none;
+  white-space: nowrap;
+  transition: all 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.ask-user-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.ask-user-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.ask-user-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 提交按钮：实心主色（主操作） */
+.ask-user-btn-submit {
+  color: #fff;
+  background: var(--primary-color);
+  border-color: var(--primary-color);
+}
+
+.ask-user-btn-submit:hover:not(:disabled) {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+
+.ask-user-btn-submit:active:not(:disabled) {
+  background: var(--primary-active);
+  border-color: var(--primary-active);
+}
+
+/* 忽略按钮：描边次要态（克制，避免与主操作竞争） */
+.ask-user-btn-ignore {
+  background: var(--bg-panel);
+  border-color: var(--border-color);
+  color: var(--text-muted);
+}
+
+.ask-user-btn-ignore:hover {
+  color: var(--color-error-hover);
+  border-color: var(--color-error-hover);
+  background: var(--bg-hover);
+}
+
+.ask-user-btn-ignore:active {
+  color: var(--color-error-active);
+  border-color: var(--color-error-active);
+}
+
+/* ---------- 响应式：窄屏 detail 改为上下堆叠 ---------- */
+@media (max-width: 560px) {
+  .ask-user-question.has-detail .ask-user-body {
+    flex-direction: column;
+  }
+  .ask-user-question.has-detail .ask-user-options,
+  .ask-user-question.has-detail .ask-user-detail {
+    flex: none;
+    width: 100%;
+  }
+}
+
+/* ---------- 尊重用户的"减少动态"偏好 ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .ask-user-option,
+  .ask-user-btn,
+  .ask-user-other-input,
+  .ask-user-option-check {
+    transition: none !important;
+    animation: none !important;
+  }
+}

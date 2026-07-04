@@ -28,8 +28,8 @@ export async function handleEnterPlanMode(
         question: 'Agent 建议进入 Plan 模式以探索代码并设计技术方案，是否同意？',
         header: '🏗️ Agent 建议进入 Plan 模式',
         options: [
-          { label: '进入规划', description: '启动 Plan SubAgent 进行分析设计', preview: 'approve' },
-          { label: '跳过，直接执行', description: 'Agent 将继续在当前模式下直接工作', preview: 'skip' }
+          { label: '进入规划', description: '启动 Plan SubAgent 进行分析设计' },
+          { label: '跳过，直接执行', description: 'Agent 将继续在当前模式下直接工作' }
         ],
         multiSelect: false
       }
