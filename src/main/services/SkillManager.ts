@@ -82,7 +82,9 @@ export class SkillManager {
         if (entry.isDirectory()) {
           await processDir(fullPath)
         } else if (entry.isFile() && (entry.name === 'SKILL.md' || entry.name.endsWith('.skill.md'))) {
-          const content = await fs.promises.readFile(fullPath, 'utf-8')
+          const raw = await fs.promises.readFile(fullPath, 'utf-8')
+          // 去掉可能存在的 UTF-8 BOM，否则 ^--- frontmatter 匹配会失败
+          const content = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw
           const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/)
           if (match) {
             const frontmatter = match[1]

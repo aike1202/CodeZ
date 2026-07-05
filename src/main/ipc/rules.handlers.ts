@@ -132,6 +132,8 @@ async function loadRulesFromDir(dirPath: string, scope: RuleScope, rules: RuleFi
 
 function parseRuleFile(filePath: string, scope: RuleScope, raw: string, projectId?: string): RuleFile {
   const filename = path.basename(filePath)
+  // 去掉可能存在的 UTF-8 BOM，否则 ^--- frontmatter 匹配会失败
+  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1)
   const rule: RuleFile = {
     filename,
     scope,

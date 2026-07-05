@@ -134,4 +134,24 @@ describe('SkillManager builtin', () => {
     // 普通用户技能不受影响
     expect(skills.find((s) => s.id === 'global-my-custom')).toBeDefined()
   })
+
+  it('带 UTF-8 BOM 的 SKILL.md 仍能被正确扫描', async () => {
+    const globalDir = path.join(home, '.codez', 'skills')
+    const skillDir = path.join(globalDir, 'task-summary')
+    await fs.mkdir(skillDir, { recursive: true })
+    // 前置 BOM
+    await fs.writeFile(
+      path.join(skillDir, 'SKILL.md'),
+      '﻿---\nname: task-summary\ndescription: 生成总结\n---\n正文',
+      'utf-8'
+    )
+
+    const sm = SkillManager.getInstance()
+    const skills = await sm.scanWorkspace(null)
+
+    const found = skills.find((s) => s.id === 'global-task-summary')
+    expect(found).toBeDefined()
+    expect(found?.name).toBe('task-summary')
+    expect(found?.description).toBe('生成总结')
+  })
 })
