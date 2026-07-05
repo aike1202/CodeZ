@@ -9,20 +9,25 @@ export function buildSubAgentGuidance(): string {
   lines.push('<delegation_guidance>')
   lines.push('## When to Delegate to SubAgents via the Task Tool')
   lines.push('')
-  lines.push('Delegating complex work to specialized SubAgents is MORE EFFICIENT than doing everything yourself because each SubAgent has:')
-  lines.push('- An isolated context window (does not consume your token budget)')
-  lines.push('- A focused tool set optimized for its task')
-  lines.push('- A structured output format with evidence anchors and quality metadata')
+  lines.push('**CRITICAL:** You have access to specialized subagents via the Task tool. For any exploration that spans 3+ files or directories, you MUST delegate to a subagent rather than searching directly. Direct Glob/Grep/Read calls pollute your context window; subagents are isolated and return structured evidence you can act on immediately.')
+  lines.push('')
+
+  // Anti-patterns — direct instructions
+  lines.push('### ANTI-PATTERNS: What NOT to do')
+  lines.push('- Do NOT use fast_context or Read on multiple directories to "explore" a project — delegate to Research instead.')
+  lines.push('- Do NOT chain 3+ Glob + Grep + Read calls to trace a data flow yourself — delegate to Research.')
+  lines.push('- Do NOT dump directory trees or file contents into your context for broad questions — Research returns a focused summary.')
   lines.push('')
 
   // Decision table
   lines.push('### Quick Decision Table')
   lines.push('| Situation | Action |')
   lines.push('|-----------|--------|')
-  lines.push('| Single file/symbol lookup | Use Glob/Grep/Read directly — faster and cheaper |')
-  lines.push('| Cross-cutting exploration (3+ files/dirs) | Delegate to Research subagent |')
+  lines.push('| Single file/symbol lookup | Use Glob/Grep/Read directly |')
+  lines.push('| Cross-cutting exploration (3+ files/dirs) | **MUST** delegate to Research subagent |')
   lines.push('| Multi-step implementation plan needed | Use EnterPlanMode (→ Plan subagent) |')
   lines.push('| Two fully independent explorations | Run two subagents in parallel via Task tool |')
+  lines.push('| User asks "analyze the project" or similar | Delegate to Research — NEVER use fast_context for this |')
   lines.push('| Answer already in conversation context | Do NOT delegate — use what you already know |')
   lines.push('')
 
@@ -54,11 +59,28 @@ export function buildSubAgentGuidance(): string {
     lines.push('')
   }
 
+  // Example
+  lines.push('### Concrete Example')
+  lines.push('')
+  lines.push('User asks: "分析整个项目"')
+  lines.push('')
+  lines.push('WRONG approach:')
+  lines.push('  → fast_context(["package.json", "src", "README.md", ...])  ← pollutes context')
+  lines.push('  → Read multiple files directly  ← more context pollution')
+  lines.push('')
+  lines.push('RIGHT approach:')
+  lines.push('  → Task({ subagent_type: "Research", description: "Analyze project structure",')
+  lines.push('          prompt: "Analyze the codebase architecture: directory layout, key modules,')
+  lines.push('            their responsibilities, and how they connect.",')
+  lines.push('          depth: "normal" })')
+  lines.push('  → Summarize the subagent result for the user')
+  lines.push('')
+
   // How to write a good prompt
   lines.push('### How to Write a Good Task Prompt')
-  lines.push('1. **State the core question** — one sentence describing what you need to know (use the `prompt` or `task` field).')
-  lines.push('2. **Include acceptance criteria** — use `expectations.questions` to list specific sub-questions that must be answered.')
-  lines.push('3. **Provide known context** — use the `context` field to share what you already know (natural language, not file lists).')
+  lines.push('1. **State the core question** — one sentence describing what you need to know.')
+  lines.push('2. **Include acceptance criteria** — use `expectations.questions` to list specific sub-questions.')
+  lines.push('3. **Provide known context** — use the `context` field to share what you already know.')
   lines.push('4. **Set explicit scope** — use `expectations.outOfScope` to declare what NOT to investigate.')
   lines.push('5. **Choose the right depth** — `quick` for simple lookups, `normal` for tracing, `exhaustive` for full audits.')
   lines.push('')
@@ -71,7 +93,7 @@ export function buildSubAgentGuidance(): string {
   lines.push('- Trust `confirmed` answers; spot-check `likely` answers; verify `speculative` ones yourself.')
   lines.push('- Use `filesExamined` to see what was actually read — spot-check key files if unsure.')
   lines.push('')
-  lines.push('**Important:** Delegating is cheaper than doing it yourself. If unsure, delegate — the subagent returns structured evidence you can act on immediately.')
+  lines.push('**Remember:** Delegating preserves YOUR context for reasoning about results. Direct exploration burns YOUR tokens. Always delegate broad exploration.')
   lines.push('</delegation_guidance>')
   return lines.join('\n')
 }

@@ -13,7 +13,19 @@ export class FastContextTool extends Tool {
   }
 
   get description() {
-    return 'Quickly gather project context by providing an array of file or directory paths. For directories, it returns the tree structure. For files, it returns their exact contents. Use this tool for a rapid understanding of specific components. (e.g. ["src", "pom.xml", "README.md"])'
+    return [
+      'Quickly gather project context by providing an array of file or directory paths.',
+      'For directories, it returns the tree structure. For files, it returns their exact contents.',
+      '',
+      '**When to use:** Quick lookups of 1-2 specific files or directories to understand narrow scope.',
+      '',
+      '**When NOT to use:** Broad "analyze the project" or "understand the architecture" requests.',
+      'For cross-cutting exploration spanning 3+ files/directories, use the Task tool with Research subagent instead —',
+      'that preserves your context window and returns structured evidence.',
+      '',
+      'Example: `fast_context(["package.json", "src/main/agent"])` — OK for understanding the agent module layout.',
+      'Example: `fast_context(["package.json", "src", "README.md"])` — BAD. Delegate to Research subagent for broad analysis.'
+    ].join('\n')
   }
 
   get parameters_schema() {
