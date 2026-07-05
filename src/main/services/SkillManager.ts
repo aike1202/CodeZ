@@ -8,7 +8,7 @@ import type {
   ExternalSkillGroup,
   ExternalSkillItem
 } from '../../shared/types/skill'
-import { isBuiltinSkillName } from './BuiltinSkills'
+import { isBuiltinSkillName, BUILTIN_SKILL_NAMES, resolveBuiltinSkillsDir } from './BuiltinSkills'
 
 export class SkillManager {
   private static instance: SkillManager
@@ -114,30 +114,35 @@ export class SkillManager {
     return skills
   }
 
-  private async initializeGlobalSkillsIfNeeded(): Promise<void> {
+  /**
+   * 将打包的内置技能同步到全局技能目录（覆盖，保证随应用升级更新内容）。
+   * 找不到打包资源时静默跳过，不阻断技能扫描。
+   */
+  private async syncBuiltinSkills(): Promise<void> {
+    const srcRoot = resolveBuiltinSkillsDir()
+    if (!srcRoot) {
+      console.warn('[SkillManager] builtin skills resource dir not found, skip sync')
+      return
+    }
+
     const globalDir = this.getGlobalSkillsDir()
     if (!fs.existsSync(globalDir)) {
       await fs.promises.mkdir(globalDir, { recursive: true })
-      // Create a default built-in skill
-      const defaultSkillDir = path.join(globalDir, 'Code-Review')
-      await fs.promises.mkdir(defaultSkillDir, { recursive: true })
-      const defaultSkillContent = `---
-name: 代码审查专家
-description: 全局常驻技能：作为一个严苛但友善的资深代码审查员，帮我找出潜在问题。
-triggers: [code-review, review, 代码审查]
----
-你现在是一个拥有 10 年经验的架构师和代码审查专家。
-每次我发代码给你，你必须：
-1. 找出潜在的 Bug 和内存泄漏。
-2. 提出性能优化的建议。
-3. 检查是否符合 SOLID 原则。
-请保持回复简明扼要，直接指出核心问题！`
-      await fs.promises.writeFile(path.join(defaultSkillDir, 'SKILL.md'), defaultSkillContent, 'utf-8')
+    }
+
+    for (const name of BUILTIN_SKILL_NAMES) {
+      const src = path.join(srcRoot, name)
+      try {
+        if (!fs.existsSync(path.join(src, 'SKILL.md'))) continue
+        await this.copyDirectory(src, path.join(globalDir, name))
+      } catch (e) {
+        console.error(`[SkillManager] failed to sync builtin skill ${name}:`, e)
+      }
     }
   }
 
   public async scanWorkspace(workspaceRoot: string | null): Promise<SkillDefinition[]> {
-    await this.initializeGlobalSkillsIfNeeded()
+    await this.syncBuiltinSkills()
     
     let allSkills: SkillDefinition[] = []
     
@@ -352,6 +357,27 @@ triggers: [code-review, review, 代码审查]
     } catch (e) {
       console.error(`Failed to delete skill ${id}:`, e)
       return false
+    }
+  }
+
+  /** 递归复制目录（覆盖同名文件）。 */
+  private async copyDirectory(src: string, dest: string): Promise<void> {
+    if (!fs.existsSync(dest)) {
+      await fs.promises.mkdir(dest, { recursive: true })
+    }
+    const entries = await fs.promises.readdir(src, { withFileTypes: true })
+    for (const entry of entries) {
+      const s = path.join(src, entry.name)
+      const d = path.join(dest, entry.name)
+      let isDir = false
+      try {
+        isDir = fs.statSync(s).isDirectory()
+      } catch (e) {}
+      if (isDir) {
+        await this.copyDirectory(s, d)
+      } else {
+        await fs.promises.copyFile(s, d)
+      }
     }
   }
 

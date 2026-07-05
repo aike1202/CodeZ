@@ -66,4 +66,32 @@ describe('SkillManager builtin', () => {
     const stat = await fs.stat(path.join(globalDir, 'skill-creator'))
     expect(stat.isDirectory()).toBe(true)
   })
+
+  it('syncBuiltinSkills 从打包资源复制内置技能到全局目录', async () => {
+    // 造一个假的打包资源目录
+    const resDir = path.join(home, 'builtin-res')
+    const scDir = path.join(resDir, 'skill-creator')
+    await fs.mkdir(scDir, { recursive: true })
+    await fs.writeFile(
+      path.join(scDir, 'SKILL.md'),
+      '---\nname: skill-creator\ndescription: official\n---\nbody',
+      'utf-8'
+    )
+    await fs.mkdir(path.join(scDir, 'scripts'), { recursive: true })
+    await fs.writeFile(path.join(scDir, 'scripts', 'run.py'), 'print(1)\n', 'utf-8')
+    process.env.CODEZ_BUILTIN_SKILLS_DIR = resDir
+
+    ;(SkillManager as any)['instance'] = undefined
+    const sm = SkillManager.getInstance()
+    const skills = await sm.scanWorkspace(null)
+
+    const creator = skills.find((s) => s.id === 'global-skill-creator')
+    expect(creator?.builtin).toBe(true)
+    // 子目录脚本也被复制
+    const copied = await fs.readFile(
+      path.join(home, '.codez', 'skills', 'skill-creator', 'scripts', 'run.py'),
+      'utf-8'
+    )
+    expect(copied).toContain('print(1)')
+  })
 })
