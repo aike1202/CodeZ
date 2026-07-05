@@ -149,7 +149,7 @@ export function buildUnifiedTimeline(
           return
         }
 
-        if ((tc.name === 'fast_context' || tc.name === 'read_files') && tc.args) {
+        if (tc.name === 'read_files' && tc.args) {
           const argsObj = parseArgs(tc.args)
           const targetPaths = argsObj.targetPaths || argsObj.TargetPaths
           if (Array.isArray(targetPaths) && targetPaths.length > 0) {
@@ -184,8 +184,7 @@ export function buildUnifiedTimeline(
           verbDisplay = 'Terminal'
         } else if (
           tc.name === 'Read' ||
-          tc.name === 'read_files' ||
-          tc.name === 'fast_context'
+          tc.name === 'read_files'
         ) {
           verbDisplay = tc.status === 'running' ? 'Analyzing' : 'Analyzed'
         } else if (tc.name === 'AskUserQuestion') {

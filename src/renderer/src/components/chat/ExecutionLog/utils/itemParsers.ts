@@ -64,8 +64,6 @@ export function getToolNoun(toolName: string): string {
       return '代码搜索'
     case 'get_symbol_map':
       return '符号索引'
-    case 'fast_context':
-      return '快速上下文'
     default:
       return toolName
   }

@@ -4,7 +4,7 @@ import { ToolManager } from '../main/tools/ToolManager'
 import { IPC_CHANNELS } from '../shared/ipc/channels'
 
 describe('ToolManager.getReadOnlyTools()', () => {
-  it('应返回 5 个只读工具', () => {
+  it('应返回 4 个只读工具', () => {
     const tm = new ToolManager()
     const readOnly = tm.getReadOnlyTools()
     const names = readOnly.map(t => t.function.name).sort()
@@ -12,7 +12,6 @@ describe('ToolManager.getReadOnlyTools()', () => {
       'Glob',
       'Grep',
       'Read',
-      'fast_context',
       'list_files'
     ])
   })

@@ -34,7 +34,7 @@ export class PermissionManager {
 
   public checkToolPermission(toolName: string, parsedArgs: any, workspaceRoot: string, workspaceMode: 'ask' | 'auto-approve-safe' | 'full-access' = 'auto-approve-safe'): PermissionResult {
     // 0. Base safe tools
-    if (['list_files', 'fast_context', 'update_resume_state', 'UpdatePlanStep', 'ExitPlanMode', 'Read', 'NotebookEdit', 'Glob', 'Grep', 'Skill', 'PushNotification', 'AskUserQuestion', 'view_file', 'grep_search'].includes(toolName)) {
+    if (['list_files', 'update_resume_state', 'UpdatePlanStep', 'ExitPlanMode', 'Read', 'NotebookEdit', 'Glob', 'Grep', 'Skill', 'PushNotification', 'AskUserQuestion', 'view_file', 'grep_search'].includes(toolName)) {
       return 'allow'
     }
 

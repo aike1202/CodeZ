@@ -37,7 +37,7 @@ export const ResearchSubAgent: SubAgentDefinition = {
   },
 
   getTools: (toolManager: ToolManager): ToolDefinition[] => {
-    // 只读工具集：Read, list_files, Glob, Grep, fast_context
+    // 只读工具集：Read, list_files, Glob, Grep
     return toolManager.getReadOnlyTools()
   },
 
@@ -67,7 +67,7 @@ export const ResearchSubAgent: SubAgentDefinition = {
       contextSection,
       '',
       'Constraints:',
-      '- You ONLY have read-only tools (Read, list_files, Glob, Grep, fast_context).',
+      '- You ONLY have read-only tools (Read, list_files, Glob, Grep).',
       '- Keep token usage minimal; do not dump entire file contents.',
       '- If the question is ambiguous, make a reasonable interpretation and proceed.',
       '- Every finding must reference file_path:line_number as evidence.',

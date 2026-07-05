@@ -14,7 +14,7 @@ export function buildSubAgentGuidance(): string {
 
   // Anti-patterns — direct instructions
   lines.push('### ANTI-PATTERNS: What NOT to do')
-  lines.push('- Do NOT use fast_context or Read on multiple directories to "explore" a project — delegate to Research instead.')
+  lines.push('- Do NOT chain 3+ Glob + Grep + Read calls to trace a data flow yourself — delegate to Research.')
   lines.push('- Do NOT chain 3+ Glob + Grep + Read calls to trace a data flow yourself — delegate to Research.')
   lines.push('- Do NOT dump directory trees or file contents into your context for broad questions — Research returns a focused summary.')
   lines.push('')
@@ -27,7 +27,7 @@ export function buildSubAgentGuidance(): string {
   lines.push('| Cross-cutting exploration (3+ files/dirs) | **MUST** delegate to Research subagent |')
   lines.push('| Multi-step implementation plan needed | Use EnterPlanMode (→ Plan subagent) |')
   lines.push('| Two fully independent explorations | Run two subagents in parallel via Task tool |')
-  lines.push('| User asks "analyze the project" or similar | Delegate to Research — NEVER use fast_context for this |')
+  lines.push('| User asks "analyze the project" or similar | Delegate to Research — do NOT directly explore with Glob/Grep/Read |')
   lines.push('| Answer already in conversation context | Do NOT delegate — use what you already know |')
   lines.push('')
 
@@ -65,7 +65,7 @@ export function buildSubAgentGuidance(): string {
   lines.push('User asks: "分析整个项目"')
   lines.push('')
   lines.push('WRONG approach:')
-  lines.push('  → fast_context(["package.json", "src", "README.md", ...])  ← pollutes context')
+  lines.push('  → Glob + Grep + Read across multiple directories  ← pollutes context')
   lines.push('  → Read multiple files directly  ← more context pollution')
   lines.push('')
   lines.push('RIGHT approach:')

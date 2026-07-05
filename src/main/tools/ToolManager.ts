@@ -14,7 +14,6 @@ import { TaskTool } from './builtin/TaskTool'
 import { SkillTool } from './builtin/SkillTool'
 import { RollbackLastEditTool } from './builtin/RollbackLastEditTool'
 import { UpdateResumeStateTool } from './builtin/UpdateResumeStateTool'
-import { FastContextTool } from './builtin/FastContextTool'
 import { EnterPlanModeTool } from './builtin/EnterPlanModeTool'
 import { ExitPlanModeTool } from './builtin/ExitPlanModeTool'
 import { UpdatePlanStepTool } from './builtin/UpdatePlanStepTool'
@@ -28,8 +27,7 @@ export class ToolManager {
     'Read',
     'list_files',
     'Glob',
-    'Grep',
-    'fast_context'
+    'Grep'
   ])
 
   constructor() {
@@ -52,7 +50,6 @@ export class ToolManager {
       new SkillTool(),
       new RollbackLastEditTool(),
       new UpdateResumeStateTool(),
-      new FastContextTool(),
       new EnterPlanModeTool(),
       new ExitPlanModeTool(),
       new UpdatePlanStepTool(),
