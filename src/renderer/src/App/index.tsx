@@ -91,10 +91,18 @@ export default function App(): React.ReactElement {
 
   const hasMessages = messages.length > 0
 
-  const handleCreateFromSkill = (triggerName: string, promptSuffix: string) => {
-    if (workspace) createSession(workspace.id)
+  const handleCreateFromSkill = async (triggerName: string, promptSuffix: string) => {
+    let ws = useWorkspaceStore.getState().workspace
+    if (!ws) {
+      // 无工作区：先让用户选择/打开一个项目（内部会建会话），再预填提示词
+      await handleOpenProject()
+      ws = useWorkspaceStore.getState().workspace
+      if (!ws) return // 用户取消了选择
+    } else {
+      createSession(ws.id)
+    }
     setPendingPrompt(`/${triggerName} ${promptSuffix}`)
-    setCurrentView(hasMessages || workspace ? 'chat' : 'home')
+    setCurrentView('chat')
   }
 
   if (currentView === 'settings') {
