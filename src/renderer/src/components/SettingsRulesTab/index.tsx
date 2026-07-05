@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import Flex from '../ui/Flex'
 import Stack from '../ui/Stack'
-import { IconFolder, IconChevron, IconMessagePlus, IconMessage, IconTrash } from '../Icons'
+import { IconFolder, IconChevron, IconMessagePlus, IconMessage, IconTrash, IconZap } from '../Icons'
 import { useRulesStore } from '../../stores/rulesStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import type { RuleFile, RuleScope } from '@shared/types/rules'
@@ -9,7 +9,11 @@ import MarkdownEditor from '../ui/MarkdownEditor'
 import './SettingsRulesTab.css'
 import { RuleListItem } from './components/RuleListItem'
 
-export default function SettingsRulesTab(): React.ReactElement {
+interface Props {
+  onCreate?: () => void
+}
+
+export default function SettingsRulesTab({ onCreate }: Props): React.ReactElement {
   const rules = useRulesStore((s) => s.rules)
   const loadRules = useRulesStore((s) => s.loadRules)
   const saveRule = useRulesStore((s) => s.saveRule)
@@ -173,6 +177,15 @@ export default function SettingsRulesTab(): React.ReactElement {
         <div className="settings-provider-header">
           <h1 className="settings-provider-title">规则设置</h1>
           <p className="settings-provider-desc">管理全局和项目的 Agent 规则，指导 AI 如何编写代码。</p>
+          <button
+            className="project-action-btn"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 8 }}
+            onClick={() => onCreate?.()}
+            title="让 AI 帮你写一条规则"
+          >
+            <IconZap />
+            <span>AI 帮写规则</span>
+          </button>
         </div>
 
         <Stack className="settings-provider-list-container" style={{ padding: '0 8px' }}>
