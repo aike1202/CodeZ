@@ -26,6 +26,8 @@ export default function App(): React.ReactElement {
   const restoreSession = useChatStore((s) => s.restoreSession)
   const planListModalOpen = useChatStore((s) => s.planListModalOpen)
   const setPlanListModalOpen = useChatStore((s) => s.setPlanListModalOpen)
+  const createSession = useChatStore((s) => s.createSession)
+  const setPendingPrompt = useChatStore((s) => s.setPendingPrompt)
 
   const {
     workspace,
@@ -89,12 +91,19 @@ export default function App(): React.ReactElement {
 
   const hasMessages = messages.length > 0
 
+  const handleCreateFromSkill = (triggerName: string, promptSuffix: string) => {
+    if (workspace) createSession(workspace.id)
+    setPendingPrompt(`/${triggerName} ${promptSuffix}`)
+    setCurrentView(hasMessages || workspace ? 'chat' : 'home')
+  }
+
   if (currentView === 'settings') {
     return (
       <div className="settings-view-wrapper">
         <SettingsPage
           initialTab={settingsTab}
           onBack={() => setCurrentView(hasMessages ? 'chat' : 'home')}
+          onCreateFromSkill={handleCreateFromSkill}
         />
       </div>
     )
