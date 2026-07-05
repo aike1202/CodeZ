@@ -91,7 +91,6 @@ export const ResearchSubAgent: SubAgentDefinition = {
       '**unresolvedCount** (number, optional): How many acceptance criteria questions you could NOT answer.',
       '',
       'Constraints:',
-      '- You ONLY have read-only tools (Read, list_files, Glob, Grep).',
       '- Keep token usage minimal; do not dump entire file contents.',
       '- Every finding must reference `file_path:line_number` as evidence.',
       '- If the question is ambiguous, make a reasonable interpretation and proceed.',
