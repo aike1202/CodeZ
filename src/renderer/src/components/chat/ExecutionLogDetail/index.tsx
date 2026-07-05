@@ -21,19 +21,32 @@ export default function ExecutionLogDetail({
 
   if (item.type === 'tool') {
     if (item.verb === 'Explored') {
-      const lines = item.detail ? item.detail.split('\n') : []
-      const hasTree = lines.some((l) => l.startsWith('[DIR]') || l.startsWith('[FILE]'))
+      let detailText = item.detail || ''
+      try {
+        if (detailText.trim().startsWith('{')) {
+          const parsed = JSON.parse(detailText)
+          if (parsed && typeof parsed.data === 'string') {
+            detailText = parsed.data
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      const lines = detailText.split('\n')
+      const hasTree = lines.some((l) => l.trim().startsWith('[DIR]') || l.trim().startsWith('[FILE]'))
 
       if (hasTree) {
         return (
           <div className="exe-log-detail-box-mono">
             {lines.map((line, idx) => {
-              const isDir = line.startsWith('[DIR]')
-              const isFile = line.startsWith('[FILE]')
+              const trimmed = line.trim()
+              const isDir = trimmed.startsWith('[DIR]')
+              const isFile = trimmed.startsWith('[FILE]')
               if (!isDir && !isFile) {
-                if (!line.trim()) return null
+                if (!trimmed) return null
 
-                const dirMatch = line.match(/^={2,}\s*Directory:\s*(.+?)\s*={2,}$/)
+                const dirMatch = trimmed.match(/^={2,}\s*Directory:\s*(.+?)\s*={2,}$/)
                 if (dirMatch) {
                   return (
                     <div key={idx} className="exe-log-dir-header">
@@ -46,7 +59,7 @@ export default function ExecutionLogDetail({
                 return <div key={idx} className="pl-2">{line}</div>
               }
 
-              const name = line.replace(/^\[(DIR|FILE)\]\s*/u, '')
+              const name = trimmed.replace(/^\[(DIR|FILE)\]\s*/u, '')
               return (
                 <div key={idx} className="exe-log-dir-row">
                   {isDir ? <FolderIcon folderName={name} /> : getFileIconComponent(name)}
