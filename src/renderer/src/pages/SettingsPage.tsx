@@ -15,6 +15,7 @@ import './SettingsPage.css'
 interface Props {
   onBack: () => void
   initialTab?: string
+  onCreateFromSkill?: (triggerName: string, promptSuffix: string) => void
 }
 
 // 侧边栏菜单项配置 - 仅保留排期内需要的核心模块
@@ -28,7 +29,7 @@ const GLOBAL_MENU_ITEMS = [
   { id: 'trash', label: '最近删除', icon: <IconTrash /> },
 ]
 
-export default function SettingsPage({ onBack, initialTab }: Props): React.ReactElement {
+export default function SettingsPage({ onBack, initialTab, onCreateFromSkill }: Props): React.ReactElement {
   // Provider 相关的 state
   const providers = useProviderStore((s) => s.providers)
   const activeProviderId = useProviderStore((s) => s.activeProviderId)
@@ -181,7 +182,11 @@ export default function SettingsPage({ onBack, initialTab }: Props): React.React
     }
 
     if (activeGlobalMenu === 'skills') {
-      return <SettingsSkillsTab />
+      return (
+        <SettingsSkillsTab
+          onCreate={() => onCreateFromSkill?.('skill-creator', '帮我写一个技能：')}
+        />
+      )
     }
 
     if (activeGlobalMenu === 'agents') {
@@ -189,7 +194,11 @@ export default function SettingsPage({ onBack, initialTab }: Props): React.React
     }
 
     if (activeGlobalMenu === 'rules') {
-      return <SettingsRulesTab />
+      return (
+        <SettingsRulesTab
+          onCreate={() => onCreateFromSkill?.('rule-creator', '帮我写一条规则：')}
+        />
+      )
     }
 
     // 其它通用的占位面板区域
