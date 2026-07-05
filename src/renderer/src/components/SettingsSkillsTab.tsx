@@ -4,11 +4,15 @@ import type { SkillDefinition } from '@shared/types/skill'
 import Flex from './ui/Flex'
 import Button from './ui/Button'
 import Input from './ui/Input'
-import { IconAdd, IconDownload, IconRefreshCw, IconPackage, IconSearch, IconTrash } from './Icons'
+import { IconAdd, IconDownload, IconRefreshCw, IconPackage, IconSearch, IconTrash, IconFolderOpen } from './Icons'
 import SkillImportModal from './SkillImportModal'
 import './SettingsSkillsTab.css'
 
-export default function SettingsSkillsTab(): React.ReactElement {
+interface Props {
+  onCreate?: () => void
+}
+
+export default function SettingsSkillsTab({ onCreate }: Props): React.ReactElement {
   const workspace = useWorkspaceStore((s) => s.workspace)
   const [skills, setSkills] = useState<SkillDefinition[]>([])
   const [loading, setLoading] = useState(false)
@@ -94,10 +98,19 @@ export default function SettingsSkillsTab(): React.ReactElement {
           <Button
             variant="ghost"
             size="none"
-            onClick={handleOpenFolder}
-            title="新建/打开本地技能目录"
+            onClick={() => onCreate?.()}
+            title="新建技能（AI 帮你写）"
           >
             <IconAdd className="w-[18px] h-[18px]" />
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="none"
+            onClick={handleOpenFolder}
+            title="打开本地技能目录"
+          >
+            <IconFolderOpen className="w-[18px] h-[18px]" />
           </Button>
 
           <Button
@@ -173,7 +186,7 @@ export default function SettingsSkillsTab(): React.ReactElement {
 
                 <div className="skills-item-actions">
                   <span className="skills-item-type">
-                    {skill.isGlobal ? '个人' : '项目'}
+                    {skill.builtin ? '系统' : skill.isGlobal ? '个人' : '项目'}
                   </span>
                   <label className="skills-switch-label">
                     <input
@@ -184,14 +197,16 @@ export default function SettingsSkillsTab(): React.ReactElement {
                     />
                     <div className="skills-switch-inner"></div>
                   </label>
-                  <button
-                    className="skills-item-delete"
-                    title="删除技能"
-                    disabled={deletingId === skill.id}
-                    onClick={() => handleDelete(skill)}
-                  >
-                    <IconTrash className="w-4 h-4" />
-                  </button>
+                  {!skill.builtin && (
+                    <button
+                      className="skills-item-delete"
+                      title="删除技能"
+                      disabled={deletingId === skill.id}
+                      onClick={() => handleDelete(skill)}
+                    >
+                      <IconTrash className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
