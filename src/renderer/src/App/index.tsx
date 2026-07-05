@@ -91,18 +91,17 @@ export default function App(): React.ReactElement {
 
   const hasMessages = messages.length > 0
 
-  const handleCreateFromSkill = async (triggerName: string, promptSuffix: string) => {
-    let ws = useWorkspaceStore.getState().workspace
-    if (!ws) {
-      // 无工作区：先让用户选择/打开一个项目（内部会建会话），再预填提示词
-      await handleOpenProject()
-      ws = useWorkspaceStore.getState().workspace
-      if (!ws) return // 用户取消了选择
-    } else {
-      createSession(ws.id)
-    }
+  const handleCreateFromSkill = (triggerName: string, promptSuffix: string) => {
+    const ws = useWorkspaceStore.getState().workspace
+    // 预填提示词，等待用户在有工作区时发送
     setPendingPrompt(`/${triggerName} ${promptSuffix}`)
-    setCurrentView('chat')
+    if (ws) {
+      createSession(ws.id)
+      setCurrentView('chat')
+    } else {
+      // 无工作区：回到主页，让用户从"最近打开的项目"里选一个已加载的项目
+      setCurrentView('home')
+    }
   }
 
   if (currentView === 'settings') {
