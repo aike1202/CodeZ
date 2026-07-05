@@ -91,15 +91,26 @@ export default function App(): React.ReactElement {
 
   const hasMessages = messages.length > 0
 
-  const handleCreateFromSkill = (triggerName: string, promptSuffix: string) => {
-    const ws = useWorkspaceStore.getState().workspace
-    // 预填提示词，等待用户在有工作区时发送
+  const handleCreateFromSkill = async (triggerName: string, promptSuffix: string) => {
+    let ws = useWorkspaceStore.getState().workspace
+
+    // 无工作区：自动打开"最近打开的项目"里的第一个
+    if (!ws) {
+      const recent = useWorkspaceStore.getState().recentProjects
+      if (recent.length > 0) {
+        await handleOpenRecentProject({ id: recent[0].id, name: recent[0].name, sessions: [] })
+        ws = useWorkspaceStore.getState().workspace
+      }
+    }
+
+    // 预填提示词，等待用户发送
     setPendingPrompt(`/${triggerName} ${promptSuffix}`)
+
     if (ws) {
       createSession(ws.id)
       setCurrentView('chat')
     } else {
-      // 无工作区：回到主页，让用户从"最近打开的项目"里选一个已加载的项目
+      // 连最近项目都没有：回主页，让用户先打开一个项目
       setCurrentView('home')
     }
   }
