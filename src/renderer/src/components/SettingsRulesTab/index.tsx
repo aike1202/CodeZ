@@ -127,13 +127,44 @@ export default function SettingsRulesTab(): React.ReactElement {
     }
   }
 
+  const handleDeleteRule = async (rule: RuleFile) => {
+    if (confirm(`确定要删除规则 ${rule.filename} 吗？`)) {
+      await deleteRule(rule.path)
+      if (activeTabId === rule.path) {
+        setActiveTabId(null)
+        setEditingRule(null)
+      }
+    }
+  }
+
+  const handleToggleRule = async (rule: RuleFile, enabled: boolean) => {
+    let newContent = rule.content
+    const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---/
+    const match = newContent.match(frontmatterRegex)
+    
+    if (match) {
+      let yamlStr = match[1]
+      const enabledMatch = yamlStr.match(/^enabled:.*$/m)
+      if (enabledMatch) {
+        yamlStr = yamlStr.replace(/^enabled:.*$/m, `enabled: ${enabled}`)
+      } else {
+        yamlStr = `enabled: ${enabled}\n` + yamlStr
+      }
+      newContent = newContent.replace(match[0], `---\n${yamlStr}\n---`)
+    } else {
+      newContent = `---\nenabled: ${enabled}\n---\n\n` + newContent
+    }
+
+    const updatedRule = { ...rule, content: newContent, enabled }
+    await saveRule(updatedRule)
+    if (activeTabId === rule.path && editingRule) {
+      setEditingRule({ ...editingRule, content: newContent, enabled })
+    }
+  }
+
   const handleDelete = async () => {
     if (!editingRule || !editingRule.path) return
-    if (confirm(`确定要删除规则 ${editingRule.filename} 吗？`)) {
-      await deleteRule(editingRule.path)
-      setActiveTabId(null)
-      setEditingRule(null)
-    }
+    await handleDeleteRule(editingRule as RuleFile)
   }
 
   return (
@@ -174,6 +205,8 @@ export default function SettingsRulesTab(): React.ReactElement {
                 commitRename={commitRename}
                 handleSelectRule={handleSelectRule}
                 startRename={startRename}
+                handleToggleRule={handleToggleRule}
+                handleDeleteRule={handleDeleteRule}
               />
             ))}
           </Stack>
@@ -226,6 +259,8 @@ export default function SettingsRulesTab(): React.ReactElement {
                           commitRename={commitRename}
                           handleSelectRule={handleSelectRule}
                           startRename={startRename}
+                          handleToggleRule={handleToggleRule}
+                          handleDeleteRule={handleDeleteRule}
                         />
                       ))}
                       {projRules.length === 0 && activeTabId !== 'new' && (

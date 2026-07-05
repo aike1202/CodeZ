@@ -21,7 +21,9 @@ function normalizeThinkingConfig(value: unknown): ThinkingConfig {
     const config = value as Partial<ThinkingConfig>
     return {
       enabled: config.enabled !== false,
-      mode: config.mode || 'auto'
+      mode: config.mode || 'auto',
+      effort: config.effort,
+      budgetTokens: config.budgetTokens
     }
   }
 

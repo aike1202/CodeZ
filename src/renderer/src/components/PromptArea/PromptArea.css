@@ -254,22 +254,25 @@
 .prompt-dropdown-card {
   position: absolute;
   right: 0;
-  bottom: 120%;
-  margin-bottom: 4px;
-  width: 256px; /* w-64 */
-  padding-top: 6px;
-  padding-bottom: 6px;
+  bottom: calc(100% + 8px);
+  width: 260px; /* w-64 */
+  padding-top: 8px;
+  padding-bottom: 8px;
   z-index: 50;
   font-size: 14px;
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12); /* Softer, larger shadow */
+  border: 1px solid var(--border-light);
 }
 
 .prompt-dropdown-header {
-  padding: 6px 12px;
-  font-size: 12px;
+  padding: 8px 16px;
+  font-size: 11px;
   color: var(--text-muted);
-  font-weight: 500;
-  letter-spacing: 0.05em;
+  font-weight: 600;
   text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
 }
 
 .prompt-dropdown-empty {
@@ -283,49 +286,95 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 12px;
+  padding: 8px 16px;
   cursor: pointer;
-  color: var(--text-main); /* text-gray-700 */
-  transition: background-color 0.2s;
+  color: var(--text-main);
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease;
 }
 
 .prompt-dropdown-provider:hover {
-  background-color: var(--bg-hover); /* hover:bg-gray-50 */
+  background-color: var(--bg-hover);
+}
+
+.prompt-provider-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-top: 2px;
+  opacity: 0.8;
 }
 
 .prompt-dropdown-provider.is-active {
-  color: var(--primary-color); /* text-blue-600 */
-  font-weight: 500;
+  color: var(--primary-color);
+  font-weight: 600;
 }
 
 .prompt-check-mark {
-  font-size: 10px;
-  color: #60a5fa; /* text-blue-400 */
+  font-size: 12px;
+  color: var(--primary-color);
 }
 
-.prompt-dropdown-model-list {
-  margin-left: 16px;
-  border-left: 1px solid var(--border-light); /* border-gray-100 */
+.prompt-dropdown-provider-wrapper {
+  position: relative;
+}
+
+.prompt-chevron-right {
+  width: 14px;
+  height: 14px;
+  opacity: 0.5;
+}
+
+.prompt-submenu-container {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: 100%;
+  padding-left: 8px; /* invisible gap so hover doesn't break */
+  z-index: 60;
+  width: 260px;
+}
+
+.prompt-dropdown-provider-wrapper:hover .prompt-submenu-container {
+  display: block;
+}
+
+.prompt-submenu-card {
+  padding: 8px;
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--border-light);
+}
+
+.prompt-dropdown-model-list-submenu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .prompt-dropdown-model-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 12px;
+  padding: 6px 12px;
   cursor: pointer;
   font-size: 13px;
-  color: var(--text-muted); /* text-gray-500 */
-  transition: background-color 0.2s;
+  color: var(--text-muted);
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  margin-right: 8px;
 }
 
 .prompt-dropdown-model-item:hover {
   background-color: var(--bg-hover);
+  color: var(--text-main);
 }
 
 .prompt-dropdown-model-item.is-selected {
+  background-color: rgba(22, 119, 255, 0.08); /* slight primary tint */
   color: var(--primary-color);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .prompt-model-context-tokens {
@@ -357,11 +406,13 @@
 .prompt-send-btn {
   width: 32px;
   height: 32px;
+  flex-shrink: 0;
   border-radius: 9999px;
   display: flex;
   align-items: center;
   justify-content: center;
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); /* shadow-sm */
+  padding: 0 !important; /* Ensure shape isn't distorted by padding */
 }
 
 .prompt-send-btn.is-streaming {

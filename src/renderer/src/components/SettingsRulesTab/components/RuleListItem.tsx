@@ -1,6 +1,7 @@
 import React from 'react'
-import { IconMessage } from '../../Icons'
+import { IconMessage, IconTrash } from '../../Icons'
 import type { RuleFile } from '@shared/types/rules'
+import Switch from '../../ui/Switch'
 
 interface RuleListItemProps {
   rule: RuleFile
@@ -11,6 +12,8 @@ interface RuleListItemProps {
   commitRename: () => void
   handleSelectRule: (rule: RuleFile) => void
   startRename: (rule: RuleFile) => void
+  handleToggleRule: (rule: RuleFile, enabled: boolean) => void
+  handleDeleteRule: (rule: RuleFile) => void
 }
 
 export function RuleListItem({
@@ -21,7 +24,9 @@ export function RuleListItem({
   setInlineEditValue,
   commitRename,
   handleSelectRule,
-  startRename
+  startRename,
+  handleToggleRule,
+  handleDeleteRule
 }: RuleListItemProps): React.ReactElement {
   const isEditing = inlineEditId === rule.path
 
@@ -56,9 +61,29 @@ export function RuleListItem({
           }}
         />
       ) : (
-        <span className="truncate" style={{ flex: 1 }}>
-          {rule.filename}
-        </span>
+        <>
+          <span className="truncate" style={{ flex: 1 }}>
+            {rule.filename}
+          </span>
+          <div className="rule-item-actions">
+            <button
+              className="rule-item-trash-btn"
+              onClick={(e) => {
+                e.stopPropagation()
+                handleDeleteRule(rule)
+              }}
+              title="删除规则"
+            >
+              <IconTrash />
+            </button>
+            <div onClick={(e) => e.stopPropagation()}>
+              <Switch
+                checked={rule.enabled !== false}
+                onChange={(checked) => handleToggleRule(rule, checked)}
+              />
+            </div>
+          </div>
+        </>
       )}
     </div>
   )

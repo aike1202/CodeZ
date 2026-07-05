@@ -327,3 +327,25 @@
 .dark .skills-switch-input:checked + .skills-switch-inner::after {
   background-color: var(--bg-panel);
 }
+
+/* 删除按钮 */
+.skills-item-delete {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: var(--text-light);
+  transition: all 0.15s;
+  cursor: pointer;
+}
+.skills-item-delete:hover {
+  background-color: var(--color-error-bg, rgba(255, 77, 79, 0.12));
+  color: var(--color-error);
+}
+.skills-item-delete:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

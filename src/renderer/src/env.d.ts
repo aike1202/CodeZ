@@ -79,6 +79,9 @@ declare global {
         toggle: (workspaceRoot: string | null, id: string, enabled: boolean) => Promise<void>
         checkExternal: () => Promise<{ hasUpdates: boolean; totalCount: number; sources: { sourceName: string; count: number }[] }>
         importExternal: (sourceName?: string, customPath?: string, forceOverwrite?: boolean) => Promise<boolean>
+        listExternal: () => Promise<import('@shared/types/skill').ExternalSkillGroup[]>
+        importSingle: (sourceName: string, dirName: string) => Promise<boolean>
+        remove: (id: string) => Promise<boolean>
       }
       rules: {
         getList: (workspaces: any[]) => Promise<any[]>

@@ -27,4 +27,21 @@ export function registerSkillIpc(): void {
     const sm = SkillManager.getInstance()
     return await sm.importExternalSkills(sourceName, customPath, forceOverwrite)
   })
+
+  ipcMain.handle(IPC_CHANNELS.SKILL_LIST_EXTERNAL, async () => {
+    const sm = SkillManager.getInstance()
+    return await sm.listExternalSkills()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SKILL_IMPORT_SINGLE, async (_event, sourceName: string, dirName: string) => {
+    const sm = SkillManager.getInstance()
+    return await sm.importSingleExternalSkill(sourceName, dirName)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SKILL_DELETE, async (_event, id: string) => {
+    const workspaceSvc = getWorkspaceService()
+    const currentWorkspace = workspaceSvc ? workspaceSvc.getCurrentWorkspace() : null
+    const sm = SkillManager.getInstance()
+    return await sm.deleteSkill(currentWorkspace, id)
+  })
 }

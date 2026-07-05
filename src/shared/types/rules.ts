@@ -10,6 +10,7 @@ export interface RuleFile {
   description?: string
   globs?: string
   alwaysApply?: boolean
+  enabled?: boolean
   
   // Raw content minus the frontmatter
   content: string

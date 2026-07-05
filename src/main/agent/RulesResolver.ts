@@ -42,6 +42,22 @@ export class RulesResolver {
   private static async safeReadFile(filePath: string): Promise<string> {
     try {
       const content = await fs.readFile(filePath, 'utf-8')
+      const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---/
+      const match = content.match(frontmatterRegex)
+      if (match) {
+        const yamlStr = match[1]
+        const lines = yamlStr.split(/\r?\n/)
+        for (const line of lines) {
+          const idx = line.indexOf(':')
+          if (idx > -1) {
+            const key = line.slice(0, idx).trim()
+            const val = line.slice(idx + 1).trim()
+            if (key === 'enabled' && val === 'false') {
+              return '' // skip rule if explicitly disabled
+            }
+          }
+        }
+      }
       return content.trim() ? `[Source: ${path.basename(filePath)}]\n${content.trim()}` : ''
     } catch {
       return ''

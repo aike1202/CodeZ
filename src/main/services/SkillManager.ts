@@ -1,7 +1,13 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
-import type { SkillDefinition, ExternalSkillCheckResult, ExternalSourceCheck } from '../../shared/types/skill'
+import type {
+  SkillDefinition,
+  ExternalSkillCheckResult,
+  ExternalSourceCheck,
+  ExternalSkillGroup,
+  ExternalSkillItem
+} from '../../shared/types/skill'
 
 export class SkillManager {
   private static instance: SkillManager
@@ -185,8 +191,162 @@ triggers: [code-review, review, 代码审查]
     this.skillsCache.clear()
   }
 
-  public async checkExternalSkills(): Promise<ExternalSkillCheckResult> {
-    let totalCount = 0
+  /** 内置的外部工具技能目录（Codex / Claude）。 */
+  private getExternalSourceDirs(): { name: string; path: string }[] {
+    return [
+      { name: 'Codex', path: path.join(os.homedir(), '.codex', 'skills') },
+      { name: 'Claude', path: path.join(os.homedir(), '.claude', 'skills') }
+    ]
+  }
+
+  /** 从 SKILL.md 解析 name / description；失败时回退到目录名。 */
+  private readSkillMeta(skillMdPath: string, fallbackName: string): { name: string; description: string } {
+    try {
+      const content = fs.readFileSync(skillMdPath, 'utf-8')
+      const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/)
+      if (match) {
+        const frontmatter = match[1]
+        const nameMatch = frontmatter.match(/name:\s*(.*)/)
+        const descMatch = frontmatter.match(/description:\s*(.*)/)
+        return {
+          name: nameMatch ? nameMatch[1].trim() : fallbackName,
+          description: descMatch ? descMatch[1].trim() : ''
+        }
+      }
+    } catch (e) {
+      console.error('Failed to read skill meta:', e)
+    }
+    return { name: fallbackName, description: '' }
+  }
+
+  /** 列出各外部工具下的单个技能，并标记其导入 / 可更新状态，供选择性导入使用。 */
+  public async listExternalSkills(): Promise<ExternalSkillGroup[]> {
+    const codezSkillsDir = this.getGlobalSkillsDir()
+    const groups: ExternalSkillGroup[] = []
+
+    for (const ext of this.getExternalSourceDirs()) {
+      const skills: ExternalSkillItem[] = []
+      if (fs.existsSync(ext.path)) {
+        try {
+          const entries = await fs.promises.readdir(ext.path, { withFileTypes: true })
+          for (const entry of entries) {
+            if (entry.name.startsWith('.')) continue
+            const srcSkillPath = path.join(ext.path, entry.name)
+            let isDir = false
+            try {
+              isDir = fs.statSync(srcSkillPath).isDirectory()
+            } catch (e) {}
+            if (!isDir) continue
+
+            const srcSkillMd = path.join(srcSkillPath, 'SKILL.md')
+            if (!fs.existsSync(srcSkillMd)) continue
+
+            const destSkillPath = path.join(codezSkillsDir, entry.name)
+            const destSkillMd = path.join(destSkillPath, 'SKILL.md')
+            const imported = fs.existsSync(destSkillMd)
+
+            let hasUpdate = false
+            if (imported) {
+              try {
+                const srcStat = fs.statSync(srcSkillMd)
+                const destStat = fs.statSync(destSkillMd)
+                hasUpdate = srcStat.mtimeMs > destStat.mtimeMs
+              } catch (e) {}
+            }
+
+            const meta = this.readSkillMeta(srcSkillMd, entry.name)
+            skills.push({
+              dirName: entry.name,
+              sourceName: ext.name,
+              name: meta.name,
+              description: meta.description,
+              imported,
+              hasUpdate
+            })
+          }
+        } catch (e) {
+          console.error(`Failed to list external skills in ${ext.name}:`, e)
+        }
+      }
+      groups.push({ sourceName: ext.name, skills })
+    }
+
+    return groups
+  }
+
+  /** 导入单个指定技能（按来源工具与目录名定位），强制覆盖同名已导入技能。 */
+  public async importSingleExternalSkill(sourceName: string, dirName: string): Promise<boolean> {
+    const source = this.getExternalSourceDirs().find((s) => s.name === sourceName)
+    if (!source) return false
+
+    const srcSkillPath = path.join(source.path, dirName)
+    if (!fs.existsSync(path.join(srcSkillPath, 'SKILL.md'))) return false
+
+    const codezSkillsDir = this.getGlobalSkillsDir()
+    if (!fs.existsSync(codezSkillsDir)) {
+      await fs.promises.mkdir(codezSkillsDir, { recursive: true })
+    }
+
+    const copyDirectory = async (src: string, dest: string) => {
+      if (!fs.existsSync(dest)) {
+        await fs.promises.mkdir(dest, { recursive: true })
+      }
+      const entries = await fs.promises.readdir(src, { withFileTypes: true })
+      for (const entry of entries) {
+        const s = path.join(src, entry.name)
+        const d = path.join(dest, entry.name)
+        let isDir = false
+        try {
+          isDir = fs.statSync(s).isDirectory()
+        } catch (e) {}
+        if (isDir) {
+          await copyDirectory(s, d)
+        } else {
+          await fs.promises.copyFile(s, d)
+        }
+      }
+    }
+
+    try {
+      await copyDirectory(srcSkillPath, path.join(codezSkillsDir, dirName))
+      this.skillsCache.clear()
+      return true
+    } catch (e) {
+      console.error(`Failed to import skill ${dirName} from ${sourceName}:`, e)
+      return false
+    }
+  }
+
+  /** 删除一个已导入的技能（仅作用于 CodeZ 全局 / 工作区目录，不动外部源文件）。 */
+  public async deleteSkill(workspaceRoot: string | null, id: string): Promise<boolean> {
+    const skills = await this.getSkills(workspaceRoot)
+    const target = skills.find((s) => s.id === id)
+    if (!target || !target.path) return false
+
+    // 技能目录 = SKILL.md 所在目录；.skill.md 单文件形式则删除文件本身。
+    const isSkillMd = path.basename(target.path) === 'SKILL.md'
+    const removeTarget = isSkillMd ? path.dirname(target.path) : target.path
+
+    try {
+      await fs.promises.rm(removeTarget, { recursive: true, force: true })
+
+      // 同步清理 config 中残留的开关记录
+      const targetRoot = target.isGlobal ? null : workspaceRoot
+      const config = await this.loadConfig(targetRoot)
+      if (id in config) {
+        delete config[id]
+        await this.saveConfig(targetRoot, config)
+      }
+
+      this.skillsCache.clear()
+      return true
+    } catch (e) {
+      console.error(`Failed to delete skill ${id}:`, e)
+      return false
+    }
+  }
+
+  public async checkExternalSkills(): Promise<ExternalSkillCheckResult> {    let totalCount = 0
     const sourcesData: ExternalSourceCheck[] = []
     const codezSkillsDir = this.getGlobalSkillsDir()
     const externalDirs = [

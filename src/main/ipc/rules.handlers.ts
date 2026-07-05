@@ -157,8 +157,14 @@ function parseRuleFile(filePath: string, scope: RuleScope, raw: string, projectI
         if (key === 'description') rule.description = val.replace(/^["']|["']$/g, '')
         if (key === 'globs') rule.globs = val.replace(/^["']|["']$/g, '')
         if (key === 'alwaysApply') rule.alwaysApply = val === 'true'
+        if (key === 'enabled') rule.enabled = val === 'true'
       }
     }
+  }
+
+  // default enabled to true if not explicitly false
+  if (rule.enabled === undefined) {
+    rule.enabled = true
   }
 
   return rule

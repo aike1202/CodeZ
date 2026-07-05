@@ -279,7 +279,13 @@ const api = {
     checkExternal: (): Promise<{ hasUpdates: boolean, totalCount: number, sources: { sourceName: string, count: number }[] }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SKILL_CHECK_EXTERNAL),
     importExternal: (sourceName?: string, customPath?: string, forceOverwrite?: boolean): Promise<boolean> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SKILL_IMPORT_EXTERNAL, sourceName, customPath, forceOverwrite)
+      ipcRenderer.invoke(IPC_CHANNELS.SKILL_IMPORT_EXTERNAL, sourceName, customPath, forceOverwrite),
+    listExternal: (): Promise<any[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SKILL_LIST_EXTERNAL),
+    importSingle: (sourceName: string, dirName: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SKILL_IMPORT_SINGLE, sourceName, dirName),
+    remove: (id: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SKILL_DELETE, id)
   },
 
   rules: {

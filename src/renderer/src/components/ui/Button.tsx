@@ -3,7 +3,7 @@ import './Button.css'
 
 export interface ButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'type'> {
   // Ant Design style props
-  type?: 'primary' | 'default' | 'dashed' | 'text' | 'link'
+  type?: 'primary' | 'default' | 'dashed' | 'text' | 'link' | 'dark'
   htmlType?: 'button' | 'submit' | 'reset'
   danger?: boolean
   size?: 'small' | 'middle' | 'large' | 'sm' | 'md' | 'lg' | 'none'
@@ -37,6 +37,8 @@ export default function Button({
     else if (variant === 'danger') {
       btnType = 'default'
       isDanger = true
+    } else if (variant === 'dark') {
+      btnType = 'dark'
     } else {
       btnType = 'default'
     }

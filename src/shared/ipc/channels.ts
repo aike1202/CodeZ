@@ -72,6 +72,9 @@ export const IPC_CHANNELS = {
   SKILL_TOGGLE: 'skill:toggle',
   SKILL_CHECK_EXTERNAL: 'skill:check-external',
   SKILL_IMPORT_EXTERNAL: 'skill:import-external',
+  SKILL_LIST_EXTERNAL: 'skill:list-external',
+  SKILL_IMPORT_SINGLE: 'skill:import-single',
+  SKILL_DELETE: 'skill:delete',
 
   // Rules
   RULES_GET_LIST: 'rules:get-list',

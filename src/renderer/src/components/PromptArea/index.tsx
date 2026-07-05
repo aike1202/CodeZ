@@ -145,17 +145,7 @@ export default function PromptArea({
               </Flex>
 
               <Flex align="center" gap={3} className="prompt-actions-right">
-                {onOpenSettings && (
-                  <Button
-                    variant="ghost"
-                    size="none"
-                    className="prompt-gear-btn"
-                    title="模型设置"
-                    onClick={onOpenSettings}
-                  >
-                    <IconGear />
-                  </Button>
-                )}
+
 
                 <ContextTracker
                   messages={messages}
@@ -178,11 +168,13 @@ export default function PromptArea({
                     value={activeProvider.thinking.effort || 'custom'}
                     onChange={handleEffortChange}
                   >
-                    <option value="auto">自动</option>
-                    <option value="low">低</option>
-                    <option value="medium">中</option>
-                    <option value="high">高</option>
-                    <option value="custom">自定义</option>
+                    <optgroup label="推理">
+                      <option value="auto">自动</option>
+                      <option value="low">低</option>
+                      <option value="medium">中</option>
+                      <option value="high">高</option>
+                      <option value="custom">自定义</option>
+                    </optgroup>
                   </Select>
                 )}
 
