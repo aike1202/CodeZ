@@ -7,6 +7,8 @@ export interface SkillDefinition {
   path?: string
   enabled?: boolean
   isGlobal?: boolean
+  /** 系统内置技能：不可删除，但可启用/停用 */
+  builtin?: boolean
 }
 
 export interface ExternalSourceCheck {
