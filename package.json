@@ -72,6 +72,12 @@
     },
     "files": [
       "out/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/builtin-skills",
+        "to": "builtin-skills"
+      }
     ]
   }
 }
