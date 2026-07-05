@@ -100,40 +100,26 @@ export interface SubAgentHandle {
 
 // ─── 结构化输出类型 ──────────────────────────────────────────
 
-/** 子 Agent 输出的证据项 */
-export interface SubAgentEvidence {
-  file: string
-  line: number
-  snippet: string
-}
-
-/** 子 Agent 对单个问题的回答 */
-export interface SubAgentAnswer {
-  question: string
-  answer: string
-  confidence: 'confirmed' | 'likely' | 'speculative'
-  evidence: SubAgentEvidence[]
-}
-
-/** 未能回答的问题 */
-export interface SubAgentUnresolved {
-  question: string
-  reason: string
-}
-
-/** 结构化的子 Agent 输出 */
+/** 结构化的子 Agent 元信息（最小字段，框架用于计算 qualitySummary） */
 export interface SubAgentStructuredOutput {
+  /** Markdown 格式的完整研究报告（主 Agent 直接阅读） */
+  report: string
+  /** 一句话结论 */
   conclusion: string
-  answers: SubAgentAnswer[]
-  unresolved: SubAgentUnresolved[]
-  additionalDiscoveries?: SubAgentAnswer[]
+  /** 整体置信度 */
+  confidence: 'high' | 'medium' | 'low'
+  /** 实际读取过的文件路径 */
+  filesExamined?: string[]
+  /** 未能回答的问题数 */
+  unresolvedCount?: number
 }
 
 /** 质量摘要 — 框架自动计算 */
 export interface SubAgentQualitySummary {
   coverage: number
-  confirmedRatio: number
+  confidence: string
   unresolvedCount: number
+  filesExaminedCount: number
   warning: string | null
 }
 
@@ -187,7 +173,7 @@ function buildExtendedSystemPrompt(def: SubAgentDefinition, ctx: SubAgentContext
   parts.push('\n\n## Proactive Discovery')
   parts.push('After your initial exploration (first 2-3 tool calls), review the questions.')
   parts.push('Ask yourself: "Is there a critical question the caller SHOULD have asked but didn\'t?"')
-  parts.push('If yes, explore and answer it briefly. Flag these as "additionalDiscoveries" in your submit_result call.')
+  parts.push('If yes, explore and answer it briefly. Include these findings in your report under an "Additional Discoveries" heading.')
   parts.push('(If it would take more than 3 extra rounds, note it in "unresolved" instead.)')
 
   // 输出指令（如果设置了 outputSpec）
@@ -500,12 +486,13 @@ export class SubAgentManager {
 
       // 如果设置了 outputSpec 但没有 structuredOutput，生成警告质量摘要
       if (def.outputSpec && !subResult.structuredOutput && ctx.expectations?.questions?.length) {
-        subResult.qualitySummary = {
-          coverage: 0,
-          confirmedRatio: 0,
-          unresolvedCount: 0,
-          warning: 'SubAgent produced plain text instead of structured output via submit_result. Findings may be incomplete.',
-        }
+              subResult.qualitySummary = {
+                coverage: 0,
+                confidence: 'low',
+                unresolvedCount: 0,
+                filesExaminedCount: 0,
+                warning: 'SubAgent produced plain text instead of structured output via submit_result. Findings may be incomplete.',
+              }
       }
 
       handle.status = 'completed'

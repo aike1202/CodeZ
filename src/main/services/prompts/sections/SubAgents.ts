@@ -88,8 +88,8 @@ export function buildSubAgentGuidance(): string {
   // How to read results
   lines.push('### How to Read SubAgent Results')
   lines.push('- Check `qualitySummary.coverage` — below 0.5 means re-delegate or investigate yourself.')
-  lines.push('- Check `qualitySummary.confirmedRatio` — below 0.3 means most findings need verification.')
-  lines.push('- Read `unresolved` items first — these are the known unknowns.')
+  lines.push('- Check `qualitySummary.confidence` — "low" means most findings need verification. "high" means well-evidenced.')
+  lines.push('- Check `qualitySummary.unresolvedCount` — above 0 means some questions were not answered.')
   lines.push('- Trust `confirmed` answers; spot-check `likely` answers; verify `speculative` ones yourself.')
   lines.push('- Use `filesExamined` to see what was actually read — spot-check key files if unsure.')
   lines.push('')
