@@ -84,6 +84,47 @@ export default function SettingsSkillsTab({ onCreate }: Props): React.ReactEleme
     s.description.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
+  const systemSkills = filteredSkills.filter((s) => s.builtin)
+  const userSkills = filteredSkills.filter((s) => !s.builtin)
+
+  const renderSkillItem = (skill: SkillDefinition) => (
+    <div key={skill.id} className="skills-list-item">
+      <div className="skills-item-icon-wrapper">
+        <IconPackage className="w-5 h-5" />
+      </div>
+
+      <div className="skills-item-content">
+        <div className="skills-item-name">{skill.name}</div>
+        <p className="skills-item-desc">{skill.description || '无描述信息'}</p>
+      </div>
+
+      <div className="skills-item-actions">
+        <span className="skills-item-type">
+          {skill.builtin ? '系统' : skill.isGlobal ? '个人' : '项目'}
+        </span>
+        <label className="skills-switch-label">
+          <input
+            type="checkbox"
+            className="skills-switch-input"
+            checked={!!skill.enabled}
+            onChange={(e) => handleToggle(skill.id, e.target.checked)}
+          />
+          <div className="skills-switch-inner"></div>
+        </label>
+        {!skill.builtin && (
+          <button
+            className="skills-item-delete"
+            title="删除技能"
+            disabled={deletingId === skill.id}
+            onClick={() => handleDelete(skill)}
+          >
+            <IconTrash className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+    </div>
+  )
+
   return (
     <div className="skills-tab-container">
       {/* Header */}
@@ -91,7 +132,7 @@ export default function SettingsSkillsTab({ onCreate }: Props): React.ReactEleme
         <div>
           <h1 className="skills-title">技能</h1>
           <p className="skills-subtitle">
-            管理项目级与用户级技能。启用后可在聊天里通过 /skill-name 使用。
+            系统技能随应用内置、不可删除但可启停；用户技能可自由增删。启用后可在聊天里通过 /skill-name 使用。
           </p>
         </div>
         <div className="skills-action-group">
@@ -149,70 +190,47 @@ export default function SettingsSkillsTab({ onCreate }: Props): React.ReactEleme
         />
       </div>
 
-      {/* List Header */}
-      <div className="skills-list-title">
-        工作区与个人技能 <span className="skills-list-count">{filteredSkills.length}</span>
-      </div>
-
-      {/* List Container */}
-      <div className="skills-list-container">
-        {loading ? (
+      {/* 分区：系统技能（只读，可启停） / 用户技能（可增删） */}
+      {loading ? (
+        <div className="skills-list-container">
           <div className="skills-list-loading">
             <IconRefreshCw className="w-6 h-6 animate-spin" />
             正在同步数据...
           </div>
-        ) : filteredSkills.length === 0 ? (
-          <div className="skills-list-empty">
-            <IconPackage className="w-8 h-8" />
-            没有找到对应的技能
+        </div>
+      ) : (
+        <>
+          {/* 系统技能 */}
+          <div className="skills-list-title">
+            系统技能 <span className="skills-list-count">{systemSkills.length}</span>
           </div>
-        ) : (
-          <div className="skills-list-items">
-            {filteredSkills.map((skill) => (
-              <div
-                key={skill.id}
-                className="skills-list-item"
-              >
-                <div className="skills-item-icon-wrapper">
-                  <IconPackage className="w-5 h-5" />
-                </div>
-
-                <div className="skills-item-content">
-                  <div className="skills-item-name">{skill.name}</div>
-                  <p className="skills-item-desc">
-                    {skill.description || '无描述信息'}
-                  </p>
-                </div>
-
-                <div className="skills-item-actions">
-                  <span className="skills-item-type">
-                    {skill.builtin ? '系统' : skill.isGlobal ? '个人' : '项目'}
-                  </span>
-                  <label className="skills-switch-label">
-                    <input
-                      type="checkbox"
-                      className="skills-switch-input"
-                      checked={!!skill.enabled}
-                      onChange={(e) => handleToggle(skill.id, e.target.checked)}
-                    />
-                    <div className="skills-switch-inner"></div>
-                  </label>
-                  {!skill.builtin && (
-                    <button
-                      className="skills-item-delete"
-                      title="删除技能"
-                      disabled={deletingId === skill.id}
-                      onClick={() => handleDelete(skill)}
-                    >
-                      <IconTrash className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
+          <div className="skills-list-container">
+            {systemSkills.length === 0 ? (
+              <div className="skills-list-empty">
+                <IconPackage className="w-8 h-8" />
+                没有系统技能
               </div>
-            ))}
+            ) : (
+              <div className="skills-list-items">{systemSkills.map(renderSkillItem)}</div>
+            )}
           </div>
-        )}
-      </div>
+
+          {/* 用户技能 */}
+          <div className="skills-list-title" style={{ marginTop: 16 }}>
+            用户技能 <span className="skills-list-count">{userSkills.length}</span>
+          </div>
+          <div className="skills-list-container">
+            {userSkills.length === 0 ? (
+              <div className="skills-list-empty">
+                <IconPackage className="w-8 h-8" />
+                没有找到对应的技能
+              </div>
+            ) : (
+              <div className="skills-list-items">{userSkills.map(renderSkillItem)}</div>
+            )}
+          </div>
+        </>
+      )}
 
       {showImportModal && (
         <SkillImportModal

@@ -8,7 +8,7 @@ import type {
   ExternalSkillGroup,
   ExternalSkillItem
 } from '../../shared/types/skill'
-import { isBuiltinSkillName, BUILTIN_SKILL_NAMES, resolveBuiltinSkillsDir } from './BuiltinSkills'
+import { BUILTIN_SKILL_NAMES, resolveBuiltinSkillsDir } from './BuiltinSkills'
 
 export class SkillManager {
   private static instance: SkillManager
@@ -63,9 +63,17 @@ export class SkillManager {
     }
   }
 
-  private async scanDir(dirPath: string, config: Record<string, boolean>, isGlobal: boolean): Promise<SkillDefinition[]> {
+  private async scanDir(
+    dirPath: string,
+    config: Record<string, boolean>,
+    kind: 'global' | 'workspace' | 'builtin'
+  ): Promise<SkillDefinition[]> {
     const skills: SkillDefinition[] = []
     if (!fs.existsSync(dirPath)) return skills
+
+    const isGlobal = kind === 'global'
+    const isBuiltin = kind === 'builtin'
+    const idPrefix = kind === 'builtin' ? 'builtin-' : kind === 'global' ? 'global-' : 'workspace-'
 
     const processDir = async (currentDir: string) => {
       const entries = await fs.promises.readdir(currentDir, { withFileTypes: true })
@@ -79,7 +87,7 @@ export class SkillManager {
           if (match) {
             const frontmatter = match[1]
             const body = match[2].trim()
-            
+
             const nameMatch = frontmatter.match(/name:\s*(.*)/)
             const descMatch = frontmatter.match(/description:\s*(.*)/)
             const triggersMatch = frontmatter.match(/triggers:\s*\[(.*?)\]/)
@@ -92,7 +100,7 @@ export class SkillManager {
             const parentDirName = path.basename(path.dirname(fullPath))
             const fileName = path.basename(entry.name, entry.name === 'SKILL.md' ? '' : '.skill.md')
             const bareName = entry.name === 'SKILL.md' ? parentDirName : fileName
-            const id = (isGlobal ? 'global-' : 'workspace-') + bareName
+            const id = idPrefix + bareName
 
             skills.push({
               id,
@@ -102,8 +110,8 @@ export class SkillManager {
               content: body,
               path: fullPath,
               enabled: config[id] !== false,
-              isGlobal,
-              builtin: isGlobal && isBuiltinSkillName(bareName)
+              isGlobal: isGlobal || isBuiltin,
+              builtin: isBuiltin
             })
           }
         }
@@ -115,47 +123,68 @@ export class SkillManager {
   }
 
   /**
-   * 将打包的内置技能同步到全局技能目录（覆盖，保证随应用升级更新内容）。
-   * 找不到打包资源时静默跳过，不阻断技能扫描。
+   * 扫描应用自带（打包）的系统技能，只读，不复制到用户目录。
+   * 用户无法修改其内容，但可通过 config 启用/停用（开关存全局 config）。
    */
-  private async syncBuiltinSkills(): Promise<void> {
+  private async scanBuiltinSkills(): Promise<SkillDefinition[]> {
     const srcRoot = resolveBuiltinSkillsDir()
     if (!srcRoot) {
-      console.warn('[SkillManager] builtin skills resource dir not found, skip sync')
-      return
+      console.warn('[SkillManager] builtin skills resource dir not found, skip')
+      return []
     }
 
-    const globalDir = this.getGlobalSkillsDir()
-    if (!fs.existsSync(globalDir)) {
-      await fs.promises.mkdir(globalDir, { recursive: true })
-    }
-
+    const config = await this.loadConfig(null)
+    let skills: SkillDefinition[] = []
     for (const name of BUILTIN_SKILL_NAMES) {
-      const src = path.join(srcRoot, name)
+      const dir = path.join(srcRoot, name)
       try {
-        if (!fs.existsSync(path.join(src, 'SKILL.md'))) continue
-        await this.copyDirectory(src, path.join(globalDir, name))
+        if (!fs.existsSync(path.join(dir, 'SKILL.md'))) continue
+        const found = await this.scanDir(dir, config, 'builtin')
+        skills = skills.concat(found)
       } catch (e) {
-        console.error(`[SkillManager] failed to sync builtin skill ${name}:`, e)
+        console.error(`[SkillManager] failed to scan builtin skill ${name}:`, e)
+      }
+    }
+    return skills
+  }
+
+  /**
+   * 清理旧版本行为遗留：早期实现会把系统技能复制到 ~/.codez/skills。
+   * 现在系统技能只读扫描 bundle，这些复制体应移除，避免与系统技能重复显示。
+   */
+  private async cleanupLegacyCopiedBuiltins(): Promise<void> {
+    const globalDir = this.getGlobalSkillsDir()
+    for (const name of BUILTIN_SKILL_NAMES) {
+      const dir = path.join(globalDir, name)
+      try {
+        if (fs.existsSync(path.join(dir, 'SKILL.md'))) {
+          await fs.promises.rm(dir, { recursive: true, force: true })
+        }
+      } catch (e) {
+        console.error(`[SkillManager] failed to cleanup legacy builtin copy ${name}:`, e)
       }
     }
   }
 
   public async scanWorkspace(workspaceRoot: string | null): Promise<SkillDefinition[]> {
-    await this.syncBuiltinSkills()
-    
+    await this.cleanupLegacyCopiedBuiltins()
+
     let allSkills: SkillDefinition[] = []
-    
-    // 1. Scan global skills
+
+    // 1. Scan builtin (system) skills — read-only from app bundle
+    const builtinSkills = await this.scanBuiltinSkills()
+    allSkills = allSkills.concat(builtinSkills)
+
+    // 2. Scan global (user) skills
     const globalConfig = await this.loadConfig(null)
-    const globalSkills = await this.scanDir(this.getGlobalSkillsDir(), globalConfig, true)
+    const globalSkills = await this.scanDir(this.getGlobalSkillsDir(), globalConfig, 'global')
     allSkills = allSkills.concat(globalSkills)
 
-    // 2. Scan workspace skills if applicable
+    // 3. Scan workspace skills if applicable
     if (workspaceRoot) {
       const workspaceSkillsDir = path.join(workspaceRoot, '.skills')
       const workspaceConfig = await this.loadConfig(workspaceRoot)
-      const workspaceSkills = await this.scanDir(workspaceSkillsDir, workspaceConfig, false)
+      const workspaceSkills = await this.scanDir(workspaceSkillsDir, workspaceConfig, 'workspace')
       allSkills = allSkills.concat(workspaceSkills)
     }
 
@@ -185,11 +214,11 @@ export class SkillManager {
   }
 
   public async toggleSkill(workspaceRoot: string | null, id: string, enabled: boolean): Promise<void> {
-    // 根据 ID 前缀判断该 Skill 属于 Global 还是 Workspace
-    const isGlobal = id.startsWith('global-')
-    
-    // 强制使用对应的 root 和 config
-    const targetRoot = isGlobal ? null : workspaceRoot
+    // 根据 ID 前缀判断 config 归属：
+    // builtin-/global- → 全局 config；workspace- → 工作区 config
+    const useGlobalConfig = id.startsWith('builtin-') || id.startsWith('global-')
+
+    const targetRoot = useGlobalConfig ? null : workspaceRoot
     const config = await this.loadConfig(targetRoot)
     config[id] = enabled
     await this.saveConfig(targetRoot, config)

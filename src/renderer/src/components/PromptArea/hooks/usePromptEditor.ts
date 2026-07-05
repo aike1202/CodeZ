@@ -176,7 +176,7 @@ export function usePromptEditor(
 
   const filteredSkills = activeToken?.type === 'slash'
     ? dynamicSkills
-        .map((s) => ({ ...s, name: s.id.replace(/^(global|workspace)-/, ''), displayName: s.name }))
+        .map((s) => ({ ...s, name: s.id.replace(/^(global|workspace|builtin)-/, ''), displayName: s.name }))
         .filter(
           (c) =>
             c.name.toLowerCase().includes(activeToken.text.toLowerCase()) ||

@@ -29,7 +29,7 @@ async function writeSkill(dir: string, name: string): Promise<void> {
 describe('SkillManager builtin', () => {
   beforeEach(() => {
     home = path.join(os.tmpdir(), `codez-skill-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-    // 隔离测试：不触发真实内置资源同步
+    // 隔离测试：默认指向不存在的 bundle 资源，避免读到真实系统技能
     process.env.CODEZ_BUILTIN_SKILLS_DIR = path.join(home, 'no-such-dir')
     // 重置单例
     ;(SkillManager as any)['instance'] = undefined
@@ -39,7 +39,84 @@ describe('SkillManager builtin', () => {
     await fs.rm(home, { recursive: true, force: true })
   })
 
-  it('全局技能中命中内置名的被标记 builtin，其余为 false', async () => {
+  it('系统技能从 bundle 只读扫描，id 带 builtin- 前缀且标记 builtin', async () => {
+    // 造一个假的 bundle 资源目录，含内置技能名之一
+    const resDir = path.join(home, 'builtin-res')
+    await writeSkill(resDir, 'skill-creator')
+    process.env.CODEZ_BUILTIN_SKILLS_DIR = resDir
+
+    ;(SkillManager as any)['instance'] = undefined
+    const sm = SkillManager.getInstance()
+    const skills = await sm.scanWorkspace(null)
+
+    const creator = skills.find((s) => s.id === 'builtin-skill-creator')
+    expect(creator).toBeDefined()
+    expect(creator?.builtin).toBe(true)
+    expect(creator?.isGlobal).toBe(true)
+  })
+
+  it('系统技能不会被复制到 ~/.codez/skills', async () => {
+    const resDir = path.join(home, 'builtin-res')
+    await writeSkill(resDir, 'skill-creator')
+    process.env.CODEZ_BUILTIN_SKILLS_DIR = resDir
+
+    ;(SkillManager as any)['instance'] = undefined
+    const sm = SkillManager.getInstance()
+    await sm.scanWorkspace(null)
+
+    // 全局用户技能目录不应出现被复制的系统技能
+    const copiedExists = await fs
+      .stat(path.join(home, '.codez', 'skills', 'skill-creator'))
+      .then(() => true)
+      .catch(() => false)
+    expect(copiedExists).toBe(false)
+  })
+
+  it('用户全局技能 id 带 global- 前缀、非 builtin', async () => {
+    const globalDir = path.join(home, '.codez', 'skills')
+    await writeSkill(globalDir, 'my-custom')
+
+    const sm = SkillManager.getInstance()
+    const skills = await sm.scanWorkspace(null)
+
+    const custom = skills.find((s) => s.id === 'global-my-custom')
+    expect(custom?.builtin).toBe(false)
+    expect(custom?.isGlobal).toBe(true)
+  })
+
+  it('deleteSkill 拒绝删除系统技能', async () => {
+    const resDir = path.join(home, 'builtin-res')
+    await writeSkill(resDir, 'skill-creator')
+    process.env.CODEZ_BUILTIN_SKILLS_DIR = resDir
+
+    ;(SkillManager as any)['instance'] = undefined
+    const sm = SkillManager.getInstance()
+    await sm.scanWorkspace(null)
+    const ok = await sm.deleteSkill(null, 'builtin-skill-creator')
+    expect(ok).toBe(false)
+
+    // bundle 源文件仍存在
+    const stat = await fs.stat(path.join(resDir, 'skill-creator'))
+    expect(stat.isDirectory()).toBe(true)
+  })
+
+  it('toggleSkill 停用系统技能：开关存全局 config，再次扫描时 enabled=false', async () => {
+    const resDir = path.join(home, 'builtin-res')
+    await writeSkill(resDir, 'skill-creator')
+    process.env.CODEZ_BUILTIN_SKILLS_DIR = resDir
+
+    ;(SkillManager as any)['instance'] = undefined
+    const sm = SkillManager.getInstance()
+    await sm.scanWorkspace(null)
+
+    await sm.toggleSkill(null, 'builtin-skill-creator', false)
+    const skills = await sm.scanWorkspace(null)
+    const creator = skills.find((s) => s.id === 'builtin-skill-creator')
+    expect(creator?.enabled).toBe(false)
+  })
+
+  it('清理旧版遗留：~/.codez/skills 下与系统技能同名的复制体会被移除', async () => {
+    // 模拟旧版行为遗留的复制体
     const globalDir = path.join(home, '.codez', 'skills')
     await writeSkill(globalDir, 'skill-creator')
     await writeSkill(globalDir, 'my-custom')
@@ -47,51 +124,14 @@ describe('SkillManager builtin', () => {
     const sm = SkillManager.getInstance()
     const skills = await sm.scanWorkspace(null)
 
-    const creator = skills.find((s) => s.id === 'global-skill-creator')
-    const custom = skills.find((s) => s.id === 'global-my-custom')
-    expect(creator?.builtin).toBe(true)
-    expect(custom?.builtin).toBe(false)
-  })
-
-  it('deleteSkill 拒绝删除内置技能', async () => {
-    const globalDir = path.join(home, '.codez', 'skills')
-    await writeSkill(globalDir, 'skill-creator')
-
-    const sm = SkillManager.getInstance()
-    await sm.scanWorkspace(null)
-    const ok = await sm.deleteSkill(null, 'global-skill-creator')
-    expect(ok).toBe(false)
-
-    // 目录仍存在
-    const stat = await fs.stat(path.join(globalDir, 'skill-creator'))
-    expect(stat.isDirectory()).toBe(true)
-  })
-
-  it('syncBuiltinSkills 从打包资源复制内置技能到全局目录', async () => {
-    // 造一个假的打包资源目录
-    const resDir = path.join(home, 'builtin-res')
-    const scDir = path.join(resDir, 'skill-creator')
-    await fs.mkdir(scDir, { recursive: true })
-    await fs.writeFile(
-      path.join(scDir, 'SKILL.md'),
-      '---\nname: skill-creator\ndescription: official\n---\nbody',
-      'utf-8'
-    )
-    await fs.mkdir(path.join(scDir, 'scripts'), { recursive: true })
-    await fs.writeFile(path.join(scDir, 'scripts', 'run.py'), 'print(1)\n', 'utf-8')
-    process.env.CODEZ_BUILTIN_SKILLS_DIR = resDir
-
-    ;(SkillManager as any)['instance'] = undefined
-    const sm = SkillManager.getInstance()
-    const skills = await sm.scanWorkspace(null)
-
-    const creator = skills.find((s) => s.id === 'global-skill-creator')
-    expect(creator?.builtin).toBe(true)
-    // 子目录脚本也被复制
-    const copied = await fs.readFile(
-      path.join(home, '.codez', 'skills', 'skill-creator', 'scripts', 'run.py'),
-      'utf-8'
-    )
-    expect(copied).toContain('print(1)')
+    // 同名复制体被删除，且不作为用户技能出现
+    const legacyExists = await fs
+      .stat(path.join(globalDir, 'skill-creator'))
+      .then(() => true)
+      .catch(() => false)
+    expect(legacyExists).toBe(false)
+    expect(skills.find((s) => s.id === 'global-skill-creator')).toBeUndefined()
+    // 普通用户技能不受影响
+    expect(skills.find((s) => s.id === 'global-my-custom')).toBeDefined()
   })
 })

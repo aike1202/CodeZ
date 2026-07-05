@@ -91,7 +91,7 @@ export function parseSlashCommand(
       const isSkill = dynamicSkills.some(
         (s) =>
           s.id.toLowerCase() === slugLower ||
-          s.id.replace(/^(global|workspace)-/, '').toLowerCase() === slugLower ||
+          s.id.replace(/^(global|workspace|builtin)-/, '').toLowerCase() === slugLower ||
           s.triggers?.includes(slugLower)
       )
       if (!isBuiltinCommand && !isSkill) {
@@ -142,7 +142,7 @@ export function parseSlashCommand(
 
   const skill = dynamicSkills.find(s =>
     s.id.toLowerCase() === cmdName ||
-    s.id.replace(/^(global|workspace)-/, '').toLowerCase() === cmdName ||
+    s.id.replace(/^(global|workspace|builtin)-/, '').toLowerCase() === cmdName ||
     s.triggers?.includes(cmdName)
   )
   if (skill) {
