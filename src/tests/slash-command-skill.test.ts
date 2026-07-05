@@ -38,4 +38,12 @@ describe('parseSlashCommand — 技能优先于 plan slug', () => {
     expect(r.clientAction?.type).toBe('plan:load')
     expect(r.clientAction?.payload?.slug).toBe('my-cool-plan')
   })
+
+  it('胶囊格式 [$skill-creator](path) 被识别为技能', () => {
+    const r = parseSlashCommand('[$skill-creator](skill-creator) 帮我写一个技能：', skills)
+    expect(r.clientAction).toBeUndefined()
+    expect(r.isCommand).toBe(true)
+    expect(r.processedMessage).toContain('do stuff')
+    expect(r.processedMessage).toContain('帮我写一个技能')
+  })
 })
