@@ -10,8 +10,8 @@ export interface ModelFormData {
   id: string
   name: string
   maxContextTokens: number
-  apiFormat?: "openai" | "anthropic" | "gemini" | string
-  thinkingMode?: "auto" | "openai" | "deepseek" | "anthropic" | "qwen" | string
+  apiFormat?: ApiFormat
+  thinkingMode?: ThinkingMode
 }
 
 interface ProviderFormData {
@@ -86,7 +86,7 @@ export default function SettingsPanel({
     setModels(models.filter((_, i) => i !== idx))
   }
 
-  const updateModel = (idx: number, field: keyof ModelFormData, value: string | number) => {
+  const updateModel = (idx: number, field: keyof ModelFormData, value: string | number | undefined) => {
     setModels(models.map((m, i) => (i === idx ? { ...m, [field]: value } : m)))
   }
 

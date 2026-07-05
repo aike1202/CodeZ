@@ -28,7 +28,7 @@ export default function ModelSelector({
 
   const activeProvider = providers.find((p: any) => p.id === activeProviderId)
   const displayLabel = activeProvider
-    ? `${activeProvider.name} / ${selectedModelName || activeProvider.models[0]?.name || '?'}`
+    ? `${selectedModelName || activeProvider.models[0]?.name || '?'}`
     : '未配置模型'
 
   return (

@@ -27,6 +27,20 @@ export class EditTransactionService {
     this.backupRoot = path.join(app.getPath('userData'), 'edit-backups')
   }
 
+  private async saveMetadata(txId: string): Promise<void> {
+    const tx = this.transactions.get(txId)
+    if (!tx) return
+    const txDir = path.join(this.backupRoot, tx.sessionId, txId)
+    const metadataPath = path.join(txDir, 'metadata.json')
+    const data = {
+      id: tx.id,
+      sessionId: tx.sessionId,
+      backedUpFiles: Array.from(tx.backedUpFiles.entries()),
+      createdAt: tx.createdAt
+    }
+    await fs.writeFile(metadataPath, JSON.stringify(data), 'utf-8').catch(() => {})
+  }
+
   /** 开启一个新的修改事务 */
   async beginTransaction(sessionId: string): Promise<string> {
     const txId = `tx_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
@@ -85,6 +99,7 @@ export class EditTransactionService {
         throw err
       }
     }
+    await this.saveMetadata(txId)
   }
 
   private findBackedUpKey(tx: TransactionState, requestPath: string): string | undefined {
@@ -129,7 +144,7 @@ export class EditTransactionService {
   }
 
   /**
-   * 单个文件提交：清理特定文件的备份，从事务中移除。
+   * 单个文件提交：目前保留备份，仅标记为已接受
    */
   async commitFile(txId: string, absolutePath: string): Promise<boolean> {
     const tx = this.transactions.get(txId)
@@ -137,14 +152,8 @@ export class EditTransactionService {
 
     const key = this.findBackedUpKey(tx, absolutePath)
     if (!key) return false
-    const backupPath = tx.backedUpFiles.get(key)!
-
-    tx.backedUpFiles.delete(key)
-    if (backupPath !== '') {
-      try {
-        await fs.unlink(backupPath)
-      } catch {}
-    }
+    
+    // We no longer delete the backup file here so that history is retained.
     return true
   }
 
@@ -187,14 +196,92 @@ export class EditTransactionService {
   }
 
   /**
-   * 提交整个事务：清理备份目录，确认所有修改生效。
+   * 提交整个事务：保留备份以便历史回退，仅从内存中移除。
    */
   async commit(txId: string): Promise<void> {
     const tx = this.transactions.get(txId)
     if (!tx) return
 
-    await this.cleanupTxDir(txId, tx.sessionId)
+    // We no longer cleanup the txDir here to retain history for reverting
     this.transactions.delete(txId)
+  }
+
+  /**
+   * 批量回滚指定的一系列事务（用于 Revert Message）
+   * 必须按时间倒序传入 txIds
+   */
+  async revertTransactions(sessionId: string, txIds: string[]): Promise<void> {
+    for (const txId of txIds) {
+      let tx = this.transactions.get(txId)
+      if (!tx) {
+        // Try to load from disk
+        const txDir = path.join(this.backupRoot, sessionId, txId)
+        const metadataPath = path.join(txDir, 'metadata.json')
+        try {
+          const content = await fs.readFile(metadataPath, 'utf-8')
+          const data = JSON.parse(content)
+          tx = {
+            id: data.id,
+            sessionId: data.sessionId,
+            backedUpFiles: new Map(data.backedUpFiles),
+            createdAt: data.createdAt
+          }
+          this.transactions.set(txId, tx)
+        } catch {
+          continue
+        }
+      }
+      
+      await this.rollback(txId)
+    }
+  }
+
+  /**
+   * 预览批量回滚会影响哪些文件
+   */
+  async previewRevertTransactions(sessionId: string, txIds: string[]): Promise<{ toDelete: string[], toRestore: string[] }> {
+    const toDelete = new Set<string>()
+    const toRestore = new Set<string>()
+
+    for (const txId of txIds) {
+      let tx = this.transactions.get(txId)
+      if (!tx) {
+        const txDir = path.join(this.backupRoot, sessionId, txId)
+        const metadataPath = path.join(txDir, 'metadata.json')
+        try {
+          const content = await fs.readFile(metadataPath, 'utf-8')
+          const data = JSON.parse(content)
+          tx = {
+            id: data.id,
+            sessionId: data.sessionId,
+            backedUpFiles: new Map(data.backedUpFiles),
+            createdAt: data.createdAt
+          }
+        } catch {
+          continue
+        }
+      }
+      for (const [originalPath, backupPath] of tx.backedUpFiles) {
+        if (backupPath === '') {
+          toDelete.add(originalPath)
+        } else {
+          // If it's already marked for delete in a newer tx, we still restore it if it existed originally
+          toRestore.add(originalPath)
+          toDelete.delete(originalPath)
+        }
+      }
+    }
+    return { toDelete: Array.from(toDelete), toRestore: Array.from(toRestore) }
+  }
+
+  /**
+   * 彻底清理某个会话的所有文件备份历史
+   */
+  async cleanupSession(sessionId: string): Promise<void> {
+    const sessionDir = path.join(this.backupRoot, sessionId)
+    try {
+      await fs.rm(sessionDir, { recursive: true, force: true })
+    } catch {}
   }
 
   /**

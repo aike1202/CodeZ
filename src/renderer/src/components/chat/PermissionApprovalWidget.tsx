@@ -22,7 +22,7 @@ interface PermissionApprovalWidgetProps {
 
 function generateCommandOptions(cmd: string = '') {
    const options = [{ label: `精确匹配: ${cmd}`, rule: cmd }]
-   const parts = cmd.trim().split(/s+/)
+   const parts = cmd.trim().split(/\s+/)
    if (parts.length > 2) {
       options.push({ label: `子命令: ${parts[0]} ${parts[1]} *`, rule: `${parts[0]} ${parts[1]} *`})
    }

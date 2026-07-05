@@ -12,6 +12,7 @@ import type { ToolDefinition } from '../../../shared/types/provider'
 import type { AgentRunConfig, AgentRunnerCallbacks } from './types'
 import { isToolErrorResult, buildToolError } from './agentErrorHandler'
 import { handleEnterPlanMode } from './planRunnerHelper'
+import { handleTaskSpawn } from './taskRunnerHelper'
 import { getSessionStore } from '../../ipc/session.handlers'
 import { getSettingsService } from '../../ipc/settings.handlers'
 
@@ -26,10 +27,6 @@ export class AgentRunner {
     this.chatService = new ChatService()
     this.toolManager = new ToolManager()
     this.editTransactionService = getEditTransactionService()
-
-    if (!SubAgentManager.getDefinition('Plan')) {
-      SubAgentManager.register(PlanSubAgent)
-    }
   }
 
   async run(config: AgentRunConfig, callbacks: AgentRunnerCallbacks): Promise<void> {
@@ -350,6 +347,13 @@ export class AgentRunner {
                   planStore,
                   this.toolManager,
                   availableTools
+                )
+              } else if (name === 'Task') {
+                return await handleTaskSpawn(
+                  toolCallId,
+                  args,
+                  config,
+                  callbacks
                 )
               }
 

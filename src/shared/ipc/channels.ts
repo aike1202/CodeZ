@@ -30,6 +30,8 @@ export const IPC_CHANNELS = {
   CHAT_REQUEST_ASK_USER: 'chat:request-ask-user',
   CHAT_ASK_USER_RESPONSE: 'chat:ask-user-response',
   CHAT_GET_DIFF: 'chat:get-diff',
+  CHAT_REVERT_MESSAGES: 'chat:revert-messages',
+  CHAT_PREVIEW_REVERT_MESSAGES: 'chat:preview-revert-messages',
   
   // Tool Logs
   CHAT_STREAM_TOOL_START: 'chat:stream:tool-start',

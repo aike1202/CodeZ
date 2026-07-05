@@ -170,6 +170,18 @@ export function registerChatIpc(): void {
     return await svc.getDiff(txId)
   })
 
+  ipcMain.handle(IPC_CHANNELS.CHAT_REVERT_MESSAGES, async (_event, sessionId: string, txIds: string[]) => {
+    const { getEditTransactionService } = await import('../services/EditTransactionService')
+    const svc = getEditTransactionService()
+    await svc.revertTransactions(sessionId, txIds)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.CHAT_PREVIEW_REVERT_MESSAGES, async (_event, sessionId: string, txIds: string[]) => {
+    const { getEditTransactionService } = await import('../services/EditTransactionService')
+    const svc = getEditTransactionService()
+    return await svc.previewRevertTransactions(sessionId, txIds)
+  })
+
   // Plan 审批 IPC（per-stream 决策）
   const planReviewResolvers = new Map<string, (decision: { approved: boolean; feedback?: string }) => void>()
 

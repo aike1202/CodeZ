@@ -258,6 +258,11 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.RULES_RENAME, oldPath, newFilename, workspaceRoot, scope)
   },
 
+  permissions: {
+    addRule: (rule: string, scope: 'session' | 'global'): Promise<void> =>
+      ipcRenderer.invoke('permissions:addRule', rule, scope)
+  },
+
   settings: {
     get: (): Promise<any> =>
       ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET),

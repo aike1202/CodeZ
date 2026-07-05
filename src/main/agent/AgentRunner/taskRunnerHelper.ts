@@ -16,7 +16,7 @@ import type { AgentRunnerCallbacks } from './types'
 export async function handleTaskSpawn(
   toolCallId: string,
   rawArgs: string,
-  config: { workspaceRoot: string; sessionId?: string; baseUrl?: string; apiKey?: string; apiFormat?: string; model?: string; thinking?: boolean },
+  config: { workspaceRoot: string; sessionId?: string; baseUrl?: string; apiKey?: string; apiFormat?: string; model?: string; thinking?: any },
   callbacks: AgentRunnerCallbacks
 ): Promise<{ role: 'tool'; tool_call_id: string; name: string; content: string }> {
   const name = 'Task'

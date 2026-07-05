@@ -7,7 +7,8 @@ import { PlanStore } from '../main/services/PlanStore'
 const tmpRoot = vi.hoisted(() => require('path').join(__dirname, 'tmp_plan_service'))
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn().mockReturnValue(tmpRoot) }
+  app: { getPath: vi.fn().mockReturnValue(tmpRoot) },
+  BrowserWindow: { getAllWindows: vi.fn().mockReturnValue([]) }
 }))
 
 // Mock os.homedir so plans are written under the temp dir, not the real home

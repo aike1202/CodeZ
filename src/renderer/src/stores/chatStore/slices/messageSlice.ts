@@ -8,6 +8,7 @@ import type {
   ReasoningTimelineItem,
   ChatSession
 } from '../types'
+import { IPC_CHANNELS } from '../../../../../shared/ipc/channels'
 
 function genId(): string {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -57,6 +58,8 @@ export interface MessageSlice {
   setPlanReview: (review: { plan: any; status: string } | null) => void
   setActivePlanStreamId: (streamId: string | null) => void
   setPendingPrompt: (prompt: string | null) => void
+  revertToMessage: (msgId: string) => Promise<void>
+  previewRevertMessage: (msgId: string) => Promise<{ toDelete: string[], toRestore: string[] } | null>
 }
 
 export function updateMessageInState(
@@ -452,5 +455,86 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
   setActivePlan: (plan) => set({ activePlan: plan }),
   setPlanReview: (review) => set({ planReview: review }),
   setActivePlanStreamId: (streamId) => set({ activePlanStreamId: streamId }),
-  setPendingPrompt: (prompt) => set({ pendingPrompt: prompt })
+  setPendingPrompt: (prompt) => set({ pendingPrompt: prompt }),
+
+  revertToMessage: async (msgId: string) => {
+    const s = get()
+    const activeSession = s.sessions.find(ses => ses.id === s.activeSessionId)
+    if (!activeSession) return
+
+    const msgIndex = activeSession.messages.findIndex(m => m.id === msgId)
+    if (msgIndex === -1) return
+
+    const targetMessage = activeSession.messages[msgIndex]
+    
+    // Gather txIds from this message and all subsequent messages in reverse chronological order
+    const txIds: string[] = []
+    for (let i = activeSession.messages.length - 1; i >= msgIndex; i--) {
+      const m = activeSession.messages[i]
+      if (m.txId) {
+        txIds.push(m.txId)
+      }
+    }
+
+    if (txIds.length > 0) {
+      const win = window as any
+      const ipc = win?.electron?.ipcRenderer
+      if (ipc) {
+        // Run IPC call asynchronously, but don't wait for it to block UI responsiveness
+        ipc.invoke(IPC_CHANNELS.CHAT_REVERT_MESSAGES, activeSession.id, txIds).catch(console.error)
+      }
+    }
+
+    // Set pending prompt
+    set({ pendingPrompt: targetMessage.content || '' })
+
+    // Slice messages to remove this message and everything after
+    const newMessages = activeSession.messages.slice(0, msgIndex)
+    
+    set((state) => {
+      const nextSessions = state.sessions.map(ses => 
+        ses.id === state.activeSessionId ? { ...ses, messages: newMessages } : ses
+      )
+      return { 
+        messages: newMessages, 
+        sessions: nextSessions 
+      }
+    })
+    
+    await get().persistCurrentSession()
+  },
+
+  previewRevertMessage: async (msgId: string) => {
+    const s = get()
+    const activeSession = s.sessions.find(ses => ses.id === s.activeSessionId)
+    if (!activeSession) return null
+
+    const msgIndex = activeSession.messages.findIndex(m => m.id === msgId)
+    if (msgIndex === -1) return null
+
+    const txIds: string[] = []
+    for (let i = activeSession.messages.length - 1; i >= msgIndex; i--) {
+      const m = activeSession.messages[i]
+      if (m.txId) {
+        txIds.push(m.txId)
+      }
+    }
+
+    if (txIds.length === 0) {
+      return { toDelete: [], toRestore: [] }
+    }
+
+    const win = window as any
+    const ipc = win?.electron?.ipcRenderer
+    if (ipc) {
+      try {
+        const preview = await ipc.invoke(IPC_CHANNELS.CHAT_PREVIEW_REVERT_MESSAGES, activeSession.id, txIds)
+        return preview
+      } catch (err) {
+        console.error('Failed to preview revert:', err)
+        return null
+      }
+    }
+    return null
+  }
 })

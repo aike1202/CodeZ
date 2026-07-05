@@ -4,6 +4,7 @@ import { ContextManager } from './ContextManager'
 import type { ChatMessage, ToolDefinition } from '../../shared/types/provider'
 import type { StreamCallbacks } from '../services/ChatService'
 import type { AgentRunnerCallbacks } from './AgentRunner'
+import { allSubAgentDefinitions } from './definitions'
 
 // ─── SubAgent 定义接口 ──────────────────────────────────────
 
@@ -54,7 +55,9 @@ export interface SubAgentHandle {
 // ─── SubAgentManager ────────────────────────────────────────
 
 export class SubAgentManager {
-  private static definitions = new Map<string, SubAgentDefinition>()
+  private static definitions = new Map<string, SubAgentDefinition>(
+    allSubAgentDefinitions.map(def => [def.type, def])
+  )
   private static activeHandles = new Map<string, SubAgentHandle>()
 
   static register(definition: SubAgentDefinition): void {
