@@ -56,6 +56,7 @@ export async function handleEnterPlanMode(
         {
           workspaceRoot: config.workspaceRoot,
           sessionId: config.sessionId || 'session_default',
+          task: parentPrompt,
           parentPrompt,
           apiConfig: {
             baseUrl: config.baseUrl || '',

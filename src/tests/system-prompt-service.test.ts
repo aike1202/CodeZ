@@ -39,6 +39,26 @@ vi.mock('../main/services/SkillManager', () => ({
   }
 }))
 
+vi.mock('../main/agent/SubAgentManager', () => ({
+  SubAgentManager: {
+    listDefinitions: vi.fn().mockReturnValue([
+      {
+        type: 'Research',
+        description: 'Read-only research agent.',
+        whenToUse: 'You need to explore a module.\nYou have a scoped question.',
+        whenNotToUse: 'The answer is a single file lookup.',
+        costHint: 'Up to 12 tool calls.'
+      },
+      {
+        type: 'Plan',
+        description: 'Software architect agent.',
+        whenToUse: 'You need a structured implementation plan.',
+        costHint: 'Up to 15 tool calls.'
+      }
+    ])
+  }
+}))
+
 vi.mock('../main/tools/ToolManager', () => ({
   ToolManager: vi.fn().mockImplementation(() => ({
     getAllTools: vi.fn().mockReturnValue([
@@ -136,6 +156,14 @@ describe('SystemPromptService', () => {
       expect(prompt).toContain('</skills_instructions>')
     })
 
+    it('should contain delegation guidance', async () => {
+      const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
+      expect(prompt).toContain('<delegation_guidance>')
+      expect(prompt).toContain('Research SubAgent')
+      expect(prompt).toContain('Plan SubAgent')
+      expect(prompt).toContain('</delegation_guidance>')
+    })
+
     it('should contain pending features section', async () => {
       const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
       expect(prompt).toContain('<pending_features>')
@@ -151,6 +179,7 @@ describe('SystemPromptService', () => {
       const repoIdx = prompt.indexOf('<repository_instructions>')
       const envIdx = prompt.indexOf('<environment_context>')
       const gitIdx = prompt.indexOf('<git_status>')
+      const delegationIdx = prompt.indexOf('<delegation_guidance>')
       const toolsIdx = prompt.indexOf('<available_tools>')
       const pendingIdx = prompt.indexOf('<pending_features>')
       const skillsIdx = prompt.indexOf('<skills_instructions>')
@@ -161,7 +190,8 @@ describe('SystemPromptService', () => {
       expect(devIdx).toBeLessThan(repoIdx)
       expect(repoIdx).toBeLessThan(envIdx)
       expect(envIdx).toBeLessThan(gitIdx)
-      expect(gitIdx).toBeLessThan(toolsIdx)
+      expect(gitIdx).toBeLessThan(delegationIdx)
+      expect(delegationIdx).toBeLessThan(toolsIdx)
       expect(toolsIdx).toBeLessThan(pendingIdx)
       expect(pendingIdx).toBeLessThan(skillsIdx)
     })

@@ -6,7 +6,19 @@ export const PlanSubAgent: SubAgentDefinition = {
   type: 'Plan',
   description: 'Software architect agent for designing implementation plans. Use this when you need to plan the implementation strategy for a task.',
   maxLoops: 15,
-  
+
+  whenToUse: [
+    'You need to design an implementation plan before writing code for a multi-file change.',
+    'Multiple valid technical approaches exist and you want user approval on the strategy.',
+    'The task requires architectural decisions affecting 3+ files.',
+  ].join('\n'),
+  whenNotToUse: [
+    'Single-line fixes, typo corrections, or trivial changes.',
+    'Pure research or exploration tasks (use Research subagent instead).',
+    'The user explicitly said to skip planning.',
+  ].join('\n'),
+  costHint: 'Up to 15 tool calls including plan file writing. Plan subagent also triggers user approval UI.',
+
   getTools: (toolManager: ToolManager): ToolDefinition[] => {
     // Plan SubAgent 可用工具：所有只读工具 + WriteTool + ExitPlanModeTool
     const readOnly = toolManager.getReadOnlyTools()
@@ -61,7 +73,7 @@ export const PlanSubAgent: SubAgentDefinition = {
       '- You ONLY have access to read-only tools, Write (strictly for the plan file), and ExitPlanMode.',
       '',
       `Project Workspace: ${ctx.workspaceRoot}`,
-      `Original Task Request: ${ctx.parentPrompt}`
+      `Original Task Request: ${ctx.task || ctx.parentPrompt}`
     ].join('\n')
   }
 }

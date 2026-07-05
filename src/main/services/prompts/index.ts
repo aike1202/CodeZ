@@ -14,6 +14,7 @@ import { buildGitStatus } from './sections/GitStatus'
 import { buildAvailableTools } from './sections/AvailableTools'
 import { buildPendingFeatures } from './sections/PendingFeatures'
 import { buildSkills } from './sections/Skills'
+import { buildSubAgentGuidance } from './sections/SubAgents'
 
 export type { PromptContext } from './types'
 
@@ -34,6 +35,7 @@ export async function assembleSystemPrompt(ctx: PromptContext): Promise<string> 
 
   sections.push(buildEnvironment(ctx))
   sections.push(buildGitStatus(ctx.workspaceRoot))
+  sections.push(buildSubAgentGuidance())
   sections.push(buildAvailableTools())
   sections.push(buildPendingFeatures())
 

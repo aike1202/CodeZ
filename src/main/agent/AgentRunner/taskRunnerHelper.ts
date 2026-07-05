@@ -21,7 +21,16 @@ export async function handleTaskSpawn(
 ): Promise<{ role: 'tool'; tool_call_id: string; name: string; content: string }> {
   const name = 'Task'
 
-  let parsed: { subagent_type?: string; description?: string; prompt?: string } = {}
+  let parsed: {
+    subagent_type?: string
+    description?: string
+    prompt?: string
+    task?: string
+    context?: string
+    expectations?: { questions: string[]; outOfScope?: string[] }
+    scope?: { directories?: string[]; excludeGlobs?: string[] }
+    depth?: 'quick' | 'normal' | 'exhaustive'
+  } = {}
   try {
     parsed = JSON.parse(rawArgs || '{}')
   } catch {
@@ -32,10 +41,10 @@ export async function handleTaskSpawn(
 
   const { subagent_type, description, prompt } = parsed
 
-  if (!subagent_type || !prompt) {
+  if (!subagent_type || (!prompt && !parsed.task)) {
     const errMsg = JSON.stringify({
       ok: false,
-      error: 'Task requires `subagent_type` and `prompt` arguments.'
+      error: 'Task requires `subagent_type` and (`prompt` or `task`) arguments.'
     })
     callbacks.onToolEnd?.(toolCallId, errMsg)
     return { role: 'tool' as const, tool_call_id: toolCallId, name, content: errMsg }
@@ -66,7 +75,12 @@ export async function handleTaskSpawn(
       {
         workspaceRoot: config.workspaceRoot,
         sessionId: config.sessionId || 'session_default',
-        parentPrompt: prompt,
+        task: parsed.task || prompt || '',
+        parentPrompt: parsed.task || prompt || '',
+        expectations: parsed.expectations,
+        context: parsed.context,
+        scope: parsed.scope,
+        depth: parsed.depth,
         apiConfig: {
           baseUrl: config.baseUrl || '',
           apiKey: config.apiKey || '',
@@ -89,7 +103,10 @@ export async function handleTaskSpawn(
         subagent_type,
         description: description || '',
         output: result.output || '(subagent produced no text output)',
-        toolCallCount: result.toolCallCount
+        structuredOutput: result.structuredOutput,
+        qualitySummary: result.qualitySummary,
+        toolCallCount: result.toolCallCount,
+        filesExamined: result.filesExamined,
       }
     })
     callbacks.onToolEnd?.(toolCallId, resultMsg)
