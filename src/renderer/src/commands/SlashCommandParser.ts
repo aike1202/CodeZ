@@ -83,11 +83,24 @@ export function parseSlashCommand(
     // A slug-like pattern: only lowercase, digits, hyphens
     const slugPattern = /^[a-z][a-z0-9-]*$/
     if (slugPattern.test(potentialSlug)) {
-      return {
-        isCommand: true,
-        commandName: potentialSlug,
-        processedMessage: '',
-        clientAction: { type: 'plan:load', payload: { slug: potentialSlug } }
+      // 先排除已注册的内置命令与技能：它们虽是 kebab-case，但不是 plan slug
+      const slugLower = potentialSlug.toLowerCase()
+      const isBuiltinCommand = builtinCommands.some(
+        (c) => c.name === slugLower || c.aliases?.includes(slugLower)
+      )
+      const isSkill = dynamicSkills.some(
+        (s) =>
+          s.id.toLowerCase() === slugLower ||
+          s.id.replace(/^(global|workspace)-/, '').toLowerCase() === slugLower ||
+          s.triggers?.includes(slugLower)
+      )
+      if (!isBuiltinCommand && !isSkill) {
+        return {
+          isCommand: true,
+          commandName: potentialSlug,
+          processedMessage: '',
+          clientAction: { type: 'plan:load', payload: { slug: potentialSlug } }
+        }
       }
     }
   }
