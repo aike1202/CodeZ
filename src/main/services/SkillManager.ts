@@ -8,6 +8,7 @@ import type {
   ExternalSkillGroup,
   ExternalSkillItem
 } from '../../shared/types/skill'
+import { isBuiltinSkillName } from './BuiltinSkills'
 
 export class SkillManager {
   private static instance: SkillManager
@@ -90,7 +91,8 @@ export class SkillManager {
 
             const parentDirName = path.basename(path.dirname(fullPath))
             const fileName = path.basename(entry.name, entry.name === 'SKILL.md' ? '' : '.skill.md')
-            const id = (isGlobal ? 'global-' : 'workspace-') + (entry.name === 'SKILL.md' ? parentDirName : fileName)
+            const bareName = entry.name === 'SKILL.md' ? parentDirName : fileName
+            const id = (isGlobal ? 'global-' : 'workspace-') + bareName
 
             skills.push({
               id,
@@ -100,7 +102,8 @@ export class SkillManager {
               content: body,
               path: fullPath,
               enabled: config[id] !== false,
-              isGlobal
+              isGlobal,
+              builtin: isGlobal && isBuiltinSkillName(bareName)
             })
           }
         }
@@ -322,6 +325,12 @@ triggers: [code-review, review, 代码审查]
     const skills = await this.getSkills(workspaceRoot)
     const target = skills.find((s) => s.id === id)
     if (!target || !target.path) return false
+
+    // 内置技能受保护：不可删除
+    if (target.builtin) {
+      console.warn(`Refused to delete builtin skill: ${id}`)
+      return false
+    }
 
     // 技能目录 = SKILL.md 所在目录；.skill.md 单文件形式则删除文件本身。
     const isSkillMd = path.basename(target.path) === 'SKILL.md'
