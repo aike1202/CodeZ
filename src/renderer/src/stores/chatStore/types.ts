@@ -60,6 +60,31 @@ export interface TextTimelineItem {
 
 export type ExecutionTimelineItem = ReasoningTimelineItem | ToolTimelineItem | TextTimelineItem
 
+/** 子 Agent 调用记录 — 与主 Agent 时间线分离，由 SubAgentCard 消费 */
+export interface SubAgentRecord {
+  id: string
+  type: string
+  description: string
+  prompt: string
+  depth?: 'quick' | 'normal' | 'exhaustive'
+  expectations?: { questions: string[]; outOfScope?: string[] }
+  parentToolCallId: string
+  status: 'running' | 'completed' | 'failed'
+  startedAt: number
+  completedAt?: number
+  content: string
+  reasoningContent?: string
+  toolCalls: ToolCallState[]
+  executionTimeline: ExecutionTimelineItem[]
+  result?: {
+    output?: string
+    qualitySummary?: any
+    toolCallCount: number
+    filesExamined?: string[]
+    conclusion?: string
+  }
+}
+
 export interface PermissionRequestState {
   id: string
   toolName: string
@@ -111,6 +136,7 @@ export interface ChatMessage {
   diffEntries?: Array<{ path: string; diff: string }>
   permissionRequests?: PermissionRequestState[]
   askUserRequests?: AskUserRequestState[]
+  subAgents?: SubAgentRecord[]
 }
 
 export interface ChatSession {
@@ -173,6 +199,27 @@ export interface ChatState {
   completeReasoningTimeline: (msgId: string) => void
   startToolCall: (msgId: string, toolCall: Omit<ToolCallState, 'status' | 'startedAt' | 'sequence'>) => void
   finishToolCall: (msgId: string, toolCallId: string, result: string) => void
+
+  startSubAgent: (
+    msgId: string,
+    subAgentId: string,
+    meta: {
+      type: string
+      description: string
+      prompt: string
+      depth?: 'quick' | 'normal' | 'exhaustive'
+      expectations?: { questions: string[]; outOfScope?: string[] }
+      parentToolCallId: string
+    }
+  ) => void
+  appendSubAgentChunk: (msgId: string, subAgentId: string, delta: string, reasoningDelta: string) => void
+  startSubAgentToolCall: (msgId: string, subAgentId: string, toolCall: Omit<ToolCallState, 'status' | 'startedAt' | 'sequence'>) => void
+  finishSubAgentToolCall: (msgId: string, subAgentId: string, toolCallId: string, result: string) => void
+  endSubAgent: (
+    msgId: string,
+    subAgentId: string,
+    result: { status: 'completed' | 'failed'; output?: string; qualitySummary?: any; toolCallCount: number; filesExamined?: string[] }
+  ) => void
 
   setExpandedCapsule: (capsule: 'task' | 'plan' | null) => void
   setSubAgentStatus: (status: 'idle' | 'running' | 'completed' | 'failed') => void

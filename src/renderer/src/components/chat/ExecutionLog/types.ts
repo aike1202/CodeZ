@@ -1,4 +1,4 @@
-import type { AgentState, ExecutionTimelineItem } from '../../../stores/chatStore'
+import type { AgentState, ExecutionTimelineItem, SubAgentRecord } from '../../../stores/chatStore'
 
 export interface ExecutionLogProps {
   timeline?: ExecutionTimelineItem[]
@@ -15,4 +15,5 @@ export interface ExecutionLogProps {
     }
   ) => void
   streaming?: boolean
+  subAgents?: SubAgentRecord[]
 }

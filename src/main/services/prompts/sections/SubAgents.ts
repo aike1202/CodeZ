@@ -2,7 +2,7 @@
 import { SubAgentManager } from '../../../agent/SubAgentManager'
 
 export function buildSubAgentGuidance(): string {
-  const defs = SubAgentManager.listDefinitions()
+  const defs = SubAgentManager.listEnabledDefinitions()
   if (defs.length === 0) return ''
 
   const lines: string[] = []

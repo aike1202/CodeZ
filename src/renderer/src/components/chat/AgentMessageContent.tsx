@@ -91,6 +91,7 @@ export function AgentMessageContent({
             onFileClick={handleFileClick}
             onDiffClick={handleDiffClick}
             streaming={isStreaming && !msg.content}
+            subAgents={msg.subAgents}
           />
         </div>
       )}
@@ -121,6 +122,7 @@ export function AgentMessageContent({
                 onFileClick={handleFileClick}
                 onDiffClick={handleDiffClick}
                 streaming={chunk.streaming}
+                subAgents={msg.subAgents}
               />
             </div>
           )

@@ -37,6 +37,13 @@ export const IPC_CHANNELS = {
   CHAT_STREAM_TOOL_START: 'chat:stream:tool-start',
   CHAT_STREAM_TOOL_END: 'chat:stream:tool-end',
 
+  // SubAgent Logs (scoped to a sub-agent invocation, keyed by subAgentId)
+  CHAT_STREAM_SUBAGENT_START: 'chat:stream:subagent:start',
+  CHAT_STREAM_SUBAGENT_END: 'chat:stream:subagent:end',
+  CHAT_STREAM_SUBAGENT_CHUNK: 'chat:stream:subagent:chunk',
+  CHAT_STREAM_SUBAGENT_TOOL_START: 'chat:stream:subagent:tool-start',
+  CHAT_STREAM_SUBAGENT_TOOL_END: 'chat:stream:subagent:tool-end',
+
   // Session
   SESSION_LIST: 'session:list',
   SESSION_GET: 'session:get',
@@ -74,5 +81,10 @@ export const IPC_CHANNELS = {
 
   // Settings
   SETTINGS_GET: 'settings:get',
-  SETTINGS_SAVE: 'settings:save'
+  SETTINGS_SAVE: 'settings:save',
+
+  // SubAgents
+  SUBAGENT_LIST: 'subagent:list',
+  SUBAGENT_TOGGLE: 'subagent:toggle',
+  SUBAGENT_GET_DETAIL: 'subagent:get-detail'
 } as const

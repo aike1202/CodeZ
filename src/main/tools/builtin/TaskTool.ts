@@ -14,7 +14,7 @@ export class TaskTool extends Tool {
   }
 
   get description() {
-    const defs = SubAgentManager.listDefinitions()
+    const defs = SubAgentManager.listEnabledDefinitions()
     const typeLines =
       defs.length > 0
         ? defs.map((d) => `  - ${d.type}: ${d.description}`).join('\n')
@@ -37,7 +37,7 @@ export class TaskTool extends Tool {
   }
 
   get parameters_schema() {
-    const defs = SubAgentManager.listDefinitions()
+    const defs = SubAgentManager.listEnabledDefinitions()
     const types = defs.map((d) => d.type)
     return {
       type: 'object',

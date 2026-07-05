@@ -15,6 +15,7 @@ import {
 import './ExecutionLog.css'
 import type { ExecutionLogProps } from './types'
 import { LogItemRow } from './components/LogItemRow'
+import SubAgentCard from '../SubAgentCard'
 
 export default function ExecutionLog({
   timeline,
@@ -22,7 +23,8 @@ export default function ExecutionLog({
   agentStates,
   onFileClick,
   onDiffClick,
-  streaming
+  streaming,
+  subAgents
 }: ExecutionLogProps): React.ReactElement | null {
   const [expanded, setExpanded] = useState(false)
   const [expandedMap, setExpandedMap] = useState<Record<string, boolean>>({})
@@ -151,18 +153,37 @@ export default function ExecutionLog({
 
       <div className={`timeline-list-wrapper ${expanded ? 'timeline-list-wrapper--expanded' : ''}`}>
         <Stack className="timeline-list">
-          {unifiedItems.map((item, idx) => (
-            <LogItemRow
-              key={item.id}
-              item={item}
-              isLast={idx === unifiedItems.length - 1}
-              isItemExpanded={Boolean(expandedMap[item.id])}
-              hasItemDetail={hasDetail(item)}
-              toggleItemExpand={toggleItemExpand}
-              onFileClick={onFileClick}
-              onDiffClick={onDiffClick}
-            />
-          ))}
+          {unifiedItems.map((item, idx) => {
+            const matchedSubAgent =
+              item.type === 'tool' &&
+              (item.toolName === 'Task' || item.toolName === 'EnterPlanMode')
+                ? subAgents?.find((s) => s.parentToolCallId === item.id)
+                : undefined
+
+            if (matchedSubAgent) {
+              return (
+                <SubAgentCard
+                  key={item.id}
+                  subAgent={matchedSubAgent}
+                  onFileClick={onFileClick}
+                  onDiffClick={onDiffClick}
+                />
+              )
+            }
+
+            return (
+              <LogItemRow
+                key={item.id}
+                item={item}
+                isLast={idx === unifiedItems.length - 1}
+                isItemExpanded={Boolean(expandedMap[item.id])}
+                hasItemDetail={hasDetail(item)}
+                toggleItemExpand={toggleItemExpand}
+                onFileClick={onFileClick}
+                onDiffClick={onDiffClick}
+              />
+            )
+          })}
         </Stack>
       </div>
     </div>

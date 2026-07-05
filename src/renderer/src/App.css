@@ -43,36 +43,46 @@
 
 .scroll-to-bottom-btn {
   position: absolute;
-  right: 24px;
-  bottom: 24px;
+  bottom: 12px;
+  left: 50%;
   z-index: 40;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 14px;
+  padding: 8px 16px;
   border: 1px solid var(--border-color);
   border-radius: 9999px;
   background-color: var(--bg-panel);
   color: var(--text-main);
   font-size: 13px;
+  font-weight: 500;
   line-height: 1;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  opacity: 1;
-  transform: translateY(0);
-  transition: opacity 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+  
+  /* Animation properties for hidden state */
+  opacity: 0;
+  transform: translateX(-50%) translateY(10px);
+  pointer-events: none;
+  transition: opacity 250ms ease, transform 300ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
-.scroll-to-bottom-btn:hover {
+.scroll-to-bottom-btn.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  pointer-events: auto;
+}
+
+.scroll-to-bottom-btn.visible:hover {
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
   border-color: var(--primary-color);
   color: var(--primary-color);
 }
 
-.scroll-to-bottom-btn:active {
-  transform: translateY(1px);
+.scroll-to-bottom-btn.visible:active {
+  transform: translateX(-50%) translateY(2px);
 }
 
 .app-chat-scroll-area {

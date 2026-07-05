@@ -35,6 +35,18 @@ export interface UnifiedTimelineItem {
     | 'Executing'
     | 'Asked'
     | 'Asking'
+    | 'Submitting'
+    | 'Submitted'
+    | 'Dispatching'
+    | 'Dispatched'
+    | 'Saving'
+    | 'Saved'
+    | 'Updating'
+    | 'Updated'
+    | 'Fetching'
+    | 'Fetched'
+    | 'Invoking'
+    | 'Invoked'
   target: string
   detail?: string
   args?: string

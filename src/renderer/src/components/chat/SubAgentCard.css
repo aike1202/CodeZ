@@ -1,0 +1,283 @@
+/* SubAgentCard — 内嵌在主时间线中的子 Agent 调用卡片 */
+
+.subagent-card {
+  font-family: var(--font-sans, sans-serif);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-panel);
+  overflow: hidden;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+  margin: 6px 0;
+}
+
+.subagent-card--running {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 1px var(--primary-outline);
+}
+
+.subagent-card--failed {
+  border-color: var(--color-error);
+}
+
+/* ── 头部 ── */
+
+.subagent-card-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  outline: none;
+  cursor: pointer;
+  user-select: none;
+  text-align: left;
+  transition: background-color 0.12s ease;
+}
+.subagent-card-header:hover {
+  background-color: var(--bg-hover);
+}
+
+.subagent-card-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+}
+
+.subagent-card-prefix {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.subagent-card-type-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: var(--primary-outline);
+  color: var(--primary-color);
+}
+
+.subagent-card-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-main);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-card-time {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.subagent-card-chevron {
+  flex-shrink: 0;
+  color: var(--text-light);
+  transition: transform 0.2s ease;
+}
+.subagent-card-chevron--expanded {
+  transform: rotate(180deg);
+}
+
+.subagent-card-status-icon--error {
+  color: var(--color-error);
+}
+
+/* ── 折叠态统计条 ── */
+
+.subagent-card-meta-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 8px 12px;
+  font-size: 11px;
+  color: var(--text-light);
+}
+
+.subagent-card-meta-running {
+  color: var(--primary-color);
+  font-weight: 500;
+}
+
+/* ── 展开体 ── */
+
+.subagent-card-body {
+  padding: 4px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-top: 1px solid var(--border-color);
+}
+
+/* ── 统计行 ── */
+
+.subagent-card-stats-row {
+  display: flex;
+  gap: 16px;
+  padding: 8px 6px;
+}
+
+.subagent-card-stats-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.subagent-card-stats-num {
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-main);
+}
+
+.subagent-card-stats-label {
+  font-size: 10px;
+  color: var(--text-light);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* ── 分区折叠 ── */
+
+.subagent-section {
+  border-bottom: 1px solid var(--border-light);
+}
+.subagent-section:last-child {
+  border-bottom: none;
+}
+
+.subagent-section-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  background: transparent;
+  border: none;
+  outline: none;
+  cursor: pointer;
+  user-select: none;
+  text-align: left;
+  border-radius: 6px;
+  transition: background-color 0.1s ease;
+}
+.subagent-section-header:hover {
+  background-color: var(--bg-hover);
+}
+
+.subagent-section-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-muted);
+}
+.subagent-section-dot--thinking { background: #8b5cf6; }
+.subagent-section-dot--file     { background: var(--primary-color); }
+.subagent-section-dot--exec     { background: var(--color-warning); }
+.subagent-section-dot--reply    { background: var(--color-success); }
+
+.subagent-section-label {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-main);
+}
+
+.subagent-section-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: var(--bg-hover);
+  color: var(--text-light);
+  font-weight: 500;
+  min-width: 20px;
+  text-align: center;
+}
+
+.subagent-section-content {
+  padding: 6px 4px 10px 16px;
+  animation: subagent-expand 0.15s ease;
+}
+
+@keyframes subagent-expand {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* 任务安排 */
+.subagent-section-content--prompt {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--bg-app);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+/* 时间线区 */
+.subagent-section-content--timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-left: -4px;
+  position: relative;
+}
+
+/* AI 回复 */
+.subagent-section-content--reply {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.subagent-reply-text {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-main);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  background: var(--bg-app);
+  border-radius: 6px;
+}
+
+.subagent-reply-qual {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.subagent-reply-qual-tag {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: var(--primary-outline);
+  color: var(--primary-color);
+  font-weight: 500;
+}
+
+.subagent-reply-qual-tag--warn {
+  background: color-mix(in srgb, var(--color-warning) 15%, transparent);
+  color: var(--color-warning);
+}

@@ -9,6 +9,7 @@ import './TaskHistoryModal.css' // Reusing the modal overlay and card styles
 interface RevertPreviewModalProps {
   toDelete: string[]
   toRestore: string[]
+  unknownStatus?: boolean
   onConfirm: () => void
   onCancel: () => void
 }
@@ -16,6 +17,7 @@ interface RevertPreviewModalProps {
 export default function RevertPreviewModal({
   toDelete,
   toRestore,
+  unknownStatus,
   onConfirm,
   onCancel
 }: RevertPreviewModalProps) {
@@ -35,7 +37,7 @@ export default function RevertPreviewModal({
               确定要回退到此消息吗？这将删除在此之后的所有对话，并强行撤销在此之后 AI 对工作区所做的所有文件修改。
             </p>
             
-            {(toDelete.length > 0 || toRestore.length > 0) && (
+            {!unknownStatus && (toDelete.length > 0 || toRestore.length > 0) && (
               <div style={{ background: 'var(--bg-subtle)', padding: '12px', borderRadius: '6px' }}>
                 {toDelete.length > 0 && (
                   <div className="mb-3">
@@ -61,9 +63,9 @@ export default function RevertPreviewModal({
               </div>
             )}
 
-            {toDelete.length === 0 && toRestore.length === 0 && (
+            {!unknownStatus && toDelete.length === 0 && toRestore.length === 0 && (
               <p style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                (没有检测到任何受影响的文件修改)
+                (没有检测到受影响的文件修改，仅截断对话历史)
               </p>
             )}
 

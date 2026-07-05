@@ -80,6 +80,11 @@ const api = {
         onToolEnd?: (toolCallId: string, result: string) => void
         onPermissionRequest?: (request: any) => void
         onAskUserRequest?: (request: any) => void
+        onSubAgentStart?: (subAgentId: string, meta: any) => void
+        onSubAgentEnd?: (subAgentId: string, result: any) => void
+        onSubAgentChunk?: (subAgentId: string, delta: string, reasoningDelta: string) => void
+        onSubAgentToolStart?: (subAgentId: string, toolCallId: string, name: string, args: string, thoughtSignature?: string) => void
+        onSubAgentToolEnd?: (subAgentId: string, toolCallId: string, result: string) => void
       }
     ): (() => void) => {
       let activeStreamId: string | null = null
@@ -106,6 +111,26 @@ const api = {
       const toolEndHandler = (_event: unknown, streamId: string, toolCallId: string, result: string) => {
         if (streamId !== activeStreamId) return
         callbacks.onToolEnd?.(toolCallId, result)
+      }
+      const subAgentStartHandler = (_event: unknown, streamId: string, subAgentId: string, meta: any) => {
+        if (streamId !== activeStreamId) return
+        callbacks.onSubAgentStart?.(subAgentId, meta)
+      }
+      const subAgentEndHandler = (_event: unknown, streamId: string, subAgentId: string, result: any) => {
+        if (streamId !== activeStreamId) return
+        callbacks.onSubAgentEnd?.(subAgentId, result)
+      }
+      const subAgentChunkHandler = (_event: unknown, streamId: string, subAgentId: string, delta: string, reasoningDelta: string) => {
+        if (streamId !== activeStreamId) return
+        callbacks.onSubAgentChunk?.(subAgentId, delta, reasoningDelta)
+      }
+      const subAgentToolStartHandler = (_event: unknown, streamId: string, subAgentId: string, toolCallId: string, name: string, args: string, thoughtSignature?: string) => {
+        if (streamId !== activeStreamId) return
+        callbacks.onSubAgentToolStart?.(subAgentId, toolCallId, name, args, thoughtSignature)
+      }
+      const subAgentToolEndHandler = (_event: unknown, streamId: string, subAgentId: string, toolCallId: string, result: string) => {
+        if (streamId !== activeStreamId) return
+        callbacks.onSubAgentToolEnd?.(subAgentId, toolCallId, result)
       }
       const approvalHandler = (_event: unknown, streamId: string, request: any) => {
         if (streamId !== activeStreamId) return
@@ -135,6 +160,11 @@ const api = {
         ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_ERROR, errorHandler)
         ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_TOOL_START, toolStartHandler)
         ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_TOOL_END, toolEndHandler)
+        ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_SUBAGENT_START, subAgentStartHandler)
+        ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_SUBAGENT_END, subAgentEndHandler)
+        ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_SUBAGENT_CHUNK, subAgentChunkHandler)
+        ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_SUBAGENT_TOOL_START, subAgentToolStartHandler)
+        ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_SUBAGENT_TOOL_END, subAgentToolEndHandler)
         ipcRenderer.removeListener(IPC_CHANNELS.CHAT_REQUEST_APPROVAL, approvalHandler)
         ipcRenderer.removeListener(IPC_CHANNELS.CHAT_REQUEST_ASK_USER, askUserHandler)
       }
@@ -144,6 +174,11 @@ const api = {
       ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_ERROR, errorHandler)
       ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_TOOL_START, toolStartHandler)
       ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_TOOL_END, toolEndHandler)
+      ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_SUBAGENT_START, subAgentStartHandler)
+      ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_SUBAGENT_END, subAgentEndHandler)
+      ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_SUBAGENT_CHUNK, subAgentChunkHandler)
+      ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_SUBAGENT_TOOL_START, subAgentToolStartHandler)
+      ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_SUBAGENT_TOOL_END, subAgentToolEndHandler)
       ipcRenderer.on(IPC_CHANNELS.CHAT_REQUEST_APPROVAL, approvalHandler)
       ipcRenderer.on(IPC_CHANNELS.CHAT_REQUEST_ASK_USER, askUserHandler)
 
@@ -268,6 +303,15 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET),
     save: (settings: any): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SAVE, settings)
+  },
+
+  subAgent: {
+    list: (): Promise<any[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SUBAGENT_LIST),
+    toggle: (type: string, enabled: boolean): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SUBAGENT_TOGGLE, type, enabled),
+    getDetail: (type: string): Promise<any | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SUBAGENT_GET_DETAIL, type)
   },
 
   plan: {

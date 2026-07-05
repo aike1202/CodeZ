@@ -20,7 +20,7 @@ export interface ModelConfig {
   thinkingMode?: ThinkingMode
 }
 
-export type ApiFormat = 'openai' | 'anthropic' | 'gemini' | 'ollama' | 'azure'
+export type ApiFormat = 'openai' | 'anthropic' | 'gemini'
 
 /** Provider 持久化配置（含加密后的 API Key） */
 export interface ProviderConfig {

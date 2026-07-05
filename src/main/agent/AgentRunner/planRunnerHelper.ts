@@ -38,6 +38,7 @@ export async function handleEnterPlanMode(
 
   const ans = answers?.[0]?.answer as string
   if (ans === 'approve') {
+    const subAgentId = `subagent_${toolCallId}`
     try {
       const lastUserMsg = [...allMessages].reverse().find((m) => m.role === 'user')
       const parentPrompt = lastUserMsg
@@ -51,6 +52,14 @@ export async function handleEnterPlanMode(
         win.webContents.send(IPC_CHANNELS.PLAN_SUBAGENT_PROGRESS, { status: 'running' })
       }
 
+      // 通知前端 SubAgent 开始（驱动 SubAgentCard）
+      callbacks.onSubAgentStart?.(subAgentId, {
+        type: 'Plan',
+        description: `规划：${parentPrompt.slice(0, 60)}`,
+        prompt: parentPrompt,
+        parentToolCallId: toolCallId
+      })
+
       const result = await SubAgentManager.spawn(
         'Plan',
         {
@@ -58,6 +67,7 @@ export async function handleEnterPlanMode(
           sessionId: config.sessionId || 'session_default',
           task: parentPrompt,
           parentPrompt,
+          subAgentId,
           apiConfig: {
             baseUrl: config.baseUrl || '',
             apiKey: config.apiKey || '',
@@ -72,6 +82,14 @@ export async function handleEnterPlanMode(
       if (win) {
         win.webContents.send(IPC_CHANNELS.PLAN_SUBAGENT_PROGRESS, { status: 'completed' })
       }
+
+      callbacks.onSubAgentEnd?.(subAgentId, {
+        status: 'completed',
+        output: result.output || '',
+        qualitySummary: result.qualitySummary,
+        toolCallCount: result.toolCallCount,
+        filesExamined: result.filesExamined
+      })
 
       const activePlan = await planStore.getActive(config.workspaceRoot)
       if (activePlan) {
@@ -141,6 +159,11 @@ export async function handleEnterPlanMode(
     } catch (err: any) {
       const win = BrowserWindow.getAllWindows()[0]
       if (win) win.webContents.send(IPC_CHANNELS.PLAN_SUBAGENT_PROGRESS, { status: 'failed' })
+
+      callbacks.onSubAgentEnd?.(subAgentId, {
+        status: 'failed',
+        toolCallCount: 0
+      })
 
       const errMsg = JSON.stringify({
         ok: false,

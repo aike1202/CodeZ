@@ -93,11 +93,6 @@
   cursor: pointer;
 }
 
-.settings-thinking-select {
-  margin-top: 8px;
-  width: 100%;
-}
-
 .settings-thinking-row {
   margin-top: 12px;
   display: flex;
@@ -132,12 +127,6 @@
   white-space: nowrap;
 }
 
-.settings-thinking-desc {
-  font-size: 12px;
-  color: var(--text-muted);
-  line-height: 1.625;
-}
-
 .settings-models-box {
   background-color: var(--bg-input);
   border: 1px solid var(--border);
@@ -164,23 +153,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 12px 4px 12px;
-}
-
-.settings-model-advanced-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 12px 12px 12px;
-}
-
-.settings-model-advanced-select {
-  flex: 1;
-  font-size: 12px;
-  padding: 4px 8px;
-  color: var(--text-muted);
-  background-color: transparent;
-  border: 1px dashed var(--border);
+  padding: 12px;
 }
 
 .settings-model-name-wrapper {
@@ -193,7 +166,7 @@
 }
 
 .settings-model-tokens-wrapper {
-  width: 140px;
+  width: 180px;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -212,6 +185,7 @@
   font-size: 13px;
   color: var(--text-muted);
   margin-right: 8px;
+  white-space: nowrap;
 }
 
 .settings-remove-model-btn {

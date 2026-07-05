@@ -189,6 +189,18 @@ export function buildUnifiedTimeline(
           verbDisplay = tc.status === 'running' ? 'Analyzing' : 'Analyzed'
         } else if (tc.name === 'AskUserQuestion') {
           verbDisplay = tc.status === 'running' ? 'Asking' : 'Asked'
+        } else if (tc.name === 'submit_result' || tc.name === 'submit') {
+          verbDisplay = tc.status === 'running' ? 'Submitting' : 'Submitted'
+        } else if (tc.name === 'Task' || tc.name === 'spawn' || tc.name === 'delegate') {
+          verbDisplay = tc.status === 'running' ? 'Dispatching' : 'Dispatched'
+        } else if (tc.name === 'Write' || tc.name === 'write_to_file') {
+          verbDisplay = tc.status === 'running' ? 'Saving' : 'Saved'
+        } else if (tc.name === 'UpdatePlanStep') {
+          verbDisplay = tc.status === 'running' ? 'Updating' : 'Updated'
+        } else if (tc.name === 'Skill' || tc.name === 'invoke_skill') {
+          verbDisplay = tc.status === 'running' ? 'Invoking' : 'Invoked'
+        } else if (tc.name === 'WebFetch' || tc.name === 'web_fetch' || tc.name === 'fetch') {
+          verbDisplay = tc.status === 'running' ? 'Fetching' : 'Fetched'
         } else {
           verbDisplay = tc.status === 'running' ? 'Executing' : 'Executed'
         }
@@ -228,6 +240,49 @@ export function buildUnifiedTimeline(
             }
           } catch {
             // keep original target
+          }
+        }
+
+        // submit_result：展示提交摘要
+        if (tc.name === 'submit_result') {
+          try {
+            const sa = JSON.parse(tc.args)
+            if (sa.conclusion) {
+              targetDisplay = sa.conclusion.slice(0, 80) + (sa.conclusion.length > 80 ? '…' : '')
+            } else {
+              targetDisplay = '提交研究结果'
+            }
+          } catch {
+            targetDisplay = '提交结果'
+          }
+        }
+
+        // Task / spawn：展示委派目标
+        if (tc.name === 'Task' || tc.name === 'spawn') {
+          try {
+            const ta = JSON.parse(tc.args)
+            targetDisplay = ta.description || ta.subagent_type || '子任务'
+          } catch {
+            targetDisplay = '委派子任务'
+          }
+        }
+
+        // WebFetch：展示目标 URL
+        if (tc.name === 'WebFetch' || tc.name === 'web_fetch') {
+          try {
+            const wa = JSON.parse(tc.args)
+            const u = wa.url || wa.fetchInfo || ''
+            if (u) targetDisplay = u.length > 60 ? u.slice(0, 60) + '…' : u
+          } catch {}
+        }
+
+        // Skill：展示技能名
+        if (tc.name === 'Skill') {
+          try {
+            const ska = JSON.parse(tc.args)
+            targetDisplay = ska.skill || ska.command || '调用技能'
+          } catch {
+            targetDisplay = '调用技能'
           }
         }
 

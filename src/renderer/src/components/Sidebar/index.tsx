@@ -24,6 +24,7 @@ export default function Sidebar({
   onSelectSession,
   onArchiveSession,
   onDeleteSession,
+  onRestoreSession,
   onSelectProject,
   onOpenProject,
   activeProjectId,
@@ -44,6 +45,13 @@ export default function Sidebar({
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 })
   const buttonRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
+  const [toastData, setToastData] = useState<{
+    sessionId: string
+    sessionSummary: string
+    action: 'delete' | 'archive'
+    timeoutId: ReturnType<typeof setTimeout>
+  } | null>(null)
+
   const isAnyCollapsed = projects.some((p) => expandedProjects[p.id] === false)
   const toggleAllProjects = () => {
     if (isAnyCollapsed) {
@@ -55,6 +63,43 @@ export default function Sidebar({
       })
       setExpandedProjects(next)
     }
+  }
+
+  const getSessionSummary = (sessionId: string) => {
+    for (const proj of projects) {
+      const session = proj.sessions.find(s => s.id === sessionId)
+      if (session) return session.summary
+    }
+    return ''
+  }
+
+  const handleDeleteSession = (sessionId: string) => {
+    const summary = getSessionSummary(sessionId)
+    onDeleteSession?.(sessionId)
+    if (toastData?.timeoutId) clearTimeout(toastData.timeoutId)
+    const timeoutId = setTimeout(() => setToastData(null), 5000)
+    setToastData({ sessionId, sessionSummary: summary, action: 'delete', timeoutId })
+  }
+
+  const handleArchiveSession = (sessionId: string, archive: boolean) => {
+    const summary = getSessionSummary(sessionId)
+    onArchiveSession?.(sessionId, archive)
+    if (archive) {
+      if (toastData?.timeoutId) clearTimeout(toastData.timeoutId)
+      const timeoutId = setTimeout(() => setToastData(null), 5000)
+      setToastData({ sessionId, sessionSummary: summary, action: 'archive', timeoutId })
+    }
+  }
+
+  const handleUndo = () => {
+    if (!toastData) return
+    if (toastData.action === 'delete') {
+      onRestoreSession?.(toastData.sessionId)
+    } else {
+      onArchiveSession?.(toastData.sessionId, false)
+    }
+    clearTimeout(toastData.timeoutId)
+    setToastData(null)
   }
 
   const handleOpenMenu = (e: React.MouseEvent, projId: string) => {
@@ -150,8 +195,8 @@ export default function Sidebar({
                   setConfirmState={setConfirmState}
                   onSelectProject={onSelectProject}
                   onSelectSession={onSelectSession}
-                  onArchiveSession={onArchiveSession}
-                  onDeleteSession={onDeleteSession}
+                  onArchiveSession={handleArchiveSession}
+                  onDeleteSession={handleDeleteSession}
                   buttonRefs={buttonRefs}
                   handleOpenMenu={handleOpenMenu}
                 />
@@ -179,6 +224,52 @@ export default function Sidebar({
         onRenameProject={onRenameProject}
         onRemoveProject={onRemoveProject}
       />
+
+      {toastData && (
+        <div 
+          key={toastData.timeoutId as unknown as string}
+          style={{
+            position: 'fixed',
+            top: '24px',
+            right: '24px',
+            zIndex: 9999,
+            backgroundColor: 'var(--bg-panel)',
+            border: '1px solid var(--border-color)',
+            boxShadow: '0 8px 30px rgba(0,0,0,0.12)',
+            borderRadius: '8px',
+            padding: '12px 16px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            animation: 'messageSlideIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards',
+            color: 'var(--text-main)',
+            fontSize: '13px',
+            overflow: 'hidden'
+          }}
+        >
+          <span>
+            已{toastData.action === 'delete' ? '删除' : '归档'} {toastData.sessionSummary ? `"${toastData.sessionSummary}"` : '对话'}
+          </span>
+          <Button 
+            variant="primary" 
+            size="sm" 
+            onClick={handleUndo}
+            style={{ padding: '4px 12px', minHeight: '28px', height: '28px' }}
+          >
+            撤销
+          </Button>
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 0,
+              left: 0,
+              height: '3px',
+              backgroundColor: 'var(--primary-color)',
+              animation: 'toastProgressShrink 5s linear forwards'
+            }}
+          />
+        </div>
+      )}
     </aside>
   )
 }

@@ -26,7 +26,19 @@ const VERB_TRANSLATIONS: Record<string, string> = {
   Executed: '已执行',
   Executing: '正在执行',
   Asked: '已提问',
-  Asking: '正在提问'
+  Asking: '正在提问',
+  Submitting: '正在提交',
+  Submitted: '已提交结果',
+  Dispatching: '正在委派',
+  Dispatched: '已委派子任务',
+  Saving: '正在保存',
+  Saved: '已保存文件',
+  Updating: '正在更新',
+  Updated: '已更新计划',
+  Fetching: '正在获取',
+  Fetched: '已获取网页',
+  Invoking: '正在调用技能',
+  Invoked: '已调用技能'
 }
 
 interface LogItemRowProps {
@@ -108,13 +120,14 @@ export function LogItemRow({
                     className="timeline-target-link"
                     onClick={(e) => {
                       e.stopPropagation()
+                      const filePath = item.realPath || item.target
                       if (item.type === 'edit') {
                         const diffInfo = buildDiffEditInfo(item.toolName || '', item.args || '')
                         if (diffInfo) {
-                          onDiffClick?.(item.target, diffInfo)
+                          onDiffClick?.(filePath, diffInfo)
                         }
                       } else {
-                        onFileClick?.(item.target)
+                        onFileClick?.(filePath)
                       }
                     }}
                   >

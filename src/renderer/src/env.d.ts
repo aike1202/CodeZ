@@ -90,6 +90,11 @@ declare global {
         get: () => Promise<any>
         save: (settings: any) => Promise<boolean>
       }
+      subAgent: {
+        list: () => Promise<import('@shared/types/subagent').SubAgentInfo[]>
+        toggle: (type: string, enabled: boolean) => Promise<void>
+        getDetail: (type: string) => Promise<import('@shared/types/subagent').SubAgentDetail | null>
+      }
     }
   }
 }

@@ -110,6 +110,21 @@ export function registerChatIpc(): void {
           onToolEnd: (toolCallId, result) => {
             sender.send(IPC_CHANNELS.CHAT_STREAM_TOOL_END, streamId, toolCallId, result)
           },
+          onSubAgentStart: (subAgentId, meta) => {
+            sender.send(IPC_CHANNELS.CHAT_STREAM_SUBAGENT_START, streamId, subAgentId, meta)
+          },
+          onSubAgentEnd: (subAgentId, result) => {
+            sender.send(IPC_CHANNELS.CHAT_STREAM_SUBAGENT_END, streamId, subAgentId, result)
+          },
+          onSubAgentChunk: (subAgentId, delta, reasoningDelta) => {
+            sender.send(IPC_CHANNELS.CHAT_STREAM_SUBAGENT_CHUNK, streamId, subAgentId, delta, reasoningDelta)
+          },
+          onSubAgentToolStart: (subAgentId, toolCallId, name, args, thoughtSignature) => {
+            sender.send(IPC_CHANNELS.CHAT_STREAM_SUBAGENT_TOOL_START, streamId, subAgentId, toolCallId, name, args, thoughtSignature)
+          },
+          onSubAgentToolEnd: (subAgentId, toolCallId, result) => {
+            sender.send(IPC_CHANNELS.CHAT_STREAM_SUBAGENT_TOOL_END, streamId, subAgentId, toolCallId, result)
+          },
           onPermissionRequest: async (request) => {
             return new Promise((resolve) => {
               sender.send(IPC_CHANNELS.CHAT_REQUEST_APPROVAL, streamId, request)

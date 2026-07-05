@@ -69,6 +69,17 @@ export async function handleTaskSpawn(
     win.webContents.send(IPC_CHANNELS.PLAN_SUBAGENT_PROGRESS, { status: 'running' })
   }
 
+  // 生成与父工具调用绑定的 subAgentId，并通知前端开始（驱动 SubAgentCard）
+  const subAgentId = `subagent_${toolCallId}`
+  callbacks.onSubAgentStart?.(subAgentId, {
+    type: subagent_type,
+    description: description || '',
+    prompt: parsed.task || prompt || '',
+    depth: parsed.depth,
+    expectations: parsed.expectations,
+    parentToolCallId: toolCallId
+  })
+
   try {
     const result = await SubAgentManager.spawn(
       subagent_type,
@@ -77,6 +88,7 @@ export async function handleTaskSpawn(
         sessionId: config.sessionId || 'session_default',
         task: parsed.task || prompt || '',
         parentPrompt: parsed.task || prompt || '',
+        subAgentId,
         expectations: parsed.expectations,
         context: parsed.context,
         scope: parsed.scope,
@@ -95,6 +107,15 @@ export async function handleTaskSpawn(
     if (win) {
       win.webContents.send(IPC_CHANNELS.PLAN_SUBAGENT_PROGRESS, { status: 'completed' })
     }
+
+    callbacks.onSubAgentEnd?.(subAgentId, {
+      status: 'completed',
+      output: result.output || '',
+      qualitySummary: result.qualitySummary,
+      toolCallCount: result.toolCallCount,
+      filesExamined: result.filesExamined,
+      conclusion: result.structuredOutput?.conclusion
+    })
 
     const resultMsg = JSON.stringify({
       ok: true,
@@ -115,6 +136,10 @@ export async function handleTaskSpawn(
     if (win) {
       win.webContents.send(IPC_CHANNELS.PLAN_SUBAGENT_PROGRESS, { status: 'failed' })
     }
+    callbacks.onSubAgentEnd?.(subAgentId, {
+      status: 'failed',
+      toolCallCount: 0
+    })
     const errMsg = JSON.stringify({
       ok: false,
       error: `SubAgent '${subagent_type}' execution failed: ${err.message}`

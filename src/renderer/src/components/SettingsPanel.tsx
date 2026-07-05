@@ -142,8 +142,6 @@ export default function SettingsPanel({
               <option value="openai">OpenAI Compatible (/v1/chat/completions)</option>
               <option value="anthropic">Anthropic Messages (/v1/messages)</option>
               <option value="gemini">Gemini Native (streamGenerateContent)</option>
-              <option value="ollama">Ollama</option>
-              <option value="azure">Azure OpenAI</option>
             </Select>
           </div>
 
@@ -178,28 +176,22 @@ export default function SettingsPanel({
                 <input
                   type="checkbox"
                   checked={thinking.enabled}
-                  onChange={(e) => setThinking({ ...thinking, enabled: e.target.checked })}
+                  onChange={(e) => setThinking({ ...thinking, enabled: e.target.checked, mode: 'auto' })}
                 />
                 启用模型 reasoning / thinking 输出
               </label>
-              <Select
-                className="settings-thinking-select"
-                value={thinking.mode}
-                disabled={!thinking.enabled}
-                onChange={(e) => setThinking({ ...thinking, mode: e.target.value as ThinkingMode })}
-              >
-                <option value="auto">自动智能适配 (推荐)</option>
-                <option value="openai">通用 OpenAI-compatible</option>
-                <option value="deepseek">DeepSeek reasoning</option>
-                <option value="qwen">Qwen enable_thinking</option>
-                <option value="anthropic">Anthropic thinking summarized</option>
-                <option value="gemini">Google Gemini 思考配置</option>
-                <option value="openrouter">OpenRouter include_reasoning</option>
-                <option value="none">不发送思考参数</option>
-              </Select>
-              <p className="settings-thinking-desc">
-                全局思考模式。如果未在模型列表中单独覆盖，则使用此默认配置。
-              </p>
+              {thinking.enabled && (
+                <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>自定义思考 Token 数量：</span>
+                  <Input
+                    type="number"
+                    style={{ width: '120px' }}
+                    placeholder="如 8192"
+                    value={thinking.budgetTokens || ''}
+                    onChange={(e) => setThinking({ ...thinking, budgetTokens: parseInt(e.target.value) || undefined })}
+                  />
+                </div>
+              )}
             </div>
           </div>
 
@@ -234,30 +226,6 @@ export default function SettingsPanel({
                         <IconClose />
                       </Button>
                     </div>
-                  </div>
-                  <div className="settings-model-advanced-row">
-                    <Select
-                      className="settings-model-advanced-select"
-                      value={m.apiFormat || ''}
-                      onChange={(e) => updateModel(idx, 'apiFormat', e.target.value === '' ? undefined : e.target.value)}
-                    >
-                      <option value="">继承全局协议格式</option>
-                      <option value="openai">OpenAI 格式</option>
-                      <option value="anthropic">Anthropic 格式</option>
-                      <option value="gemini">Gemini 格式</option>
-                    </Select>
-                    <Select
-                      className="settings-model-advanced-select"
-                      value={m.thinkingMode || ''}
-                      onChange={(e) => updateModel(idx, 'thinkingMode', e.target.value === '' ? undefined : e.target.value)}
-                    >
-                      <option value="">继承全局思考模式</option>
-                      <option value="auto">自动适配</option>
-                      <option value="openai">OpenAI 格式</option>
-                      <option value="deepseek">DeepSeek 格式</option>
-                      <option value="anthropic">Anthropic 格式</option>
-                      <option value="qwen">Qwen 格式</option>
-                    </Select>
                   </div>
                 </div>
               ) : null)}

@@ -49,8 +49,8 @@ export default function SessionItem({
       <span className="sidebar-session-summary">{session.summary}</span>
 
       {!isConfirming && (
-        <>
-          <span className="sidebar-session-time group-hover/session:hidden">
+        <div className="sidebar-session-right">
+          <span className="sidebar-session-time">
             {session.relativeTime}
           </span>
           <Flex className="sidebar-session-actions-box">
@@ -75,7 +75,7 @@ export default function SessionItem({
                   title="删除对话"
                   onClick={(e) => {
                     e.stopPropagation()
-                    setConfirmState({ sessionId: session.id, action: 'delete' })
+                    onDeleteSession?.(session.id)
                   }}
                 >
                   <Trash className="w-3.5 h-3.5" />
@@ -110,7 +110,7 @@ export default function SessionItem({
               </>
             )}
           </Flex>
-        </>
+        </div>
       )}
 
       {isConfirming && (

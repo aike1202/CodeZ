@@ -162,18 +162,11 @@ export default function ChatArea({
   const handleScroll = useCallback(() => {
     const container = containerRef.current
     if (!container) return
-    if (isNearBottom(container)) {
-      setIsFollowing(true)
-    }
+    setIsFollowing(isNearBottom(container))
   }, [])
 
-  const handleWheel = useCallback(() => {
-    setIsFollowing(false)
-  }, [])
-
-  const handleTouchStart = useCallback(() => {
-    setIsFollowing(false)
-  }, [])
+  // We no longer need handleWheel or handleTouchStart to break following,
+  // because handleScroll accurately reflects the current position.
 
   const resolvePermissionRequest = useChatStore((s) => s.resolvePermissionRequest)
   const resolveAskUserRequest = useChatStore((s) => s.resolveAskUserRequest)
@@ -261,32 +254,25 @@ export default function ChatArea({
   }, [messages])
 
   const scrollToBottomButton =
-    containerMounted && containerRef.current && !isFollowing
-      ? createPortal(
-          <button
-            type="button"
-            className="scroll-to-bottom-btn"
-            onClick={() => {
-              setIsFollowing(true)
-              scrollToBottom()
-            }}
-            aria-label="回到最新"
-          >
-            ↓ 回到最新
-          </button>,
-          containerRef.current
-        )
-      : null
+    <button
+      type="button"
+      className={`scroll-to-bottom-btn ${!isFollowing && hasMessages ? 'visible' : ''}`}
+      onClick={() => {
+        setIsFollowing(true)
+        scrollToBottom()
+      }}
+      aria-label="回到最新"
+    >
+      ↓ 回到最新
+    </button>
 
   return (
     <>
-      {scrollToBottomButton}
       <ChatAreaLayout
+        scrollToBottomButton={scrollToBottomButton}
         containerRef={containerRef}
         panelOpen={panelOpen}
         onScroll={handleScroll}
-        onWheel={handleWheel}
-        onTouchStart={handleTouchStart}
         messageArea={
           hasMessages ? (
             <div ref={contentRef} style={{ width: '100%', flexShrink: 0 }}>

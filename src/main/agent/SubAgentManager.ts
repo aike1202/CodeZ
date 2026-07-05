@@ -4,6 +4,7 @@ import { ContextManager } from './ContextManager'
 import type { ChatMessage, ToolDefinition } from '../../shared/types/provider'
 import type { StreamCallbacks } from '../services/ChatService'
 import type { AgentRunnerCallbacks } from './AgentRunner'
+import type { SubAgentDetail } from '../../shared/types/subagent'
 import { allSubAgentDefinitions } from './definitions'
 import {
   generateSubmitResultTool,
@@ -22,6 +23,9 @@ export interface SubAgentContext {
   task: string
   /** @deprecated 使用 task 代替 */
   parentPrompt: string
+
+  /** SubAgent 调用标识 — 用于把事件路由到 SubAgentCard（由调用方 handleTaskSpawn/handleEnterPlanMode 注入） */
+  subAgentId?: string
 
   /** 验收标准 — 子 Agent 必须逐条回答 */
   expectations?: {
@@ -194,6 +198,8 @@ export class SubAgentManager {
     allSubAgentDefinitions.map(def => [def.type, def])
   )
   private static activeHandles = new Map<string, SubAgentHandle>()
+  /** 被禁用的子智能体 type —— 不在此集合中即为启用 */
+  private static disabledTypes = new Set<string>()
 
   static register(definition: SubAgentDefinition): void {
     this.definitions.set(definition.type, definition)
@@ -205,6 +211,98 @@ export class SubAgentManager {
 
   static listDefinitions(): SubAgentDefinition[] {
     return Array.from(this.definitions.values())
+  }
+
+  /** 设置被禁用的子智能体 type 集合（由 SettingsService 驱动） */
+  static setDisabledTypes(types: string[]): void {
+    this.disabledTypes = new Set(types)
+  }
+
+  static isEnabled(type: string): boolean {
+    return !this.disabledTypes.has(type)
+  }
+
+  /** 仅返回启用的子智能体定义 —— 用于向主 Agent 广告可用类型 */
+  static listEnabledDefinitions(): SubAgentDefinition[] {
+    return Array.from(this.definitions.values()).filter(def => this.isEnabled(def.type))
+  }
+
+  /**
+   * 返回某个子智能体的完整详情，用于设置页「查看详情」弹窗。
+   *
+   * 系统提示词通过真实的 systemPromptBuilder + 框架扩展构建；
+   * 运行时才注入的动态值（workspaceRoot、task、scope 等）以 {{...}} 占位标注，
+   * 因此看到的提示词结构与实际运行时完全一致。
+   */
+  static getDetail(type: string): SubAgentDetail | undefined {
+    const def = this.definitions.get(type)
+    if (!def) return undefined
+
+    // 用占位上下文渲染提示词 —— 动态值显示为 {{...}} 便于阅读
+    const previewCtx: SubAgentContext = {
+      workspaceRoot: '{{workspaceRoot}}',
+      sessionId: '{{sessionId}}',
+      task: '{{task — 主 Agent 委派的核心问题}}',
+      parentPrompt: '{{task — 主 Agent 委派的核心问题}}',
+      expectations: {
+        questions: ['{{expectations.questions — 主 Agent 指定的验收问题}}'],
+      },
+      scope: {
+        directories: ['{{scope.directories}}'],
+        excludeGlobs: ['{{scope.excludeGlobs}}'],
+      },
+      context: '{{context — 主 Agent 已知的背景信息}}',
+      apiConfig: {
+        baseUrl: '',
+        apiKey: '',
+        apiFormat: 'openai',
+        model: '{{model}}',
+      },
+    }
+
+    let systemPrompt: string
+    try {
+      systemPrompt = buildExtendedSystemPrompt(def, previewCtx)
+    } catch (e: any) {
+      systemPrompt = `（提示词预览生成失败：${e?.message ?? e}）`
+    }
+
+    const toolManager = new ToolManager()
+    let tools: string[] = []
+    try {
+      tools = def.getTools(toolManager).map(t => t.function.name)
+    } catch {
+      tools = []
+    }
+    if (def.outputSpec) {
+      tools.push('submit_result')
+    }
+
+    return {
+      type: def.type,
+      description: def.description,
+      whenToUse: def.whenToUse,
+      whenNotToUse: def.whenNotToUse,
+      costHint: def.costHint,
+      enabled: this.isEnabled(def.type),
+      maxLoops: def.maxLoops,
+      defaultModel: def.defaultModel,
+      isolation: def.isolation,
+      canRunInBackground: def.canRunInBackground,
+      tools,
+      outputSpec: def.outputSpec
+        ? {
+            description: def.outputSpec.description,
+            fields: def.outputSpec.fields.map(f => ({
+              name: f.name,
+              type: f.type,
+              description: f.description,
+              required: f.required,
+            })),
+          }
+        : undefined,
+      systemPrompt,
+    }
   }
 
   /**
@@ -222,8 +320,13 @@ export class SubAgentManager {
     if (!def) {
       throw new Error(`SubAgent type '${type}' is not registered`)
     }
+    if (!this.isEnabled(type)) {
+      throw new Error(`SubAgent type '${type}' is disabled`)
+    }
 
     const handleId = `subagent_${type}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+    // SubAgent 事件作用域标识 — 优先用调用方注入的（与父工具调用绑定），否则回退到 handleId
+    const subAgentId = ctx.subAgentId || handleId
     let abortController = new AbortController()
 
     const handle: SubAgentHandle = {
@@ -295,10 +398,10 @@ export class SubAgentManager {
                 if (thoughtSignature) thoughtSig = thoughtSignature
                 if (delta) {
                   currentContent += delta
-                  callbacks.onChunk?.(delta, '')
+                  callbacks.onSubAgentChunk?.(subAgentId, delta, '')
                 }
                 if (reasoningDelta) {
-                  callbacks.onChunk?.('', reasoningDelta)
+                  callbacks.onSubAgentChunk?.(subAgentId, '', reasoningDelta)
                 }
                 if (toolCallsChunk) {
                   for (const tc of toolCallsChunk) {
@@ -312,7 +415,7 @@ export class SubAgentManager {
                     if (tc.function?.arguments) acc.function.arguments += tc.function.arguments
                     if (tc.thought_signature) acc.thought_signature = tc.thought_signature
                     else if (thoughtSignature) acc.thought_signature = thoughtSignature
-                    if (acc.id) callbacks.onToolStart?.(acc.id, acc.function.name, acc.function.arguments, acc.thought_signature)
+                    if (acc.id) callbacks.onSubAgentToolStart?.(subAgentId, acc.id, acc.function.name, acc.function.arguments, acc.thought_signature)
                   }
                 }
               },
@@ -416,7 +519,7 @@ export class SubAgentManager {
               const args = tc.function.arguments
               toolCallCount++
 
-              callbacks.onToolStart?.(tc.id, name, args)
+              callbacks.onSubAgentToolStart?.(subAgentId, tc.id, name, args)
 
               const toolInstance = toolManager.getTool(name)
               let result = ''
@@ -436,7 +539,7 @@ export class SubAgentManager {
                 }
               }
 
-              callbacks.onToolEnd?.(tc.id, result)
+              callbacks.onSubAgentToolEnd?.(subAgentId, tc.id, result)
               return { role: 'tool' as const, tool_call_id: tc.id, name, content: result }
             })
           )

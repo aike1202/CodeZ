@@ -178,11 +178,11 @@ export default function PromptArea({
                     value={activeProvider.thinking.effort || 'custom'}
                     onChange={handleEffortChange}
                   >
-                    <option value="auto">Auto</option>
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="custom">Custom</option>
+                    <option value="auto">自动</option>
+                    <option value="low">低</option>
+                    <option value="medium">中</option>
+                    <option value="high">高</option>
+                    <option value="custom">自定义</option>
                   </Select>
                 )}
 

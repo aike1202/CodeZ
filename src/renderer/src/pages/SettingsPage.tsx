@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react'
 import { useProviderStore } from '../stores/providerStore'
 import SettingsPanel from '../components/SettingsPanel'
-import { IconSettings, IconServer, IconSkills, IconCode, IconAdd, IconArrowLeft, IconTrash, IconBook } from '../components/Icons'
+import { IconSettings, IconServer, IconSkills, IconCode, IconAdd, IconArrowLeft, IconTrash, IconBook, IconZap } from '../components/Icons'
 import Flex from '../components/ui/Flex'
 import Stack from '../components/ui/Stack'
 import Card from '../components/ui/Card'
 import TrashPanel from '../components/TrashPanel'
 import SettingsSkillsTab from '../components/SettingsSkillsTab'
 import SettingsRulesTab from '../components/SettingsRulesTab'
+import SettingsAgentsTab from '../components/SettingsAgentsTab'
 import SettingsGeneralTab from '../components/SettingsGeneralTab'
 import './SettingsPage.css'
 
@@ -21,6 +22,7 @@ const GLOBAL_MENU_ITEMS = [
   { id: 'general', label: '常规', icon: <IconSettings /> },
   { id: 'code-preview', label: '代码预览', icon: <IconCode /> },
   { id: 'model-config', label: '模型设置', icon: <IconServer /> },
+  { id: 'agents', label: '智能体', icon: <IconZap /> },
   { id: 'skills', label: '技能', icon: <IconSkills /> },
   { id: 'rules', label: '规则', icon: <IconBook /> },
   { id: 'trash', label: '最近删除', icon: <IconTrash /> },
@@ -180,6 +182,10 @@ export default function SettingsPage({ onBack, initialTab }: Props): React.React
 
     if (activeGlobalMenu === 'skills') {
       return <SettingsSkillsTab />
+    }
+
+    if (activeGlobalMenu === 'agents') {
+      return <SettingsAgentsTab />
     }
 
     if (activeGlobalMenu === 'rules') {

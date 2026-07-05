@@ -22,6 +22,11 @@ export function useSendMessage() {
   const addPermissionRequest = useChatStore((s) => s.addPermissionRequest)
   const addAskUserRequest = useChatStore((s) => s.addAskUserRequest)
   const setDiffEntries = useChatStore((s) => s.setDiffEntries)
+  const startSubAgent = useChatStore((s) => s.startSubAgent)
+  const appendSubAgentChunk = useChatStore((s) => s.appendSubAgentChunk)
+  const startSubAgentToolCall = useChatStore((s) => s.startSubAgentToolCall)
+  const finishSubAgentToolCall = useChatStore((s) => s.finishSubAgentToolCall)
+  const endSubAgent = useChatStore((s) => s.endSubAgent)
 
   const handleSendMessage = useCallback(
     async (message: string, modelName: string, isSystem: boolean = false) => {
@@ -252,6 +257,28 @@ export function useSendMessage() {
           },
           onAskUserRequest: (request: any) => {
             addAskUserRequest(agentId, request)
+          },
+          onSubAgentStart: (subAgentId: string, meta: any) => {
+            startSubAgent(agentId, subAgentId, meta)
+            useChatStore.getState().persistSession(sid)
+          },
+          onSubAgentChunk: (subAgentId: string, delta: string, reasoningDelta: string) => {
+            appendSubAgentChunk(agentId, subAgentId, delta, reasoningDelta)
+          },
+          onSubAgentToolStart: (subAgentId: string, toolCallId: string, name: string, args: string, thoughtSignature?: string) => {
+            startSubAgentToolCall(agentId, subAgentId, {
+              id: toolCallId || genId(),
+              name,
+              args,
+              thoughtSignature
+            })
+          },
+          onSubAgentToolEnd: (subAgentId: string, toolCallId: string, result: string) => {
+            finishSubAgentToolCall(agentId, subAgentId, toolCallId, result)
+          },
+          onSubAgentEnd: (subAgentId: string, result: any) => {
+            endSubAgent(agentId, subAgentId, result)
+            useChatStore.getState().persistSession(sid)
           }
         }
       )
@@ -278,7 +305,12 @@ export function useSendMessage() {
       appendReasoningTimelineChunk,
       addPermissionRequest,
       addAskUserRequest,
-      setDiffEntries
+      setDiffEntries,
+      startSubAgent,
+      appendSubAgentChunk,
+      startSubAgentToolCall,
+      finishSubAgentToolCall,
+      endSubAgent
     ]
   )
 

@@ -10,6 +10,7 @@ import { registerThemeIpc } from './ipc/theme.handlers'
 import { registerSkillIpc } from './ipc/skill.handlers'
 import { registerRulesIpc } from './ipc/rules.handlers'
 import { registerSettingsIpc } from './ipc/settings.handlers'
+import { registerSubAgentIpc, syncDisabledSubAgents } from './ipc/subagent.handlers'
 import { registerPlanIpc } from './ipc/plan.handlers'
 import { TerminalService } from './services/TerminalService'
 
@@ -83,6 +84,7 @@ app.whenReady().then(() => {
   registerSkillIpc()
   registerRulesIpc()
   registerSettingsIpc()
+  registerSubAgentIpc()
   registerPlanIpc()
 
   // Initialize memory system for the current workspace
@@ -102,6 +104,7 @@ app.whenReady().then(() => {
   import('./ipc/settings.handlers').then(({ getSettingsService }) => {
     const svc = getSettingsService()
     svc.init().then(() => {
+      syncDisabledSubAgents()
       const theme = svc.getSettings().appTheme
       import('electron').then(({ nativeTheme }) => {
         nativeTheme.themeSource = theme

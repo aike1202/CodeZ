@@ -52,18 +52,36 @@ export function getToolTarget(log: ToolCallState): string {
 export function getToolNoun(toolName: string): string {
   switch (toolName) {
     case 'read_file':
+    case 'read_files':
       return '文件'
     case 'list_files':
     case 'list_dir':
       return '目录'
     case 'search_text':
       return '文本搜索'
-    case 'read_files':
-      return '文件'
     case 'search_code':
       return '代码搜索'
     case 'get_symbol_map':
       return '符号索引'
+    case 'submit_result':
+    case 'submit':
+      return '提交结果'
+    case 'Task':
+    case 'spawn':
+    case 'delegate':
+      return '子任务'
+    case 'Write':
+    case 'write_to_file':
+      return '保存文件'
+    case 'UpdatePlanStep':
+      return '更新计划'
+    case 'Skill':
+    case 'invoke_skill':
+      return '技能'
+    case 'WebFetch':
+    case 'web_fetch':
+    case 'fetch':
+      return '网页'
     default:
       return toolName
   }
