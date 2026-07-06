@@ -16,6 +16,10 @@ export class WebFetchTool extends Tool {
     return 'WebFetch'
   }
 
+  get summary() {
+    return 'Fetch and process content from a URL.'
+  }
+
   get description() {
     return "Fetch a URL, extract the main content, and convert it to Markdown. Use this to read documentation, articles, or reference pages. Returns the page title and body text (truncated if very long). Note: JS-heavy pages that render content client-side may return incomplete text. The optional prompt describes what you're looking for on the page."
   }

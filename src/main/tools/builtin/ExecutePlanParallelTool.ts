@@ -12,6 +12,10 @@ export class ExecutePlanParallelTool extends Tool {
     return 'ExecutePlanParallel'
   }
 
+  get summary() {
+    return 'Execute approved plan steps in parallel waves.'
+  }
+
   get description() {
     return [
       'Execute the steps of an approved plan in parallel: steps in the same wave run concurrently,',

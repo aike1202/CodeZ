@@ -19,6 +19,10 @@ export class PushNotificationTool extends Tool {
     return 'PushNotification'
   }
 
+  get summary() {
+    return 'Send a desktop push notification.'
+  }
+
   get description() {
     return 'Sends a desktop notification. Use sparingly — do NOT notify for routine progress, for things asked seconds ago, or when a quick task completes. Notify only when the user may have walked away and something is worth coming back for, or when explicitly asked. Keep the message under 200 characters, one line, no markdown. Lead with what they would act on (e.g. "build failed: 2 auth tests"). status: info/success/warning/error. If the result says sent:false, that is expected — do not retry.'
   }

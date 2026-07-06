@@ -15,6 +15,10 @@ export class WriteTool extends Tool {
     return 'Write'
   }
 
+  get summary() {
+    return 'Write or overwrite a file.'
+  }
+
   get description() {
     return 'Writes a file to the local filesystem, overwriting if one exists. Use to create a new file, or to fully replace one you have already Read in this conversation. Overwriting an existing file you have NOT Read fails — use Edit for partial changes instead. Writes go through the edit transaction and can be rolled back with rollback_last_edit.'
   }

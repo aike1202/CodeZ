@@ -13,6 +13,10 @@ export class SubAgentRunnerTool extends Tool {
     return 'SubAgentRunner'
   }
 
+  get summary() {
+    return 'Launch a subagent for complex multi-step tasks.'
+  }
+
   get description() {
     const defs = SubAgentManager.listEnabledDefinitions()
     const typeLines =

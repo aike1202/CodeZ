@@ -5,6 +5,10 @@ export class RollbackLastEditTool extends Tool {
     return 'rollback_last_edit'
   }
 
+  get summary() {
+    return 'Rollback the most recent edit.'
+  }
+
   get description() {
     return 'Rolls back all file modifications made in the current editing transaction. Use this when a code change caused compilation errors, test failures, or other problems and you want to undo all changes made in this round.'
   }

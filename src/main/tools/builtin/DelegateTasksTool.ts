@@ -11,6 +11,10 @@ export class DelegateTasksTool extends Tool {
     return 'DelegateTasks'
   }
 
+  get summary() {
+    return 'Delegate tasks to parallel Worker subagents.'
+  }
+
   get description() {
     return [
       'Delegate session tasks to parallel Worker subagents. Tasks in the same wave run concurrently;',

@@ -34,7 +34,8 @@
 /* ---- Reasoning ---- */
 .exe-log-reasoning-detail {
   white-space: pre-wrap;
-  word-break: break-words;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
   line-height: 1.625;
   color: var(--text-muted);
   font-family: var(--font-sans, sans-serif);

@@ -20,6 +20,10 @@ export class GlobTool extends Tool {
     return 'Glob'
   }
 
+  get summary() {
+    return 'Find files matching a glob pattern.'
+  }
+
   get description() {
     return 'Fast file pattern matching. Supports glob patterns like "**/*.js" or "src/**/*.ts". Returns matching file paths (relative to workspace) sorted by modification time (newest first). Use path to scope to a subdirectory.'
   }

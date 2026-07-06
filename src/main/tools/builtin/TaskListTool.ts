@@ -11,6 +11,10 @@ export class TaskListTool extends Tool {
     return 'TaskList'
   }
 
+  get summary() {
+    return 'List all tasks with progress summary.'
+  }
+
   get description() {
     return [
       'List all tasks for the current session with a progress summary.',

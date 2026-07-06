@@ -1,48 +1,28 @@
 // src/main/services/prompts/index.ts
+//
+// Prompt v2 — 分层 Pipeline 架构
+//
+// assembleSystemPrompt() 通过 PromptBuilder → PromptPipeline 组装：
+//   - Core: 永远发送（Identity, Security, Harness, Reasoning, Output, Communication）
+//   - Context: 按需注入（Memory, ContextMgmt, RepoRules, Environment, GitStatus, Skills, ActivePlan）
+//   - Execution: 执行规则（ToolPolicy, Editing, Verification, Task, Plan, Worker, Completion）
+//   - Dynamic: 按环境（AvailableTools, WorkspaceRules, UserRules, SubAgents, RuntimeHints）
+//   - Reminder: 临时提醒（SystemReminder, TrimReminder）
+//
+// 公共 API 保持不变，调用方无需修改。
+
+import { getPipeline } from './PromptBuilder'
 import { RulesResolver } from '../../agent/RulesResolver'
-import type { PromptContext } from './types'
+import type { PromptContext } from './PromptTypes'
 
-import { buildIdentity } from './sections/Identity'
-import { buildSecurity } from './sections/Security'
-import { buildHarness } from './sections/Harness'
-import { buildMemory } from './sections/Memory'
-import { buildContextManagement } from './sections/ContextManagement'
-import { buildDeveloperInstructions } from './sections/DeveloperInstructions'
-import { buildRepositoryInstructions } from './sections/RepositoryInstructions'
-import { buildEnvironment } from './sections/Environment'
-import { buildGitStatus } from './sections/GitStatus'
-import { buildAvailableTools } from './sections/AvailableTools'
-import { buildPendingFeatures } from './sections/PendingFeatures'
-import { buildSkills } from './sections/Skills'
-import { buildSubAgentGuidance } from './sections/SubAgents'
+export type { PromptContext } from './PromptTypes'
 
-export type { PromptContext } from './types'
+export { getPipeline, resetPipelineCache, createDefaultPipeline } from './PromptBuilder'
+export { PromptPipeline } from './PromptPipeline'
+export type { PromptModule, PromptLayer } from './PromptTypes'
 
 export async function assembleSystemPrompt(ctx: PromptContext): Promise<string> {
-  const sections: string[] = []
-
-  sections.push(buildIdentity())
-  sections.push(buildSecurity())
-  sections.push(buildHarness())
-  sections.push(buildMemory(ctx.workspaceRoot))
-  sections.push(buildContextManagement())
-
-  const devInstructions = await buildDeveloperInstructions(ctx.workspaceRoot)
-  sections.push(devInstructions)
-
-  const repoRules = await buildRepositoryInstructions(ctx.workspaceRoot)
-  if (repoRules) sections.push(repoRules)
-
-  sections.push(buildEnvironment(ctx))
-  sections.push(buildGitStatus(ctx.workspaceRoot))
-  sections.push(buildSubAgentGuidance())
-  sections.push(buildAvailableTools())
-  sections.push(buildPendingFeatures())
-
-  const skills = await buildSkills(ctx.workspaceRoot)
-  if (skills) sections.push(skills)
-
-  return sections.filter(Boolean).join('\n\n')
+  return getPipeline().run(ctx)
 }
 
 export async function buildSystemReminder(_workspaceRoot: string): Promise<string> {
@@ -50,7 +30,6 @@ export async function buildSystemReminder(_workspaceRoot: string): Promise<strin
   if (!globalRules) return ''
 
   const today = new Date().toISOString().slice(0, 10)
-
   return [
     '<system-reminder>',
     "As you answer the user's questions, you can use the following context:",

@@ -15,6 +15,8 @@ export interface ToolContext {
 export abstract class Tool {
   /** 工具的名称，应匹配 [a-zA-Z0-9_-]+ */
   abstract get name(): string
+  /** 一句话摘要，用于 AvailableTools 精简列表（~10 words max） */
+  abstract get summary(): string
   /** 描述它的作用被大模型看到 */
   abstract get description(): string
   /** 工具接受的参数类型，JSON Schema 格式 */

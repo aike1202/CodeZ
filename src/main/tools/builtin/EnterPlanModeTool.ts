@@ -5,6 +5,10 @@ export class EnterPlanModeTool extends Tool {
     return 'EnterPlanMode'
   }
 
+  get summary() {
+    return 'Enter plan mode for complex task planning.'
+  }
+
   get description() {
     return [
       'Propose entering Plan Mode to design an implementation plan.',

@@ -12,6 +12,10 @@ export class SkillTool extends Tool {
     return 'Skill'
   }
 
+  get summary() {
+    return 'Invoke a skill by name.'
+  }
+
   get description() {
     return 'Execute a skill within the main conversation. When users ask you to perform tasks, check if any of the available skills match. Skills provide specialized capabilities and domain knowledge. When users reference a "slash command" or "/<something>", they are referring to a skill. Use this tool to invoke it. How to invoke: set skill to the exact name of an available skill (no leading slash); set args to pass optional arguments. Important: available skills are listed in system-reminder messages in the conversation. Only invoke a skill that appears in that list, or one the user explicitly typed as /<name> in their message. Never guess or invent a skill name from training data; otherwise do not call this tool. When a skill matches the user\'s request, this is a BLOCKING REQUIREMENT: invoke the relevant Skill tool BEFORE generating any other response about the task. NEVER mention a skill without actually calling this tool. Do not invoke a skill that is already running. If you see a <command-name> tag in the current conversation turn, the skill has ALREADY been loaded — follow the instructions directly instead of calling this tool again. Returns the SKILL.md body for the model to follow.'
   }

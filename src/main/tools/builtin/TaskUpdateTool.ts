@@ -15,6 +15,10 @@ export class TaskUpdateTool extends Tool {
     return 'TaskUpdate'
   }
 
+  get summary() {
+    return 'Update task status or fields.'
+  }
+
   get description() {
     return [
       'Update a task by id: change its status or edit its fields.',

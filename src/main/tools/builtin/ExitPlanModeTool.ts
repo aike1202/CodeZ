@@ -9,6 +9,10 @@ export class ExitPlanModeTool extends Tool {
     return 'ExitPlanMode'
   }
 
+  get summary() {
+    return 'Exit plan mode and return to normal execution.'
+  }
+
   get description() {
     return 'Signal that the implementation plan has been written and is ready for user review. Call this tool after using WriteTool to save the plan file. The execution will pause here while the user reviews the plan. They may approve it or request changes.'
   }

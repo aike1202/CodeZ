@@ -30,6 +30,10 @@ export class GrepTool extends Tool {
     return 'Grep'
   }
 
+  get summary() {
+    return 'Search file contents with regex patterns.'
+  }
+
   get description() {
     return 'Content search built on ripgrep. Prefer this over grep/rg via Bash — results integrate with the permission UI and file links. Full regex syntax (e.g. "log.*Error", "function\\s+\\w+"); escape literal braces. path scopes the search to a subdirectory (default workspace root). Filter with glob (e.g. "**/*.tsx") or type (e.g. "js", "py", "rust"). output_mode: "files_with_matches" (default, paths only), "content" (matching lines), or "count". Use -n for line numbers, -A/-B/-C for after/before/context lines, -i for case-insensitive, -o for matching part only. multiline: true for patterns that span lines. head_limit and offset paginate results.'
   }

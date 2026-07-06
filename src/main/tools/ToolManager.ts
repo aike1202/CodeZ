@@ -12,6 +12,7 @@ import { AskUserQuestionTool } from './builtin/AskUserQuestionTool'
 import { PushNotificationTool } from './builtin/PushNotificationTool'
 import { SubAgentRunnerTool } from './builtin/SubAgentRunnerTool'
 import { TaskCreateTool } from './builtin/TaskCreateTool'
+import { TaskGetTool } from './builtin/TaskGetTool'
 import { TaskUpdateTool } from './builtin/TaskUpdateTool'
 import { TaskListTool } from './builtin/TaskListTool'
 import { DelegateTasksTool } from './builtin/DelegateTasksTool'
@@ -65,6 +66,7 @@ export class ToolManager {
       new WebFetchTool(),
       new SubAgentRunnerTool(),
       new TaskCreateTool(),
+      new TaskGetTool(),
       new TaskUpdateTool(),
       new TaskListTool(),
       new DelegateTasksTool()

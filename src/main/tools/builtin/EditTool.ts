@@ -22,6 +22,10 @@ export class EditTool extends Tool {
     return 'Edit'
   }
 
+  get summary() {
+    return 'Make exact string replacements in a file.'
+  }
+
   get description() {
     return 'Performs exact string replacement in a file. You MUST Read the file in this conversation before editing, or the call fails. old_string must match exactly (including indentation) and be unique — the edit fails otherwise; the Read line prefix (line number + tab) is stripped automatically before matching. Use replace_all: true to replace every occurrence. For creating files or full rewrites use Write instead.'
   }

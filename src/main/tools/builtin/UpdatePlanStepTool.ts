@@ -14,6 +14,10 @@ export class UpdatePlanStepTool extends Tool {
     return 'UpdatePlanStep'
   }
 
+  get summary() {
+    return "Update a plan step's status or details."
+  }
+
   get description() {
     return 'Update a plan step status or description. Use during execution to track progress.'
   }

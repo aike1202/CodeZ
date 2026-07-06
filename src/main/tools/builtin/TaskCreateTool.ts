@@ -12,6 +12,10 @@ export class TaskCreateTool extends Tool {
     return 'TaskCreate'
   }
 
+  get summary() {
+    return 'Create lightweight tracking tasks for the session.'
+  }
+
   get description() {
     return [
       'Create one or more lightweight tasks (a todo list) for the current session to track multi-step work.',

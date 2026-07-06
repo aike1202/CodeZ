@@ -19,6 +19,10 @@ export class NotebookEditTool extends Tool {
     return 'NotebookEdit'
   }
 
+  get summary() {
+    return 'Edit cells in a Jupyter notebook.'
+  }
+
   get description() {
     return 'Replaces, inserts, or deletes a single cell in a Jupyter notebook (.ipynb). You MUST Read the notebook in this conversation first — this tool fails otherwise. notebook_path is absolute. cell_id is the id shown in the Read tool <cell id="..."> output; required for replace and delete. edit_mode defaults to replace. insert adds a new cell after the given cell_id (or at the beginning if omitted) — cell_type is required when inserting (defaults to code).'
   }

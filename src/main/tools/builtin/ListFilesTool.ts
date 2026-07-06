@@ -7,6 +7,10 @@ export class ListFilesTool extends Tool {
     return 'list_files'
   }
 
+  get summary() {
+    return 'List files in a directory.'
+  }
+
   get description() {
     return 'Lists files and directories within one or multiple directory paths in a single call. Use this tool to inspect multiple directory structures without calling list_files repeatedly.'
   }

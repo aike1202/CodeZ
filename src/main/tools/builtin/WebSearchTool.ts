@@ -17,6 +17,10 @@ export class WebSearchTool extends Tool {
     return 'WebSearch'
   }
 
+  get summary() {
+    return 'Search the web for current information.'
+  }
+
   get description() {
     return 'Search the web and return result titles, URLs, and snippets. Covers Chinese tech communities (Baidu, Juejin, CSDN). Use this to find information beyond the training data — recent library releases, docs, error messages, best practices. Filter with allowed_domains (only keep these hosts) or blocked_domains (exclude these hosts). After answering from results, cite the URLs you used.'
   }

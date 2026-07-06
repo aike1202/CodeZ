@@ -3,6 +3,7 @@ import { ContextManager, ResumeState } from '../../agent/ContextManager'
 
 export class UpdateResumeStateTool extends Tool {
   get name() { return 'update_resume_state' }
+  get summary() { return 'Save resume state for context continuity.' }
   get description() { return 'Update the core context state of the task: current goal, phase, step, next action, files touched, and items pending verification. Call this when advancing a long-running task or completing a key milestone, so direction is not lost when conversation history is trimmed.' }
   
   get parameters_schema() {
