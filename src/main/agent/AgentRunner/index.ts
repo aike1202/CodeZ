@@ -205,18 +205,15 @@ export class AgentRunner {
         )
         allMessages = trimResult.messages
 
+        // System prompt is always at index 0
+        const systemPrompt = allMessages[0]
+
         if (trimResult.willTrimSoon && !this.hasWarnedTrim) {
           this.hasWarnedTrim = true
-          allMessages.push({
-            role: 'system',
-            content: `⚠️ 上下文容量预警：当前历史消息已达到容量上限的 65%，即将触发自动裁剪。\n为了防止丢失早期的任务目标和上下文，请**立即调用 update_resume_state 工具**把当前的任务进度、已完成和未完成的步骤进行总结存档！`
-          } as any)
+          systemPrompt.content += `\n\n⚠️ [SYSTEM NOTIFICATION]: 当前历史消息已达到容量上限的 65%，即将触发自动裁剪。为了防止丢失早期的任务目标和上下文，请**立即调用 update_resume_state 工具**把当前的任务进度、已完成和未完成的步骤进行总结存档！`
         } else if (trimResult.trimmed) {
           this.hasWarnedTrim = false
-          allMessages.push({
-            role: 'system',
-            content: `⚠️ 上下文裁剪通知：刚才有 ${trimResult.trimmedCount} 条旧消息被移除。\n如果你的部分早期记忆变得模糊，请查阅或更新你的 resume_state。`
-          } as any)
+          systemPrompt.content += `\n\n⚠️ [SYSTEM NOTIFICATION]: 刚才有 ${trimResult.trimmedCount} 条旧消息被移除。如果你的部分早期记忆变得模糊，请查阅或更新你的 resume_state。`
         }
 
         if (loopCount === MAX_LOOPS - 2) {
@@ -236,10 +233,7 @@ export class AgentRunner {
           } catch (e: any) {
             console.error('[AgentRunner] Auto-save resume state failed:', e.message)
           }
-          allMessages.push({
-            role: 'system',
-            content: `⚠️ 警告：当前任务即将在 2 步后达到最大执行上限并挂起。框架已自动保存了一份进度快照。请务必在下一步调用 update_resume_state 补充更详细的任务状态（目标、已完成步骤、待办等），以确保恢复时不丢失关键信息。`
-          } as any)
+          systemPrompt.content += `\n\n⚠️ [SYSTEM WARNING]: 当前任务即将在 2 步后达到最大执行上限并挂起。框架已自动保存了一份进度快照。请务必在下一步调用 update_resume_state 补充更详细的任务状态以确保恢复时不丢失关键信息。`
         }
 
         let currentFullContent = ''
@@ -704,9 +698,7 @@ export class AgentRunner {
             loopCount
           });
 
-          if (currentFullContent.trim()) {
-            allMessages.push({ role: 'assistant', content: currentFullContent } as any);
-          }
+          allMessages.push({ role: 'assistant', content: currentFullContent.trim() ? currentFullContent : '(Acknowledged)' } as any);
 
           allMessages.push({
             role: 'user',
@@ -723,9 +715,7 @@ export class AgentRunner {
           consecutiveIdleTurns++;
           log.info('[AgentRunner] Auto-continuing', { transitionEvent, loopCount, consecutiveIdleTurns });
           
-          if (currentFullContent.trim()) {
-            allMessages.push({ role: 'assistant', content: currentFullContent } as any);
-          }
+          allMessages.push({ role: 'assistant', content: currentFullContent.trim() ? currentFullContent : '(Acknowledged)' } as any);
           
           if (consecutiveIdleTurns >= 2) {
             allMessages.push({
