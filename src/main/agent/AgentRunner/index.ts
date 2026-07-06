@@ -10,6 +10,7 @@ import { SubAgentManager } from '../SubAgentManager'
 import { PlanSubAgent } from '../definitions/PlanSubAgent'
 import type { ToolDefinition } from '../../../shared/types/provider'
 import log from '../../logger'
+import { logPrompt } from '../../services/PromptLogger'
 
 import type { AgentRunConfig, AgentRunnerCallbacks } from './types'
 import { isToolErrorResult, buildToolError } from './agentErrorHandler'
@@ -267,6 +268,9 @@ export class AgentRunner {
           // ─── watchdog end ──────────────────────────────
 
           log.info('[AgentRunner] calling streamChat', { loopCount, model: config.model })
+
+          // Prompt 调试日志（CODEZ_LOG_PROMPT=1 时写入独立文件）
+          logPrompt(`[AgentRunner] loop ${loopCount}`, allMessages.length, allMessages[0]?.content as string)
 
           this.chatService.streamChat(
             {

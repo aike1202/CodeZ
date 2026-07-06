@@ -3,11 +3,10 @@
 // Prompt v2 — 分层 Pipeline 架构
 //
 // assembleSystemPrompt() 通过 PromptBuilder → PromptPipeline 组装：
-//   - Core: 永远发送（Identity, Security, Harness, Reasoning, Output, Communication）
-//   - Context: 按需注入（Memory, ContextMgmt, RepoRules, Environment, GitStatus, Skills, ActivePlan）
-//   - Execution: 执行规则（ToolPolicy, Editing, Verification, Task, Plan, Worker, Completion）
-//   - Dynamic: 按环境（AvailableTools, WorkspaceRules, UserRules, SubAgents, RuntimeHints）
-//   - Reminder: 临时提醒（SystemReminder, TrimReminder）
+//   - Core: Identity, Security, Harness（决策原则已合并进 Harness）
+//   - Context: Memory, ContextMgmt, RepoRules, Environment, GitStatus, Skills
+//   - Execution: ToolPolicy, Editing, Verification, Task, Plan, Worker, Completion
+//   - Dynamic: AvailableTools, SubAgents
 //
 // 公共 API 保持不变，调用方无需修改。
 

@@ -1,5 +1,6 @@
 import { IChatProvider, ChatRequestConfig, StreamCallbacks } from './types'
 import log from '../../logger'
+import { logPrompt } from '../PromptLogger'
 
 export class AnthropicProvider implements IChatProvider {
   async streamChat(config: ChatRequestConfig, callbacks: StreamCallbacks, signal: AbortSignal): Promise<void> {
@@ -77,6 +78,7 @@ export class AnthropicProvider implements IChatProvider {
 
     log.info(`[AnthropicProvider] Invoking model: ${model}`);
     log.debug(`[AnthropicProvider] Request Payload:`, JSON.stringify({ ...requestPayload, messages: `[Array of ${anthropicMessages.length} messages]` }));
+    logPrompt(`[AnthropicProvider] system prompt`, 1, systemPrompt || '(none)');
 
     try {
       const response = await fetch(url, {

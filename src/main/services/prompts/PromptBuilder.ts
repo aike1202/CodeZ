@@ -1,26 +1,22 @@
 // src/main/services/prompts/PromptBuilder.ts
 //
 // 注册所有 PromptModule 到 Pipeline。
-// 新增/移除模块只需改 createDefaultPipeline() —— Pipeline 和 index.ts 都不动。
+// 新增/移除模块只需改此文件。
 
 import { PromptPipeline } from './PromptPipeline'
 
-// Core (always sent)
+// Core
 import { IdentityModule } from './core/Identity'
 import { SecurityModule } from './core/Security'
 import { HarnessModule } from './core/Harness'
-import { ReasoningPolicyModule } from './core/ReasoningPolicy'
-import { OutputPolicyModule } from './core/OutputPolicy'
-import { CommunicationModule } from './core/Communication'
 
-// Context (conditional)
+// Context
 import { MemoryModule } from './context/Memory'
 import { ContextManagementModule } from './context/ContextManagement'
 import { RepositoryRulesModule } from './context/RepositoryRules'
 import { EnvironmentModule } from './context/Environment'
 import { GitStatusModule } from './context/GitStatus'
 import { SkillsModule } from './context/Skills'
-import { ActivePlanModule } from './context/ActivePlan'
 
 // Execution
 import { ToolPolicyModule } from './execution/ToolPolicy'
@@ -33,14 +29,7 @@ import { CompletionModule } from './execution/Completion'
 
 // Dynamic
 import { AvailableToolsModule } from './dynamic/AvailableTools'
-import { WorkspaceRulesModule } from './dynamic/WorkspaceRules'
-import { UserRulesModule } from './dynamic/UserRules'
 import { SubAgentsModule } from './dynamic/SubAgents'
-import { RuntimeHintsModule } from './dynamic/RuntimeHints'
-
-// Reminder
-import { SystemReminderModule } from './reminder/SystemReminder'
-import { TrimReminderModule } from './reminder/TrimReminder'
 
 export function createDefaultPipeline(): PromptPipeline {
   return new PromptPipeline()
@@ -48,17 +37,13 @@ export function createDefaultPipeline(): PromptPipeline {
     .register(IdentityModule)
     .register(SecurityModule)
     .register(HarnessModule)
-    .register(ReasoningPolicyModule)
-    .register(OutputPolicyModule)
-    .register(CommunicationModule)
     // ── Context ───────────────────────────────
     .register(MemoryModule)
     .register(ContextManagementModule)
-    .register(RepositoryRulesModule)   // workspace rules early
+    .register(RepositoryRulesModule)
     .register(EnvironmentModule)
     .register(GitStatusModule)
     .register(SkillsModule)
-    .register(ActivePlanModule)        // only when plan is active
     // ── Execution ─────────────────────────────
     .register(ToolPolicyModule)
     .register(EditingModule)
@@ -69,13 +54,7 @@ export function createDefaultPipeline(): PromptPipeline {
     .register(CompletionModule)
     // ── Dynamic ───────────────────────────────
     .register(AvailableToolsModule)
-    .register(WorkspaceRulesModule)
-    .register(UserRulesModule)
     .register(SubAgentsModule)
-    .register(RuntimeHintsModule)
-    // ── Reminder ──────────────────────────────
-    .register(SystemReminderModule)
-    .register(TrimReminderModule)
 }
 
 let cachedPipeline: PromptPipeline | null = null

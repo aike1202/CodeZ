@@ -1,6 +1,7 @@
 import { IChatProvider, ChatRequestConfig, StreamCallbacks } from './types'
 import { buildThinkingPayload } from './utils'
 import log from '../../logger'
+import { logPrompt } from '../PromptLogger'
 
 export class GeminiProvider implements IChatProvider {
   async streamChat(config: ChatRequestConfig, callbacks: StreamCallbacks, signal: AbortSignal): Promise<void> {
@@ -135,6 +136,7 @@ export class GeminiProvider implements IChatProvider {
 
     log.info(`[GeminiProvider] Invoking model: ${model}`);
     log.debug(`[GeminiProvider] Request Payload:`, JSON.stringify({ ...requestPayload, contents: `[Array of ${contents.length} contents]` }));
+    logPrompt(`[GeminiProvider] system instruction`, 1, systemInstructionParts[0]?.text || '(none)');
 
     try {
       const response = await fetch(url, {
