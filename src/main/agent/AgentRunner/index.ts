@@ -20,6 +20,25 @@ import { handleExecutePlanParallel } from './parallelRunnerHelper'
 import { handleDelegateTasks } from './delegateTasksHelper'
 import { getSessionStore } from '../../ipc/session.handlers'
 import { getSettingsService } from '../../ipc/settings.handlers'
+import { LoopStateMachine, AgentState, TransitionEvent, TerminationReason } from './LoopStateMachine'
+
+export enum NormalizedStopReason {
+  Truncated = 'Truncated',
+  Finished = 'Finished',
+  ToolUse = 'ToolUse',
+  Blocked = 'Blocked',
+  Unknown = 'Unknown',
+}
+
+function normalizeProviderStopReason(reason?: string): NormalizedStopReason {
+  if (!reason) return NormalizedStopReason.Unknown;
+  const lower = reason.toLowerCase();
+  if (lower === 'length' || lower === 'max_tokens') return NormalizedStopReason.Truncated;
+  if (lower === 'stop' || lower === 'end_turn') return NormalizedStopReason.Finished;
+  if (lower === 'tool_calls' || lower === 'tool_use') return NormalizedStopReason.ToolUse;
+  if (lower === 'content_filter' || lower === 'safety') return NormalizedStopReason.Blocked;
+  return NormalizedStopReason.Unknown;
+}
 
 export class AgentRunner {
   private chatService: ChatService
@@ -170,6 +189,9 @@ export class AgentRunner {
         }
       }
     } catch (e) {}
+
+    let consecutiveIdleTurns = 0
+    let currentState = AgentState.Running
 
     try {
       while (loopCount < MAX_LOOPS && !this.abortController?.signal.aborted) {
@@ -610,60 +632,122 @@ export class AgentRunner {
           } else {
             consecutiveFailures = 0
           }
-        } else {
-          if (filesModifiedInSession && lastVerificationResult && !lastVerificationResult.success) {
-            verificationRetryCount++
+        }
 
-            if (verificationRetryCount > MAX_VERIFICATION_RETRIES) {
-              log.warn('[AgentRunner] verification retry limit exceeded, giving up', {
-                command: lastVerificationResult.command,
-                retries: verificationRetryCount,
-                loopCount
-              })
-              lastVerificationResult = null
-              verificationRetryCount = 0
-              // fall through to normal onDone — don't block forever
-            } else {
-              log.info('[AgentRunner] verification intercept', {
-                command: lastVerificationResult.command,
-                retry: verificationRetryCount,
-                max: MAX_VERIFICATION_RETRIES,
-                loopCount
-              })
+        const taskStore = TaskStore.getInstance();
+        const hasPendingTasks = taskStore.list(sessionId).some(t => t.status === 'pending' || t.status === 'in_progress');
 
-              if (currentFullContent.trim()) {
-                allMessages.push({
-                  role: 'assistant',
-                  content: currentFullContent
-                } as any)
-              }
+        const isVerificationFailure = filesModifiedInSession && lastVerificationResult && !lastVerificationResult.success;
+        
+        let transitionEvent: TransitionEvent;
+        
+        // 1. Tool Call Evaluation
+        if (toolCallsArray.length > 0) {
+          transitionEvent = TransitionEvent.ToolExecuted;
+        } 
+        // 2. Retry Evaluation
+        else if (isVerificationFailure && (verificationRetryCount < MAX_VERIFICATION_RETRIES)) {
+          transitionEvent = TransitionEvent.RetryRequested;
+        } 
+        // 3. Idle Evaluation
+        else if (consecutiveIdleTurns >= 3) {
+          transitionEvent = TransitionEvent.MaxIdleReached;
+        } 
+        // 4. Truncation Evaluation
+        else if (normalizeProviderStopReason(currentStopReason) === NormalizedStopReason.Truncated) {
+          transitionEvent = TransitionEvent.OutputTruncated;
+        } 
+        // 5. Pending Task Evaluation
+        else if (hasPendingTasks) {
+          transitionEvent = TransitionEvent.SchedulerContinue;
+        } 
+        // 6. Completion
+        else {
+          transitionEvent = TransitionEvent.Completed;
+        }
 
-              allMessages.push({
-                role: 'system',
-                content: `⚠️ 验证闭环拦截（第 ${verificationRetryCount}/${MAX_VERIFICATION_RETRIES} 次）：你最后一次运行的验证命令 (${lastVerificationResult.command}) 未成功通过。请修复错误并重新运行验证。如果无法修复或错误与本次修改无关，请说明原因。`
-              } as any)
+        currentState = LoopStateMachine.next(currentState, transitionEvent);
 
-              if (callbacks.onChunk) {
-                callbacks.onChunk(
-                  `\n\n[系统拦截：验证失败，重试 ${verificationRetryCount}/${MAX_VERIFICATION_RETRIES}...]\n\n`,
-                  ''
-                )
-              }
-              continue
+        if (currentState === AgentState.Terminated) {
+          const finishReason = transitionEvent === TransitionEvent.Completed ? TerminationReason.Completed : TerminationReason.Failed;
+          if (!gotError && callbacks.onDone) {
+            log.info('[AgentRunner] run complete', { sessionId, loops: loopCount, finalContentLen: currentFullContent.length, finishReason });
+            callbacks.onDone(currentFullContent, currentStopReason, txId || undefined);
+          }
+          break;
+        }
+
+        if (currentState === AgentState.WaitingUser || currentState === AgentState.Suspended) {
+           if (!gotError && callbacks.onDone) {
+             log.info('[AgentRunner] run suspended/waiting', { sessionId, loops: loopCount, finalContentLen: currentFullContent.length, state: currentState });
+             callbacks.onDone(currentFullContent, currentStopReason, txId || undefined);
+           }
+           break;
+        }
+
+        // --- Handle Running state transitions ---
+        if (transitionEvent === TransitionEvent.ToolExecuted) {
+          consecutiveIdleTurns = 0;
+          if (filesModifiedInSession && lastVerificationResult && lastVerificationResult.success) {
+            verificationRetryCount = 0;
+          }
+          continue; // Loop continues naturally to process new messages (tool results)
+        }
+
+        if (transitionEvent === TransitionEvent.RetryRequested) {
+          consecutiveIdleTurns = 0;
+          verificationRetryCount++;
+          log.info('[AgentRunner] verification intercept', {
+            command: lastVerificationResult!.command,
+            retry: verificationRetryCount,
+            max: MAX_VERIFICATION_RETRIES,
+            loopCount
+          });
+
+          if (currentFullContent.trim()) {
+            allMessages.push({ role: 'assistant', content: currentFullContent } as any);
+          }
+
+          allMessages.push({
+            role: 'user',
+            content: `⚠️ [Verification Failed] The command (${lastVerificationResult!.command}) failed. Please fix the error and try again.`
+          } as any);
+
+          if (callbacks.onChunk) {
+            callbacks.onChunk(`\n\n[系统拦截：验证失败，重试 ${verificationRetryCount}/${MAX_VERIFICATION_RETRIES}...]\n\n`, '');
+          }
+          continue;
+        }
+
+        if (transitionEvent === TransitionEvent.SchedulerContinue || transitionEvent === TransitionEvent.OutputTruncated) {
+          consecutiveIdleTurns++;
+          log.info('[AgentRunner] Auto-continuing', { transitionEvent, loopCount, consecutiveIdleTurns });
+          
+          if (currentFullContent.trim()) {
+            allMessages.push({ role: 'assistant', content: currentFullContent } as any);
+          }
+          
+          if (consecutiveIdleTurns >= 2) {
+            allMessages.push({
+              role: 'user',
+              content: `⚠️ System Reminder: There are unfinished tasks. Do NOT summarize. Do NOT stop. Either:\n1. call the next tool\n2. ask user for missing information\n3. explain why execution is blocked\nOtherwise continue execution.`
+            } as any);
+            if (callbacks.onChunk) {
+              callbacks.onChunk(`\n\n[系统引导：检测到连续响应未调用工具，强制唤醒...]\n\n`, '');
+            }
+          } else {
+            allMessages.push({
+              role: 'user',
+              content: '(Auto-continue)'
+            } as any);
+            if (callbacks.onChunk) {
+              callbacks.onChunk(`\n\n[系统引导：自动继续...]\n\n`, '');
             }
           }
-
-          // Reset verification retry counter when verification passes
-          if (lastVerificationResult?.success) {
-            verificationRetryCount = 0
-          }
-
-          if (!gotError && callbacks.onDone) {
-            log.info('[AgentRunner] run complete', { sessionId, loops: loopCount, finalContentLen: currentFullContent.length })
-            callbacks.onDone(currentFullContent, currentStopReason, txId || undefined)
-          }
-          break
+          continue;
         }
+
+        break;
       }
     } catch (err) {
       if (txId) {

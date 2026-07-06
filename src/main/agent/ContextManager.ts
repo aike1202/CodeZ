@@ -272,6 +272,11 @@ export class ContextManager {
       currentTokens -= groupTokens
     }
 
+    // Ensure we don't leave an orphaned assistant/tool sequence at the beginning
+    while (removed < trimCandidates.length && trimCandidates[removed].role !== 'user') {
+      removed++
+    }
+
     trimCandidates = trimCandidates.slice(Math.min(removed, trimCandidates.length))
 
     const final: ChatMessage[] = []
@@ -331,6 +336,11 @@ export class ContextManager {
         } else {
           removed++
         }
+      }
+
+      // Ensure we don't leave an orphaned assistant/tool sequence at the beginning
+      while (removed < trimCandidates.length && trimCandidates[removed].role !== 'user') {
+        removed++
       }
 
       trimCandidates = trimCandidates.slice(Math.min(removed, trimCandidates.length))

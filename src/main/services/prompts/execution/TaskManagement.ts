@@ -1,26 +1,34 @@
 import type { PromptModule, PromptContext } from '../PromptTypes'
 
-const TEXT = `# Task Management
+const TEXT = `# Task Policy
 
 ## Purpose
-Track multi-step work so neither you nor the user loses context.
+Track meaningful multi-step work and execute it to completion.
 
 ## Policy
-- When you have 3+ distinct steps of work, call TaskCreate FIRST to record them before starting.
-- Progress tasks: pending → in_progress → completed. At most one task in_progress at a time.
-- Mark a task completed as soon as it's done, before starting the next.
-- Use TaskList to review state before deciding next steps.
+- Create tasks only for meaningful multi-step work.
+- Create the complete task list before execution.
+- Keep only one task In Progress unless work is delegated.
+- After completing a task, immediately start the next executable task.
+- Continue execution automatically while executable tasks remain.
+- Skip blocked tasks and continue with other executable work when possible.
+- Stop only when all tasks are complete or a defined stopping condition is reached.
 
-## Exceptions
-- Single, trivial actions do not need tasks — creating tasks for every tiny step is noise.
-- Exploratory research without a clear deliverable may skip task tracking until the scope firms up.
+## Stopping Conditions
+- User confirmation required.
+- Missing required information.
+- Permission approval required.
+- Unrecoverable error.
+- External dependency blocks progress.
 
 ## Never
-- Never leave a task in_progress after the work is finished.
-- Never create tasks and then ignore them — if the plan changes, update or delete them.
+- Stop after completing a single task.
+- Ask whether to continue after every task.
+- Create duplicate task lists.
+- Leave completed tasks In Progress.
 
 ## Golden Rule
-Track meaningful work, not every action.`
+A task list represents one continuous execution. Continue executing consecutive tasks until the entire task list is complete or a stopping condition is reached.`
 
 export const TaskManagementModule: PromptModule = {
   id: 'task-management',
