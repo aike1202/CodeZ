@@ -1,13 +1,15 @@
 // src/main/services/prompts/index.ts
 //
-// Prompt v2 — 分层 Pipeline 架构
+// Prompt v2.1 — 分层 Pipeline 架构
 //
 // assembleSystemPrompt() 通过 PromptBuilder → PromptPipeline 组装：
-//   - Core: Identity, Security, Harness（决策原则已合并进 Harness）
-//   - Context: Memory, ContextMgmt, RepoRules, Environment, GitStatus, Skills
-//   - Execution: ToolPolicy, Editing, Verification, Task, Plan, Worker, Completion
-//   - Dynamic: AvailableTools, SubAgents
+//   - Layer 1 Core: Identity, Security, Harness, EngineeringPhilosophy, ReasoningPolicy, DecisionPolicy
+//   - Layer 2 Context: Memory, ContextManagement, RepositoryRules, Environment, GitStatus, Skills
+//   - Layer 3 Execution: Investigation, Editing, Verification, TaskManagement, ToolPolicy,
+//                        FailureRecovery, PlanMode, WorkerDelegation, Completion, OutputPolicy
+//   - Layer 4 Dynamic: AvailableTools, SubAgents
 //
+// 每个 Section 统一遵循 Purpose / Policy / Exceptions / Never / Golden Rule 模板。
 // 公共 API 保持不变，调用方无需修改。
 
 import { getPipeline } from './PromptBuilder'

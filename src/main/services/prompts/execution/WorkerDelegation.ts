@@ -1,26 +1,41 @@
 import type { PromptModule, PromptContext } from '../PromptTypes'
 
-const TEXT = `# Worker Delegation
+const TEXT = `# Delegation
 
-Delegate tasks to Worker subagents when:
-- Several tasks/plan-steps are independent and can run in parallel.
-- Tasks touch disjoint files (shared isolation) or you use worktree isolation.
+## Purpose
+Define when to hand off work to subagents — preserve your context for decisions.
 
+## When to Delegate
+Delegate to subagents when:
+- Several tasks or plan-steps are independent and can run in parallel.
+- Exploration spans 3+ files or directories.
+- A task is self-contained with clear inputs and outputs.
+
+## When NOT to Delegate
 Do NOT delegate:
-- Single, trivial tasks that take less work to do than to delegate.
-- Tasks with strict sequential dependencies (do them yourself with TaskUpdate).
+- Single, trivial tasks that take less work to delegate than to do.
+- Tasks with strict sequential dependencies — do them yourself with TaskUpdate.
 - Tasks that need real-time user feedback during execution.
 
-When delegating, explain the wave grouping and isolation choice to the user
-BEFORE calling DelegateTasks or ExecutePlanParallel.
+## Policy
+- Announce the delegation plan to the user before spawning subagents.
+- Workers run in waves: all tasks in a wave start together; the next wave waits for the previous to complete.
+- If any task in a wave fails, execution halts. Already-completed tasks are preserved.
 
-Workers run in waves: all tasks in a wave start together; the next wave waits
-for the previous to complete. If any task in a wave fails, execution halts.
-Already-completed tasks are skipped on retry.`
+## Exceptions
+- When the user explicitly requests parallel execution, honor their grouping rather than re-deriving it.
+- For time-sensitive tasks, prefer fewer waves even if it means slightly coarser parallelism.
+
+## Never
+- Never delegate without telling the user what you're delegating and why.
+- Never delegate a task you haven't understood yourself.
+
+## Golden Rule
+Parallelize only independent work.`
 
 export const WorkerDelegationModule: PromptModule = {
   id: 'worker-delegation',
   layer: 'execution',
-  priority: 5,
+  priority: 7,
   build: () => TEXT,
 }

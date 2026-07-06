@@ -257,6 +257,58 @@ export default function ExecutionLogDetail({
       )
     }
 
+    // TaskCreate / TaskUpdate
+    if (item.toolName === 'TaskCreate' || item.toolName === 'TaskUpdate') {
+      let parsedArgs: any = null
+      try {
+        if (item.args) parsedArgs = JSON.parse(item.args)
+      } catch {}
+
+      let parsedResult: any = null
+      try {
+        if (item.detail) parsedResult = JSON.parse(item.detail)
+      } catch {}
+
+      return (
+        <div className="exe-log-cmd-details-box">
+          {item.toolName === 'TaskCreate' && parsedResult?.data?.created && (
+            <div className="exe-log-params-section">
+              <span className="exe-log-params-label">Created Tasks:</span>
+              <div className="exe-log-params-box">
+                {parsedResult.data.created.map((t: any, i: number) => (
+                  <div key={i} className="exe-log-param-row">
+                    <span className="exe-log-param-key">{t.id}:</span>
+                    <span className="exe-log-param-val">{t.subject}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {item.toolName === 'TaskUpdate' && parsedArgs && (
+            <div className="exe-log-params-section">
+              <span className="exe-log-params-label">Update Request:</span>
+              <div className="exe-log-params-box">
+                {Object.entries(parsedArgs).map(([k, v]) => (
+                  <div key={k} className="exe-log-param-row">
+                    <span className="exe-log-param-key">{k}:</span>
+                    <span className="exe-log-param-val">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {parsedResult?.data?.summary && (
+            <div className="exe-log-params-output-container">
+              <span className="exe-log-output-label">Current Progress:</span>
+              <pre className="exe-log-output-pre" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {parsedResult.data.summary}
+              </pre>
+            </div>
+          )}
+        </div>
+      )
+    }
+
     let parsedArgs: any = null
     try {
       if (item.args) {

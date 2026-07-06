@@ -45,6 +45,8 @@ export class AgentRunner {
 
     let filesModifiedInSession = false
     let lastVerificationResult: { success: boolean; command: string } | null = null
+    let verificationRetryCount = 0
+    const MAX_VERIFICATION_RETRIES = 3
 
     const planStore = new PlanStore()
     const taskStore = TaskStore.getInstance()
@@ -610,27 +612,50 @@ export class AgentRunner {
           }
         } else {
           if (filesModifiedInSession && lastVerificationResult && !lastVerificationResult.success) {
-            log.info('[AgentRunner] verification intercept', { command: lastVerificationResult.command, loopCount })
+            verificationRetryCount++
 
-            if (currentFullContent.trim()) {
+            if (verificationRetryCount > MAX_VERIFICATION_RETRIES) {
+              log.warn('[AgentRunner] verification retry limit exceeded, giving up', {
+                command: lastVerificationResult.command,
+                retries: verificationRetryCount,
+                loopCount
+              })
+              lastVerificationResult = null
+              verificationRetryCount = 0
+              // fall through to normal onDone — don't block forever
+            } else {
+              log.info('[AgentRunner] verification intercept', {
+                command: lastVerificationResult.command,
+                retry: verificationRetryCount,
+                max: MAX_VERIFICATION_RETRIES,
+                loopCount
+              })
+
+              if (currentFullContent.trim()) {
+                allMessages.push({
+                  role: 'assistant',
+                  content: currentFullContent
+                } as any)
+              }
+
               allMessages.push({
-                role: 'assistant',
-                content: currentFullContent
+                role: 'system',
+                content: `⚠️ 验证闭环拦截（第 ${verificationRetryCount}/${MAX_VERIFICATION_RETRIES} 次）：你最后一次运行的验证命令 (${lastVerificationResult.command}) 未成功通过。请修复错误并重新运行验证。如果无法修复或错误与本次修改无关，请说明原因。`
               } as any)
-            }
 
-            allMessages.push({
-              role: 'system',
-              content: `⚠️ 验证闭环拦截：你最后一次运行的验证命令 (${lastVerificationResult.command}) 未成功通过。作为负责任的 AI，你必须修复这些错误并重新验证，在验证通过之前绝对不能声称任务已完成。请继续使用相关工具（如 Read, Edit, Write, Bash 等）进行排查和修复。`
-            } as any)
-
-            if (callbacks.onChunk) {
-              callbacks.onChunk(
-                '\n\n[系统拦截：检测到验证失败，正在强制模型继续修复...]\n\n',
-                ''
-              )
+              if (callbacks.onChunk) {
+                callbacks.onChunk(
+                  `\n\n[系统拦截：验证失败，重试 ${verificationRetryCount}/${MAX_VERIFICATION_RETRIES}...]\n\n`,
+                  ''
+                )
+              }
+              continue
             }
-            continue
+          }
+
+          // Reset verification retry counter when verification passes
+          if (lastVerificationResult?.success) {
+            verificationRetryCount = 0
           }
 
           if (!gotError && callbacks.onDone) {

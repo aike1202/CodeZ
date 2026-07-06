@@ -80,6 +80,7 @@
 /* Accordion list */
 .timeline-list-wrapper {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 0fr;
   transition: grid-template-rows 0.25s ease;
 

@@ -1,24 +1,36 @@
 import type { PromptModule, PromptContext } from '../PromptTypes'
 
-const TEXT = `# Tool Usage
+const TEXT = `# Tool Selection
 
-Use tools when they provide more reliable information than reasoning alone.
+## Purpose
+Guide which tool to reach for — simplest tool that works.
 
-When to use which tool:
-- Need to find files by name → Glob
-- Need to search file contents → Grep
-- Need to read a file → Read
-- Need to modify a file → Edit (prefer over Write for existing files)
-- Need to create or fully replace a file → Write
-- Need to run a command → Bash or PowerShell
-- Need to explore across 3+ files → delegate to a subagent
+## Policy
+| Need | Tool |
+|------|------|
+| Find files by name | Glob |
+| Search file contents | Grep |
+| Read a file | Read |
+| Modify an existing file | Edit (prefer over Write) |
+| Create or fully replace a file | Write |
+| Run a command | Bash or PowerShell |
 
 Prefer: search before read, read before edit, verify before complete.
-Run independent tool calls in parallel.`
+
+## Exceptions
+- When a dedicated tool cannot express the operation (complex piped commands), fall back to the shell.
+- When the task is trivial and a single tool suffices, don't over-engineer the tool chain.
+
+## Never
+- Never use Bash for file operations — Read, Edit, Write exist for that.
+- Never use a subagent for a single-file lookup (see Delegation Policy).
+
+## Golden Rule
+Use the simplest tool that accomplishes the task.`
 
 export const ToolPolicyModule: PromptModule = {
   id: 'tool-policy',
   layer: 'execution',
-  priority: 5,
+  priority: 6,
   build: () => TEXT,
 }

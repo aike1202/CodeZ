@@ -55,6 +55,21 @@ vi.mock('../main/agent/SubAgentManager', () => ({
         whenToUse: 'You need a structured implementation plan.',
         costHint: 'Up to 15 tool calls.'
       }
+    ]),
+    listEnabledDefinitions: vi.fn().mockReturnValue([
+      {
+        type: 'Research',
+        description: 'Read-only research agent.',
+        whenToUse: 'You need to explore a module.\nYou have a scoped question.',
+        whenNotToUse: 'The answer is a single file lookup.',
+        costHint: 'Up to 12 tool calls.'
+      },
+      {
+        type: 'Plan',
+        description: 'Software architect agent.',
+        whenToUse: 'You need a structured implementation plan.',
+        costHint: 'Up to 15 tool calls.'
+      }
     ])
   }
 }))
@@ -93,10 +108,10 @@ describe('SystemPromptService', () => {
       expect(prompt).toContain('CodeZ')
     })
 
-    it('should contain harness rules', async () => {
+    it('should contain operating environment rules', async () => {
       const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
-      expect(prompt).toContain('# Harness')
-      expect(prompt).toContain('Github-flavored markdown')
+      expect(prompt).toContain('# Operating Environment')
+      expect(prompt).toContain('markdown')
       expect(prompt).toContain('file_path:line_number')
     })
 
@@ -106,11 +121,10 @@ describe('SystemPromptService', () => {
       expect(prompt).toContain('.codez')
     })
 
-    it('should contain developer instructions', async () => {
+    it('should contain security rules', async () => {
       const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
-      expect(prompt).toContain('<developer_instructions>')
-      expect(prompt).toContain('ANTI-INJECTION')
-      expect(prompt).toContain('</developer_instructions>')
+      expect(prompt).toContain('# Security')
+      expect(prompt).toContain('UNTRUSTED DATA')
     })
 
     it('should contain verification strategy', async () => {
@@ -118,82 +132,93 @@ describe('SystemPromptService', () => {
       expect(prompt).toContain('VERIFICATION STRATEGY')
     })
 
-    it('should contain repository instructions', async () => {
+    it('should contain reasoning policy with pipeline', async () => {
       const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
-      expect(prompt).toContain('<repository_instructions>')
-      expect(prompt).toContain('Workspace Rule Content')
-      expect(prompt).toContain('</repository_instructions>')
+      expect(prompt).toContain('# Reasoning Policy')
+      expect(prompt).toContain('Understand first, act second')
     })
 
-    it('should contain environment context with model info', async () => {
+    it('should contain failure recovery', async () => {
       const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
-      expect(prompt).toContain('<environment_context>')
-      expect(prompt).toContain('<cwd>')
-      expect(prompt).toContain('<shell>')
-      expect(prompt).toContain('<model_id>')
-      expect(prompt).toContain('</environment_context>')
+      expect(prompt).toContain('# Failure Recovery')
+      expect(prompt).toContain('Fail once, learn, change strategy')
+    })
+
+    it('should contain output policy', async () => {
+      const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
+      expect(prompt).toContain('# Output Policy')
+      expect(prompt).toContain('Report truth, not comfort')
+    })
+
+    it('should contain decision policy', async () => {
+      const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
+      expect(prompt).toContain('# Decision Policy')
+      expect(prompt).toContain('Every action should have a reason')
+    })
+
+    it('should contain repository rules', async () => {
+      const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
+      expect(prompt).toContain('Workspace Rule Content')
+    })
+
+    it('should contain environment context', async () => {
+      const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
+      expect(prompt).toContain('Primary working directory')
+      expect(prompt).toContain(mockCtx.modelId)
     })
 
     it('should contain git status', async () => {
       const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
-      expect(prompt).toContain('<git_status>')
       expect(prompt).toContain('Current branch:')
-      expect(prompt).toContain('</git_status>')
     })
 
     it('should contain available tools', async () => {
       const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
-      expect(prompt).toContain('<available_tools>')
       expect(prompt).toContain('Read')
       expect(prompt).toContain('read_file')
-      expect(prompt).toContain('</available_tools>')
     })
 
     it('should contain available skills', async () => {
       const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
-      expect(prompt).toContain('<skills_instructions>')
       expect(prompt).toContain('brainstorming')
-      expect(prompt).toContain('</skills_instructions>')
     })
 
     it('should contain delegation guidance', async () => {
       const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
-      expect(prompt).toContain('<delegation_guidance>')
-      expect(prompt).toContain('Research SubAgent')
-      expect(prompt).toContain('Plan SubAgent')
-      expect(prompt).toContain('</delegation_guidance>')
-    })
-
-    it('should contain pending features section', async () => {
-      const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
-      expect(prompt).toContain('<pending_features>')
-      expect(prompt).toContain('</pending_features>')
+      expect(prompt).toContain('subagent_guidance')
     })
 
     it('sections should appear in correct order', async () => {
       const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
-      const identityIdx = prompt.indexOf('CodeZ')
-      const harnessIdx = prompt.indexOf('# Harness')
+      const identityIdx = prompt.indexOf('You are CodeZ')
+      const securityIdx = prompt.indexOf('# Security')
+      const harnessIdx = prompt.indexOf('# Operating Environment')
+      const engineeringIdx = prompt.indexOf('# Engineering Philosophy')
+      const reasoningIdx = prompt.indexOf('# Reasoning Policy')
+      const decisionIdx = prompt.indexOf('# Decision Policy')
       const memoryIdx = prompt.indexOf('# Memory')
-      const devIdx = prompt.indexOf('<developer_instructions>')
-      const repoIdx = prompt.indexOf('<repository_instructions>')
-      const envIdx = prompt.indexOf('<environment_context>')
-      const gitIdx = prompt.indexOf('<git_status>')
-      const delegationIdx = prompt.indexOf('<delegation_guidance>')
-      const toolsIdx = prompt.indexOf('<available_tools>')
-      const pendingIdx = prompt.indexOf('<pending_features>')
-      const skillsIdx = prompt.indexOf('<skills_instructions>')
+      const investigationIdx = prompt.indexOf('# Investigation')
+      const editingIdx = prompt.indexOf('# Editing')
+      const verificationIdx = prompt.indexOf('VERIFICATION STRATEGY')
+      const failureIdx = prompt.indexOf('# Failure Recovery')
+      const completionIdx = prompt.indexOf('# Completion')
+      const outputIdx = prompt.indexOf('# Output Policy')
 
-      expect(identityIdx).toBeLessThan(harnessIdx)
-      expect(harnessIdx).toBeLessThan(memoryIdx)
-      expect(memoryIdx).toBeLessThan(devIdx)
-      expect(devIdx).toBeLessThan(repoIdx)
-      expect(repoIdx).toBeLessThan(envIdx)
-      expect(envIdx).toBeLessThan(gitIdx)
-      expect(gitIdx).toBeLessThan(delegationIdx)
-      expect(delegationIdx).toBeLessThan(toolsIdx)
-      expect(toolsIdx).toBeLessThan(pendingIdx)
-      expect(pendingIdx).toBeLessThan(skillsIdx)
+      // Layer 1: Core — Identity & Thinking
+      expect(identityIdx).toBeLessThan(securityIdx)
+      expect(securityIdx).toBeLessThan(harnessIdx)
+      expect(harnessIdx).toBeLessThan(engineeringIdx)
+      expect(engineeringIdx).toBeLessThan(reasoningIdx)
+      expect(reasoningIdx).toBeLessThan(decisionIdx)
+      // Layer 2: Context — Knowledge appears after core, before execution
+      expect(decisionIdx).toBeLessThan(memoryIdx)
+      expect(memoryIdx).toBeLessThan(investigationIdx)
+      // Layer 3: Execution modules appear in order
+      expect(investigationIdx).toBeLessThan(editingIdx)
+      expect(editingIdx).toBeLessThan(verificationIdx)
+      expect(verificationIdx).toBeLessThan(failureIdx)
+      expect(failureIdx).toBeLessThan(completionIdx)
+      expect(completionIdx).toBeLessThan(outputIdx)
     })
   })
 

@@ -308,6 +308,45 @@ export function buildUnifiedTimeline(
           }
         }
 
+        // TaskCreate
+        if (tc.name === 'TaskCreate') {
+          try {
+            const res = JSON.parse(tc.result || '{}')
+            const created = res.data?.created || []
+            if (created.length > 0) {
+              const firstTask = created[0].subject
+              targetDisplay = created.length > 1 ? `创建 ${created.length} 个任务 (如: ${firstTask})` : `创建任务: ${firstTask}`
+            } else {
+              targetDisplay = '创建任务'
+            }
+          } catch {
+            targetDisplay = '创建任务'
+          }
+        }
+
+        // TaskUpdate
+        if (tc.name === 'TaskUpdate') {
+          try {
+            const res = JSON.parse(tc.result || '{}')
+            const task = res.data?.task
+            if (task) {
+              if (task.status === 'completed') {
+                targetDisplay = `完成任务: ${task.subject}`
+              } else if (task.status === 'in_progress') {
+                targetDisplay = `开始执行: ${task.subject}`
+              } else if (task.status === 'cancelled') {
+                targetDisplay = `取消任务: ${task.subject}`
+              } else {
+                targetDisplay = `更新任务: ${task.subject}`
+              }
+            } else {
+              targetDisplay = '更新任务状态'
+            }
+          } catch {
+            targetDisplay = '更新任务状态'
+          }
+        }
+
         const cleanRealPath = getToolTarget(tc)
         const isActuallyRunning = tc.status === 'running' && isStreaming !== false
 

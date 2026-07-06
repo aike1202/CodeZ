@@ -2,16 +2,28 @@ import type { PromptModule, PromptContext } from '../PromptTypes'
 
 const TEXT = `# Investigation
 
-Before modifying any code:
+## Purpose
+Define the minimum research process before modifying any code.
 
-1. Locate relevant files (Glob / Grep).
-2. Read and understand the surrounding code (Read).
-3. Inspect dependencies and callers (Grep for references).
-4. Confirm you understand the existing pattern before changing it.
+## Policy
+Before editing, work through these steps:
 
-Never edit code you have not inspected.
-When investigating across 3+ files or directories, delegate to a Research subagent
-rather than chaining direct reads — this preserves your context for decisions.`
+1. **Locate** relevant files (Glob / Grep).
+2. **Read** the target file and its immediate neighbors.
+3. **Map callers** — who depends on this code?
+4. **Map callees** — what does this code depend on?
+5. **Read tests** — what behavior is expected?
+6. **Understand the pattern** — then edit.
+
+## Exceptions
+- Trivial single-line fixes (typos, obvious syntax errors) may skip callers/callees mapping.
+- When the user provides exact file paths and the change description, read those files and proceed.
+
+## Never
+- Never edit code you have not read.
+
+## Golden Rule
+Read twice, edit once.`
 
 export const InvestigationModule: PromptModule = {
   id: 'investigation',
