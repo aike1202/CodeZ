@@ -4,6 +4,7 @@ import { IPC_CHANNELS } from '../../shared/ipc/channels'
 import { getProviderService } from './provider.handlers'
 import { getWorkspaceService } from './workspace.handlers'
 import type { ChatMessage } from '../../shared/types/provider'
+import log from '../logger'
 
 interface StreamRequest {
   providerId: string
@@ -26,15 +27,19 @@ export function registerChatIpc(): void {
         throw new Error('无法获取窗口引用')
       }
 
+      log.info('[Chat] stream start', { streamId, providerId: request.providerId, model: request.model, sessionId: request.sessionId, msgCount: request.messages?.length ?? 0 })
+
       const providerSvc = getProviderService()
       const config = providerSvc.getConfig(request.providerId)
       if (!config) {
+        log.warn('[Chat] reject: provider not found', { streamId, providerId: request.providerId })
         sender.send(IPC_CHANNELS.CHAT_STREAM_ERROR, streamId, 'Provider 不存在')
         return streamId
       }
 
       const apiKey = providerSvc.getApiKey(request.providerId)
       if (!apiKey) {
+        log.warn('[Chat] reject: no api key', { streamId, providerId: request.providerId })
         sender.send(IPC_CHANNELS.CHAT_STREAM_ERROR, streamId, '无法获取 API Key')
         return streamId
       }
@@ -42,6 +47,7 @@ export function registerChatIpc(): void {
       const workspaceSvc = getWorkspaceService()
       const currentWorkspace = workspaceSvc ? workspaceSvc.getCurrentWorkspace() : null
       if (!currentWorkspace) {
+        log.warn('[Chat] reject: no workspace', { streamId })
         sender.send(IPC_CHANNELS.CHAT_STREAM_ERROR, streamId, '当前未打开任何工作区，无法启动 Agent')
         return streamId
       }
@@ -78,6 +84,8 @@ export function registerChatIpc(): void {
       }
 
       // 异步执行 Agent 循环，通过 webContents.send 推送
+      log.info('[Chat] runner start', { streamId, model: request.model, contextWindowTokens })
+
       runner.run(
         {
           baseUrl: config.baseUrl,
@@ -97,17 +105,21 @@ export function registerChatIpc(): void {
             sender.send(IPC_CHANNELS.CHAT_STREAM_CHUNK, streamId, delta, reasoningDelta)
           },
           onDone: (fullContent, stopReason, txId) => {
+            log.info('[Chat] done', { streamId, stopReason, contentLen: fullContent?.length ?? 0 })
             sender.send(IPC_CHANNELS.CHAT_STREAM_END, streamId, fullContent, stopReason, txId)
             activeRunners.delete(streamId)
           },
           onError: (error) => {
+            log.error('[Chat] error', { streamId, error })
             sender.send(IPC_CHANNELS.CHAT_STREAM_ERROR, streamId, error)
             activeRunners.delete(streamId)
           },
           onToolStart: (toolCallId, name, args, thoughtSignature) => {
+            log.info('[Chat] tool start', { streamId, name })
             sender.send(IPC_CHANNELS.CHAT_STREAM_TOOL_START, streamId, toolCallId, name, args, thoughtSignature)
           },
           onToolEnd: (toolCallId, result) => {
+            log.info('[Chat] tool end', { streamId })
             sender.send(IPC_CHANNELS.CHAT_STREAM_TOOL_END, streamId, toolCallId, result)
           },
           onSubAgentStart: (subAgentId, meta) => {
@@ -151,6 +163,7 @@ export function registerChatIpc(): void {
           }
         }
       ).catch((error) => {
+        log.error('[Chat] runner crashed', { streamId, error: error instanceof Error ? error.message : String(error) })
         sender.send(IPC_CHANNELS.CHAT_STREAM_ERROR, streamId, `未知错误: ${error}`)
         activeRunners.delete(streamId)
       })

@@ -82,6 +82,39 @@ export function AgentMessageContent({
 
   return (
     <div className="agent-message-content" style={{ minWidth: 0, width: '100%' }}>
+      {isStreaming && chunks.length === 0 && !msg.content && !legacyExecution && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '6px 2px',
+            fontSize: '14px',
+            color: 'var(--text-tertiary, #999)'
+          }}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            style={{ animation: 'spin 0.8s linear infinite' }}
+            aria-hidden="true"
+          >
+            <circle
+              cx="12"
+              cy="12"
+              r="10"
+              stroke="currentColor"
+              strokeWidth="3"
+              fill="none"
+              strokeLinecap="round"
+              strokeDasharray="40 60"
+            />
+          </svg>
+          <span>正在思考…</span>
+        </div>
+      )}
+
       {legacyExecution && (
         <div className="app-spacer mb-4" style={{ minWidth: 0, width: '100%' }}>
           <ExecutionLog

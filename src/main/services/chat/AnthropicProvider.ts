@@ -102,6 +102,8 @@ export class AnthropicProvider implements IChatProvider {
         return
       }
 
+      log.info('[AnthropicProvider] response ok, streaming started')
+
       const decoder = new TextDecoder()
       let buffer = ''
       let currentEvent = ''
@@ -178,6 +180,7 @@ export class AnthropicProvider implements IChatProvider {
         }
       }
 
+      log.info('[AnthropicProvider] stream done', { contentLen: fullContent.length })
       callbacks.onDone(fullContent, finalStopReason)
     } catch (error) {
       if (!signal.aborted) {

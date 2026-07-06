@@ -156,6 +156,8 @@ export class GeminiProvider implements IChatProvider {
         return
       }
 
+      log.info('[GeminiProvider] response ok, streaming started')
+
       const decoder = new TextDecoder()
       let buffer = ''
       let toolCallIndex = 0
@@ -219,6 +221,7 @@ export class GeminiProvider implements IChatProvider {
         }
       }
 
+      log.info('[GeminiProvider] stream done', { contentLen: fullContent.length })
       callbacks.onDone(fullContent, finalStopReason)
     } catch (error) {
       if (!signal.aborted) {

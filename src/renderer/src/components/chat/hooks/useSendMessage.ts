@@ -206,6 +206,10 @@ export function useSendMessage() {
           })
       ]
 
+      // 前端兜底 watchdog：90s 无首字节提示（后端 60s watchdog 通常先触发，此为兜底）
+      let firstByteTimer: ReturnType<typeof setTimeout> | null = null
+      let gotFirstByte = false
+
       const cleanup = (window as any).api.chat.stream(
         activeProv.id,
         model,
@@ -213,10 +217,15 @@ export function useSendMessage() {
         sid,
         {
           onChunk: (delta: string, reasoningDelta?: string) => {
+            if (!gotFirstByte) {
+              gotFirstByte = true
+              if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
+            }
             appendStreamChunk(agentId, delta, reasoningDelta)
             appendReasoningTimelineChunk(agentId, reasoningDelta || '')
           },
           onDone: async (fullContent: string, _stopReason?: string, txId?: string) => {
+            if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
             finishStreaming(agentId, txId)
             if (txId) {
               useChatStore.getState().setTransactionId(agentId, txId)
@@ -233,7 +242,8 @@ export function useSendMessage() {
             setStreamCleanup(sid, null)
           },
           onError: (error: string) => {
-            appendStreamChunk(agentId, `\n\n错误：${error}`)
+            if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
+            appendStreamChunk(agentId, `\n\n⚠️ 错误：${error}`)
             finishStreaming(agentId)
             useChatStore.getState().persistSession(sid)
             setStreamCleanup(sid, null)
@@ -283,7 +293,14 @@ export function useSendMessage() {
         }
       )
 
+      firstByteTimer = setTimeout(() => {
+        if (!gotFirstByte) {
+          appendStreamChunk(agentId, '\n\n⚠️ 长时间未收到响应（90s），可能网络或服务异常。建议点击停止按钮后重试。')
+        }
+      }, 90_000)
+
       const wrappedCleanup = () => {
+        if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
         cleanup()
         finishStreaming(agentId)
         useChatStore.getState().persistSession(sid)

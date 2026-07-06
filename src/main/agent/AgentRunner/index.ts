@@ -5,9 +5,11 @@ import { ContextManager } from '../ContextManager'
 import { PermissionManager } from '../../services/PermissionManager'
 import { interceptAskUser } from '../../tools/builtin/AskUserQuestionTool'
 import { PlanStore } from '../../services/PlanStore'
+import { TaskStore } from '../../services/TaskStore'
 import { SubAgentManager } from '../SubAgentManager'
 import { PlanSubAgent } from '../definitions/PlanSubAgent'
 import type { ToolDefinition } from '../../../shared/types/provider'
+import log from '../../logger'
 
 import type { AgentRunConfig, AgentRunnerCallbacks } from './types'
 import { isToolErrorResult, buildToolError } from './agentErrorHandler'
@@ -44,10 +46,12 @@ export class AgentRunner {
     let lastVerificationResult: { success: boolean; command: string } | null = null
 
     const planStore = new PlanStore()
-    const taskStore = require('../../services/TaskStore').TaskStore.getInstance()
+    const taskStore = TaskStore.getInstance()
     let availableTools: ToolDefinition[] = config.tools || this.toolManager.getToolDefinitions()
 
     const sessionId = config.sessionId || `session_${Date.now()}`
+
+    log.info('[AgentRunner] run start', { sessionId, model: config.model, loopMax: MAX_LOOPS, msgCount: allMessages.length })
 
     try {
       const sessionStore = getSessionStore()
@@ -66,7 +70,7 @@ export class AgentRunner {
       if (session && session.linkedPlanSlug) {
         activePlan = await planStore.getBySlug(config.workspaceRoot, session.linkedPlanSlug)
         if (activePlan && activePlan.status === 'suspended') {
-          const { PlanService } = require('../../services/PlanService')
+          const { PlanService } = await import('../../services/PlanService')
           activePlan = await PlanService.resume(config.workspaceRoot, activePlan.slug)
         }
       }
@@ -168,6 +172,8 @@ export class AgentRunner {
       while (loopCount < MAX_LOOPS && !this.abortController?.signal.aborted) {
         loopCount++
 
+        log.info('[AgentRunner] loop start', { loopCount, msgCount: allMessages.length })
+
         const trimResult = ContextManager.trimMessages(
           allMessages,
           config.contextWindowTokens || 32000
@@ -228,6 +234,40 @@ export class AgentRunner {
         let currentStopReason: import('../../../shared/types/provider').AgentStopReason | undefined = undefined
 
         await new Promise<void>((resolve) => {
+          // ─── 流式超时 watchdog ──────────────────────────
+          const FIRST_BYTE_TIMEOUT = 30_000
+          const IDLE_TIMEOUT = 60_000
+          let firstByteTimer: ReturnType<typeof setTimeout> | null = null
+          let idleTimer: ReturnType<typeof setTimeout> | null = null
+          let gotFirstByte = false
+
+          const clearWatchdogs = () => {
+            if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
+            if (idleTimer) { clearTimeout(idleTimer); idleTimer = null }
+          }
+
+          const resetIdleTimer = () => {
+            if (idleTimer) clearTimeout(idleTimer)
+            idleTimer = setTimeout(() => {
+              log.error('[AgentRunner] stream idle timeout', { loopCount })
+              clearWatchdogs()
+              callbacks.onError('响应流已超时中断（60s 无新数据），已自动停止。请检查网络连接后重试。')
+              this.abortController?.abort()
+              resolve()
+            }, IDLE_TIMEOUT)
+          }
+
+          firstByteTimer = setTimeout(() => {
+            log.error('[AgentRunner] stream first byte timeout', { loopCount })
+            clearWatchdogs()
+            callbacks.onError('等待首个响应超时（30s），请检查网络 / Provider / 模型是否可用。')
+            this.abortController?.abort()
+            resolve()
+          }, FIRST_BYTE_TIMEOUT)
+          // ─── watchdog end ──────────────────────────────
+
+          log.info('[AgentRunner] calling streamChat', { loopCount, model: config.model })
+
           this.chatService.streamChat(
             {
               baseUrl: config.baseUrl,
@@ -241,6 +281,13 @@ export class AgentRunner {
             {
               onChunk: (delta, reasoningDelta, toolCallsChunk, thoughtSignature) => {
                 if (this.abortController?.signal.aborted) return
+
+                if (!gotFirstByte) {
+                  gotFirstByte = true
+                  if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
+                  log.info('[AgentRunner] first chunk received', { loopCount })
+                }
+                resetIdleTimer()
 
                 if (thoughtSignature) {
                   thoughtSignatureForThisTurn = thoughtSignature
@@ -289,18 +336,24 @@ export class AgentRunner {
                 }
               },
               onDone: (fullContent, stopReason) => {
+                clearWatchdogs()
                 currentStopReason = stopReason
+                log.info('[AgentRunner] streamChat done', { loopCount, stopReason, contentLen: fullContent.length })
                 resolve()
               },
               onError: (err) => {
+                clearWatchdogs()
                 gotError = true
+                log.error('[AgentRunner] streamChat error', { loopCount, error: err })
                 callbacks.onError(err)
                 resolve()
               }
             },
             this.abortController!.signal
           ).catch((err) => {
+            clearWatchdogs()
             gotError = true
+            log.error('[AgentRunner] streamChat exception', { loopCount, error: err instanceof Error ? err.message : String(err) })
             callbacks.onError(err instanceof Error ? err.message : String(err))
             resolve()
           })
@@ -376,6 +429,8 @@ export class AgentRunner {
               }
 
               callbacks.onToolStart?.(toolCallId, name, args)
+
+              log.info('[AgentRunner] tool start', { name, loopCount })
 
               if (name === 'EnterPlanMode') {
                 return await handleEnterPlanMode(
@@ -483,6 +538,8 @@ export class AgentRunner {
 
               callbacks.onToolEnd?.(toolCallId, resultMessage)
 
+              log.info('[AgentRunner] tool end', { name, isError, loopCount })
+
               const toolResultWrapper = isError
                 ? {
                     ok: false,
@@ -549,9 +606,7 @@ export class AgentRunner {
           }
         } else {
           if (filesModifiedInSession && lastVerificationResult && !lastVerificationResult.success) {
-            console.log(
-              `[AgentRunner] Intercepted final response due to failed verification: ${lastVerificationResult.command}`
-            )
+            log.info('[AgentRunner] verification intercept', { command: lastVerificationResult.command, loopCount })
 
             if (currentFullContent.trim()) {
               allMessages.push({
@@ -575,6 +630,7 @@ export class AgentRunner {
           }
 
           if (!gotError && callbacks.onDone) {
+            log.info('[AgentRunner] run complete', { sessionId, loops: loopCount, finalContentLen: currentFullContent.length })
             callbacks.onDone(currentFullContent, currentStopReason, txId || undefined)
           }
           break

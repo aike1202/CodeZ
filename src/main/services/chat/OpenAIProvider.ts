@@ -132,6 +132,8 @@ export class OpenAIProvider implements IChatProvider {
         return
       }
 
+      log.info('[OpenAIProvider] response ok, streaming started')
+
       const decoder = new TextDecoder()
       let buffer = ''
       const thinkParserState: ThinkParserState = { inThinkTag: false, streamBuffer: '' }
@@ -217,6 +219,7 @@ export class OpenAIProvider implements IChatProvider {
           callbacks.onChunk(thinkParserState.streamBuffer, '')
         }
       }
+      log.info('[OpenAIProvider] stream done', { contentLen: fullContent.length })
       callbacks.onDone(fullContent, finalStopReason)
     } catch (error) {
       if (!signal.aborted) {
