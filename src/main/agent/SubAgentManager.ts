@@ -1,6 +1,8 @@
 import { ChatService } from '../services/ChatService'
 import { ToolManager } from '../tools/ToolManager'
 import { ContextManager } from './ContextManager'
+import { CommandAnalyzer } from '../services/CommandAnalyzer'
+import * as path from 'path'
 import type { ChatMessage, ToolDefinition } from '../../shared/types/provider'
 import type { StreamCallbacks } from '../services/ChatService'
 import type { AgentRunnerCallbacks } from './AgentRunner'
@@ -13,6 +15,30 @@ import {
   computeQualitySummary
 } from './AgentRunner/subagentOutputHelper'
 
+// ─── 子 Agent 写权限范围（并行 Worker 用） ──────────────────
+
+/**
+ * 可写子 Agent 的非交互式权限范围。
+ *
+ * 只在需要写代码的 Worker 上传入；不传时保持现有行为（只读子 Agent 无 gap）。
+ * spawn 在执行每个工具前用此范围做非交互式校验：命中放行，越界/危险直接拒绝
+ * （返回 error 给子 Agent，不弹窗）。
+ */
+export interface SubAgentPermissionScope {
+  /**
+   * 允许写入的文件路径列表（相对 workspaceRoot 或绝对路径）。
+   * 仅当 allowAllWritesInWorkspace 为 false 时生效。
+   */
+  allowedWriteFiles?: string[]
+  /** 是否允许运行 Bash/PowerShell 验证命令（destructive/network 命令始终拒绝）。 */
+  allowBash?: boolean
+  /**
+   * worktree 档：物理隔离已兜底，放宽到 workspaceRoot 内任意文件可写。
+   * 为 true 时忽略 allowedWriteFiles，只做「不逃逸 workspaceRoot」的边界检查。
+   */
+  allowAllWritesInWorkspace?: boolean
+}
+
 // ─── SubAgent 定义接口 ──────────────────────────────────────
 
 export interface SubAgentContext {
@@ -24,7 +50,7 @@ export interface SubAgentContext {
   /** @deprecated 使用 task 代替 */
   parentPrompt: string
 
-  /** SubAgent 调用标识 — 用于把事件路由到 SubAgentCard（由调用方 handleTaskSpawn/handleEnterPlanMode 注入） */
+  /** SubAgent 调用标识 — 用于把事件路由到 SubAgentCard（由调用方 handleSubAgentRunnerSpawn/handleEnterPlanMode 注入） */
   subAgentId?: string
 
   /** 验收标准 — 子 Agent 必须逐条回答 */
@@ -48,6 +74,12 @@ export interface SubAgentContext {
   parentMessages?: ChatMessage[]
   modelOverride?: string
   maxLoopsOverride?: number
+
+  /**
+   * 可写子 Agent 的写权限范围（非交互式校验）。
+   * 只读子 Agent 不传，保持现有零权限门行为。
+   */
+  permissionScope?: SubAgentPermissionScope
 
   /** 主 Agent 的 API 配置（baseUrl / apiKey / model 等） */
   apiConfig: {
@@ -147,6 +179,79 @@ const DEPTH_LOOPS: Record<string, number> = {
   quick: 6,
   normal: 12,
   exhaustive: 20,
+}
+
+/** 可写工具名集合 —— 需要 permissionScope 校验。 */
+const WRITE_TOOL_NAMES = new Set(['Edit', 'Write', 'NotebookEdit'])
+/** 终端命令工具名集合。 */
+const SHELL_TOOL_NAMES = new Set(['Bash', 'PowerShell'])
+
+/**
+ * 对可写子 Agent 的单次工具调用做非交互式权限校验。
+ *
+ * @returns null 表示放行；否则返回拒绝原因字符串（回给子 Agent 当 error）。
+ */
+export function checkSubAgentToolPermission(
+  toolName: string,
+  parsedArgs: any,
+  workspaceRoot: string,
+  scope: SubAgentPermissionScope | undefined
+): string | null {
+  // 无 scope（只读子 Agent）：仅当调用了可写/终端工具才拒绝（它们本不该拿到这些工具）
+  if (!scope) {
+    if (WRITE_TOOL_NAMES.has(toolName) || SHELL_TOOL_NAMES.has(toolName)) {
+      return `Tool '${toolName}' is not permitted for this subagent.`
+    }
+    return null
+  }
+
+  // 终端命令
+  if (SHELL_TOOL_NAMES.has(toolName)) {
+    if (!scope.allowBash) {
+      return `Shell commands are not permitted for this worker.`
+    }
+    const command = parsedArgs?.command || parsedArgs?.commandLine || parsedArgs?.CommandLine || ''
+    const risk = CommandAnalyzer.analyze(command)
+    if (risk === 'destructive' || risk === 'network') {
+      return `Command blocked (risk=${risk}): workers may only run safe verification commands. Report a blocker instead.`
+    }
+    return null
+  }
+
+  // 文件写入
+  if (WRITE_TOOL_NAMES.has(toolName)) {
+    let targetPath: string | undefined =
+      parsedArgs?.file_path || parsedArgs?.filePath || parsedArgs?.TargetFile || parsedArgs?.path
+    if (!targetPath) {
+      return `Write tool called without a file path.`
+    }
+    if (!path.isAbsolute(targetPath)) {
+      targetPath = path.resolve(workspaceRoot, targetPath)
+    }
+    // 边界检查：不得逃逸 workspaceRoot
+    const rel = path.relative(workspaceRoot, targetPath)
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      return `Write denied: path '${targetPath}' escapes the workspace.`
+    }
+
+    // worktree 档：workspace 内任意文件可写
+    if (scope.allowAllWritesInWorkspace) {
+      return null
+    }
+
+    // shared 档：必须命中 allowedWriteFiles
+    const allowed = (scope.allowedWriteFiles || []).map(f =>
+      path.isAbsolute(f) ? path.resolve(f) : path.resolve(workspaceRoot, f)
+    )
+    const resolvedTarget = path.resolve(targetPath)
+    if (!allowed.some(a => a === resolvedTarget)) {
+      return `Write denied: '${rel}' is outside your assigned file set. A sibling worker may be editing it — stop and report a blocker.`
+    }
+    return null
+  }
+
+  // 只读工具及其余（AskUserQuestion 等）放行
+  return null
 }
 
 function resolveMaxLoops(def: SubAgentDefinition, ctx: SubAgentContext): number {
@@ -526,6 +631,15 @@ export class SubAgentManager {
               if (!toolInstance) {
                 result = JSON.stringify({ ok: false, error: { code: 'NOT_FOUND', message: `Tool '${name}' not found` } })
               } else {
+                // 非交互式权限校验（可写 Worker 用 permissionScope；只读子 Agent 传 undefined）
+                let parsedArgs: any = {}
+                try { parsedArgs = JSON.parse(args) } catch {}
+                const denyReason = checkSubAgentToolPermission(name, parsedArgs, ctx.workspaceRoot, ctx.permissionScope)
+                if (denyReason) {
+                  result = JSON.stringify({ ok: false, error: { code: 'PERMISSION_DENIED', message: denyReason } })
+                  callbacks.onSubAgentToolEnd?.(subAgentId, tc.id, result)
+                  return { role: 'tool' as const, tool_call_id: tc.id, name, content: result }
+                }
                 try {
                   const raw = await toolInstance.execute(args, { workspaceRoot: ctx.workspaceRoot, sessionId: ctx.sessionId })
                   result = JSON.stringify({ ok: true, data: raw })

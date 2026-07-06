@@ -10,6 +10,7 @@ import type {
   SubAgentRecord,
   ChatSession
 } from '../types'
+import type { TaskItem } from '../../../../../shared/types/task'
 import { IPC_CHANNELS } from '../../../../../shared/ipc/channels'
 
 function genId(): string {
@@ -36,6 +37,7 @@ export interface MessageSlice {
   planReview: { plan: any; status: string } | null
   activePlanStreamId: string | null
   pendingPrompt: string | null
+  tasks: TaskItem[]
 
   addUserMessage: (content: string) => ChatMessage
   addSystemMessage: (content: string) => ChatMessage
@@ -80,6 +82,7 @@ export interface MessageSlice {
   setPlanReview: (review: { plan: any; status: string } | null) => void
   setActivePlanStreamId: (streamId: string | null) => void
   setPendingPrompt: (prompt: string | null) => void
+  setTasks: (tasks: TaskItem[]) => void
   revertToMessage: (msgId: string) => Promise<void>
   previewRevertMessage: (msgId: string) => Promise<{ toDelete: string[], toRestore: string[] } | null>
 }
@@ -149,6 +152,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
   planReview: null,
   activePlanStreamId: null,
   pendingPrompt: null,
+  tasks: [],
 
   addUserMessage: (content: string) => {
     const msg: ChatMessage = {
@@ -693,6 +697,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
   setPlanReview: (review) => set({ planReview: review }),
   setActivePlanStreamId: (streamId) => set({ activePlanStreamId: streamId }),
   setPendingPrompt: (prompt) => set({ pendingPrompt: prompt }),
+  setTasks: (tasks) => set({ tasks }),
 
   revertToMessage: async (msgId: string) => {
     const s = get()

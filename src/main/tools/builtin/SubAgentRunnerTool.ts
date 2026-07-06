@@ -4,13 +4,13 @@ import { SubAgentManager } from '../../agent/SubAgentManager'
 /**
  * 通用子智能体调度工具。
  * 主 Agent 调用此工具来 spawn 一个子智能体处理委派任务。
- * 实际执行由 AgentRunner 拦截（handleTaskSpawn），不走此 execute。
+ * 实际执行由 AgentRunner 拦截（handleSubAgentRunnerSpawn），不走此 execute。
  *
  * 新增子智能体只需 SubAgentManager.register(...)，无需改此工具或 AgentRunner。
  */
-export class TaskTool extends Tool {
+export class SubAgentRunnerTool extends Tool {
   get name() {
-    return 'Task'
+    return 'SubAgentRunner'
   }
 
   get description() {
@@ -111,7 +111,7 @@ export class TaskTool extends Tool {
       ok: true,
       data: {
         status: 'intercepted',
-        message: 'Task should be intercepted by AgentRunner.'
+        message: 'SubAgentRunner should be intercepted by AgentRunner.'
       }
     })
   }

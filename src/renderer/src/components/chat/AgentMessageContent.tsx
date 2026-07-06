@@ -81,9 +81,9 @@ export function AgentMessageContent({
   const legacyExecution = (!msg.executionTimeline || msg.executionTimeline.length === 0) && (msg.reasoningContent || (msg.agentStates && msg.agentStates.length > 0))
 
   return (
-    <div className="agent-message-content">
+    <div className="agent-message-content" style={{ minWidth: 0, width: '100%' }}>
       {legacyExecution && (
-        <div className="app-spacer mb-4">
+        <div className="app-spacer mb-4" style={{ minWidth: 0, width: '100%' }}>
           <ExecutionLog
             timeline={[]}
             reasoning={msg.reasoningContent}
@@ -108,13 +108,13 @@ export function AgentMessageContent({
       {chunks.map((chunk, idx) => {
         if (chunk.type === 'text') {
           return (
-            <div key={idx} className="mb-4">
+            <div key={idx} className="mb-4" style={{ minWidth: 0, width: '100%' }}>
               <MessageBody content={chunk.content} streaming={chunk.streaming} onFileClick={handleFileClick} />
             </div>
           )
         } else {
           return (
-            <div key={idx} className="app-spacer mb-4">
+            <div key={idx} className="app-spacer mb-4" style={{ minWidth: 0, width: '100%' }}>
               <ExecutionLog
                 timeline={chunk.items}
                 reasoning={idx === 0 ? msg.reasoningContent : undefined} // Only pass legacy reasoning to first block if any

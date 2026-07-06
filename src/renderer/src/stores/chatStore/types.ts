@@ -1,3 +1,5 @@
+import type { TaskItem } from '../../../../shared/types/task'
+
 export type AgentStateType =
   | 'processing'
   | 'command_running'
@@ -163,6 +165,7 @@ export interface ChatState {
   planReview: { plan: any; status: string } | null
   activePlanStreamId: string | null
   pendingPrompt: string | null
+  tasks: TaskItem[]
 
   loadSessions: () => Promise<void>
   createSession: (projectId: string) => string
@@ -229,4 +232,5 @@ export interface ChatState {
   setPlanReview: (review: { plan: any; status: string } | null) => void
   setActivePlanStreamId: (streamId: string | null) => void
   setPendingPrompt: (prompt: string | null) => void
+  setTasks: (tasks: TaskItem[]) => void
 }

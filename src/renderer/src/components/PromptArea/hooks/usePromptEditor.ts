@@ -219,9 +219,27 @@ export function usePromptEditor(
     view.focus()
   }
 
+  const processSkillsInText = (rawText: string) => {
+    return rawText.replace(/(^|\s)\$([a-zA-Z0-9_-]+)/g, (match, prefix, skillName) => {
+      const lowerName = skillName.toLowerCase()
+      const skill = dynamicSkills.find((s) => {
+        const sName = s.id.replace(/^(global|workspace|builtin)-/, '').toLowerCase()
+        return sName === lowerName || s.triggers?.some((t: string) => t.toLowerCase() === lowerName)
+      })
+      if (skill && skill.path) {
+        const markdownPath = skill.path.replace(/\\/g, '\\\\')
+        return `${prefix}[$${skillName}](${markdownPath})`
+      }
+      return match
+    })
+  }
+
   const handleSend = () => {
     if (!text.trim()) return
-    onSend(text.trim(), selectedModelName || models[0]?.name || '')
+    let finalContent = text.trim()
+    finalContent = processSkillsInText(finalContent)
+    
+    onSend(finalContent, selectedModelName || models[0]?.name || '')
     setText('')
   }
 

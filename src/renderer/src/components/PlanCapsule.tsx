@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useChatStore } from '../stores/chatStore'
 import { Loader2, CheckCircle2, CircleDashed, Sparkles, ChevronDown, ChevronUp, Unlink } from 'lucide-react'
+import { ParallelExecButton } from './chat/ParallelExecButton'
 import './PlanCapsule.css'
 
 export const PlanCapsule: React.FC = () => {
@@ -94,6 +95,15 @@ export const PlanCapsule: React.FC = () => {
               ))}
             </ul>
           </div>
+          {activePlan.status === 'executing' && total > 1 && completed < total && (
+            <div className="plan-capsule-parallel">
+              <ParallelExecButton
+                planSlug={activePlan.slug}
+                planTitle={activePlan.title}
+                onTriggered={() => setExpanded(false)}
+              />
+            </div>
+          )}
           <div className="plan-capsule-footer" onClick={handleUnlink} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '10px', borderTop: '1px solid var(--border)', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '0.8rem', gap: '6px' }}>
             <Unlink size={12} />
             从当前会话解绑

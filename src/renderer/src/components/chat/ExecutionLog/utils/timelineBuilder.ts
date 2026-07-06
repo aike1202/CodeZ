@@ -191,8 +191,10 @@ export function buildUnifiedTimeline(
           verbDisplay = tc.status === 'running' ? 'Asking' : 'Asked'
         } else if (tc.name === 'submit_result' || tc.name === 'submit') {
           verbDisplay = tc.status === 'running' ? 'Submitting' : 'Submitted'
-        } else if (tc.name === 'Task' || tc.name === 'spawn' || tc.name === 'delegate') {
+        } else if (tc.name === 'SubAgentRunner' || tc.name === 'spawn' || tc.name === 'delegate') {
           verbDisplay = tc.status === 'running' ? 'Dispatching' : 'Dispatched'
+        } else if (tc.name === 'DelegateTasks' || tc.name === 'ExecutePlanParallel') {
+          verbDisplay = tc.status === 'running' ? 'Executing' : 'Executed'
         } else if (tc.name === 'Write' || tc.name === 'write_to_file') {
           verbDisplay = tc.status === 'running' ? 'Saving' : 'Saved'
         } else if (tc.name === 'UpdatePlanStep') {
@@ -201,6 +203,8 @@ export function buildUnifiedTimeline(
           verbDisplay = tc.status === 'running' ? 'Invoking' : 'Invoked'
         } else if (tc.name === 'WebFetch' || tc.name === 'web_fetch' || tc.name === 'fetch') {
           verbDisplay = tc.status === 'running' ? 'Fetching' : 'Fetched'
+        } else if (tc.name === 'WebSearch' || tc.name === 'web_search') {
+          verbDisplay = tc.status === 'running' ? 'Searching' : 'Searched'
         } else {
           verbDisplay = tc.status === 'running' ? 'Executing' : 'Executed'
         }
@@ -228,15 +232,33 @@ export function buildUnifiedTimeline(
           }
         }
 
-        // AskUserQuestion：折叠态展示首个问题的 header 作为标题
+        // AskUserQuestion：将每个问题拆分为单独的日志项
         if (tc.name === 'AskUserQuestion') {
           try {
             const askArgs = JSON.parse(tc.args)
-            const firstQ = Array.isArray(askArgs.questions) ? askArgs.questions[0] : null
-            if (firstQ) {
-              const qCount = askArgs.questions.length
-              targetDisplay = firstQ.header || firstQ.question || '用户问题'
-              if (qCount > 1) targetDisplay += ` 等 ${qCount} 个问题`
+            if (Array.isArray(askArgs.questions) && askArgs.questions.length > 0) {
+              const isActuallyRunning = tc.status === 'running' && isStreaming !== false
+              
+              askArgs.questions.forEach((q: any, index: number) => {
+                const targetDisplay = q.header || q.question || '用户问题'
+                const singleQuestionArgs = JSON.stringify({ ...askArgs, questions: [q] })
+                
+                list.push({
+                  id: `${tc.id}_${index}`,
+                  type: 'tool',
+                  timestamp: tc.startedAt + index,
+                  status: isActuallyRunning ? 'running' : tc.status === 'running' ? 'error' : tc.status,
+                  verb: isActuallyRunning ? 'Asking' : 'Asked',
+                  target: targetDisplay,
+                  realPath: getToolTarget(tc),
+                  args: singleQuestionArgs,
+                  detail: tc.result,
+                  duration: index === 0 ? formatDuration(tc) : undefined,
+                  fileName: undefined,
+                  toolName: tc.name
+                })
+              })
+              return
             }
           } catch {
             // keep original target
@@ -257,8 +279,8 @@ export function buildUnifiedTimeline(
           }
         }
 
-        // Task / spawn：展示委派目标
-        if (tc.name === 'Task' || tc.name === 'spawn') {
+        // SubAgentRunner / spawn / DelegateTasks / ExecutePlanParallel：展示委派目标
+        if (tc.name === 'SubAgentRunner' || tc.name === 'spawn' || tc.name === 'DelegateTasks' || tc.name === 'ExecutePlanParallel') {
           try {
             const ta = JSON.parse(tc.args)
             targetDisplay = ta.description || ta.subagent_type || '子任务'

@@ -62,6 +62,14 @@
 
 .timeline-target-text { color: var(--text-main); }
 
+.timeline-target-truncate-box {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Detail expand box */
 .timeline-detail-box {
   margin-top: 4px;

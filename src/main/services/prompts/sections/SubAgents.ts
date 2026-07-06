@@ -7,9 +7,9 @@ export function buildSubAgentGuidance(): string {
 
   const lines: string[] = []
   lines.push('<delegation_guidance>')
-  lines.push('## When to Delegate to SubAgents via the Task Tool')
+  lines.push('## When to Delegate to SubAgents via the SubAgentRunner Tool')
   lines.push('')
-  lines.push('**CRITICAL:** You have access to specialized subagents via the Task tool. For any exploration that spans 3+ files or directories, you MUST delegate to a subagent rather than searching directly. Direct Glob/Grep/Read calls pollute your context window; subagents are isolated and return structured evidence you can act on immediately.')
+  lines.push('**CRITICAL:** You have access to specialized subagents via the SubAgentRunner tool. For any exploration that spans 3+ files or directories, you MUST delegate to a subagent rather than searching directly. Direct Glob/Grep/Read calls pollute your context window; subagents are isolated and return structured evidence you can act on immediately.')
   lines.push('')
 
   // Anti-patterns — direct instructions
@@ -26,9 +26,29 @@ export function buildSubAgentGuidance(): string {
   lines.push('| Single file/symbol lookup | Use Glob/Grep/Read directly |')
   lines.push('| Cross-cutting exploration (3+ files/dirs) | **MUST** delegate to Research subagent |')
   lines.push('| Multi-step implementation plan needed | Use EnterPlanMode (→ Plan subagent) |')
-  lines.push('| Two fully independent explorations | Run two subagents in parallel via Task tool |')
+  lines.push('| Two fully independent explorations | Run two subagents in parallel via SubAgentRunner tool |')
   lines.push('| User asks "analyze the project" or similar | Delegate to Research — do NOT directly explore with Glob/Grep/Read |')
   lines.push('| Answer already in conversation context | Do NOT delegate — use what you already know |')
+  lines.push('')
+
+  // Parallel plan execution guidance
+  lines.push('### Parallel Plan Execution (ExecutePlanParallel tool)')
+  lines.push('When an approved plan is in "executing" status and its steps are largely independent, you can execute them in parallel:')
+  lines.push('1. Delegate to the **ExecutionPlanner** subagent to analyze step dependencies and produce a wave grouping (which steps can run concurrently) plus an isolation recommendation ("shared" or "worktree").')
+  lines.push('2. Call the **ExecutePlanParallel** tool with `planSlug`, the planner\'s `grouping` (waves + isolation + rationale), and the final `isolation`. Each wave runs its steps in parallel via Worker subagents; waves run in order; execution halts on the first wave with a failure.')
+  lines.push('3. If the returned report has status "halted", report the failed step(s) to the user. After the user confirms a fix, call ExecutePlanParallel again — already-completed steps are skipped automatically (the planner reads step status).')
+  lines.push('- Prefer "worktree" isolation when steps might touch shared files; "shared" only when each wave writes fully disjoint files.')
+  lines.push('- Do NOT use parallel execution for plans with 1-2 steps or strictly sequential steps.')
+  lines.push('')
+
+  // Parallel task delegation guidance
+  lines.push('### Parallel Task Delegation (DelegateTasks tool)')
+  lines.push('When you have created lightweight Tasks (TaskCreate) and several are independent, delegate them to parallel Worker subagents:')
+  lines.push('1. Decide the wave grouping yourself: tasks that can run independently go in the same wave; a task that depends on another goes in a later wave.')
+  lines.push('2. NEVER put two tasks that touch the same files in the same wave — "shared" isolation will reject them; "worktree" may cause merge conflicts.')
+  lines.push('3. Call **DelegateTasks** with `waves: [{ index, taskIds }]`, optional `isolation` (default "worktree"), and a one-line `rationale`.')
+  lines.push('4. If the returned report has status "halted", fix the failed task(s) and call DelegateTasks again — already-completed tasks are skipped automatically.')
+  lines.push('- This runs WITHOUT a Plan — Tasks are session-only and lightweight. Use it for medium multi-step work that does not need a reviewed plan.')
   lines.push('')
 
   // Per-type guidance
@@ -69,7 +89,7 @@ export function buildSubAgentGuidance(): string {
   lines.push('  → Read multiple files directly  ← more context pollution')
   lines.push('')
   lines.push('RIGHT approach:')
-  lines.push('  → Task({ subagent_type: "Research", description: "Analyze project structure",')
+  lines.push('  → SubAgentRunner({ subagent_type: "Research", description: "Analyze project structure",')
   lines.push('          prompt: "Analyze the codebase architecture: directory layout, key modules,')
   lines.push('            their responsibilities, and how they connect.",')
   lines.push('          depth: "normal" })')
@@ -77,7 +97,7 @@ export function buildSubAgentGuidance(): string {
   lines.push('')
 
   // How to write a good prompt
-  lines.push('### How to Write a Good Task Prompt')
+  lines.push('### How to Write a Good SubAgentRunner Prompt')
   lines.push('1. **State the core question** — one sentence describing what you need to know.')
   lines.push('2. **Include acceptance criteria** — use `expectations.questions` to list specific sub-questions.')
   lines.push('3. **Provide known context** — use the `context` field to share what you already know.')

@@ -179,12 +179,11 @@ export default function SettingsRulesTab({ onCreate }: Props): React.ReactElemen
           <p className="settings-provider-desc">管理全局和项目的 Agent 规则，指导 AI 如何编写代码。</p>
           <button
             className="project-action-btn"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 8 }}
+            style={{ marginTop: 8 }}
             onClick={() => onCreate?.()}
-            title="让 AI 帮你写一条规则"
+            title="AI 帮写规则"
           >
-            <IconZap />
-            <span>AI 帮写规则</span>
+            <IconMessagePlus />
           </button>
         </div>
 
@@ -304,11 +303,6 @@ export default function SettingsRulesTab({ onCreate }: Props): React.ReactElemen
               )}
             </h2>
             <Flex gap={2}>
-              {activeTabId !== 'new' && (
-                <button className="btn btn-danger" onClick={handleDelete} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <IconTrash /> 删除
-                </button>
-              )}
               <button className="btn btn-primary" onClick={handleSave} disabled={!editingRule.filename || isSaving}>
                 {isSaving ? '保存中...' : '保存'}
               </button>

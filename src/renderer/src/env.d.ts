@@ -98,6 +98,12 @@ declare global {
         toggle: (type: string, enabled: boolean) => Promise<void>
         getDetail: (type: string) => Promise<import('@shared/types/subagent').SubAgentDetail | null>
       }
+      logger: {
+        info: (...args: any[]) => void
+        warn: (...args: any[]) => void
+        error: (...args: any[]) => void
+        debug: (...args: any[]) => void
+      }
     }
   }
 }

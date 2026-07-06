@@ -12,7 +12,9 @@ import type { ToolDefinition } from '../../../shared/types/provider'
 import type { AgentRunConfig, AgentRunnerCallbacks } from './types'
 import { isToolErrorResult, buildToolError } from './agentErrorHandler'
 import { handleEnterPlanMode } from './planRunnerHelper'
-import { handleTaskSpawn } from './taskRunnerHelper'
+import { handleSubAgentRunnerSpawn } from './subAgentRunnerHelper'
+import { handleExecutePlanParallel } from './parallelRunnerHelper'
+import { handleDelegateTasks } from './delegateTasksHelper'
 import { getSessionStore } from '../../ipc/session.handlers'
 import { getSettingsService } from '../../ipc/settings.handlers'
 
@@ -42,6 +44,7 @@ export class AgentRunner {
     let lastVerificationResult: { success: boolean; command: string } | null = null
 
     const planStore = new PlanStore()
+    const taskStore = require('../../services/TaskStore').TaskStore.getInstance()
     let availableTools: ToolDefinition[] = config.tools || this.toolManager.getToolDefinitions()
 
     const sessionId = config.sessionId || `session_${Date.now()}`
@@ -49,6 +52,15 @@ export class AgentRunner {
     try {
       const sessionStore = getSessionStore()
       const session = sessionStore.getAll().find((s: any) => s.id === sessionId)
+
+      // ─── 恢复 Task 状态到会话内存 ──────────────────
+      if (session && session.tasks && session.tasks.length > 0) {
+        if (taskStore.list(sessionId).length === 0) {
+          taskStore.restore(sessionId, session.tasks)
+        }
+      }
+
+      // ─── 恢复 Plan ────────────────────────────────
       let activePlan: any = null
 
       if (session && session.linkedPlanSlug) {
@@ -100,6 +112,33 @@ export class AgentRunner {
             )
         )
         allMessages.push({ role: 'system', content: planMsg } as any)
+      }
+
+      // ─── 注入 active_tasks ─────────────────────────
+      const activeTasks = taskStore.list(sessionId)
+      if (activeTasks.length > 0) {
+        const taskLines = activeTasks
+          .map((t: any) => `- [${t.status}] ${t.id} ${t.subject}`)
+          .join('\n')
+        const inProgress = activeTasks.find((t: any) => t.status === 'in_progress')
+        const taskMsg = [
+          '<active_tasks>',
+          `Total: ${activeTasks.length} tasks | Completed: ${activeTasks.filter((t: any) => t.status === 'completed').length}`,
+          inProgress ? `Current: ${inProgress.id} ${inProgress.subject}` : 'No task in progress',
+          'Tasks:',
+          taskLines,
+          '</active_tasks>'
+        ].join('\n')
+
+        allMessages = allMessages.filter(
+          (m) =>
+            !(
+              m.role === 'system' &&
+              typeof m.content === 'string' &&
+              m.content.includes('<active_tasks>')
+            )
+        )
+        allMessages.push({ role: 'system', content: taskMsg } as any)
       }
     } catch (e) {
       console.error('[AgentRunner] Failed to load active plan:', e)
@@ -348,8 +387,22 @@ export class AgentRunner {
                   this.toolManager,
                   availableTools
                 )
-              } else if (name === 'Task') {
-                return await handleTaskSpawn(
+              } else if (name === 'SubAgentRunner') {
+                return await handleSubAgentRunnerSpawn(
+                  toolCallId,
+                  args,
+                  config,
+                  callbacks
+                )
+              } else if (name === 'ExecutePlanParallel') {
+                return await handleExecutePlanParallel(
+                  toolCallId,
+                  args,
+                  config,
+                  callbacks
+                )
+              } else if (name === 'DelegateTasks') {
+                return await handleDelegateTasks(
                   toolCallId,
                   args,
                   config,

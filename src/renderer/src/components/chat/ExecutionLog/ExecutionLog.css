@@ -35,6 +35,13 @@
 .timeline-header-text {
   font-size: 13px;
   color: var(--text-muted);
+  min-width: 0;
+}
+
+.timeline-header-text > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .timeline-header-answer {

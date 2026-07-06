@@ -2,7 +2,7 @@ import * as fs from 'fs/promises'
 import * as path from 'path'
 import { app } from 'electron'
 import type { GeneralSettings } from '../../shared/types/settings'
-import { defaultSettings } from '../../shared/types/settings'
+import { defaultSettings, defaultWebSearchSettings } from '../../shared/types/settings'
 
 const SETTINGS_FILE = 'settings.json'
 
@@ -21,6 +21,15 @@ export class SettingsService {
       const parsed = JSON.parse(data)
       if (parsed) {
         this.cache = { ...defaultSettings, ...parsed }
+        // 嵌套对象需深合并，避免旧配置缺字段
+        this.cache.webSearch = {
+          ...defaultWebSearchSettings,
+          ...(parsed.webSearch || {}),
+          engines: {
+            ...defaultWebSearchSettings.engines,
+            ...(parsed.webSearch?.engines || {})
+          }
+        }
       }
     } catch {
       this.cache = { ...defaultSettings }

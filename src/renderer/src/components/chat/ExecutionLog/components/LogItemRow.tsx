@@ -86,13 +86,13 @@ export function LogItemRow({
     item.type === 'edit' || (item.type === 'tool' && item.verb === 'Analyzed' && item.fileName)
 
   return (
-    <div className="timeline-item-wrapper" style={{ display: 'flex', flexDirection: 'column' }}>
+    <div className="timeline-item-wrapper" style={{ display: 'flex', flexDirection: 'column', minWidth: 0, width: '100%' }}>
       {!isLast && <div className="timeline-line-indicator" />}
 
       {item.type === 'text' ? (
-        <Flex align="start" gap={2} className="timeline-detail-status-line">
+        <Flex align="start" gap={2} className="timeline-detail-status-line" style={{ minWidth: 0, width: '100%' }}>
           <span className="timeline-detail-working-badge animate-pulse">Working</span>
-          <span className="whitespace-pre-wrap break-all min-w-0">{(item as any).content || item.detail}</span>
+          <span className="whitespace-pre-wrap break-all" style={{ minWidth: 0 }}>{(item as any).content || item.detail}</span>
         </Flex>
       ) : (
         <>
@@ -100,11 +100,12 @@ export function LogItemRow({
             align="center"
             justify="between"
             className={`timeline-item-row ${hasItemDetail ? 'interactive' : ''}`}
+            style={{ minWidth: 0, width: '100%' }}
             onClick={(e) => hasItemDetail && toggleItemExpand(item.id, e)}
           >
-            <Flex align="center" gap={2} className="min-w-0 relative">
+            <Flex align="center" gap={2} className="relative" style={{ flex: 1, minWidth: 0 }}>
               <span className="timeline-icon-box">{getItemIcon(item)}</span>
-              <span className="truncate pr-4">
+              <span className="timeline-target-truncate-box pr-4">
                 <span
                   className={`timeline-verb-text timeline-verb-${item.verb.toLowerCase()}`}
                   title={item.toolName ? `调用工具: ${item.toolName}` : undefined}

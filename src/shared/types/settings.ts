@@ -30,7 +30,36 @@ export interface GeneralSettings {
 
   // SubAgents — 被禁用的子智能体 type 列表（不在列表中即为启用）
   disabledSubAgents: string[];
+
+  // WebSearch — 联网搜索配置
+  webSearch: WebSearchSettings;
 }
+
+export interface WebSearchSettings {
+  /** 总开关，默认 true */
+  enabled: boolean;
+  /** 各引擎启用状态 */
+  engines: {
+    baidu: boolean;       // 国内，直连，默认 true
+    juejin: boolean;      // 国内，直连，默认 true
+    csdn: boolean;        // 国内，直连，默认 true
+  };
+  /** 用户自定义排除的站点域名（结果级过滤），默认 [] */
+  blockedDomains: string[];
+  /** 单次搜索返回结果上限，默认 10 */
+  maxResults: number;
+}
+
+export const defaultWebSearchSettings: WebSearchSettings = {
+  enabled: true,
+  engines: {
+    baidu: true,
+    juejin: true,
+    csdn: true
+  },
+  blockedDomains: [],
+  maxResults: 10
+};
 
 export const defaultSettings: GeneralSettings = {
   appTheme: 'system',
@@ -51,5 +80,6 @@ export const defaultSettings: GeneralSettings = {
   dataStoragePath: '',
   experienceOptimization: true,
   workspaceMode: 'auto-approve-safe',
-  disabledSubAgents: []
+  disabledSubAgents: [],
+  webSearch: defaultWebSearchSettings
 };

@@ -1,5 +1,6 @@
 import { IChatProvider, ChatRequestConfig, StreamCallbacks } from './types'
 import { buildThinkingPayload } from './utils'
+import log from '../../logger'
 
 export interface ThinkParserState {
   inThinkTag: boolean
@@ -96,6 +97,9 @@ export class OpenAIProvider implements IChatProvider {
       stream: true,
       ...buildThinkingPayload(thinking, model, baseUrl, !!(tools && tools.length > 0))
     }
+
+    log.info(`[OpenAIProvider] Invoking model: ${model}`);
+    log.debug(`[OpenAIProvider] Request Payload:`, JSON.stringify({ ...requestPayload, messages: `[Array of ${messages.length} messages]` }));
 
     try {
       const response = await fetch(url, {

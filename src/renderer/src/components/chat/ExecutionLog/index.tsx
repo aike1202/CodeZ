@@ -154,9 +154,16 @@ export default function ExecutionLog({
       <div className={`timeline-list-wrapper ${expanded ? 'timeline-list-wrapper--expanded' : ''}`}>
         <Stack className="timeline-list">
           {unifiedItems.map((item, idx) => {
+            const isOrchestratorTool =
+              item.toolName === 'DelegateTasks' ||
+              item.toolName === 'ExecutePlanParallel' ||
+              item.toolName === 'spawn'
+
             const matchedSubAgent =
               item.type === 'tool' &&
-              (item.toolName === 'Task' || item.toolName === 'EnterPlanMode')
+              (item.toolName === 'SubAgentRunner' ||
+                item.toolName === 'EnterPlanMode' ||
+                isOrchestratorTool)
                 ? subAgents?.find((s) => s.parentToolCallId === item.id)
                 : undefined
 

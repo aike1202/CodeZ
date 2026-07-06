@@ -327,6 +327,54 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.PLAN_LOAD, workspaceRoot, slug),
     getActive: (workspaceRoot: string): Promise<any> =>
       ipcRenderer.invoke(IPC_CHANNELS.PLAN_GET_ACTIVE, workspaceRoot),
+  },
+
+  parallel: {
+    /**
+     * 订阅并行执行的 3 个广播事件。返回取消订阅函数。
+     * 这些事件面向所有窗口广播（非 stream 作用域），因此独立于 chat.stream 订阅。
+     */
+    subscribe: (callbacks: {
+      onStarted?: (payload: { planSlug: string; waves: any[]; isolation: string; rationale: string }) => void
+      onWaveUpdate?: (payload: { waveIndex: number; status: string; stepResults: any[] }) => void
+      onDone?: (payload: { report: any }) => void
+    }): (() => void) => {
+      const startedHandler = (_e: unknown, payload: any) => callbacks.onStarted?.(payload)
+      const waveHandler = (_e: unknown, payload: any) => callbacks.onWaveUpdate?.(payload)
+      const doneHandler = (_e: unknown, payload: any) => callbacks.onDone?.(payload)
+
+      ipcRenderer.on(IPC_CHANNELS.PARALLEL_EXEC_STARTED, startedHandler)
+      ipcRenderer.on(IPC_CHANNELS.PARALLEL_WAVE_UPDATE, waveHandler)
+      ipcRenderer.on(IPC_CHANNELS.PARALLEL_EXEC_DONE, doneHandler)
+
+      return () => {
+        ipcRenderer.removeListener(IPC_CHANNELS.PARALLEL_EXEC_STARTED, startedHandler)
+        ipcRenderer.removeListener(IPC_CHANNELS.PARALLEL_WAVE_UPDATE, waveHandler)
+        ipcRenderer.removeListener(IPC_CHANNELS.PARALLEL_EXEC_DONE, doneHandler)
+      }
+    },
+  },
+
+  task: {
+    /**
+     * 订阅轻量 Task 的全量清单更新（会话内存）。返回取消订阅函数。
+     */
+    subscribe: (
+      callback: (payload: { sessionId: string; tasks: any[] }) => void
+    ): (() => void) => {
+      const handler = (_e: unknown, payload: any) => callback(payload)
+      ipcRenderer.on(IPC_CHANNELS.TASK_UPDATED, handler)
+      return () => {
+        ipcRenderer.removeListener(IPC_CHANNELS.TASK_UPDATED, handler)
+      }
+    },
+  },
+
+  logger: {
+    info: (...args: any[]) => ipcRenderer.send('app:log', 'info', ...args),
+    warn: (...args: any[]) => ipcRenderer.send('app:log', 'warn', ...args),
+    error: (...args: any[]) => ipcRenderer.send('app:log', 'error', ...args),
+    debug: (...args: any[]) => ipcRenderer.send('app:log', 'debug', ...args)
   }
 }
 

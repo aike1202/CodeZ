@@ -1,0 +1,117 @@
+.pxb-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border: 1px solid var(--accent, #6366f1);
+  border-radius: 8px;
+  background: var(--accent, #6366f1);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.pxb-trigger:hover {
+  opacity: 0.88;
+}
+
+.pxb-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.pxb-dialog {
+  width: 460px;
+  max-width: 92vw;
+  background: var(--bg-primary, #fff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+}
+
+.pxb-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 10px;
+  font-size: 1rem;
+  color: var(--text-primary, #1e293b);
+}
+
+.pxb-hint {
+  margin: 0 0 14px;
+  font-size: 0.82rem;
+  color: var(--text-secondary, #64748b);
+  line-height: 1.5;
+}
+
+.pxb-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.pxb-field-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary, #1e293b);
+}
+
+.pxb-radio {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.82rem;
+  color: var(--text-secondary, #475569);
+  cursor: pointer;
+}
+
+.pxb-warn {
+  background: rgba(234, 179, 8, 0.1);
+  border: 1px solid rgba(234, 179, 8, 0.3);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.76rem;
+  color: #a16207;
+  line-height: 1.45;
+  margin-bottom: 16px;
+}
+
+.pxb-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.pxb-btn {
+  padding: 7px 16px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.pxb-btn--cancel {
+  background: var(--bg-secondary, #f1f5f9);
+  color: var(--text-secondary, #475569);
+  border-color: var(--border, #e2e8f0);
+}
+
+.pxb-btn--go {
+  background: var(--accent, #6366f1);
+  color: #fff;
+}
+
+.pxb-btn--go:hover {
+  opacity: 0.88;
+}

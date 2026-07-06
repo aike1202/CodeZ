@@ -146,10 +146,18 @@ export function parseSlashCommand(
     s.triggers?.includes(cmdName)
   )
   if (skill) {
+    let msg = `【本次请求强制应用工作流：${skill.name}】\n\n`
+    if (skill.path) {
+      const lastSlash = Math.max(skill.path.lastIndexOf('/'), skill.path.lastIndexOf('\\'))
+      const pathDir = lastSlash >= 0 ? skill.path.substring(0, lastSlash) : skill.path
+      msg += `【Skill Location】: ${pathDir}\n(If this skill instructs you to read other related documents, please use file reading tools on this directory.)\n\n`
+    }
+    msg += `指令要求如下：\n${skill.content}\n\n当前任务参数/问题：\n${args}`
+
     return {
       isCommand: true,
       commandName: cmdName,
-      processedMessage: `【本次请求强制应用工作流：${skill.name}】\n\n指令要求如下：\n${skill.content}\n\n当前任务参数/问题：\n${args}`
+      processedMessage: msg
     }
   }
 

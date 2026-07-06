@@ -2,6 +2,10 @@ import React, { ReactNode } from 'react';
 import Stack from '../ui/Stack';
 import { PlanApprovalCard } from './PlanApprovalCard';
 import { PlanCapsule } from '../PlanCapsule';
+import { TaskCapsule } from './TaskCapsule';
+import { ParallelWaveGroup } from './ParallelWaveGroup';
+import { useParallelExecSubscription } from './hooks/useParallelExecSubscription';
+import { useTaskSubscription } from './hooks/useTaskSubscription';
 import { useChatStore } from '../../stores/chatStore';
 
 export interface ChatAreaLayoutProps {
@@ -25,6 +29,8 @@ export const ChatAreaLayout: React.FC<ChatAreaLayoutProps> = ({
   containerRef,
   onScroll
 }) => {
+  useParallelExecSubscription();
+  useTaskSubscription();
   return (
     <>
       <Stack
@@ -33,7 +39,9 @@ export const ChatAreaLayout: React.FC<ChatAreaLayoutProps> = ({
         onScroll={onScroll}
       >
         <PlanCapsule />
+        <TaskCapsule />
         <PlanApprovalCard />
+        <ParallelWaveGroup />
         {messageArea}
       </Stack>
       {auditArea}

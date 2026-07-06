@@ -166,3 +166,20 @@
   display: inline-block;
 }
 
+.skill-inline-link {
+  color: #8a2be2;
+  background-color: rgba(138, 43, 226, 0.1);
+  border-color: rgba(138, 43, 226, 0.2);
+}
+.skill-inline-link:hover {
+  background-color: rgba(138, 43, 226, 0.15);
+}
+.dark .skill-inline-link {
+  color: #b175ff;
+  background-color: rgba(138, 43, 226, 0.15);
+  border-color: rgba(138, 43, 226, 0.25);
+}
+.dark .skill-inline-link:hover {
+  background-color: rgba(138, 43, 226, 0.22);
+}
+

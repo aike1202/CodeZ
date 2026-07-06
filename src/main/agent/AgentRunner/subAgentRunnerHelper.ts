@@ -7,19 +7,19 @@ import type { AgentRunnerCallbacks } from './types'
  * 通用子智能体 spawn 拦截处理。
  *
  * 与 planRunnerHelper 的区别：
- * - 无批准弹窗（Plan 的弹窗源于 EnterPlanMode 的特殊 UX；通用 Task 直接执行）
+ * - 无批准弹窗（Plan 的弹窗源于 EnterPlanMode 的特殊 UX；通用 SubAgentRunner 直接执行）
  * - 无 <active_plan> 注入 / session 关联
  * - 仅 spawn → 返回 SubAgentResult.output
  *
  * 返回 tool 消息，结构与其他工具一致（{ ok, data }）。
  */
-export async function handleTaskSpawn(
+export async function handleSubAgentRunnerSpawn(
   toolCallId: string,
   rawArgs: string,
   config: { workspaceRoot: string; sessionId?: string; baseUrl?: string; apiKey?: string; apiFormat?: string; model?: string; thinking?: any },
   callbacks: AgentRunnerCallbacks
 ): Promise<{ role: 'tool'; tool_call_id: string; name: string; content: string }> {
-  const name = 'Task'
+  const name = 'SubAgentRunner'
 
   let parsed: {
     subagent_type?: string
@@ -34,7 +34,7 @@ export async function handleTaskSpawn(
   try {
     parsed = JSON.parse(rawArgs || '{}')
   } catch {
-    const errMsg = JSON.stringify({ ok: false, error: 'Invalid JSON arguments for Task tool.' })
+    const errMsg = JSON.stringify({ ok: false, error: 'Invalid JSON arguments for SubAgentRunner tool.' })
     callbacks.onToolEnd?.(toolCallId, errMsg)
     return { role: 'tool' as const, tool_call_id: toolCallId, name, content: errMsg }
   }
@@ -44,7 +44,7 @@ export async function handleTaskSpawn(
   if (!subagent_type || (!prompt && !parsed.task)) {
     const errMsg = JSON.stringify({
       ok: false,
-      error: 'Task requires `subagent_type` and (`prompt` or `task`) arguments.'
+      error: 'SubAgentRunner requires `subagent_type` and (`prompt` or `task`) arguments.'
     })
     callbacks.onToolEnd?.(toolCallId, errMsg)
     return { role: 'tool' as const, tool_call_id: toolCallId, name, content: errMsg }

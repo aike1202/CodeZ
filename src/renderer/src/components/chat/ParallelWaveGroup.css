@@ -1,0 +1,197 @@
+.pwg-root {
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  background: var(--bg-secondary, #f8fafc);
+  padding: 12px 14px;
+  margin: 10px 0;
+  font-size: 0.85rem;
+}
+
+.pwg-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pwg-header-icon {
+  color: var(--accent, #6366f1);
+}
+
+.pwg-header-title {
+  font-weight: 600;
+  color: var(--text-primary, #1e293b);
+}
+
+.pwg-badge {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.pwg-badge--running {
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--accent, #6366f1);
+}
+
+.pwg-badge--completed {
+  background: rgba(5, 150, 105, 0.12);
+  color: #059669;
+}
+
+.pwg-badge--halted {
+  background: rgba(220, 38, 38, 0.12);
+  color: #dc2626;
+}
+
+.pwg-rationale,
+.pwg-isolation {
+  margin-top: 6px;
+  color: var(--text-secondary, #64748b);
+  font-size: 0.78rem;
+}
+
+.pwg-isolation code {
+  background: var(--bg-code, #eef2ff);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.pwg-waves {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pwg-wave {
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-primary, #fff);
+}
+
+.pwg-wave--failed {
+  border-color: rgba(220, 38, 38, 0.4);
+}
+
+.pwg-wave-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 10px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-primary, #1e293b);
+  font-size: 0.82rem;
+}
+
+.pwg-wave-title {
+  font-weight: 600;
+}
+
+.pwg-wave-badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+}
+
+.pwg-wave-badge--waiting {
+  background: var(--bg-secondary, #f1f5f9);
+  color: var(--text-secondary, #64748b);
+}
+
+.pwg-wave-badge--in_progress {
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--accent, #6366f1);
+}
+
+.pwg-wave-badge--completed {
+  background: rgba(5, 150, 105, 0.12);
+  color: #059669;
+}
+
+.pwg-wave-badge--failed {
+  background: rgba(220, 38, 38, 0.12);
+  color: #dc2626;
+}
+
+.pwg-wave-fail {
+  color: #dc2626;
+  font-size: 0.72rem;
+}
+
+.pwg-step-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 10px 8px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pwg-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--text-secondary, #475569);
+}
+
+.pwg-step-id {
+  font-weight: 600;
+  color: var(--text-primary, #1e293b);
+}
+
+.pwg-step-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 320px;
+}
+
+.pwg-step-files {
+  color: #059669;
+  font-size: 0.72rem;
+}
+
+.pwg-step-error {
+  color: #dc2626;
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
+}
+
+.pwg-icon--ok {
+  color: #059669;
+}
+
+.pwg-icon--err {
+  color: #dc2626;
+}
+
+.pwg-icon--run {
+  color: var(--accent, #6366f1);
+}
+
+.pwg-icon--pending {
+  color: var(--text-tertiary, #94a3b8);
+}
+
+.spin {
+  animation: pwg-spin 1s linear infinite;
+}
+
+@keyframes pwg-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

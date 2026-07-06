@@ -1,0 +1,25 @@
+/* Task 胶囊：复用 PlanCapsule 的样式，仅做位置与状态色微调。 */
+
+/* 与 Plan 胶囊并存时，Task 胶囊下移，避免重叠 */
+.task-capsule-wrapper {
+  top: 60px;
+}
+
+.task-capsule-wrapper .step-icon.cancelled {
+  color: var(--text-tertiary, #9ca3af);
+}
+
+.task-capsule-wrapper .step-item.status-cancelled .step-title {
+  color: var(--text-secondary);
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.task-capsule-wrapper .plan-capsule-popover .task-list-subtitle {
+  margin: 2px 0 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

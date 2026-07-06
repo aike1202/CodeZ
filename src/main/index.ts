@@ -1,4 +1,9 @@
 import { app, BrowserWindow, shell, ipcMain, globalShortcut } from 'electron'
+import { setupLogger } from './logger'
+
+// 初始化日志记录器
+setupLogger()
+
 import { join } from 'path'
 import { electronApp, is } from '@electron-toolkit/utils'
 import { registerWorkspaceIpc } from './ipc/workspace.handlers'

@@ -10,13 +10,20 @@ import { BashTool } from './builtin/BashTool'
 import { PowerShellTool } from './builtin/PowerShellTool'
 import { AskUserQuestionTool } from './builtin/AskUserQuestionTool'
 import { PushNotificationTool } from './builtin/PushNotificationTool'
-import { TaskTool } from './builtin/TaskTool'
+import { SubAgentRunnerTool } from './builtin/SubAgentRunnerTool'
+import { TaskCreateTool } from './builtin/TaskCreateTool'
+import { TaskUpdateTool } from './builtin/TaskUpdateTool'
+import { TaskListTool } from './builtin/TaskListTool'
+import { DelegateTasksTool } from './builtin/DelegateTasksTool'
 import { SkillTool } from './builtin/SkillTool'
 import { RollbackLastEditTool } from './builtin/RollbackLastEditTool'
 import { UpdateResumeStateTool } from './builtin/UpdateResumeStateTool'
 import { EnterPlanModeTool } from './builtin/EnterPlanModeTool'
 import { ExitPlanModeTool } from './builtin/ExitPlanModeTool'
 import { UpdatePlanStepTool } from './builtin/UpdatePlanStepTool'
+import { ExecutePlanParallelTool } from './builtin/ExecutePlanParallelTool'
+import { WebSearchTool } from './builtin/WebSearchTool'
+import { WebFetchTool } from './builtin/WebFetchTool'
 
 import type { ToolDefinition } from '../../shared/types/provider'
 
@@ -53,7 +60,14 @@ export class ToolManager {
       new EnterPlanModeTool(),
       new ExitPlanModeTool(),
       new UpdatePlanStepTool(),
-      new TaskTool()
+      new ExecutePlanParallelTool(),
+      new WebSearchTool(),
+      new WebFetchTool(),
+      new SubAgentRunnerTool(),
+      new TaskCreateTool(),
+      new TaskUpdateTool(),
+      new TaskListTool(),
+      new DelegateTasksTool()
     ]
     
     for (const tool of builtinTools) {

@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react'
 import { useSettingsStore } from '../../stores/settingsStore'
+import type { GeneralSettings } from '@shared/types/settings'
 import Switch from '../ui/Switch'
 import Select from '../ui/Select'
 import Input from '../ui/Input'
@@ -205,6 +206,120 @@ export default function SettingsGeneralTab(): React.ReactElement {
 
       {/* 5. 权限说明 */}
       <PermissionSettingsSection workspaceMode={settings.workspaceMode} onUpdate={handleUpdate} />
+
+      {/* 6. 联网搜索 */}
+      <WebSearchSettingsSection settings={settings} onUpdate={handleUpdate} />
+    </div>
+  )
+}
+
+interface WebSearchSectionProps {
+  settings: GeneralSettings
+  onUpdate: (key: keyof GeneralSettings, value: any) => void
+}
+
+function WebSearchSettingsSection({ settings, onUpdate }: WebSearchSectionProps): React.ReactElement {
+  const ws = settings.webSearch
+  const [domainInput, setDomainInput] = React.useState('')
+
+  const updateWs = (patch: Partial<typeof ws>) => {
+    onUpdate('webSearch', { ...ws, ...patch })
+  }
+  const updateEngine = (key: keyof typeof ws.engines, val: boolean) => {
+    updateWs({ engines: { ...ws.engines, [key]: val } })
+  }
+  const addDomain = () => {
+    const d = domainInput.trim()
+    if (!d || ws.blockedDomains.includes(d)) return
+    updateWs({ blockedDomains: [...ws.blockedDomains, d] })
+    setDomainInput('')
+  }
+  const removeDomain = (d: string) => {
+    updateWs({ blockedDomains: ws.blockedDomains.filter((x) => x !== d) })
+  }
+
+  return (
+    <div className="settings-general-card">
+      <div className="settings-general-row">
+        <div>
+          <div className="settings-general-label">联网搜索</div>
+          <div className="settings-general-desc">允许模型联网搜索并抓取网页内容。</div>
+        </div>
+        <div className="settings-general-control">
+          <Switch checked={ws.enabled} onChange={(val) => updateWs({ enabled: val })} />
+        </div>
+      </div>
+
+      {ws.enabled && (
+        <>
+          <div className="settings-general-row">
+            <div>
+              <div className="settings-general-label">搜索引擎</div>
+              <div className="settings-general-desc">百度 / 掘金 / CSDN，国内直连，无需代理。</div>
+            </div>
+            <div className="settings-general-control" style={{ gap: '16px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Switch checked={ws.engines.baidu} onChange={(v) => updateEngine('baidu', v)} />
+                <span>百度</span>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Switch checked={ws.engines.juejin} onChange={(v) => updateEngine('juejin', v)} />
+                <span>掘金</span>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Switch checked={ws.engines.csdn} onChange={(v) => updateEngine('csdn', v)} />
+                <span>CSDN</span>
+              </label>
+            </div>
+          </div>
+
+          <div className="settings-general-row">
+            <div>
+              <div className="settings-general-label">排除站点</div>
+              <div className="settings-general-desc">搜索结果中排除这些域名（子串匹配）。</div>
+            </div>
+            <div className="settings-general-control" style={{ gap: '8px' }}>
+              <Input
+                placeholder="如: example.com"
+                value={domainInput}
+                onChange={(e) => setDomainInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') addDomain()
+                }}
+              />
+              <Button type="default" size="sm" onClick={addDomain}>
+                添加
+              </Button>
+            </div>
+          </div>
+
+          {ws.blockedDomains.length > 0 && (
+            <div className="settings-general-row">
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', width: '100%' }}>
+                {ws.blockedDomains.map((d) => (
+                  <span
+                    key={d}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      background: 'var(--color-bg-secondary, #2a2a2a)',
+                      fontSize: '12px'
+                    }}
+                  >
+                    {d}
+                    <span style={{ cursor: 'pointer', opacity: 0.6 }} onClick={() => removeDomain(d)}>
+                      ✕
+                    </span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }

@@ -1,3 +1,5 @@
+import type { TaskItem } from './task'
+
 export interface SessionData {
   id: string
   projectId: string
@@ -8,4 +10,6 @@ export interface SessionData {
   isDeleted?: boolean
   deletedAt?: number
   linkedPlanSlug?: string
+  /** 轻量任务清单——落盘持久化，会话恢复时加载 */
+  tasks?: TaskItem[]
 }

@@ -212,7 +212,13 @@ export class SkillManager {
   public async getSkillContent(workspaceRoot: string | null, name: string): Promise<string | null> {
     const skills = await this.getSkills(workspaceRoot)
     const hit = skills.find(s => s.name === name || s.id === name)
-    return hit ? hit.content : null
+    if (!hit) return null
+    let result = hit.content
+    if (hit.path) {
+      const pathDir = path.dirname(hit.path)
+      result += `\n\n---\n【Skill Location】: ${pathDir}\n(If this skill instructs you to read other related documents, please use file reading tools on this directory.)`
+    }
+    return result
   }
 
   public async toggleSkill(workspaceRoot: string | null, id: string, enabled: boolean): Promise<void> {

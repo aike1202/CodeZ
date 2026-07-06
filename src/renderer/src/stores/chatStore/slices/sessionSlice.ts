@@ -79,6 +79,7 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
             sessions,
             activeSessionId: sessionId,
             messages: freshSession.messages,
+            tasks: freshSession.tasks || [],
             activePlan: null
           }
         })

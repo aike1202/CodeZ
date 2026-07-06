@@ -73,16 +73,16 @@ export function parseInline(
       fileMatch = FILE_PATH_RE.exec(remaining)
     }
 
-    // 斜杠命令: /command (只匹配行首或空格后)
-    const COMMAND_RE = /(?:^|\s)(\/[a-zA-Z0-9_-]+)/g
+    // 斜杠命令和技能: /command 或 $skill (只匹配行首或空格后)
+    const COMMAND_RE = /(?:^|\s)([\/$][a-zA-Z0-9_-]+)/g
     COMMAND_RE.lastIndex = 0
     const cmdMatch = COMMAND_RE.exec(remaining)
     let cmdIdx = -1
     let cmdActualStart = -1
     if (cmdMatch) {
-      // 调整索引到 / 的实际位置（跳过前面可能的空格）
-      const slashPos = cmdMatch[0].indexOf('/')
-      cmdActualStart = cmdMatch.index + slashPos
+      // 调整索引到 / 或 $ 的实际位置（跳过前面可能的空格）
+      const charPos = Math.max(cmdMatch[0].indexOf('/'), cmdMatch[0].indexOf('$'))
+      cmdActualStart = cmdMatch.index + charPos
       cmdIdx = cmdActualStart
     }
 
@@ -122,14 +122,14 @@ export function parseInline(
             'span',
             {
               key: `skill-pill-${keyIdx++}`,
-              className: 'cm-pill-widget msg-pill',
+              className: 'cmd-inline-link skill-inline-link',
               onClick: () => {
-                window.dispatchEvent(new CustomEvent('insert-command', { detail: `/${linkText.substring(1)} ` }))
+                window.dispatchEvent(new CustomEvent('insert-command', { detail: `${linkText} ` }))
               },
-              title: `点击在输入框中调用 /${linkText.substring(1)}`
+              title: `点击在输入框中调用 ${linkText}`
             },
-            React.createElement('span', { className: 'cm-pill-icon flex items-center justify-center', style: { marginRight: '4px' } }, React.createElement(IconPackage)),
-            React.createElement('span', { className: 'cm-pill-text' }, linkText.substring(1))
+            React.createElement(IconPackage, { className: 'cmd-inline-link-icon' }),
+            linkText.substring(1)
           )
         )
       } else if (!linkUrl.startsWith('http://') && !linkUrl.startsWith('https://')) {
@@ -254,14 +254,17 @@ export function parseInline(
       )
       remaining = remaining.slice(matchText.length)
     } else if (first.type === 'cmd' && first.match) {
-      const slashPos = first.match[0].indexOf('/')
-      const cmdText = first.match[0].slice(slashPos)
+      const matchStr = first.match[0]
+      const charPos = Math.max(matchStr.indexOf('/'), matchStr.indexOf('$'))
+      const cmdText = matchStr.slice(charPos)
+      const isSkill = cmdText.startsWith('$')
+      
       nodes.push(
         React.createElement(
           'span',
           {
             key: `cmd-link-${keyIdx++}`,
-            className: 'cmd-inline-link',
+            className: `cmd-inline-link${isSkill ? ' skill-inline-link' : ''}`,
             onClick: () => {
               window.dispatchEvent(new CustomEvent('insert-command', { detail: `${cmdText} ` }))
             },

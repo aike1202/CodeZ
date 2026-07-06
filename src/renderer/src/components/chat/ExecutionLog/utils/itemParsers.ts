@@ -66,10 +66,12 @@ export function getToolNoun(toolName: string): string {
     case 'submit_result':
     case 'submit':
       return '提交结果'
-    case 'Task':
+    case 'SubAgentRunner':
     case 'spawn':
     case 'delegate':
       return '子任务'
+    case 'DelegateTasks':
+      return '多任务委派'
     case 'Write':
     case 'write_to_file':
       return '保存文件'
@@ -82,6 +84,9 @@ export function getToolNoun(toolName: string): string {
     case 'web_fetch':
     case 'fetch':
       return '网页'
+    case 'WebSearch':
+    case 'web_search':
+      return '网页搜索'
     default:
       return toolName
   }

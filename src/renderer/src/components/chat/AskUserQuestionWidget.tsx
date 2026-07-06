@@ -14,22 +14,32 @@ interface Props {
 }
 
 export default function AskUserQuestionWidget({ msgId, requests, onResolve }: Props) {
+  const [currentIndex, setCurrentIndex] = useState(0)
+  const [answers, setAnswers] = useState<Array<{ question: string; answer: string | string[] }>>([])
+
   const pending = requests.filter((r) => r.status === 'pending')
   if (pending.length === 0) return null
   const req = pending[0]
 
+  const question = req.questions[currentIndex]
+  if (!question) return null
+
   return (
     <div className="ask-user-widget">
-      {req.questions.map((q, qi) => (
-        <QuestionBlock
-          key={qi}
-          question={q}
-          onSubmit={(answer) => {
-            // 单问即整体答复；多问可扩展为收集全部后一次提交
-            onResolve(msgId, req.id, [{ question: q.question, answer }])
-          }}
-        />
-      ))}
+      <QuestionBlock
+        key={currentIndex}
+        question={question}
+        onSubmit={(answer) => {
+          const newAnswers = [...answers, { question: question.question, answer }]
+          if (currentIndex < req.questions.length - 1) {
+            setAnswers(newAnswers)
+            setCurrentIndex(currentIndex + 1)
+          } else {
+            // 所有问题回答完毕，整体提交
+            onResolve(msgId, req.id, newAnswers)
+          }
+        }}
+      />
     </div>
   )
 }

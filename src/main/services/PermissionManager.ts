@@ -34,11 +34,18 @@ export class PermissionManager {
 
   public checkToolPermission(toolName: string, parsedArgs: any, workspaceRoot: string, workspaceMode: 'ask' | 'auto-approve-safe' | 'full-access' = 'auto-approve-safe'): PermissionResult {
     // 0. Base safe tools
-    if (['list_files', 'update_resume_state', 'UpdatePlanStep', 'ExitPlanMode', 'Read', 'NotebookEdit', 'Glob', 'Grep', 'Skill', 'PushNotification', 'AskUserQuestion', 'view_file', 'grep_search'].includes(toolName)) {
+    if (['list_files', 'update_resume_state', 'UpdatePlanStep', 'ExitPlanMode', 'Read', 'NotebookEdit', 'Glob', 'Grep', 'Skill', 'PushNotification', 'AskUserQuestion', 'view_file', 'grep_search', 'TaskCreate', 'TaskUpdate', 'TaskList'].includes(toolName)) {
       return 'allow'
     }
 
     if (toolName === 'rollback_last_edit') {
+      return 'ask'
+    }
+
+    // 0.5 联网工具（出网 + 将 query/url 发往第三方，非纯本地只读）
+    if (toolName === 'WebSearch' || toolName === 'WebFetch') {
+      if (workspaceMode === 'full-access') return 'allow'
+      // auto-approve-safe / ask 均走 ask（可选"本会话/永久允许"）
       return 'ask'
     }
 
@@ -114,6 +121,14 @@ export class PermissionManager {
       const targetPath = parsedArgs?.file_path || parsedArgs?.filePath || parsedArgs?.TargetFile || parsedArgs?.path || 'unknown path'
       risk = 'write'
       description = `Modify file: ${targetPath}`
+    } else if (toolName === 'WebSearch') {
+      risk = 'network'
+      const query = parsedArgs?.query || ''
+      description = `搜索网络: ${query}`
+    } else if (toolName === 'WebFetch') {
+      risk = 'network'
+      const url = parsedArgs?.url || ''
+      description = `读取网页: ${url}`
     }
 
     return {

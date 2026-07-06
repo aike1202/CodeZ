@@ -28,6 +28,7 @@
   background: rgba(249, 250, 251, 0.5);
   font-size: 11px;
   color: var(--text-muted);
+  overflow: hidden;
 }
 
 /* ---- Reasoning ---- */
@@ -236,6 +237,8 @@
   color: #f4f4f5;
   white-space: pre-wrap;
   word-break: break-all;
+  flex: 1;
+  min-width: 0;
 }
 
 .exe-log-terminal-output-container {
@@ -313,6 +316,8 @@
   color: var(--text-main);
   white-space: pre-wrap;
   word-break: break-all;
+  flex: 1;
+  min-width: 0;
 }
 
 .exe-log-params-output-container {

@@ -1,0 +1,97 @@
+﻿
+> codez@0.1.0 test
+> vitest run
+
+
+[7m[1m[36m RUN [39m[22m[27m [36mv1.6.1[39m [90mF:/MyProjectF/CodeZ[39m
+
+ [32m✓[39m src/tests/update-plan-step-tool.test.ts [2m ([22m[2m3 tests[22m[2m)[22m[90m 5[2mms[22m[39m
+ [32m✓[39m src/tests/memory-service.test.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 25[2mms[22m[39m
+ [32m✓[39m src/tests/chat-service.test.ts [2m ([22m[2m10 tests[22m[2m)[22m[90m 4[2mms[22m[39m
+ [33m❯[39m src/tests/permission-manager-claude-names.test.ts [2m ([22m[2m5 tests[22m [2m|[22m [31m4 failed[39m[2m)[22m[90m 13[2mms[22m[39m
+[31m   [33m❯[31m src/tests/permission-manager-claude-names.test.ts[2m > [22mPermissionManager — Claude 工具名映射[2m > [22mEdit/Write：workspace 内 allow，越界 deny[39m
+[31m     → Cannot read properties of undefined (reading 'getPath')[39m
+[31m   [33m❯[31m src/tests/permission-manager-claude-names.test.ts[2m > [22mPermissionManager — Claude 工具名映射[2m > [22mBash/PowerShell 复用 getCommandRisk[39m
+[31m     → Cannot read properties of undefined (reading 'getPath')[39m
+[31m   [33m❯[31m src/tests/permission-manager-claude-names.test.ts[2m > [22mPermissionManager — Claude 工具名映射[2m > [22mwrite_to_file 等工具现在走写工具分支[39m
+[31m     → Cannot read properties of undefined (reading 'getPath')[39m
+[31m   [33m❯[31m src/tests/permission-manager-claude-names.test.ts[2m > [22mPermissionManager — Claude 工具名映射[2m > [22mcreatePermissionRequest：Bash/PowerShell 计算 risk 与 description[39m
+[31m     → expected 'network' to be 'write' // Object.is equality[39m
+ [33m❯[39m src/tests/permission-manager.test.ts [2m ([22m[2m5 tests[22m [2m|[22m [31m4 failed[39m[2m)[22m[90m 16[2mms[22m[39m
+[31m   [33m❯[31m src/tests/permission-manager.test.ts[2m > [22mPermissionManager[2m > [22m应正确识别写入、网络和破坏性命令[39m
+[31m     → expected 'unknown' to be 'write' // Object.is equality[39m
+[31m   [33m❯[31m src/tests/permission-manager.test.ts[2m > [22mPermissionManager[2m > [22mBash 支持 command 参数名[39m
+[31m     → Cannot read properties of undefined (reading 'getPath')[39m
+[31m   [33m❯[31m src/tests/permission-manager.test.ts[2m > [22mPermissionManager[2m > [22m只读工具应 allow，rollback 和写入工具应 allow(边界内)[39m
+[31m     → Cannot read properties of undefined (reading 'getPath')[39m
+[31m   [33m❯[31m src/tests/permission-manager.test.ts[2m > [22mPermissionManager[2m > [22m写入 workspace 外路径应 deny[39m
+[31m     → Cannot read properties of undefined (reading 'getPath')[39m
+ [32m✓[39m src/tests/ask-user-question-tool.test.ts [2m ([22m[2m15 tests[22m[2m)[22m[90m 5[2mms[22m[39m
+ [33m❯[39m src/tests/system-prompt-service.test.ts [2m ([22m[2m15 tests[22m [2m|[22m [31m13 failed[39m[2m)[22m[90m 23[2mms[22m[39m
+[31m   [33m❯[31m src/tests/system-prompt-service.test.ts[2m > [22mSystemPromptService[2m > [22mbuildSystemPrompt[2m > [22mshould return a string with identity[39m
+[31m     → SubAgentManager.listEnabledDefinitions is not a function[39m
+[31m   [33m❯[31m src/tests/system-prompt-service.test.ts[2m > [22mSystemPromptService[2m > [22mbuildSystemPrompt[2m > [22mshould contain harness rules[39m
+[31m     → SubAgentManager.listEnabledDefinitions is not a function[39m
+[31m   [33m❯[31m src/tests/system-prompt-service.test.ts[2m > [22mSystemPromptService[2m > [22mbuildSystemPrompt[2m > [22mshould contain memory description[39m
+[31m     → SubAgentManager.listEnabledDefinitions is not a function[39m
+[31m   [33m❯[31m src/tests/system-prompt-service.test.ts[2m > [22mSystemPromptService[2m > [22mbuildSystemPrompt[2m > [22mshould contain developer instructions[39m
+[31m     → SubAgentManager.listEnabledDefinitions is not a function[39m
+[31m   [33m❯[31m src/tests/system-prompt-service.test.ts[2m > [22mSystemPromptService[2m > [22mbuildSystemPrompt[2m > [22mshould contain verification strategy[39m
+[31m     → SubAgentManager.listEnabledDefinitions is not a function[39m
+[31m   [33m❯[31m src/tests/system-prompt-service.test.ts[2m > [22mSystemPromptService[2m > [22mbuildSystemPrompt[2m > [22mshould contain repository instructions[39m
+[31m     → SubAgentManager.listEnabledDefinitions is not a function[39m
+[31m   [33m❯[31m src/tests/system-prompt-service.test.ts[2m > [22mSystemPromptService[2m > [22mbuildSystemPrompt[2m > [22mshould contain environment context with model info[39m
+[31m     → SubAgentManager.listEnabledDefinitions is not a function[39m
+[31m   [33m❯[31m src/tests/system-prompt-service.test.ts[2m > [22mSystemPromptService[2m > [22mbuildSystemPrompt[2m > [22mshould contain git status[39m
+[31m     → SubAgentManager.listEnabledDefinitions is not a function[39m
+[31m   [33m❯[31m src/tests/system-prompt-service.test.ts[2m > [22mSystemPromptService[2m > [22mbuildSystemPrompt[2m > [22mshould contain available tools[39m
+[31m     → SubAgentManager.listEnabledDefinitions is not a function[39m
+[31m   [33m❯[31m src/tests/system-prompt-service.test.ts[2m > [22mSystemPromptService[2m > [22mbuildSystemPrompt[2m > [22mshould contain available skills[39m
+[31m     → SubAgentManager.listEnabledDefinitions is not a function[39m
+[31m   [33m❯[31m src/tests/system-prompt-service.test.ts[2m > [22mSystemPromptService[2m > [22mbuildSystemPrompt[2m > [22mshould contain delegation guidance[39m
+[31m     → SubAgentManager.listEnabledDefinitions is not a function[39m
+[31m   [33m❯[31m src/tests/system-prompt-service.test.ts[2m > [22mSystemPromptService[2m > [22mbuildSystemPrompt[2m > [22mshould contain pending features section[39m
+[31m     → SubAgentManager.listEnabledDefinitions is not a function[39m
+[31m   [33m❯[31m src/tests/system-prompt-service.test.ts[2m > [22mSystemPromptService[2m > [22mbuildSystemPrompt[2m > [22msections should appear in correct order[39m
+[31m     → SubAgentManager.listEnabledDefinitions is not a function[39m
+ [32m✓[39m src/tests/edit-tool.test.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 56[2mms[22m[39m
+ [32m✓[39m src/tests/notebook-edit-tool.test.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 57[2mms[22m[39m
+ [32m✓[39m src/tests/rules-resolver.test.ts [2m ([22m[2m8 tests[22m[2m)[22m[90m 51[2mms[22m[39m
+ [32m✓[39m src/tests/write-tool.test.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 38[2mms[22m[39m
+ [32m✓[39m src/tests/verification-strategy-service.test.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 8[2mms[22m[39m
+ [32m✓[39m src/tests/push-provider.test.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 4[2mms[22m[39m
+ [32m✓[39m src/tests/workspace-service.test.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 81[2mms[22m[39m
+ [32m✓[39m src/tests/read-tool.test.ts [2m ([22m[2m8 tests[22m[2m)[22m[90m 89[2mms[22m[39m
+ [32m✓[39m src/tests/read-fingerprint-store.test.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 5[2mms[22m[39m
+ [32m✓[39m src/tests/context-manager-truncation.test.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 7[2mms[22m[39m
+ [32m✓[39m src/tests/skill-manager-builtin.test.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 239[2mms[22m[39m
+ [32m✓[39m src/tests/plan-store.test.ts [2m ([22m[2m10 tests[22m[2m)[22m[90m 166[2mms[22m[39m
+ [32m✓[39m src/tests/project-analysis-service.test.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 188[2mms[22m[39m
+ [32m✓[39m src/tests/grep-tool.test.ts [2m ([22m[2m7 tests[22m[2m)[22m[33m 377[2mms[22m[39m
+ [32m✓[39m src/tests/skill-tool.test.ts [2m ([22m[2m4 tests[22m[2m)[22m[33m 336[2mms[22m[39m
+ [32m✓[39m src/tests/push-notification-tool.test.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 4[2mms[22m[39m
+ [32m✓[39m src/tests/slash-command-skill.test.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 4[2mms[22m[39m
+ [32m✓[39m src/tests/search-engines.test.ts [2m ([22m[2m16 tests[22m[2m)[22m[90m 16[2mms[22m[39m
+ [32m✓[39m src/tests/smoke.test.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 5[2mms[22m[39m
+ [32m✓[39m src/tests/context-manager-resume-state.test.ts [2m ([22m[2m2 tests[22m[2m)[22m[90m 6[2mms[22m[39m
+ [32m✓[39m src/tests/scratch_snapshot.test.ts [2m ([22m[2m1 test[22m[2m)[22m[90m 6[2mms[22m[39m
+ [32m✓[39m src/tests/plan-service.test.ts [2m ([22m[2m23 tests[22m[2m)[22m[33m 411[2mms[22m[39m
+ [32m✓[39m src/tests/agent-runner-plan-mode.test.ts [2m ([22m[2m8 tests[22m[2m)[22m[90m 5[2mms[22m[39m
+ [32m✓[39m src/tests/subagent-permission-scope.test.ts [2m ([22m[2m10 tests[22m[2m)[22m[90m 5[2mms[22m[39m
+ [32m✓[39m src/tests/parallel-orchestrator.test.ts [2m ([22m[2m13 tests[22m[2m)[22m[90m 61[2mms[22m[39m
+ [32m✓[39m src/tests/spawn-runner.test.ts [2m ([22m[2m5 tests[22m[2m)[22m[33m 1093[2mms[22m[39m
+ [32m✓[39m src/tests/agent-runner-tool-result.test.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 2[2mms[22m[39m
+ [32m✓[39m src/tests/git-context-service.test.ts [2m ([22m[2m3 tests[22m[2m)[22m[33m 965[2mms[22m[39m
+ [32m✓[39m src/tests/powershell-tool.test.ts [2m ([22m[2m5 tests[22m[2m)[22m[33m 1856[2mms[22m[39m
+ [32m✓[39m src/tests/worktree-service.test.ts [2m ([22m[2m10 tests[22m[2m)[22m[33m 4153[2mms[22m[39m
+ [33m❯[39m src/tests/glob-tool.test.ts [2m ([22m[2m4 tests[22m [2m|[22m [31m1 failed[39m[2m)[22m[33m 5148[2mms[22m[39m
+[31m   [33m❯[31m src/tests/glob-tool.test.ts[2m > [22mGlobTool[2m > [22mpath 指定子目录：仅该子树匹配[39m
+[31m     → Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".[39m
+ [32m✓[39m src/tests/bash-tool.test.ts [2m ([22m[2m5 tests[22m[2m)[22m[33m 5575[2mms[22m[39m
+
+[2m Test Files [22m [1m[31m4 failed[39m[22m[2m | [22m[1m[32m35 passed[39m[22m[90m (39)[39m
+[2m      Tests [22m [1m[31m22 failed[39m[22m[2m | [22m[1m[32m252 passed[39m[22m[90m (274)[39m
+[2m   Start at [22m 00:46:15
+[2m   Duration [22m 6.65s[2m (transform 2.67s, setup 2ms, collect 9.20s, tests 21.11s, environment 8ms, prepare 20.84s)[22m
+
