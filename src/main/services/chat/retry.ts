@@ -14,8 +14,13 @@ export type StreamAttempt = (callbacks: StreamCallbacks, signal: AbortSignal) =>
 
 const DEFAULT_FIRST_BYTE_TIMEOUT_MS = 30_000
 const DEFAULT_IDLE_TIMEOUT_MS = 60_000
-const DEFAULT_MAX_RETRIES = 2
-const DEFAULT_RETRY_DELAY_MS = 1_000
+const DEFAULT_MAX_RETRIES = 10
+
+export function getDefaultRetryDelayMs(retryAttempt: number): number {
+  const schedule = [5_000, 10_000, 20_000, 40_000, 60_000, 90_000]
+  if (retryAttempt <= schedule.length) return schedule[Math.max(1, retryAttempt) - 1]
+  return 90_000 + (retryAttempt - schedule.length) * 30_000
+}
 
 function formatDuration(ms: number): string {
   if (ms % 1000 === 0) return `${ms / 1000}s`
@@ -44,7 +49,6 @@ export async function streamWithTimeoutRetry(
   const firstByteTimeoutMs = options.firstByteTimeoutMs ?? DEFAULT_FIRST_BYTE_TIMEOUT_MS
   const idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS
   const maxRetries = Math.max(0, options.maxRetries ?? DEFAULT_MAX_RETRIES)
-  const retryDelayMs = Math.max(0, options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS)
 
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
     if (externalSignal.aborted) return
@@ -142,6 +146,7 @@ export async function streamWithTimeoutRetry(
     if (timedOutBeforeFirstByte) {
       if (attempt <= maxRetries) {
         options.onRetry?.(attempt)
+        const retryDelayMs = Math.max(0, options.retryDelayMs ?? getDefaultRetryDelayMs(attempt))
         await wait(retryDelayMs, externalSignal)
         continue
       }

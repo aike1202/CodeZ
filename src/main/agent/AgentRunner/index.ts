@@ -304,8 +304,7 @@ export class AgentRunner {
           {
             firstByteTimeoutMs: 30_000,
             idleTimeoutMs: 60_000,
-            maxRetries: 2,
-            retryDelayMs: 1_000,
+            maxRetries: 10,
             onFirstByteTimeout: (attempt) => log.error('[AgentRunner] stream first byte timeout', { loopCount, attempt }),
             onIdleTimeout: (attempt) => log.error('[AgentRunner] stream idle timeout', { loopCount, attempt }),
             onRetry: (attempt) => log.warn('[AgentRunner] retrying stream after first byte timeout', { loopCount, attempt, nextAttempt: attempt + 1 })

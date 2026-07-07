@@ -1,8 +1,23 @@
 import { describe, expect, it, vi } from 'vitest'
-import { streamWithTimeoutRetry } from '../main/services/chat/retry'
+import { getDefaultRetryDelayMs, streamWithTimeoutRetry } from '../main/services/chat/retry'
 import type { StreamCallbacks } from '../main/services/ChatService'
 
 describe('streamWithTimeoutRetry', () => {
+  it('uses the requested default retry backoff schedule', () => {
+    expect(Array.from({ length: 10 }, (_, index) => getDefaultRetryDelayMs(index + 1))).toEqual([
+      5_000,
+      10_000,
+      20_000,
+      40_000,
+      60_000,
+      90_000,
+      120_000,
+      150_000,
+      180_000,
+      210_000
+    ])
+  })
+
   it('retries when the first response times out before any chunk is emitted', async () => {
     vi.useFakeTimers()
 
