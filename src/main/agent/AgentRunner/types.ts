@@ -3,6 +3,7 @@ import type { ToolDefinition } from '../../../shared/types/provider'
 import type { AskUserRequest, AskUserAnswer } from '../../tools/builtin/AskUserQuestionTool'
 import type { PermissionRequest } from '../../services/PermissionManager'
 import type { Plan } from '../../../shared/types/plan'
+import type { GeneralSettings } from '../../../shared/types/settings'
 
 export interface SubAgentStartMeta {
   type: string
@@ -45,6 +46,7 @@ export interface AgentRunnerCallbacks extends StreamCallbacks {
 
 export interface AgentRunConfig extends ChatRequestConfig {
   workspaceRoot: string
+  workspaceMode?: GeneralSettings['workspaceMode']
   tools?: ToolDefinition[]
   sessionId?: string
   contextWindowTokens?: number

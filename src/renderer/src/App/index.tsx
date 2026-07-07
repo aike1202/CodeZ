@@ -64,7 +64,7 @@ export default function App(): React.ReactElement {
     window.api.workspace.getRecentProjects().then((p) => useWorkspaceStore.getState().setRecentProjects(p)).catch(() => {})
     loadProviders()
     loadSessions()
-    useChatStore.getState().initPlanStateListener()
+    const cleanupPlanStateListener = useChatStore.getState().initPlanStateListener()
 
     if (window.api?.theme) {
       window.api.theme.get().then((info) => {
@@ -75,9 +75,12 @@ export default function App(): React.ReactElement {
         if (info.shouldUseDarkColors) document.documentElement.classList.add('dark')
         else document.documentElement.classList.remove('dark')
       })
-      return () => cleanupTheme()
+      return () => {
+        cleanupTheme()
+        cleanupPlanStateListener()
+      }
     }
-    return undefined
+    return () => cleanupPlanStateListener()
   }, [])
 
   useEffect(() => {

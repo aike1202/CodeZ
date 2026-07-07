@@ -11,18 +11,28 @@ describe('CommandAnalyzer detailed analysis', () => {
       'Get-Item package.json',
       'Get-Process node',
       'Get-Service',
+      '$PSVersionTable.PSVersion',
+      '$PWD.Path',
+      '$env:PATH',
+      '(Get-Command node).Source',
       'Resolve-Path .',
       'Join-Path src main',
       'Split-Path src/main/index.ts',
+      'Get-ChildItem -Recurse',
+      'Get-ChildItem -Recurse -File',
       'git status --short',
       'git diff -- src/main.ts',
       'git branch --show-current',
+      'git branch',
       'git branch -a',
+      'git config --get user.name',
       'git remote get-url origin',
       'git rev-parse --show-toplevel',
       'git ls-files src',
       'git blame src/main/index.ts',
       'npm view react version',
+      'rg "TODO|FIXME" src',
+      'Select-String -Path src/*.ts -Pattern "error|warn"',
       'python --version',
       'where node',
       'whoami',
@@ -31,6 +41,10 @@ describe('CommandAnalyzer detailed analysis', () => {
       'Get-Date',
       'Get-Location; git status --short',
       'Get-ChildItem -Force | Select-Object Name,Mode,Length,LastWriteTime | Format-Table -AutoSize',
+      'Get-Content package.json | ConvertFrom-Json',
+      'Get-Process node | Select-Object Id,ProcessName | ConvertTo-Json',
+      'Get-ChildItem src | Where-Object { $_.Name -like "*.ts" }',
+      'if (Test-Path package.json) { Get-Content package.json -Raw }',
       "if (Test-Path .git) { 'has .git' } else { 'no .git' }; if (Test-Path package.json) { Get-Content package.json -Raw } else { 'no package.json' }"
     ]
 
@@ -45,6 +59,9 @@ describe('CommandAnalyzer detailed analysis', () => {
       'Add-Content log.txt line',
       'Out-File out.txt',
       'New-Item -ItemType Directory tmp',
+      'New-Item -ItemType Directory -Force -Path docs/superpowers/specs | Out-Null',
+      '$null = New-Item -ItemType Directory -Force -Path docs/superpowers/plans',
+      'if (-not (Test-Path docs)) { New-Item -ItemType Directory docs }',
       'Copy-Item a b',
       'Move-Item a b',
       'git add src',
@@ -120,5 +137,6 @@ describe('CommandAnalyzer detailed analysis', () => {
     expect(CommandAnalyzer.analyzeDetailed("if (Test-Path .git) { Remove-Item .git -Recurse } else { 'no .git' }").risk).toBe('destructive')
     expect(CommandAnalyzer.analyzeDetailed('Get-ChildItem > out.txt').risk).toBe('destructive')
     expect(CommandAnalyzer.analyzeDetailed('$env:FOO="bar"; Get-ChildItem').risk).toBe('destructive')
+    expect(CommandAnalyzer.analyzeDetailed('Write-Output $(Remove-Item a.txt)').risk).toBe('destructive')
   })
 })

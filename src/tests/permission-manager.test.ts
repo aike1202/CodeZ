@@ -39,6 +39,12 @@ describe('PermissionManager', () => {
     expect(pm.checkToolPermission('Bash', { command: 'npm run test' }, workspaceRoot)).toBe('allow')
     expect(pm.checkToolPermission('Bash', { command: 'npm install' }, workspaceRoot)).toBe('ask')
     expect(pm.checkToolPermission('PowerShell', { command: 'git status' }, workspaceRoot)).toBe('allow')
+    expect(pm.checkToolPermission('PowerShell', { command: 'New-Item -ItemType Directory -Force -Path docs/superpowers/specs | Out-Null' }, workspaceRoot)).toBe('allow')
+  })
+
+  it('完全访问模式应放行非破坏性终端命令', () => {
+    expect(pm.checkToolPermission('PowerShell', { command: 'npm install' }, workspaceRoot, 'full-access')).toBe('allow')
+    expect(pm.checkToolPermission('PowerShell', { command: 'Remove-Item -Recurse -Force dist' }, workspaceRoot, 'full-access')).toBe('ask')
   })
 
   it('只读工具应 allow，rollback 和写入工具应 allow(边界内)', () => {

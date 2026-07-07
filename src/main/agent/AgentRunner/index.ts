@@ -18,6 +18,7 @@ import { getSessionStore } from '../../ipc/session.handlers'
 import { getSettingsService } from '../../ipc/settings.handlers'
 import { LoopStateMachine, AgentState, TransitionEvent, TerminationReason } from './LoopStateMachine'
 import { streamWithTimeoutRetry } from '../../services/chat/retry'
+import type { GeneralSettings } from '../../../shared/types/settings'
 
 export enum NormalizedStopReason {
   Truncated = 'Truncated',
@@ -35,6 +36,13 @@ function normalizeProviderStopReason(reason?: string): NormalizedStopReason {
   if (lower === 'tool_calls' || lower === 'tool_use') return NormalizedStopReason.ToolUse;
   if (lower === 'content_filter' || lower === 'safety') return NormalizedStopReason.Blocked;
   return NormalizedStopReason.Unknown;
+}
+
+export function resolveRunnerWorkspaceMode(
+  configMode?: GeneralSettings['workspaceMode'],
+  settingsMode?: GeneralSettings['workspaceMode']
+): GeneralSettings['workspaceMode'] {
+  return configMode || settingsMode || 'auto-approve-safe'
 }
 
 export function resolveAgentTransition(input: {
@@ -416,7 +424,10 @@ export class AgentRunner {
                   const pm = PermissionManager.getInstance()
                   const permReq = pm.createPermissionRequest(name, parsedArgs)
                   const settingsService = getSettingsService()
-                  const workspaceMode = settingsService.getSettings().workspaceMode || 'auto-approve-safe'
+                  const workspaceMode = resolveRunnerWorkspaceMode(
+                    config.workspaceMode,
+                    settingsService.getSettings().workspaceMode
+                  )
                   const permResult = pm.checkToolPermission(
                     name,
                     parsedArgs,

@@ -1,9 +1,15 @@
+import { execFileSync } from 'child_process'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import os from 'os'
+import path from 'path'
 import { describe, it, expect } from 'vitest'
 import {
   parseWaves,
   findWaveFileConflicts,
   validateGrouping,
   computeConcurrencyLimit,
+  mergeWorktree,
+  normalizeWorkerResult,
   runWithConcurrencyLimit,
 } from '../main/agent/AgentRunner/parallelOrchestrator'
 import type { PlanStep } from '../shared/types/plan'
@@ -11,6 +17,10 @@ import type { ExecutionWave } from '../shared/types/parallel'
 
 function step(id: string, files?: string[]): PlanStep {
   return { id, title: `Step ${id}`, description: '', status: 'pending', ...(files ? { files } : {}) }
+}
+
+function git(cwd: string, args: string[]): void {
+  execFileSync('git', args, { cwd, stdio: 'pipe', timeout: 30_000 })
 }
 
 describe('parseWaves', () => {
@@ -96,6 +106,67 @@ describe('computeConcurrencyLimit', () => {
   it('never goes below 1', () => {
     expect(computeConcurrencyLimit(1)).toBe(1)
     expect(computeConcurrencyLimit(0)).toBe(1)
+  })
+})
+
+describe('mergeWorktree', () => {
+  it('returns an error when worktree commit fails for a real reason', () => {
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'codez-merge-worktree-'))
+    const repo = path.join(tmp, 'repo')
+    const wt = path.join(tmp, 'wt')
+    const hooks = path.join(tmp, 'hooks')
+
+    try {
+      mkdirSync(repo)
+      git(repo, ['init'])
+      git(repo, ['config', 'user.email', 'test@example.com'])
+      git(repo, ['config', 'user.name', 'Test User'])
+      writeFileSync(path.join(repo, 'a.txt'), 'base\n')
+      git(repo, ['add', '-A'])
+      git(repo, ['commit', '-m', 'base'])
+
+      git(repo, ['worktree', 'add', '-b', 'feature', wt])
+      writeFileSync(path.join(wt, 'a.txt'), 'feature\n')
+      mkdirSync(hooks)
+      const preCommit = path.join(hooks, 'pre-commit')
+      writeFileSync(preCommit, '#!/bin/sh\nexit 1\n')
+      chmodSync(preCommit, 0o755)
+      git(wt, ['config', 'core.hooksPath', hooks])
+
+      const result = mergeWorktree(repo, 'wt', wt, 'feature')
+
+      expect(result).toMatch(/commit failed/i)
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('normalizeWorkerResult', () => {
+  it('recovers plain-text worker output as a completed summary', () => {
+    const result = normalizeWorkerResult({
+      type: 'Worker',
+      output: 'Implemented the requested change and verified it.',
+      toolCallCount: 3,
+    })
+
+    expect(result).toEqual({
+      status: 'completed',
+      summary: 'Implemented the requested change and verified it.',
+      filesModified: [],
+      blockers: undefined,
+    })
+  })
+
+  it('fails when the worker produced neither structured output nor text', () => {
+    const result = normalizeWorkerResult({
+      type: 'Worker',
+      output: '',
+      toolCallCount: 0,
+    })
+
+    expect(result.status).toBe('failed')
+    expect(result.summary).toMatch(/no structured output/i)
   })
 })
 

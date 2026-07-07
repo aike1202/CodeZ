@@ -14,35 +14,35 @@
   max-width: min(360px, calc(100vw - 48px));
   height: 32px;
   padding: 0 10px;
-  border: 1px solid var(--border-color, #e5e7eb);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
-  background: var(--surface-elevated, #ffffff);
+  background: var(--bg-panel);
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
-  color: var(--text-primary, #111827);
+  color: var(--text-main);
   cursor: pointer;
   user-select: none;
 }
 
 .plan-capsule.executing {
-  border-color: rgba(37, 99, 235, 0.35);
+  border-color: color-mix(in srgb, var(--primary-color) 45%, var(--border-color));
 }
 
 .plan-capsule-icon {
   flex: 0 0 auto;
-  color: var(--text-secondary, #4b5563);
+  color: var(--text-muted);
 }
 
 .plan-capsule-icon.success,
 .step-icon.completed {
-  color: var(--text-success, #059669);
+  color: var(--color-success);
 }
 
 .step-icon.in-progress {
-  color: var(--accent-color, #2563eb);
+  color: var(--primary-color);
 }
 
 .step-icon.pending {
-  color: var(--text-tertiary, #9ca3af);
+  color: var(--text-light);
 }
 
 .spin {
@@ -65,7 +65,7 @@
 
 .chevron {
   flex: 0 0 auto;
-  color: var(--text-secondary, #4b5563);
+  color: var(--text-muted);
 }
 
 .plan-capsule-popover {
@@ -73,11 +73,19 @@
   right: 0;
   top: 40px;
   width: min(420px, calc(100vw - 32px));
-  border: 1px solid var(--border-color, #e5e7eb);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
-  background: var(--surface-elevated, #ffffff);
+  background: var(--bg-panel);
   box-shadow: 0 14px 36px rgba(15, 23, 42, 0.16);
   overflow: hidden;
+}
+
+.dark .task-capsule-wrapper .plan-capsule {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.34);
+}
+
+.dark .task-capsule-wrapper .plan-capsule-popover {
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.44);
 }
 
 .plan-capsule-header {
@@ -86,7 +94,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 12px;
-  border-bottom: 1px solid var(--border-color, #e5e7eb);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .plan-capsule-header h4 {
@@ -99,7 +107,7 @@
   flex: 0 0 auto;
   font-size: 0.78rem;
   font-weight: 600;
-  color: var(--accent-color, #2563eb);
+  color: var(--primary-color);
 }
 
 .plan-capsule-body {
@@ -135,15 +143,15 @@
 .step-title {
   font-size: 0.82rem;
   line-height: 1.35;
-  color: var(--text-primary, #111827);
+  color: var(--text-main);
 }
 
 .task-capsule-wrapper .step-icon.cancelled {
-  color: var(--text-tertiary, #9ca3af);
+  color: var(--text-light);
 }
 
 .task-capsule-wrapper .step-item.status-cancelled .step-title {
-  color: var(--text-secondary);
+  color: var(--text-muted);
   text-decoration: line-through;
   opacity: 0.7;
 }
@@ -151,7 +159,7 @@
 .task-capsule-wrapper .plan-capsule-popover .task-list-subtitle {
   margin: 2px 0 0;
   font-size: 0.75rem;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -159,6 +167,6 @@
 
 .task-capsule-wrapper .step-desc {
   font-size: 0.72rem;
-  color: var(--text-tertiary, #9ca3af);
+  color: var(--text-light);
   line-height: 1.35;
 }

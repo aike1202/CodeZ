@@ -1,4 +1,5 @@
 import { ChatService } from '../services/ChatService'
+import { streamWithTimeoutRetry } from '../services/chat/retry'
 import { ToolManager } from '../tools/ToolManager'
 import { ContextManager } from './ContextManager'
 import { CommandAnalyzer } from '../services/CommandAnalyzer'
@@ -12,8 +13,13 @@ import {
   generateSubmitResultTool,
   extractJsonBlock,
   validateAgainstSpec,
-  computeQualitySummary
+  computeQualitySummary,
+  formatSubmitResultValidationMessage
 } from './AgentRunner/subagentOutputHelper'
+import {
+  isRecoverableProviderError,
+  shouldRetryAfterUserMaintenance,
+} from './AgentRunner/subagentRecoveryHelper'
 
 // ─── 子 Agent 写权限范围（并行 Worker 用） ──────────────────
 
@@ -260,6 +266,34 @@ function resolveMaxLoops(def: SubAgentDefinition, ctx: SubAgentContext): number 
   return def.maxLoops
 }
 
+function buildRecoverableStopOutput(
+  spec: SubAgentOutputSpec | undefined,
+  error: string
+): SubAgentStructuredOutput | undefined {
+  if (!spec) return undefined
+
+  const summary = `Worker stopped after recoverable API/network error: ${error}`
+  const data: Record<string, unknown> = {}
+  for (const field of spec.fields) {
+    if (field.name === 'status') {
+      data[field.name] = 'failed'
+    } else if (field.name === 'summary') {
+      data[field.name] = summary
+    } else if (field.name === 'filesModified') {
+      data[field.name] = []
+    } else if (field.name === 'blockers') {
+      data[field.name] = [error]
+    } else if (field.required) {
+      if (field.type === 'string') data[field.name] = summary
+      if (field.type === 'string[]') data[field.name] = []
+      if (field.type === 'number') data[field.name] = 0
+      if (field.type === 'boolean') data[field.name] = false
+    }
+  }
+
+  return validateAgainstSpec(data, spec)
+}
+
 // ─── 系统提示扩展 ───────────────────────────────────────────
 
 function buildExtendedSystemPrompt(def: SubAgentDefinition, ctx: SubAgentContext): string {
@@ -470,6 +504,7 @@ export class SubAgentManager {
     let loopCount = 0
     let toolCallCount = 0
     let finalOutput = ''
+    let forcedStructuredOutput: SubAgentStructuredOutput | undefined
     const filesExamined = new Set<string>()
     const effectiveMaxLoops = resolveMaxLoops(def, ctx)
 
@@ -484,19 +519,25 @@ export class SubAgentManager {
         let currentContent = ''
         let toolCallsAcc: Record<number, { id: string; type: 'function'; function: { name: string; arguments: string }; thought_signature?: string }> = {}
         let gotError = false
+        let lastError = ''
         let thoughtSig: string | undefined
 
         await new Promise<void>((resolve) => {
-          chatService.streamChat(
-            {
-              baseUrl: ctx.apiConfig.baseUrl,
-              apiKey: ctx.apiConfig.apiKey,
-              apiFormat: ctx.apiConfig.apiFormat,
-              model: ctx.modelOverride || ctx.apiConfig.model,
-              messages: trimmedMessages,
-              tools: availableTools,
-              thinking: ctx.apiConfig.thinking as any
-            },
+          streamWithTimeoutRetry(
+            (attemptCallbacks, signal) =>
+              chatService.streamChat(
+                {
+                  baseUrl: ctx.apiConfig.baseUrl,
+                  apiKey: ctx.apiConfig.apiKey,
+                  apiFormat: ctx.apiConfig.apiFormat,
+                  model: ctx.modelOverride || ctx.apiConfig.model,
+                  messages: trimmedMessages,
+                  tools: availableTools,
+                  thinking: ctx.apiConfig.thinking as any
+                },
+                attemptCallbacks,
+                signal
+              ),
             {
               onChunk: (delta, reasoningDelta, toolCallsChunk, thoughtSignature) => {
                 if (abortController.signal.aborted) return
@@ -525,13 +566,76 @@ export class SubAgentManager {
                 }
               },
               onDone: () => resolve(),
-              onError: (err) => { gotError = true; callbacks.onError?.(err); resolve() }
+              onError: (err) => {
+                gotError = true
+                lastError = err
+                if (!isRecoverableProviderError(err)) {
+                  callbacks.onError?.(err)
+                }
+                resolve()
+              }
             },
-            abortController.signal
+            abortController.signal,
+            {
+              onRetry: (attempt) => {
+                callbacks.onSubAgentChunk?.(
+                  subAgentId,
+                  `\n\n[SubAgent 网络/API 暂无响应，正在自动重试 ${attempt + 1}...]\n\n`,
+                  ''
+                )
+              },
+            }
           )
         })
 
-        if (gotError || abortController.signal.aborted) break
+        if (gotError || abortController.signal.aborted) {
+          if (gotError && !abortController.signal.aborted && isRecoverableProviderError(lastError)) {
+            callbacks.onSubAgentChunk?.(
+              subAgentId,
+              `\n\n[SubAgent 遇到可恢复的 API/网络问题，等待维护后继续：${lastError}]\n\n`,
+              ''
+            )
+            if (callbacks.onAskUserRequest) {
+              const answers = await callbacks.onAskUserRequest({
+                id: `subagent_recover_${subAgentId}_${Date.now()}`,
+                questions: [
+                  {
+                    header: 'Worker恢复',
+                    question: [
+                      'Worker 遇到 API/网络问题，当前步骤已暂停。',
+                      '',
+                      `错误：${lastError}`,
+                      '',
+                      '请维护网络、Provider、API Key、额度或模型配置后再继续。继续后会复用当前 Worker 上下文重试，不会重新开始。'
+                    ].join('\n'),
+                    options: [
+                      {
+                        label: '已修复，继续重试',
+                        description: '继续当前 Worker，不丢弃已积累的上下文。'
+                      },
+                      {
+                        label: '停止这个 Worker',
+                        description: '停止该 Worker，让主 Agent 接手或稍后重新分派。'
+                      }
+                    ],
+                    multiSelect: false,
+                    submitLabel: '继续',
+                    ignoreLabel: '停止'
+                  }
+                ]
+              })
+              if (shouldRetryAfterUserMaintenance(answers)) {
+                loopCount = Math.max(0, loopCount - 1)
+                continue
+              }
+            }
+            forcedStructuredOutput = buildRecoverableStopOutput(def.outputSpec, lastError)
+            finalOutput =
+              forcedStructuredOutput?.conclusion ||
+              `Worker stopped after recoverable API/network error: ${lastError}`
+          }
+          break
+        }
 
         const toolCallsArray = Object.keys(toolCallsAcc).map((k) => {
           const tc = (toolCallsAcc as any)[k]
@@ -609,7 +713,7 @@ export class SubAgentManager {
                   ok: false,
                   error: {
                     code: 'VALIDATION_ERROR',
-                    message: 'submit_result data did not match the expected schema. Check your output format — ensure you include "conclusion" (string), "answers" (array), and "unresolved" (array). Then call submit_result again.'
+                    message: formatSubmitResultValidationMessage(def.outputSpec)
                   }
                 })
               })
@@ -697,6 +801,7 @@ export class SubAgentManager {
       const subResult: SubAgentResult = {
         type,
         output: finalOutput,
+        structuredOutput: forcedStructuredOutput,
         toolCallCount,
         filesExamined: Array.from(filesExamined),
       }

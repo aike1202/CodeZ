@@ -77,28 +77,68 @@ export function extractJsonBlock(text: string): Record<string, unknown> | null {
  */
 export function validateAgainstSpec(
   data: Record<string, unknown>,
-  _spec: SubAgentOutputSpec
+  spec: SubAgentOutputSpec
 ): SubAgentStructuredOutput | undefined {
-  const report = typeof data.report === 'string' ? data.report : ''
-  const conclusion = typeof data.conclusion === 'string' ? data.conclusion : ''
-  const confidence = (
-    ['high', 'medium', 'low'].includes(data.confidence as string)
-      ? data.confidence
+  const normalized: Record<string, unknown> = {}
+
+  for (const field of spec.fields) {
+    const value = data[field.name]
+    if (value === undefined || value === null) {
+      if (field.required) return undefined
+      continue
+    }
+
+    const normalizedValue = normalizeFieldValue(value, field)
+    if (normalizedValue === undefined) {
+      return undefined
+    }
+    normalized[field.name] = normalizedValue
+  }
+
+  const summary = typeof normalized.summary === 'string' ? normalized.summary : ''
+  normalized.report = typeof normalized.report === 'string' ? normalized.report : summary
+  normalized.conclusion =
+    typeof normalized.conclusion === 'string' ? normalized.conclusion : summary
+  normalized.confidence = (
+    ['high', 'medium', 'low'].includes(normalized.confidence as string)
+      ? normalized.confidence
       : 'medium'
   ) as 'high' | 'medium' | 'low'
 
-  const filesExamined = Array.isArray(data.filesExamined)
-    ? data.filesExamined.filter((f: any) => typeof f === 'string')
-    : undefined
+  return normalized as unknown as SubAgentStructuredOutput
+}
 
-  const unresolvedCount = typeof data.unresolvedCount === 'number'
-    ? data.unresolvedCount
-    : undefined
+function normalizeFieldValue(value: unknown, field: SubAgentOutputField): unknown | undefined {
+  switch (field.type) {
+    case 'string':
+      return typeof value === 'string' ? value : undefined
+    case 'string[]':
+      return Array.isArray(value) && value.every((item) => typeof item === 'string')
+        ? value
+        : undefined
+    case 'number':
+      return typeof value === 'number' ? value : undefined
+    case 'boolean':
+      return typeof value === 'boolean' ? value : undefined
+    default:
+      return undefined
+  }
+}
 
-  // Must have at least a report or conclusion
-  if (!report && !conclusion) return undefined
+export function formatSubmitResultValidationMessage(spec: SubAgentOutputSpec): string {
+  const required = spec.fields
+    .filter(field => field.required)
+    .map(field => `"${field.name}" (${field.type})`)
+  const optional = spec.fields
+    .filter(field => !field.required)
+    .map(field => `"${field.name}" (${field.type})`)
 
-  return { report, conclusion, confidence, filesExamined, unresolvedCount }
+  return [
+    'submit_result data did not match the expected schema.',
+    required.length > 0 ? `Required fields: ${required.join(', ')}.` : '',
+    optional.length > 0 ? `Optional fields: ${optional.join(', ')}.` : '',
+    'Then call submit_result again.',
+  ].filter(Boolean).join(' ')
 }
 
 /**

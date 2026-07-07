@@ -147,17 +147,62 @@ function parseWorkerOutput(structured: Record<string, any> | undefined): WorkerO
   }
 }
 
+export function normalizeWorkerResult(result: {
+  structuredOutput?: Record<string, any>
+  output?: string
+  [key: string]: any
+}): WorkerOutput {
+  if (result.structuredOutput) {
+    return parseWorkerOutput(result.structuredOutput)
+  }
+
+  const text = typeof result.output === 'string' ? result.output.trim() : ''
+  if (text) {
+    return {
+      status: 'completed',
+      summary: text,
+      filesModified: [],
+      blockers: undefined,
+    }
+  }
+
+  return {
+    status: 'failed',
+    summary: 'Worker produced no structured output.',
+    filesModified: [],
+    blockers: undefined,
+  }
+}
+
 // ─── worktree 合并 ──────────────────────────────────────────
 
 function gitInWorktree(cwd: string, args: string[]): void {
   execFileSync('git', args, { cwd, timeout: 30_000, stdio: 'pipe' })
 }
 
+function hasStagedChanges(cwd: string): boolean {
+  try {
+    gitInWorktree(cwd, ['diff', '--cached', '--quiet'])
+    return false
+  } catch (err: any) {
+    if (err?.status === 1) {
+      return true
+    }
+    throw err
+  }
+}
+
+function formatGitError(err: any): string {
+  const stderr = err?.stderr?.toString?.().trim()
+  const stdout = err?.stdout?.toString?.().trim()
+  return stderr || stdout || err?.message || String(err)
+}
+
 /**
  * 波末合并一个成功 step 的 worktree 回主工作区。
  * @returns null 成功；否则返回错误信息（合并冲突等）
  */
-function mergeWorktree(
+export function mergeWorktree(
   workspaceRoot: string,
   wtName: string,
   wtPath: string,
@@ -166,11 +211,12 @@ function mergeWorktree(
   try {
     // worktree 内提交改动
     gitInWorktree(wtPath, ['add', '-A'])
-    // 若无改动，commit 会失败 —— 用 --allow-empty 兜底避免中断
-    try {
-      gitInWorktree(wtPath, ['commit', '-m', `codez: worktree ${wtName}`])
-    } catch {
-      // 无改动可提交，跳过
+    if (hasStagedChanges(wtPath)) {
+      try {
+        gitInWorktree(wtPath, ['commit', '-m', `codez: worktree ${wtName}`])
+      } catch (err: any) {
+        return `commit failed: ${formatGitError(err)}`
+      }
     }
     // 主区合并该分支
     gitInWorktree(workspaceRoot, ['merge', '--no-edit', branch])
@@ -385,7 +431,7 @@ async function spawnWorker(
       callbacks
     )
 
-    const output = parseWorkerOutput(result.structuredOutput as any)
+    const output = normalizeWorkerResult(result as any)
     const stepResult: StepResult = {
       stepId,
       status: output.status,

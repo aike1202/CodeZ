@@ -2,9 +2,10 @@ import { ipcMain, BrowserWindow } from 'electron'
 import { IPC_CHANNELS } from '../../shared/ipc/channels'
 
 import { getProviderService } from './provider.handlers'
-import { getWorkspaceService } from './workspace.handlers'
+import { getRecentStore, getWorkspaceService } from './workspace.handlers'
 import type { ChatMessage } from '../../shared/types/provider'
 import log from '../logger'
+import * as path from 'path'
 
 interface StreamRequest {
   providerId: string
@@ -54,6 +55,10 @@ export function registerChatIpc(): void {
 
       const modelConfig = config.models?.find(m => m.id === request.model || m.name === request.model)
       const contextWindowTokens = modelConfig?.maxContextTokens || 32000
+      const currentWorkspaceInfo = getRecentStore()
+        .getAll()
+        .find((project) => path.resolve(project.rootPath) === path.resolve(currentWorkspace))
+      const workspaceMode = currentWorkspaceInfo?.permissionMode
 
       const { AgentRunner } = await import('../agent/AgentRunner')
       const runner = new AgentRunner()
@@ -94,6 +99,7 @@ export function registerChatIpc(): void {
           model: request.model,
           messages,
           workspaceRoot: currentWorkspace,
+          workspaceMode,
           thinking: modelConfig?.thinkingMode 
             ? { ...config.thinking, mode: modelConfig.thinkingMode }
             : config.thinking,

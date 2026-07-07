@@ -5,7 +5,8 @@ import { DESTRUCTIVE_PREFIXES, NETWORK_PREFIXES, SAFE_PREFIXES, WRITE_PREFIXES }
 export type { CommandAction, CommandAnalysis, CommandRisk, CommandRuleOption } from './commandAnalysisTypes'
 
 export class CommandAnalyzer {
-  private static readonly SHELL_INJECTION_PATTERN = /[&;<>$`]/
+  private static readonly RISKY_OPERATOR_PATTERN = /[&<>`]/
+  private static readonly COMMAND_SUBSTITUTION_PATTERN = /\$\s*\(/
   
   public static analyze(command: string): CommandRisk {
     return this.analyzeDetailed(command).risk
@@ -36,7 +37,19 @@ export class CommandAnalyzer {
     const conditional = this.analyzePowerShellIf(cmd)
     if (conditional) return conditional
 
-    if (this.SHELL_INJECTION_PATTERN.test(cmd)) {
+    const assignment = this.analyzePowerShellAssignment(cmd)
+    if (assignment) return assignment
+
+    const memberAccess = this.analyzePowerShellMemberAccess(cmd)
+    if (memberAccess) return memberAccess
+
+    const variableRead = this.analyzePowerShellVariableRead(cmd)
+    if (variableRead) return variableRead
+
+    const gitRead = this.analyzeGitRead(lowerCmd, cmd)
+    if (gitRead) return gitRead
+
+    if (this.hasUnsafePowerShellSyntax(cmd)) {
       return this.createAnalysis(cmd, 'destructive', 'unknown', false)
     }
 
@@ -80,7 +93,7 @@ export class CommandAnalyzer {
   private static describeRisk(command: string, risk: CommandRisk, action: CommandAction): string {
     if ((command.includes(';') || command.trim().toLowerCase().startsWith('if ')) && risk === 'safe') return '条件分支和每个语句都被判定为只读查询或文本输出。'
     if (command.includes('|') && risk === 'safe') return '管道中的每一段都被判定为只读展示或查询。'
-    if (this.SHELL_INJECTION_PATTERN.test(command)) return '包含重定向、变量或命令链，可能组合执行多个动作。'
+    if (this.hasUnsafePowerShellSyntax(command)) return '包含重定向、命令替换或调用操作符，可能组合执行多个动作。'
     if (risk === 'destructive') return '检测到删除、强制覆盖、进程控制或系统级操作。'
     if (risk === 'network') return '检测到联网、下载、安装依赖或远端仓库交互。'
     if (risk === 'write') return action === 'git' ? '检测到会修改 Git 状态的操作。' : '检测到会修改工作区文件或生成构建产物的操作。'
@@ -112,7 +125,7 @@ export class CommandAnalyzer {
 
   private static analyzePipeline(command: string): CommandAnalysis | null {
     if (!command.includes('|')) return null
-    const segments = command.split('|').map(segment => segment.trim()).filter(Boolean)
+    const segments = this.splitTopLevel(command, '|')
     if (segments.length < 2) return null
 
     const analyses = segments.map(segment => this.analyzeDetailed(segment))
@@ -132,20 +145,68 @@ export class CommandAnalyzer {
   }
 
   private static analyzePowerShellIf(command: string): CommandAnalysis | null {
-    const match = command.match(/^if\s*\((.+)\)\s*\{(.+)\}\s*else\s*\{(.+)\}$/is)
+    const match = command.match(/^if\s*\((.+)\)\s*\{(.+)\}(?:\s*else\s*\{(.+)\})?$/is)
     if (!match) return null
     const [, condition, thenBody, elseBody] = match
-    const analyses = [condition, thenBody, elseBody].map(part => this.analyzePowerShellSnippet(part.trim()))
+    const analyses = [condition, thenBody, elseBody]
+      .filter((part): part is string => typeof part === 'string')
+      .map(part => this.analyzePowerShellSnippet(part.trim()))
     const highest = analyses.reduce((current, next) => this.compareRisk(current.risk, next.risk) >= 0 ? current : next)
     const safeIf = analyses.every(analysis => analysis.risk === 'safe')
     return this.createAnalysis(command, safeIf ? 'safe' : highest.risk, safeIf ? 'read' : highest.action, safeIf)
   }
 
   private static analyzePowerShellSnippet(snippet: string): CommandAnalysis {
-    if (/^(['"]).*\1$/.test(snippet.trim())) {
-      return this.createAnalysis(snippet, 'safe', 'read', true)
+    const trimmed = snippet.trim()
+    const negated = trimmed.match(/^-not\s+\((.+)\)$/is) || trimmed.match(/^!\s*\((.+)\)$/is)
+    if (negated) {
+      return this.analyzePowerShellSnippet(negated[1].trim())
     }
-    return this.analyzeDetailed(snippet)
+    if (/^(['"]).*\1$/.test(trimmed)) {
+      return this.createAnalysis(trimmed, 'safe', 'read', true)
+    }
+    return this.analyzeDetailed(trimmed)
+  }
+
+  private static analyzePowerShellAssignment(command: string): CommandAnalysis | null {
+    const nullAssignment = command.match(/^\$null\s*=\s*(.+)$/is)
+    if (nullAssignment) {
+      return this.analyzeDetailed(nullAssignment[1].trim())
+    }
+    if (/^\$[\w:]+\s*=/.test(command)) {
+      return this.createAnalysis(command, 'destructive', 'modify', false)
+    }
+    return null
+  }
+
+  private static analyzePowerShellMemberAccess(command: string): CommandAnalysis | null {
+    const match = command.match(/^\((.+)\)\.[A-Za-z_]\w*$/is)
+    if (!match) return null
+    const inner = this.analyzePowerShellSnippet(match[1].trim())
+    if (inner.risk === 'safe') {
+      return this.createAnalysis(command, 'safe', 'read', true)
+    }
+    return null
+  }
+
+  private static analyzePowerShellVariableRead(command: string): CommandAnalysis | null {
+    if (/^\$[\w:]+(?:\.[A-Za-z_]\w*)*$/.test(command)) {
+      return this.createAnalysis(command, 'safe', 'read', true)
+    }
+    return null
+  }
+
+  private static analyzeGitRead(lowerCommand: string, command: string): CommandAnalysis | null {
+    if (lowerCommand === 'git branch') {
+      return this.createAnalysis(command, 'safe', 'read', true)
+    }
+    if (/^git config\s+(?:--get|get)\s+\S+/.test(lowerCommand) || /^git config\s+\S+$/.test(lowerCommand)) {
+      return this.createAnalysis(command, 'safe', 'read', true)
+    }
+    if (lowerCommand === 'git config --list') {
+      return this.createAnalysis(command, 'safe', 'read', true)
+    }
+    return null
   }
 
   private static splitTopLevel(command: string, delimiter: string): string[] {
@@ -184,9 +245,15 @@ export class CommandAnalyzer {
   }
 
   private static hasDestructiveFlags(lowerCommand: string): boolean {
-    return /\s--force(?:\s|$)/.test(lowerCommand)
+    const hasFlag = /\s--force(?:\s|$)/.test(lowerCommand)
       || /\s--force-with-lease(?:\s|$)/.test(lowerCommand)
       || /\s-recurse(?:\s|$)/.test(lowerCommand)
       || /\s-rf(?:\s|$)/.test(lowerCommand)
+    if (!hasFlag) return false
+    return /^(?:rm|rmdir|rd|remove-item|del|git push|git reset|git clean|docker rm|docker rmi|kubectl delete|stop-process|kill|taskkill)(?:\s|$)/.test(lowerCommand)
+  }
+
+  private static hasUnsafePowerShellSyntax(command: string): boolean {
+    return this.RISKY_OPERATOR_PATTERN.test(command) || this.COMMAND_SUBSTITUTION_PATTERN.test(command)
   }
 }

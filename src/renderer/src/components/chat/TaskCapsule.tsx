@@ -2,15 +2,8 @@ import React, { useState, useRef, useEffect } from 'react'
 import { useChatStore } from '../../stores/chatStore'
 import { CheckCircle2, CircleDashed, Loader2, ListTodo, XCircle, ChevronDown, ChevronUp } from 'lucide-react'
 import type { TaskItem, TaskStatus } from '../../../../shared/types/task'
+import { getTaskDisplayTasks } from './TaskCapsule.order'
 import './TaskCapsule.css'
-
-/** 展示顺序：in_progress → pending → completed → cancelled */
-const STATUS_ORDER: Record<TaskStatus, number> = {
-  in_progress: 0,
-  pending: 1,
-  completed: 2,
-  cancelled: 3
-}
 
 export const TaskCapsule: React.FC = () => {
   const tasks = useChatStore((s) => s.tasks)
@@ -36,7 +29,7 @@ export const TaskCapsule: React.FC = () => {
   const inProgress = tasks.find((t) => t.status === 'in_progress')
   const allDone = completed === total
 
-  const sorted = [...tasks].sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status])
+  const displayTasks = getTaskDisplayTasks(tasks)
 
   // 从 tasks 里取第一个 TaskGroup 元数据作为清单头，兼容旧 title/subtitle
   const listTitle = tasks.find(t => t.groupTitle)?.groupTitle || tasks.find(t => t.title)?.title
@@ -94,7 +87,7 @@ export const TaskCapsule: React.FC = () => {
           </div>
           <div className="plan-capsule-body">
             <ul className="plan-steps-list">
-              {sorted.map((task) => (
+              {displayTasks.map((task) => (
                 <li key={task.id} className={`step-item status-${task.status}`}>
                   {getStatusIcon(task.status)}
                   <div className="step-info">

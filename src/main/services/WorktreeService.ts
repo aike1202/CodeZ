@@ -43,6 +43,16 @@ export class WorktreeService {
     }
   }
 
+  /** 判断目标目录是否是 git 仓库，不抛错。 */
+  static isGitRepository(workspaceRoot: string): boolean {
+    try {
+      this.assertGitRepo(workspaceRoot)
+      return true
+    } catch {
+      return false
+    }
+  }
+
   private static git(workspaceRoot: string, args: string[]): string {
     return execFileSync('git', args, {
       cwd: workspaceRoot,

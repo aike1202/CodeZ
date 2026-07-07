@@ -27,6 +27,9 @@ function schedulePersist(get: () => ChatState) {
   }, 500)
 }
 
+let _planStateListenerRefs = 0
+let _planStateListenerCleanup: (() => void) | null = null
+
 export interface MessageSlice {
   messages: ChatMessage[]
   streamCleanups: Record<string, (() => void) | null>
@@ -76,7 +79,7 @@ export interface MessageSlice {
   ) => void
   setExpandedCapsule: (capsule: 'task' | 'plan' | null) => void
   setSubAgentStatus: (status: 'idle' | 'running' | 'completed' | 'failed') => void
-  initPlanStateListener: () => void
+  initPlanStateListener: () => () => void
   setPlanListModalOpen: (open: boolean) => void
   setActivePlan: (plan: any | null) => void
   setPlanReview: (review: { plan: any; status: string } | null) => void
@@ -666,30 +669,56 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
   setSubAgentStatus: (status) => set({ subAgentStatus: status }),
 
   initPlanStateListener: () => {
+    let released = false
+    const release = () => {
+      if (released) return
+      released = true
+      _planStateListenerRefs = Math.max(0, _planStateListenerRefs - 1)
+      if (_planStateListenerRefs === 0) {
+        _planStateListenerCleanup?.()
+        _planStateListenerCleanup = null
+      }
+    }
+
+    _planStateListenerRefs += 1
+    if (_planStateListenerCleanup) return release
+
     const win = window as any
     const ipc = win?.electron?.ipcRenderer
-    if (!ipc) return
+    if (!ipc) {
+      _planStateListenerRefs -= 1
+      return () => {}
+    }
 
-    ipc.on(
-      'plan:subagent-progress',
-      (_event: unknown, data: { status: 'idle' | 'running' | 'completed' | 'failed' }) => {
-        get().setSubAgentStatus(data.status)
-      }
-    )
-
-    ipc.on('plan:review-request', (_event: unknown, streamId: string, plan: any) => {
+    const subAgentProgressHandler = (
+      _event: unknown,
+      data: { status: 'idle' | 'running' | 'completed' | 'failed' }
+    ) => {
+      get().setSubAgentStatus(data.status)
+    }
+    const reviewRequestHandler = (_event: unknown, streamId: string, plan: any) => {
       get().setActivePlanStreamId(streamId)
       get().setPlanReview({ plan, status: 'pending_review' })
-    })
-
-    ipc.on('plan:state-changed', (_event: unknown, plan: any) => {
+    }
+    const stateChangedHandler = (_event: unknown, plan: any) => {
       get().setActivePlan(plan)
-    })
-
-    ipc.on('plan:linked', (_event: unknown, data: { sessionId: string; plan: any }) => {
+    }
+    const linkedHandler = (_event: unknown, data: { sessionId: string; plan: any }) => {
       get().linkPlanToSession(data.sessionId, data.plan.slug)
       get().setActivePlan(data.plan)
-    })
+    }
+
+    const listeners: Array<[string, (...args: any[]) => void]> = [
+      ['plan:subagent-progress', subAgentProgressHandler],
+      ['plan:review-request', reviewRequestHandler],
+      ['plan:state-changed', stateChangedHandler],
+      ['plan:linked', linkedHandler]
+    ]
+    listeners.forEach(([channel, handler]) => ipc.on(channel, handler))
+    _planStateListenerCleanup = () => {
+      listeners.forEach(([channel, handler]) => ipc.removeListener?.(channel, handler))
+    }
+    return release
   },
 
   setPlanListModalOpen: (open) => set({ planListModalOpen: open }),

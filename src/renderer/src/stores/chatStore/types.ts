@@ -227,7 +227,7 @@ export interface ChatState {
 
   setExpandedCapsule: (capsule: 'task' | 'plan' | null) => void
   setSubAgentStatus: (status: 'idle' | 'running' | 'completed' | 'failed') => void
-  initPlanStateListener: () => void
+  initPlanStateListener: () => () => void
   setPlanListModalOpen: (open: boolean) => void
   setActivePlan: (plan: any | null) => void
   setPlanReview: (review: { plan: any; status: string } | null) => void
