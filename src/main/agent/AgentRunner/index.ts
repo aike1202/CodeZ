@@ -4,23 +4,20 @@ import { EditTransactionService, getEditTransactionService } from '../../service
 import { ContextManager } from '../ContextManager'
 import { PermissionManager } from '../../services/PermissionManager'
 import { interceptAskUser } from '../../tools/builtin/AskUserQuestionTool'
-import { PlanStore } from '../../services/PlanStore'
 import { TaskStore } from '../../services/TaskStore'
 import { SubAgentManager } from '../SubAgentManager'
-import { PlanSubAgent } from '../definitions/PlanSubAgent'
 import type { ToolDefinition } from '../../../shared/types/provider'
 import log from '../../logger'
 import { logPrompt } from '../../services/PromptLogger'
 
 import type { AgentRunConfig, AgentRunnerCallbacks } from './types'
 import { isToolErrorResult, buildToolError } from './agentErrorHandler'
-import { handleEnterPlanMode } from './planRunnerHelper'
 import { handleSubAgentRunnerSpawn } from './subAgentRunnerHelper'
-import { handleExecutePlanParallel } from './parallelRunnerHelper'
 import { handleDelegateTasks } from './delegateTasksHelper'
 import { getSessionStore } from '../../ipc/session.handlers'
 import { getSettingsService } from '../../ipc/settings.handlers'
 import { LoopStateMachine, AgentState, TransitionEvent, TerminationReason } from './LoopStateMachine'
+import { streamWithTimeoutRetry } from '../../services/chat/retry'
 
 export enum NormalizedStopReason {
   Truncated = 'Truncated',
@@ -38,6 +35,31 @@ function normalizeProviderStopReason(reason?: string): NormalizedStopReason {
   if (lower === 'tool_calls' || lower === 'tool_use') return NormalizedStopReason.ToolUse;
   if (lower === 'content_filter' || lower === 'safety') return NormalizedStopReason.Blocked;
   return NormalizedStopReason.Unknown;
+}
+
+export function resolveAgentTransition(input: {
+  toolCallCount: number
+  isVerificationFailure: boolean | null
+  verificationRetryCount: number
+  maxVerificationRetries: number
+  consecutiveIdleTurns: number
+  stopReason?: import('../../../shared/types/provider').AgentStopReason
+  hasPendingTasks?: boolean
+  assistantContent?: string
+}): TransitionEvent {
+  if (input.toolCallCount > 0) {
+    return TransitionEvent.ToolExecuted
+  }
+
+  if (input.isVerificationFailure && input.verificationRetryCount < input.maxVerificationRetries) {
+    return TransitionEvent.RetryRequested
+  }
+
+  if (input.consecutiveIdleTurns >= 3) {
+    return TransitionEvent.MaxIdleReached
+  }
+
+  return TransitionEvent.Completed
 }
 
 export class AgentRunner {
@@ -67,7 +89,6 @@ export class AgentRunner {
     let verificationRetryCount = 0
     const MAX_VERIFICATION_RETRIES = 3
 
-    const planStore = new PlanStore()
     const taskStore = TaskStore.getInstance()
     let availableTools: ToolDefinition[] = config.tools || this.toolManager.getToolDefinitions()
 
@@ -86,60 +107,6 @@ export class AgentRunner {
         }
       }
 
-      // ─── 恢复 Plan ────────────────────────────────
-      let activePlan: any = null
-
-      if (session && session.linkedPlanSlug) {
-        activePlan = await planStore.getBySlug(config.workspaceRoot, session.linkedPlanSlug)
-        if (activePlan && activePlan.status === 'suspended') {
-          const { PlanService } = await import('../../services/PlanService')
-          activePlan = await PlanService.resume(config.workspaceRoot, activePlan.slug)
-        }
-      }
-
-      if (activePlan) {
-        if (!availableTools.find((t) => t.function.name === 'UpdatePlanStep')) {
-          const stepTool = this.toolManager.getTool('UpdatePlanStep')
-          if (stepTool) {
-            availableTools = [
-              ...availableTools,
-              {
-                type: 'function' as const,
-                function: {
-                  name: stepTool.name,
-                  description: stepTool.description,
-                  parameters: stepTool.parameters_schema
-                }
-              }
-            ]
-          }
-        }
-
-        const stepLines = activePlan.steps
-          .map((s: any) => `- [${s.status}] ${s.id} ${s.title}`)
-          .join('\n')
-        const currentStep = activePlan.steps.find((s: any) => s.status === 'in_progress')
-        const planMsg = [
-          '<active_plan>',
-          `Plan: ${activePlan.title} (slug: ${activePlan.slug})`,
-          `Status: ${activePlan.status}`,
-          'Steps:',
-          stepLines,
-          `Current step: ${currentStep ? `${currentStep.id} ${currentStep.title}` : 'none'}`,
-          '</active_plan>'
-        ].join('\n')
-
-        allMessages = allMessages.filter(
-          (m) =>
-            !(
-              m.role === 'system' &&
-              typeof m.content === 'string' &&
-              m.content.includes('<active_plan>')
-            )
-        )
-        allMessages.push({ role: 'system', content: planMsg } as any)
-      }
-
       // ─── 注入 active_tasks ─────────────────────────
       const activeTasks = taskStore.list(sessionId)
       if (activeTasks.length > 0) {
@@ -147,9 +114,11 @@ export class AgentRunner {
           .map((t: any) => `- [${t.status}] ${t.id} ${t.subject}`)
           .join('\n')
         const inProgress = activeTasks.find((t: any) => t.status === 'in_progress')
+        const group = activeTasks.find((t: any) => t.groupTitle || t.groupId || t.requiresApproval || t.approvalStatus)
         const taskMsg = [
           '<active_tasks>',
           `Total: ${activeTasks.length} tasks | Completed: ${activeTasks.filter((t: any) => t.status === 'completed').length}`,
+          group ? `TaskGroup: ${group.groupTitle || group.groupId || 'untitled'} | Risk: ${group.riskLevel || 'unspecified'} | Approval: ${group.approvalStatus || (group.requiresApproval ? 'pending' : 'not_required')}` : 'TaskGroup: none',
           inProgress ? `Current: ${inProgress.id} ${inProgress.subject}` : 'No task in progress',
           'Tasks:',
           taskLines,
@@ -252,45 +221,13 @@ export class AgentRunner {
         let gotError = false
         let currentStopReason: import('../../../shared/types/provider').AgentStopReason | undefined = undefined
 
-        await new Promise<void>((resolve) => {
-          // ─── 流式超时 watchdog ──────────────────────────
-          const FIRST_BYTE_TIMEOUT = 30_000
-          const IDLE_TIMEOUT = 60_000
-          let firstByteTimer: ReturnType<typeof setTimeout> | null = null
-          let idleTimer: ReturnType<typeof setTimeout> | null = null
-          let gotFirstByte = false
+        log.info('[AgentRunner] calling streamChat', { loopCount, model: config.model })
 
-          const clearWatchdogs = () => {
-            if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
-            if (idleTimer) { clearTimeout(idleTimer); idleTimer = null }
-          }
+        // Prompt 调试日志（CODEZ_LOG_PROMPT=1 时写入独立文件）
+        logPrompt(`[AgentRunner] loop ${loopCount}`, allMessages.length, allMessages[0]?.content as string)
 
-          const resetIdleTimer = () => {
-            if (idleTimer) clearTimeout(idleTimer)
-            idleTimer = setTimeout(() => {
-              log.error('[AgentRunner] stream idle timeout', { loopCount })
-              clearWatchdogs()
-              callbacks.onError('响应流已超时中断（60s 无新数据），已自动停止。请检查网络连接后重试。')
-              this.abortController?.abort()
-              resolve()
-            }, IDLE_TIMEOUT)
-          }
-
-          firstByteTimer = setTimeout(() => {
-            log.error('[AgentRunner] stream first byte timeout', { loopCount })
-            clearWatchdogs()
-            callbacks.onError('等待首个响应超时（30s），请检查网络 / Provider / 模型是否可用。')
-            this.abortController?.abort()
-            resolve()
-          }, FIRST_BYTE_TIMEOUT)
-          // ─── watchdog end ──────────────────────────────
-
-          log.info('[AgentRunner] calling streamChat', { loopCount, model: config.model })
-
-          // Prompt 调试日志（CODEZ_LOG_PROMPT=1 时写入独立文件）
-          logPrompt(`[AgentRunner] loop ${loopCount}`, allMessages.length, allMessages[0]?.content as string)
-
-          this.chatService.streamChat(
+        await streamWithTimeoutRetry(
+          (attemptCallbacks, attemptSignal) => this.chatService.streamChat(
             {
               baseUrl: config.baseUrl,
               apiKey: config.apiKey,
@@ -300,86 +237,80 @@ export class AgentRunner {
               tools: availableTools,
               thinking: config.thinking
             },
-            {
-              onChunk: (delta, reasoningDelta, toolCallsChunk, thoughtSignature) => {
-                if (this.abortController?.signal.aborted) return
+            attemptCallbacks,
+            attemptSignal
+          ),
+          {
+            onChunk: (delta, reasoningDelta, toolCallsChunk, thoughtSignature) => {
+              if (this.abortController?.signal.aborted) return
 
-                if (!gotFirstByte) {
-                  gotFirstByte = true
-                  if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
-                  log.info('[AgentRunner] first chunk received', { loopCount })
-                }
-                resetIdleTimer()
+              if (thoughtSignature) {
+                thoughtSignatureForThisTurn = thoughtSignature
+              }
 
-                if (thoughtSignature) {
-                  thoughtSignatureForThisTurn = thoughtSignature
-                }
+              if (delta) {
+                currentFullContent += delta
+                callbacks.onChunk(delta, '')
+              }
+              if (reasoningDelta) {
+                callbacks.onChunk('', reasoningDelta)
+                currentReasoningContent += reasoningDelta
+              }
 
-                if (delta) {
-                  currentFullContent += delta
-                  callbacks.onChunk(delta, '')
-                }
-                if (reasoningDelta) {
-                  callbacks.onChunk('', reasoningDelta)
-                  currentReasoningContent += reasoningDelta
-                }
-
-                if (toolCallsChunk) {
-                  for (const tc of toolCallsChunk) {
-                    const index = tc.index
-                    if (!toolCallsAcc[index]) {
-                      toolCallsAcc[index] = {
-                        id: tc.id || '',
-                        type: 'function',
-                        function: { name: tc.function?.name || '', arguments: '' }
-                      }
-                    }
-                    const acc = toolCallsAcc[index]
-                    if (tc.id) acc.id = tc.id
-                    if (tc.function?.name) acc.function.name = tc.function.name
-                    if (tc.function?.arguments) acc.function.arguments += tc.function.arguments
-
-                    if (tc.thought_signature) {
-                      acc.thought_signature = tc.thought_signature
-                      thoughtSignatureForThisTurn = tc.thought_signature
-                    } else if (thoughtSignature) {
-                      acc.thought_signature = thoughtSignature
-                    }
-
-                    if (acc.id) {
-                      callbacks.onToolStart?.(
-                        acc.id,
-                        acc.function.name,
-                        acc.function.arguments,
-                        acc.thought_signature
-                      )
+              if (toolCallsChunk) {
+                for (const tc of toolCallsChunk) {
+                  const index = tc.index
+                  if (!toolCallsAcc[index]) {
+                    toolCallsAcc[index] = {
+                      id: tc.id || '',
+                      type: 'function',
+                      function: { name: tc.function?.name || '', arguments: '' }
                     }
                   }
+                  const acc = toolCallsAcc[index]
+                  if (tc.id) acc.id = tc.id
+                  if (tc.function?.name) acc.function.name = tc.function.name
+                  if (tc.function?.arguments) acc.function.arguments += tc.function.arguments
+
+                  if (tc.thought_signature) {
+                    acc.thought_signature = tc.thought_signature
+                    thoughtSignatureForThisTurn = tc.thought_signature
+                  } else if (thoughtSignature) {
+                    acc.thought_signature = thoughtSignature
+                  }
+
+                  if (acc.id) {
+                    callbacks.onToolStart?.(
+                      acc.id,
+                      acc.function.name,
+                      acc.function.arguments,
+                      acc.thought_signature
+                    )
+                  }
                 }
-              },
-              onDone: (fullContent, stopReason) => {
-                clearWatchdogs()
-                currentStopReason = stopReason
-                log.info('[AgentRunner] streamChat done', { loopCount, stopReason, contentLen: fullContent.length })
-                resolve()
-              },
-              onError: (err) => {
-                clearWatchdogs()
-                gotError = true
-                log.error('[AgentRunner] streamChat error', { loopCount, error: err })
-                callbacks.onError(err)
-                resolve()
               }
             },
-            this.abortController!.signal
-          ).catch((err) => {
-            clearWatchdogs()
-            gotError = true
-            log.error('[AgentRunner] streamChat exception', { loopCount, error: err instanceof Error ? err.message : String(err) })
-            callbacks.onError(err instanceof Error ? err.message : String(err))
-            resolve()
-          })
-        })
+            onDone: (fullContent, stopReason) => {
+              currentStopReason = stopReason
+              log.info('[AgentRunner] streamChat done', { loopCount, stopReason, contentLen: fullContent.length })
+            },
+            onError: (err) => {
+              gotError = true
+              log.error('[AgentRunner] streamChat error', { loopCount, error: err })
+              callbacks.onError(err)
+            }
+          },
+          this.abortController!.signal,
+          {
+            firstByteTimeoutMs: 30_000,
+            idleTimeoutMs: 60_000,
+            maxRetries: 2,
+            retryDelayMs: 1_000,
+            onFirstByteTimeout: (attempt) => log.error('[AgentRunner] stream first byte timeout', { loopCount, attempt }),
+            onIdleTimeout: (attempt) => log.error('[AgentRunner] stream idle timeout', { loopCount, attempt }),
+            onRetry: (attempt) => log.warn('[AgentRunner] retrying stream after first byte timeout', { loopCount, attempt, nextAttempt: attempt + 1 })
+          }
+        )
 
         if (gotError || this.abortController?.signal.aborted) {
           break
@@ -454,25 +385,8 @@ export class AgentRunner {
 
               log.info('[AgentRunner] tool start', { name, loopCount })
 
-              if (name === 'EnterPlanMode') {
-                return await handleEnterPlanMode(
-                  toolCallId,
-                  allMessages,
-                  config,
-                  callbacks,
-                  planStore,
-                  this.toolManager,
-                  availableTools
-                )
-              } else if (name === 'SubAgentRunner') {
+              if (name === 'SubAgentRunner') {
                 return await handleSubAgentRunnerSpawn(
-                  toolCallId,
-                  args,
-                  config,
-                  callbacks
-                )
-              } else if (name === 'ExecutePlanParallel') {
-                return await handleExecutePlanParallel(
                   toolCallId,
                   args,
                   config,
@@ -633,32 +547,14 @@ export class AgentRunner {
 
         const isVerificationFailure = filesModifiedInSession && lastVerificationResult && !lastVerificationResult.success;
         
-        let transitionEvent: TransitionEvent;
-        
-        // 1. Tool Call Evaluation
-        if (toolCallsArray.length > 0) {
-          transitionEvent = TransitionEvent.ToolExecuted;
-        } 
-        // 2. Retry Evaluation
-        else if (isVerificationFailure && (verificationRetryCount < MAX_VERIFICATION_RETRIES)) {
-          transitionEvent = TransitionEvent.RetryRequested;
-        } 
-        // 3. Idle Evaluation
-        else if (consecutiveIdleTurns >= 3) {
-          transitionEvent = TransitionEvent.MaxIdleReached;
-        } 
-        // 4. Truncation Evaluation
-        else if (normalizeProviderStopReason(currentStopReason) === NormalizedStopReason.Truncated) {
-          transitionEvent = TransitionEvent.OutputTruncated;
-        } 
-        // 5. Pending Task Evaluation
-        else if (hasPendingTasks) {
-          transitionEvent = TransitionEvent.SchedulerContinue;
-        } 
-        // 6. Completion
-        else {
-          transitionEvent = TransitionEvent.Completed;
-        }
+        const transitionEvent = resolveAgentTransition({
+          toolCallCount: toolCallsArray.length,
+          isVerificationFailure,
+          verificationRetryCount,
+          maxVerificationRetries: MAX_VERIFICATION_RETRIES,
+          consecutiveIdleTurns,
+          stopReason: currentStopReason
+        });
 
         currentState = LoopStateMachine.next(currentState, transitionEvent);
 
@@ -707,32 +603,6 @@ export class AgentRunner {
 
           if (callbacks.onChunk) {
             callbacks.onChunk(`\n\n[系统拦截：验证失败，重试 ${verificationRetryCount}/${MAX_VERIFICATION_RETRIES}...]\n\n`, '');
-          }
-          continue;
-        }
-
-        if (transitionEvent === TransitionEvent.SchedulerContinue || transitionEvent === TransitionEvent.OutputTruncated) {
-          consecutiveIdleTurns++;
-          log.info('[AgentRunner] Auto-continuing', { transitionEvent, loopCount, consecutiveIdleTurns });
-          
-          allMessages.push({ role: 'assistant', content: currentFullContent.trim() ? currentFullContent : '(Acknowledged)' } as any);
-          
-          if (consecutiveIdleTurns >= 2) {
-            allMessages.push({
-              role: 'user',
-              content: `⚠️ System Reminder: There are unfinished tasks. Do NOT summarize. Do NOT stop. Either:\n1. call the next tool\n2. ask user for missing information\n3. explain why execution is blocked\nOtherwise continue execution.`
-            } as any);
-            if (callbacks.onChunk) {
-              callbacks.onChunk(`\n\n[系统引导：检测到连续响应未调用工具，强制唤醒...]\n\n`, '');
-            }
-          } else {
-            allMessages.push({
-              role: 'user',
-              content: '(Auto-continue)'
-            } as any);
-            if (callbacks.onChunk) {
-              callbacks.onChunk(`\n\n[系统引导：自动继续...]\n\n`, '');
-            }
           }
           continue;
         }

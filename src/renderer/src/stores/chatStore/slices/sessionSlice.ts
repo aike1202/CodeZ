@@ -9,6 +9,52 @@ function genId(): string {
 // 防竞态：每次 selectSession 分配递增序号，IPC 返回时检查是否仍是最新请求
 let _selectSessionSeq = 0
 
+function hasUnfinishedTasks(tasks: Array<{ status: string }> | undefined): boolean {
+  return Boolean(tasks?.some((task) => task.status === 'pending' || task.status === 'in_progress'))
+}
+
+function buildInterruptedSubAgentPrompt(subAgent: any): string {
+  const description = subAgent.description || subAgent.type || '未命名子智能体任务'
+  const prompt = subAgent.prompt || subAgent.description || ''
+  const partial = subAgent.content?.trim()
+  return [
+    `继续刚才中断的子智能体任务：${description}`,
+    prompt ? `原始任务：${prompt}` : '',
+    partial ? `已产生的部分结果：${partial}` : '',
+    '请先基于当前会话里已有的执行记录判断已完成内容，再继续未完成分析。'
+  ].filter(Boolean).join('\n\n')
+}
+
+function healInterruptedSubAgents(messages: any[]): { messages: any[]; prompt: string | null; changed: boolean } {
+  let prompt: string | null = null
+  let changed = false
+  const healedMessages = messages.map((message) => {
+    const subAgents = message.subAgents
+    if (!Array.isArray(subAgents) || !subAgents.some((sub: any) => sub.status === 'running')) {
+      return message.streaming ? { ...message, streaming: false, interrupted: true } : message
+    }
+
+    changed = true
+    const healedSubAgents = subAgents.map((sub: any) => {
+      if (sub.status !== 'running') return sub
+      if (!prompt) prompt = buildInterruptedSubAgentPrompt(sub)
+      return {
+        ...sub,
+        status: 'interrupted',
+        completedAt: sub.completedAt || Date.now()
+      }
+    })
+    return {
+      ...message,
+      streaming: false,
+      interrupted: true,
+      subAgents: healedSubAgents
+    }
+  })
+
+  return { messages: healedMessages, prompt, changed }
+}
+
 export interface SessionSlice {
   sessions: ChatSession[]
   activeSessionId: string | null
@@ -34,9 +80,7 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
         // 愈合崩溃残留：将 streaming:true 的消息标记为 interrupted
         const healedSessions = sessions.map((session) => ({
           ...session,
-          messages: session.messages.map((m: any) =>
-            m.streaming ? { ...m, streaming: false, interrupted: true } : m
-          )
+          messages: healInterruptedSubAgents(session.messages).messages
         }))
         set({ sessions: healedSessions })
       }
@@ -71,18 +115,28 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
       // 防止竞态：IPC 返回时用户可能已切换到其他会话
       if (seq !== _selectSessionSeq) return
       if (freshSession) {
+        const healed = healInterruptedSubAgents(freshSession.messages)
+        const healedSession = {
+          ...freshSession,
+          messages: healed.messages
+        }
         set((s) => {
           const sessions = s.sessions.map((sess) =>
-            sess.id === sessionId ? { ...sess, ...freshSession, messages: freshSession.messages } : sess
+            sess.id === sessionId ? { ...sess, ...healedSession, messages: healedSession.messages } : sess
           )
           return {
             sessions,
             activeSessionId: sessionId,
-            messages: freshSession.messages,
+            messages: healedSession.messages,
             tasks: freshSession.tasks || [],
+            expandedCapsule: hasUnfinishedTasks(freshSession.tasks) ? 'task' : s.expandedCapsule,
+            pendingPrompt: healed.prompt || s.pendingPrompt,
             activePlan: null
           }
         })
+        if (healed.changed) {
+          await window.api.session.save(healedSession)
+        }
         if (freshSession.linkedPlanSlug) {
           try {
             const workspace = useWorkspaceStore.getState().workspace
@@ -105,9 +159,13 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     // Fallback: 从内存中查找
     const session = get().sessions.find((s) => s.id === sessionId)
     if (session) {
+      const healed = healInterruptedSubAgents(session.messages)
       set({
         activeSessionId: sessionId,
-        messages: session.messages,
+        messages: healed.messages,
+        tasks: (session as any).tasks || [],
+        expandedCapsule: hasUnfinishedTasks((session as any).tasks) ? 'task' : get().expandedCapsule,
+        pendingPrompt: healed.prompt || get().pendingPrompt,
         activePlan: null
       })
       if (session.linkedPlanSlug) {

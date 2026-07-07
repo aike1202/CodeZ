@@ -1,7 +1,8 @@
 import { BrowserWindow } from 'electron'
 import { IPC_CHANNELS } from '../../shared/ipc/channels'
-import type { TaskItem, TaskStatus } from '../../shared/types/task'
+import type { TaskApprovalStatus, TaskItem, TaskRiskLevel, TaskStatus } from '../../shared/types/task'
 import type { SessionData } from '../../shared/types/session'
+import { getSessionStore } from '../ipc/session.handlers'
 
 /**
  * 轻量 Task 的存储（单例）。
@@ -54,8 +55,6 @@ export class TaskStore {
   /** 变更后落盘：读 session → 设 tasks → 存回。 */
   private persist(sessionId: string): void {
     try {
-      // 运行时懒加载 session handler，避免循环依赖
-      const { getSessionStore } = require('../../ipc/session.handlers')
       const store = getSessionStore() as { get(sessionId: string): SessionData | undefined; save(session: SessionData): Promise<void> }
       const session = store.get(sessionId)
       if (session) {
@@ -73,7 +72,22 @@ export class TaskStore {
    */
   create(
     sessionId: string,
-    items: Array<{ subject: string; description?: string; files?: string[]; activeForm?: string; title?: string; subtitle?: string }>
+    items: Array<{
+      subject: string
+      description?: string
+      files?: string[]
+      activeForm?: string
+      title?: string
+      subtitle?: string
+      groupId?: string
+      groupTitle?: string
+      groupSubtitle?: string
+      riskLevel?: TaskRiskLevel
+      requiresApproval?: boolean
+      approvalStatus?: TaskApprovalStatus
+      acceptanceCriteria?: string[]
+      verificationCommand?: string
+    }>
   ): TaskItem[] {
     const list = this.bySession.get(sessionId) ?? []
     for (const item of items) {
@@ -86,6 +100,14 @@ export class TaskStore {
         ...(item.activeForm ? { activeForm: item.activeForm } : {}),
         ...(item.title ? { title: item.title } : {}),
         ...(item.subtitle ? { subtitle: item.subtitle } : {}),
+        ...(item.groupId ? { groupId: item.groupId } : {}),
+        ...(item.groupTitle ? { groupTitle: item.groupTitle } : {}),
+        ...(item.groupSubtitle ? { groupSubtitle: item.groupSubtitle } : {}),
+        ...(item.riskLevel ? { riskLevel: item.riskLevel } : {}),
+        ...(item.requiresApproval !== undefined ? { requiresApproval: item.requiresApproval } : {}),
+        ...(item.approvalStatus ? { approvalStatus: item.approvalStatus } : {}),
+        ...(item.acceptanceCriteria && item.acceptanceCriteria.length > 0 ? { acceptanceCriteria: item.acceptanceCriteria } : {}),
+        ...(item.verificationCommand ? { verificationCommand: item.verificationCommand } : {}),
       })
     }
     this.bySession.set(sessionId, list)
@@ -101,7 +123,21 @@ export class TaskStore {
   update(
     sessionId: string,
     taskId: string,
-    patch: Partial<Pick<TaskItem, 'subject' | 'description' | 'status' | 'files' | 'activeForm'>>
+    patch: Partial<Pick<TaskItem,
+      'subject' |
+      'description' |
+      'status' |
+      'files' |
+      'activeForm' |
+      'groupId' |
+      'groupTitle' |
+      'groupSubtitle' |
+      'riskLevel' |
+      'requiresApproval' |
+      'approvalStatus' |
+      'acceptanceCriteria' |
+      'verificationCommand'
+    >>
   ): TaskItem | null {
     const list = this.bySession.get(sessionId)
     const task = list?.find(t => t.id === taskId)
@@ -112,6 +148,14 @@ export class TaskStore {
     if (patch.status !== undefined) task.status = patch.status
     if (patch.files !== undefined) task.files = patch.files
     if (patch.activeForm !== undefined) task.activeForm = patch.activeForm
+    if (patch.groupId !== undefined) task.groupId = patch.groupId
+    if (patch.groupTitle !== undefined) task.groupTitle = patch.groupTitle
+    if (patch.groupSubtitle !== undefined) task.groupSubtitle = patch.groupSubtitle
+    if (patch.riskLevel !== undefined) task.riskLevel = patch.riskLevel
+    if (patch.requiresApproval !== undefined) task.requiresApproval = patch.requiresApproval
+    if (patch.approvalStatus !== undefined) task.approvalStatus = patch.approvalStatus
+    if (patch.acceptanceCriteria !== undefined) task.acceptanceCriteria = patch.acceptanceCriteria
+    if (patch.verificationCommand !== undefined) task.verificationCommand = patch.verificationCommand
 
     this.persist(sessionId)
     this.broadcast(sessionId)

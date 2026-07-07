@@ -7,8 +7,8 @@ import type { AgentRunnerCallbacks } from './types'
  * 通用子智能体 spawn 拦截处理。
  *
  * 与 planRunnerHelper 的区别：
- * - 无批准弹窗（Plan 的弹窗源于 EnterPlanMode 的特殊 UX；通用 SubAgentRunner 直接执行）
- * - 无 <active_plan> 注入 / session 关联
+ * - 无批准弹窗；通用 SubAgentRunner 直接执行
+ * - 无 session 计划关联
  * - 仅 spawn → 返回 SubAgentResult.output
  *
  * 返回 tool 消息，结构与其他工具一致（{ ok, data }）。

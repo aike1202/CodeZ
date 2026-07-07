@@ -1,0 +1,126 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const saveMock = vi.hoisted(() => vi.fn())
+const sessionRecord = vi.hoisted(() => ({
+  id: 's1',
+  projectId: 'p1',
+  summary: 'Task session',
+  relativeTime: 'now',
+  messages: [] as any[],
+  tasks: [] as any[]
+}))
+
+vi.mock('electron', () => ({
+  BrowserWindow: { getAllWindows: vi.fn().mockReturnValue([]) }
+}))
+
+vi.mock('../main/ipc/session.handlers', () => ({
+  getSessionStore: () => ({
+    get: (sessionId: string) => sessionId === sessionRecord.id ? sessionRecord : undefined,
+    save: saveMock
+  })
+}))
+
+describe('TaskStore persistence', () => {
+  beforeEach(async () => {
+    vi.resetModules()
+    saveMock.mockReset()
+    sessionRecord.tasks = []
+  })
+
+  it('writes created tasks back to the session', async () => {
+    const { TaskStore } = await import('../main/services/TaskStore')
+    const store = TaskStore.getInstance()
+
+    store.create('s1', [{ subject: 'Persist task', description: 'must survive reopen' }])
+
+    expect(sessionRecord.tasks).toEqual([
+      expect.objectContaining({ id: 't1', subject: 'Persist task', status: 'pending' })
+    ])
+    expect(saveMock).toHaveBeenCalledWith(expect.objectContaining({
+      id: 's1',
+      tasks: sessionRecord.tasks
+    }))
+  })
+
+  it('persists task group approval metadata on created tasks', async () => {
+    const { TaskStore } = await import('../main/services/TaskStore')
+    const store = TaskStore.getInstance()
+
+    store.create('s1', [
+      {
+        subject: 'Design migration',
+        description: 'unify plan and task concepts',
+        groupId: 'tg1',
+        groupTitle: 'Unified Task System',
+        riskLevel: 'high',
+        requiresApproval: true,
+        approvalStatus: 'pending',
+        acceptanceCriteria: ['Plan entry is no longer exposed by default'],
+        verificationCommand: 'npm test -- task-store-persistence'
+      }
+    ])
+
+    expect(sessionRecord.tasks[0]).toMatchObject({
+      id: 't1',
+      groupId: 'tg1',
+      groupTitle: 'Unified Task System',
+      riskLevel: 'high',
+      requiresApproval: true,
+      approvalStatus: 'pending',
+      acceptanceCriteria: ['Plan entry is no longer exposed by default'],
+      verificationCommand: 'npm test -- task-store-persistence'
+    })
+  })
+
+  it('writes task status updates back to the session', async () => {
+    const { TaskStore } = await import('../main/services/TaskStore')
+    const store = TaskStore.getInstance()
+    store.create('s1', [{ subject: 'Persist task' }])
+    saveMock.mockClear()
+
+    store.update('s1', 't1', { status: 'in_progress' })
+
+    expect(sessionRecord.tasks[0]).toMatchObject({ id: 't1', status: 'in_progress' })
+    expect(saveMock).toHaveBeenCalledWith(expect.objectContaining({
+      id: 's1',
+      tasks: sessionRecord.tasks
+    }))
+  })
+
+  it('restores the original status when rejecting a second in_progress task', async () => {
+    const { TaskUpdateTool } = await import('../main/tools/builtin/TaskUpdateTool')
+    const { TaskStore } = await import('../main/services/TaskStore')
+    const store = TaskStore.getInstance()
+    store.create('s1', [
+      { subject: 'First task' },
+      { subject: 'Second task' }
+    ])
+    store.update('s1', 't1', { status: 'in_progress' })
+    store.update('s1', 't2', { status: 'completed' })
+
+    const tool = new TaskUpdateTool()
+    const result = JSON.parse(await tool.execute(JSON.stringify({ taskId: 't2', status: 'in_progress' }), {
+      workspaceRoot: process.cwd(),
+      sessionId: 's1'
+    } as any))
+
+    expect(result.ok).toBe(false)
+    expect(store.getById('s1', 't2')?.status).toBe('completed')
+  })
+
+  it('clears persisted session tasks when the task list is cleared', async () => {
+    const { TaskStore } = await import('../main/services/TaskStore')
+    const store = TaskStore.getInstance()
+    store.create('s1', [{ subject: 'Persist task' }])
+    saveMock.mockClear()
+
+    store.clear('s1')
+
+    expect(sessionRecord.tasks).toEqual([])
+    expect(saveMock).toHaveBeenCalledWith(expect.objectContaining({
+      id: 's1',
+      tasks: []
+    }))
+  })
+})

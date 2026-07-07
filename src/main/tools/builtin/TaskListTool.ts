@@ -47,6 +47,11 @@ export class TaskListTool extends Tool {
           id: t.id,
           subject: t.subject,
           status: t.status,
+          ...(t.groupId ? { groupId: t.groupId } : {}),
+          ...(t.groupTitle ? { groupTitle: t.groupTitle } : {}),
+          ...(t.riskLevel ? { riskLevel: t.riskLevel } : {}),
+          ...(t.requiresApproval !== undefined ? { requiresApproval: t.requiresApproval } : {}),
+          ...(t.approvalStatus ? { approvalStatus: t.approvalStatus } : {}),
           ...(t.files && t.files.length > 0 ? { files: t.files } : {})
         })),
         summary: store.summary(sessionId)

@@ -176,7 +176,7 @@ export default function ExecutionLogDetail({
             <div className="exe-log-terminal-output-container">
               <span className="exe-log-output-label">Output:</span>
               <pre className="exe-log-output-pre">
-                {item.detail.length > 2000 ? `${item.detail.slice(0, 2000)}\n...[Output Truncated]` : item.detail}
+                {item.detail}
               </pre>
             </div>
           )}
@@ -341,7 +341,7 @@ export default function ExecutionLogDetail({
           <div className="exe-log-params-output-container">
             <span className="exe-log-output-label">Output:</span>
             <pre className="exe-log-output-pre">
-              {item.detail.length > 1500 ? `${item.detail.slice(0, 1500)}\n...内容已截断` : item.detail}
+              {item.detail}
             </pre>
           </div>
         )}
@@ -353,7 +353,7 @@ export default function ExecutionLogDetail({
     return (
       <div className="exe-log-cmd-raw-output">
         <pre className="whitespace-pre-wrap break-all leading-relaxed">
-          {item.detail && item.detail.length > 2000 ? `${item.detail.slice(0, 2000)}\n...[Output Truncated]` : item.detail}
+          {item.detail}
         </pre>
       </div>
     )

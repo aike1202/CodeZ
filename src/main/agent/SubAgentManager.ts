@@ -50,7 +50,7 @@ export interface SubAgentContext {
   /** @deprecated 使用 task 代替 */
   parentPrompt: string
 
-  /** SubAgent 调用标识 — 用于把事件路由到 SubAgentCard（由调用方 handleSubAgentRunnerSpawn/handleEnterPlanMode 注入） */
+  /** SubAgent 调用标识 — 用于把事件路由到 SubAgentCard（由调用方 handleSubAgentRunnerSpawn 注入） */
   subAgentId?: string
 
   /** 验收标准 — 子 Agent 必须逐条回答 */

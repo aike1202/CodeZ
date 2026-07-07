@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { buildThinkingPayload } from '../main/services/chat/utils'
 import { processDeltaWithThinkTags, ThinkParserState } from '../main/services/chat/OpenAIProvider'
+import { mapAnthropicStopReason, extractAnthropicDelta } from '../main/services/chat/AnthropicProvider'
 
 describe('ChatService - processDeltaWithThinkTags', () => {
   it('应当直接输出不带 think 标签的标准文本', () => {
@@ -106,6 +107,47 @@ describe('ChatService - buildThinkingPayload (自动适配与推导)', () => {
     expect(payload).toEqual({ include_reasoning: true })
   })
 
+  it('uses adaptive thinking for Claude Opus 4.8 without budget_tokens', () => {
+    const payload = buildThinkingPayload(
+      { enabled: true, mode: 'anthropic', effort: 'high' },
+      'claude-opus-4-8',
+      'https://api.anthropic.com/v1'
+    )
+
+    expect(payload).toEqual({
+      thinking: { type: 'adaptive', display: 'summarized' },
+      output_config: { effort: 'high' }
+    })
+    expect(JSON.stringify(payload)).not.toContain('budget_tokens')
+  })
+
+  it('uses adaptive thinking for Claude Sonnet 5 custom effort without custom budget_tokens', () => {
+    const payload = buildThinkingPayload(
+      { enabled: true, mode: 'anthropic', effort: 'custom', budgetTokens: 2000 },
+      'claude-sonnet-5',
+      'https://api.anthropic.com/v1'
+    )
+
+    expect(payload).toEqual({
+      thinking: { type: 'adaptive', display: 'summarized' }
+    })
+    expect(JSON.stringify(payload)).not.toContain('budget_tokens')
+  })
+
+  it('infers adaptive Anthropic thinking for Claude Fable 5 in auto mode', () => {
+    const payload = buildThinkingPayload(
+      { enabled: true, mode: 'auto', effort: 'medium' },
+      'claude-fable-5',
+      'https://api.anthropic.com/v1'
+    )
+
+    expect(payload).toEqual({
+      thinking: { type: 'adaptive', display: 'summarized' },
+      output_config: { effort: 'medium' }
+    })
+    expect(JSON.stringify(payload)).not.toContain('budget_tokens')
+  })
+
   it('应当在 mode 为 auto 时，基于 model 自动选用 deepseek 配置', () => {
     const payload = buildThinkingPayload(
       { enabled: true, mode: 'auto' },
@@ -173,5 +215,48 @@ describe('ChatService - buildThinkingPayload (自动适配与推导)', () => {
       'https://dashscope.aliyuncs.com/api/v1'
     )
     expect(payloadHigh).toEqual({ enable_thinking: true, max_completion_tokens: 16384, reasoning_effort: 'high' })
+  })
+})
+
+describe('AnthropicProvider - stream helpers', () => {
+  it('maps Anthropic stop_reason values to internal stop reasons', () => {
+    expect(mapAnthropicStopReason('end_turn')).toBe('stop')
+    expect(mapAnthropicStopReason('stop_sequence')).toBe('stop')
+    expect(mapAnthropicStopReason('max_tokens')).toBe('length')
+    expect(mapAnthropicStopReason('tool_use')).toBe('tool_calls')
+    expect(mapAnthropicStopReason('refusal')).toBe('content_filter')
+    expect(mapAnthropicStopReason('safety')).toBe('content_filter')
+    expect(mapAnthropicStopReason('pause_turn')).toBe('tool_calls')
+    expect(mapAnthropicStopReason('unknown_reason')).toBe('unknown')
+  })
+
+  it('extracts text from Anthropic text_delta', () => {
+    expect(extractAnthropicDelta({ type: 'text_delta', text: 'hello' })).toEqual({
+      textDelta: 'hello',
+      reasoningDelta: '',
+      toolInputDelta: ''
+    })
+  })
+
+  it('extracts reasoning from Anthropic thinking_delta', () => {
+    expect(extractAnthropicDelta({ type: 'thinking_delta', thinking: 'reasoning' })).toEqual({
+      textDelta: '',
+      reasoningDelta: 'reasoning',
+      toolInputDelta: ''
+    })
+  })
+
+  it('extracts partial JSON from Anthropic tool input deltas', () => {
+    expect(extractAnthropicDelta({ type: 'tool_use_input_delta', partial_json: '{"a"' })).toEqual({
+      textDelta: '',
+      reasoningDelta: '',
+      toolInputDelta: '{"a"'
+    })
+
+    expect(extractAnthropicDelta({ type: 'input_json_delta', partial_json: ':1}' })).toEqual({
+      textDelta: '',
+      reasoningDelta: '',
+      toolInputDelta: ':1}'
+    })
   })
 })

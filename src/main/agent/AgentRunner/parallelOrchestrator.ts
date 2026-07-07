@@ -18,7 +18,7 @@ import type {
 export interface ParallelOrchestratorConfig {
   workspaceRoot: string
   sessionId: string
-  /** 父工具调用 ID — Worker 的 parentToolCallId 设置为这个值，前端据此把 SubAgentCard 关联到 DelegateTasks/ExecutePlanParallel */
+  /** 父工具调用 ID — Worker 的 parentToolCallId 设置为这个值，前端据此把 SubAgentCard 关联到 DelegateTasks */
   parentToolCallId?: string
   apiConfig: {
     baseUrl: string

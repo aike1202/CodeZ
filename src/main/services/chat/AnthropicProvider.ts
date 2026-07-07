@@ -1,6 +1,58 @@
 import { IChatProvider, ChatRequestConfig, StreamCallbacks } from './types'
+import type { AgentStopReason } from '../../../shared/types/provider'
 import log from '../../logger'
 import { logPrompt } from '../PromptLogger'
+
+export interface AnthropicDeltaParts {
+  textDelta: string
+  reasoningDelta: string
+  toolInputDelta: string
+}
+
+export function mapAnthropicStopReason(stopReason: string): AgentStopReason {
+  if (stopReason === 'end_turn' || stopReason === 'stop_sequence') {
+    return 'stop'
+  }
+  if (stopReason === 'max_tokens') {
+    return 'length'
+  }
+  if (stopReason === 'tool_use' || stopReason === 'pause_turn') {
+    return 'tool_calls'
+  }
+  if (stopReason === 'refusal' || stopReason === 'safety') {
+    return 'content_filter'
+  }
+  return 'unknown'
+}
+
+export function extractAnthropicDelta(delta: any): AnthropicDeltaParts {
+  if (delta?.type === 'text_delta') {
+    return {
+      textDelta: delta.text || '',
+      reasoningDelta: '',
+      toolInputDelta: ''
+    }
+  }
+  if (delta?.type === 'thinking_delta') {
+    return {
+      textDelta: '',
+      reasoningDelta: delta.thinking || '',
+      toolInputDelta: ''
+    }
+  }
+  if (delta?.type === 'tool_use_input_delta' || delta?.type === 'input_json_delta') {
+    return {
+      textDelta: '',
+      reasoningDelta: '',
+      toolInputDelta: delta.partial_json || ''
+    }
+  }
+  return {
+    textDelta: '',
+    reasoningDelta: '',
+    toolInputDelta: ''
+  }
+}
 
 export class AnthropicProvider implements IChatProvider {
   async streamChat(config: ChatRequestConfig, callbacks: StreamCallbacks, signal: AbortSignal): Promise<void> {
@@ -114,7 +166,7 @@ export class AnthropicProvider implements IChatProvider {
       let currentToolCallId = ''
       let currentToolCallName = ''
       let currentToolCallArgs = ''
-      let finalStopReason: import('../../../shared/types/provider').AgentStopReason = 'unknown'
+      let finalStopReason: AgentStopReason = 'unknown'
 
       while (true) {
         const { done, value } = await reader.read()
@@ -149,17 +201,19 @@ export class AnthropicProvider implements IChatProvider {
               } else if (currentEvent === 'message_delta') {
                 const stopReason = json.delta?.stop_reason
                 if (stopReason) {
-                  if (stopReason === 'end_turn' || stopReason === 'stop_sequence') finalStopReason = 'stop'
-                  else if (stopReason === 'max_tokens') finalStopReason = 'length'
-                  else if (stopReason === 'tool_use') finalStopReason = 'tool_calls'
+                  finalStopReason = mapAnthropicStopReason(stopReason)
                 }
               } else if (currentEvent === 'content_block_delta') {
-                if (json.delta?.type === 'text_delta') {
-                  const text = json.delta.text
-                  fullContent += text
-                  callbacks.onChunk(text, '')
-                } else if (json.delta?.type === 'tool_use_input_delta') {
-                  currentToolCallArgs += json.delta.partial_json
+                const deltaParts = extractAnthropicDelta(json.delta)
+                if (deltaParts.textDelta) {
+                  fullContent += deltaParts.textDelta
+                  callbacks.onChunk(deltaParts.textDelta, '')
+                }
+                if (deltaParts.reasoningDelta) {
+                  callbacks.onChunk('', deltaParts.reasoningDelta)
+                }
+                if (deltaParts.toolInputDelta) {
+                  currentToolCallArgs += deltaParts.toolInputDelta
                 }
               } else if (currentEvent === 'content_block_stop') {
                 if (currentToolCallId) {

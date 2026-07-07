@@ -13,6 +13,22 @@ function resolveBudgetTokens(thinking: ThinkingConfig): number | undefined {
   }
 }
 
+function isAdaptiveOnlyAnthropicModel(model: string): boolean {
+  const modelLower = model.toLowerCase()
+  return modelLower.includes('claude-opus-4-8')
+    || modelLower.includes('claude-opus-4-7')
+    || modelLower.includes('claude-sonnet-5')
+    || modelLower.includes('claude-fable-5')
+    || modelLower.includes('claude-mythos-5')
+}
+
+function buildAnthropicEffortPayload(thinking: ThinkingConfig): Record<string, unknown> {
+  if (thinking.effort && ['low', 'medium', 'high'].includes(thinking.effort)) {
+    return { output_config: { effort: thinking.effort } }
+  }
+  return {}
+}
+
 export function buildThinkingPayload(
   thinking: ThinkingConfig | undefined,
   model: string,
@@ -43,15 +59,23 @@ export function buildThinkingPayload(
   }
 
   switch (mode) {
-    case 'anthropic':
+    case 'anthropic': {
       const anthropicPayload: Record<string, unknown> = {}
+      if (isAdaptiveOnlyAnthropicModel(model)) {
+        anthropicPayload.thinking = { type: 'adaptive', display: 'summarized' }
+        return {
+          ...anthropicPayload,
+          ...buildAnthropicEffortPayload(thinking),
+        }
+      }
       if (resolvedTokens) {
         anthropicPayload.thinking = { type: 'enabled', budget_tokens: Math.max(1024, resolvedTokens) }
       }
-      if (thinking.effort && ['low', 'medium', 'high'].includes(thinking.effort)) {
-        anthropicPayload.output_config = { effort: thinking.effort }
+      return {
+        ...anthropicPayload,
+        ...buildAnthropicEffortPayload(thinking),
       }
-      return anthropicPayload
+    }
     case 'deepseek': {
       const payload: Record<string, unknown> = {
         reasoning: { enabled: true },

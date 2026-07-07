@@ -3,14 +3,25 @@ import Button from '../ui/Button'
 import Card from '../ui/Card'
 import Flex from '../ui/Flex'
 import Stack from '../ui/Stack'
+import {
+  generateCommandRuleOptions,
+  PERMISSION_SCOPE_OPTIONS,
+  type CommandRuleOption,
+  type PermissionRuleScope
+} from './permissionApprovalOptions'
+import { actionLabel, riskLabel } from './permissionApprovalLabels'
 import './PermissionApprovalWidget.css'
 
 interface PermissionRequest {
   id: string
   toolName: string
   risk: string
+  action?: string
+  reason?: string
+  impacts?: string[]
   description: string
   args: any
+  ruleOptions?: CommandRuleOption[]
   status: 'pending' | 'approved' | 'denied'
 }
 
@@ -20,26 +31,102 @@ interface PermissionApprovalWidgetProps {
   onResolve: (msgId: string, requestId: string, approved: boolean) => Promise<void>
 }
 
-function generateCommandOptions(cmd: string = '') {
-   const options = [{ label: `精确匹配: ${cmd}`, rule: cmd }]
-   const parts = cmd.trim().split(/\s+/)
-   if (parts.length > 2) {
-      options.push({ label: `子命令: ${parts[0]} ${parts[1]} *`, rule: `${parts[0]} ${parts[1]} *`})
-   }
-   if (parts.length > 1) {
-      options.push({ label: `全部操作: ${parts[0]} *`, rule: `${parts[0]} *` })
-   }
-   return options
+interface BashPermissionOptionsProps {
+  msgId: string
+  request: PermissionRequest
+  loading: boolean
+  setLoading: (loading: boolean) => void
+  onResolve: PermissionApprovalWidgetProps['onResolve']
 }
 
-function riskLabel(risk: string): string {
-  switch (risk) {
-    case 'safe': return '安全'
-    case 'write': return '写入'
-    case 'network': return '网络'
-    case 'destructive': return '高风险'
-    default: return '未知'
+function BashPermissionOptions({
+  msgId,
+  request,
+  loading,
+  setLoading,
+  onResolve
+}: BashPermissionOptionsProps) {
+  const cmd = (request.args?.commandLine || request.args?.CommandLine || request.args?.command || '').trim()
+  const ruleOptions = useMemo(
+    () => request.ruleOptions && request.ruleOptions.length > 0
+      ? request.ruleOptions
+      : generateCommandRuleOptions(cmd),
+    [cmd, request.ruleOptions]
+  )
+  const [selectedRule, setSelectedRule] = useState<CommandRuleOption>(ruleOptions[0])
+
+  const dispatchApproval = async (scope: PermissionRuleScope) => {
+    if (loading) return
+    setLoading(true)
+    try {
+      if (scope !== 'once' && window.api.permissions?.addRule) {
+        await window.api.permissions.addRule(selectedRule.rule, scope)
+      }
+      await onResolve(msgId, request.id, true)
+    } catch(e) {
+       console.error(e)
+    } finally {
+      setLoading(false)
+    }
   }
+
+  return (
+    <div className="permission-review">
+       <div className="permission-command-block">
+         <div className="permission-section-label">完整命令</div>
+         <code>{cmd}</code>
+       </div>
+       <div className="permission-review-grid">
+         <div className="permission-review-main">
+           <div className="permission-facts">
+             <span>{actionLabel(request.action)}</span>
+             {(request.impacts || []).map((impact) => <span key={impact}>{impact}</span>)}
+           </div>
+           <div className="permission-review-reason">
+             {request.reason || '未提供风险原因，按当前风险等级处理。'}
+           </div>
+           <div className="permission-section-label">允许规则</div>
+           <div className="permission-rule-list">
+             {ruleOptions.map((option) => (
+               <button
+                 key={option.id}
+                 className={`permission-rule-btn ${selectedRule.id === option.id ? 'selected' : ''}`}
+                 onClick={() => setSelectedRule(option)}
+                 disabled={loading}
+               >
+                 <span>{option.label}</span>
+                 <code>{option.rule}</code>
+                 <small>{option.description}</small>
+               </button>
+             ))}
+           </div>
+           {ruleOptions.length === 1 && request.risk === 'destructive' && (
+             <div className="permission-rule-note">高风险命令不提供通配保存，只能选择精确命令。</div>
+           )}
+         </div>
+         <div className="permission-scope-list">
+           <div className="permission-section-label">授权方式</div>
+           {PERMISSION_SCOPE_OPTIONS.map((option) => (
+             <button
+               key={option.id}
+               className="permission-option-btn"
+               onClick={() => dispatchApproval(option.id)}
+               disabled={loading}
+             >
+               {option.label}
+             </button>
+           ))}
+           <button
+             className="permission-option-btn permission-deny-btn"
+             onClick={() => onResolve(msgId, request.id, false)}
+             disabled={loading}
+           >
+             拒绝执行
+           </button>
+         </div>
+       </div>
+    </div>
+  )
 }
 
 export default function PermissionApprovalWidget({ msgId, requests, onResolve }: PermissionApprovalWidgetProps) {
@@ -50,64 +137,6 @@ export default function PermissionApprovalWidget({ msgId, requests, onResolve }:
 
   if (pendingRequests.length === 0) return null
 
-  // 批量拒绝所有兜底
-  const handleDenyAll = async () => {
-    if (loadingAll) return
-    setLoadingAll(true)
-    try {
-      for (const req of pendingRequests) {
-        await onResolve(msgId, req.id, false)
-      }
-    } finally {
-      setLoadingAll(false)
-    }
-  }
-
-  // 组件：负责单行的 Bash 快捷按键处理
-  const BashPermOptions = ({ request }: { request: PermissionRequest }) => {
-    const cmd = (request.args?.commandLine || request.args?.CommandLine || request.args?.command || '').trim();
-    const opts = useMemo(() => generateCommandOptions(cmd), [cmd]);
-
-    const dispatchApproval = async (rule: string, scope: 'once'|'session'|'global') => {
-      if (loadingAll) return;
-      setLoadingAll(true);
-      try {
-        if (scope !== 'once' && (window.api as any)?.permissions?.addRule) {
-          // @ts-ignore
-          await window.api.permissions.addRule(rule, scope);
-        }
-        await onResolve(msgId, request.id, true);
-      } catch(e) {
-         console.error(e)
-      } finally {
-        setLoadingAll(false);
-      }
-    };
-
-    return (
-      <div style={{ marginTop: '8px' }}>
-         <div className="permission-cmd-highlight">
-           执行: <code style={{ userSelect: 'all', color: 'var(--text-main)' }}>{cmd}</code>
-         </div>
-         <Stack gap={1} style={{ marginTop: '8px' }}>
-           <button className="permission-option-btn" onClick={() => dispatchApproval(cmd, 'once')} disabled={loadingAll}>
-             <span style={{color: '#16a34a', fontWeight: 'bold', width: '20px'}}>✓</span> 仅此次允许执行
-           </button>
-           {opts[1] && (
-             <button className="permission-option-btn" onClick={() => dispatchApproval(opts[1].rule, 'session')} disabled={loadingAll}>
-               <span style={{color: '#eab308', fontWeight: 'bold', width: '20px'}}>⚡</span> 允许本会话使用 <code>{opts[1].rule}</code>
-             </button>
-           )}
-           {opts[2] && (
-             <button className="permission-option-btn" onClick={() => dispatchApproval(opts[2].rule, 'global')} disabled={loadingAll}>
-               <span style={{color: '#3b82f6', fontWeight: 'bold', width: '20px'}}>🌐</span> 全局始终允许 <code>{opts[2].rule}</code>
-             </button>
-           )}
-         </Stack>
-      </div>
-    )
-  }
-
   return (
     <Card variant="default" className="permission-approval-float-card dropdown-shadow">
       <Stack gap={1.5}>
@@ -116,13 +145,10 @@ export default function PermissionApprovalWidget({ msgId, requests, onResolve }:
              <div className="permission-approval-pulse-icon">⚠️</div>
              <span className="permission-approval-title">需要您的授权 ({pendingRequests.length} 行动)</span>
           </Flex>
-          
         </Flex>
-
         <Stack gap={1}>
           {pendingRequests.map((request) => {
             const isBash = (request.toolName === 'Bash' || request.toolName === 'PowerShell') && (request.args?.commandLine || request.args?.CommandLine || request.args?.command)
-            
             return (
               <div key={request.id} className={`permission-approval-float-item permission-approval-risk-${request.risk}`}>
                 <Flex align="center" justify="between" gap={3}>
@@ -132,10 +158,15 @@ export default function PermissionApprovalWidget({ msgId, requests, onResolve }:
                     <span className="permission-approval-desc-inline">{request.description}</span>
                   </Flex>
                 </Flex>
-                
-                <div style={{ marginTop: '8px' }}>
+                <div>
                   {isBash ? (
-                     <BashPermOptions request={request} />
+                     <BashPermissionOptions
+                       msgId={msgId}
+                       request={request}
+                       loading={loadingAll}
+                       setLoading={setLoadingAll}
+                       onResolve={onResolve}
+                     />
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       <pre style={{ margin: 0, padding: '8px', background: 'var(--bg-surface)', borderRadius: '4px', fontSize: '11px', overflowX: 'auto', border: '1px solid var(--border-color)', color: 'var(--text-secondary)' }}>
@@ -148,7 +179,6 @@ export default function PermissionApprovalWidget({ msgId, requests, onResolve }:
                     </div>
                   )}
                 </div>
-                
               </div>
             )
           })}

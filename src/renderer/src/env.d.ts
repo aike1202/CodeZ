@@ -89,6 +89,9 @@ declare global {
         delete: (rulePath: string) => Promise<boolean>
         rename: (oldPath: string, newFilename: string, workspaceRoot: string, scope: string) => Promise<boolean>
       }
+      permissions: {
+        addRule: (rule: string, scope: 'session' | 'workspace' | 'global') => Promise<void>
+      }
       settings: {
         get: () => Promise<any>
         save: (settings: any) => Promise<boolean>

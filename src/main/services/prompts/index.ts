@@ -6,7 +6,7 @@
 //   - Layer 1 Core: Identity, Security, Harness, EngineeringPhilosophy, ReasoningPolicy, DecisionPolicy
 //   - Layer 2 Context: Memory, ContextManagement, RepositoryRules, Environment, GitStatus, Skills
 //   - Layer 3 Execution: Investigation, Editing, Verification, TaskManagement, ToolPolicy,
-//                        FailureRecovery, PlanMode, WorkerDelegation, Completion, OutputPolicy
+//                        FailureRecovery, TaskManagement, WorkerDelegation, Completion, OutputPolicy
 //   - Layer 4 Dynamic: AvailableTools, SubAgents
 //
 // 每个 Section 统一遵循 Purpose / Policy / Exceptions / Never / Golden Rule 模板。

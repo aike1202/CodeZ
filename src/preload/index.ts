@@ -300,7 +300,7 @@ const api = {
   },
 
   permissions: {
-    addRule: (rule: string, scope: 'session' | 'global'): Promise<void> =>
+    addRule: (rule: string, scope: 'session' | 'workspace' | 'global'): Promise<void> =>
       ipcRenderer.invoke('permissions:addRule', rule, scope)
   },
 

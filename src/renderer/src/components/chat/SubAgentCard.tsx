@@ -57,6 +57,7 @@ export function SubAgentCard({
 
   const isRunning = subAgent.status === 'running'
   const isFailed = subAgent.status === 'failed'
+  const isInterrupted = subAgent.status === 'interrupted'
 
   const durationMs = useMemo(() => {
     const end = subAgent.completedAt || Date.now()
@@ -116,7 +117,7 @@ export function SubAgentCard({
         <span className="subagent-card-status">
           {isRunning ? (
             <IconLoading width="14" height="14" className="spin-slow" />
-          ) : isFailed ? (
+          ) : isFailed || isInterrupted ? (
             <IconWarning width="14" height="14" className="subagent-card-status-icon--error" />
           ) : (
             <IconCheck width="14" height="14" style={{ color: 'var(--text-success, #059669)' }} />
@@ -147,6 +148,7 @@ export function SubAgentCard({
           <span>工具调用 {toolCount}</span>
           {filesExamined > 0 && <span>· 读取 {filesExamined} 文件</span>}
           {isRunning && <span className="subagent-card-meta-running">· 运行中…</span>}
+          {isInterrupted && <span className="subagent-card-meta-running">· 已中断，可继续</span>}
           {subAgent.depth && <span>· {subAgent.depth}</span>}
         </div>
       )}

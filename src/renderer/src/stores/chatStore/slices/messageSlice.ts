@@ -697,7 +697,12 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
   setPlanReview: (review) => set({ planReview: review }),
   setActivePlanStreamId: (streamId) => set({ activePlanStreamId: streamId }),
   setPendingPrompt: (prompt) => set({ pendingPrompt: prompt }),
-  setTasks: (tasks) => set({ tasks }),
+  setTasks: (tasks) => set((s) => ({
+    tasks,
+    sessions: s.sessions.map((session) =>
+      session.id === s.activeSessionId ? { ...session, tasks } : session
+    )
+  })),
 
   revertToMessage: async (msgId: string) => {
     const s = get()

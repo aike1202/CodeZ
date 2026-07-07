@@ -193,12 +193,10 @@ export function buildUnifiedTimeline(
           verbDisplay = tc.status === 'running' ? 'Submitting' : 'Submitted'
         } else if (tc.name === 'SubAgentRunner' || tc.name === 'spawn' || tc.name === 'delegate') {
           verbDisplay = tc.status === 'running' ? 'Dispatching' : 'Dispatched'
-        } else if (tc.name === 'DelegateTasks' || tc.name === 'ExecutePlanParallel') {
+        } else if (tc.name === 'DelegateTasks') {
           verbDisplay = tc.status === 'running' ? 'Executing' : 'Executed'
         } else if (tc.name === 'Write' || tc.name === 'write_to_file') {
           verbDisplay = tc.status === 'running' ? 'Saving' : 'Saved'
-        } else if (tc.name === 'UpdatePlanStep') {
-          verbDisplay = tc.status === 'running' ? 'Updating' : 'Updated'
         } else if (tc.name === 'Skill' || tc.name === 'invoke_skill') {
           verbDisplay = tc.status === 'running' ? 'Invoking' : 'Invoked'
         } else if (tc.name === 'WebFetch' || tc.name === 'web_fetch' || tc.name === 'fetch') {
@@ -279,8 +277,8 @@ export function buildUnifiedTimeline(
           }
         }
 
-        // SubAgentRunner / spawn / DelegateTasks / ExecutePlanParallel：展示委派目标
-        if (tc.name === 'SubAgentRunner' || tc.name === 'spawn' || tc.name === 'DelegateTasks' || tc.name === 'ExecutePlanParallel') {
+        // SubAgentRunner / spawn / DelegateTasks：展示委派目标
+        if (tc.name === 'SubAgentRunner' || tc.name === 'spawn' || tc.name === 'DelegateTasks') {
           try {
             const ta = JSON.parse(tc.args)
             targetDisplay = ta.description || ta.subagent_type || '子任务'

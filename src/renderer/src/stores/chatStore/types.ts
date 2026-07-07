@@ -71,7 +71,7 @@ export interface SubAgentRecord {
   depth?: 'quick' | 'normal' | 'exhaustive'
   expectations?: { questions: string[]; outOfScope?: string[] }
   parentToolCallId: string
-  status: 'running' | 'completed' | 'failed'
+  status: 'running' | 'completed' | 'failed' | 'interrupted'
   startedAt: number
   completedAt?: number
   content: string
@@ -151,6 +151,7 @@ export interface ChatSession {
   isDeleted?: boolean
   deletedAt?: number
   linkedPlanSlug?: string
+  tasks?: TaskItem[]
 }
 
 export interface ChatState {

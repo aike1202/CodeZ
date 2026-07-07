@@ -19,10 +19,6 @@ import { DelegateTasksTool } from './builtin/DelegateTasksTool'
 import { SkillTool } from './builtin/SkillTool'
 import { RollbackLastEditTool } from './builtin/RollbackLastEditTool'
 import { UpdateResumeStateTool } from './builtin/UpdateResumeStateTool'
-import { EnterPlanModeTool } from './builtin/EnterPlanModeTool'
-import { ExitPlanModeTool } from './builtin/ExitPlanModeTool'
-import { UpdatePlanStepTool } from './builtin/UpdatePlanStepTool'
-import { ExecutePlanParallelTool } from './builtin/ExecutePlanParallelTool'
 import { WebSearchTool } from './builtin/WebSearchTool'
 import { WebFetchTool } from './builtin/WebFetchTool'
 
@@ -58,10 +54,6 @@ export class ToolManager {
       new SkillTool(),
       new RollbackLastEditTool(),
       new UpdateResumeStateTool(),
-      new EnterPlanModeTool(),
-      new ExitPlanModeTool(),
-      new UpdatePlanStepTool(),
-      new ExecutePlanParallelTool(),
       new WebSearchTool(),
       new WebFetchTool(),
       new SubAgentRunnerTool(),
@@ -85,7 +77,7 @@ export class ToolManager {
     return Array.from(this.tools.values())
   }
 
-  /** 返回兼容 OpenAI 等模型格式的 Tool Definitions 列表 */
+  /** 返回默认执行路径的 Tool Definitions 列表。 */
   getToolDefinitions(): ToolDefinition[] {
     return this.getAllTools().map(tool => ({
       type: 'function',
@@ -97,7 +89,7 @@ export class ToolManager {
     }))
   }
 
-  /** 返回只读工具集合（用于 Plan Mode） */
+  /** 返回只读工具集合（用于只读子智能体） */
   getReadOnlyTools(): ToolDefinition[] {
     return this.getAllTools()
       .filter(t => ToolManager.READ_ONLY_TOOL_NAMES.has(t.name))

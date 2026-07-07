@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from 'react'
 import { useChatStore } from '../../stores/chatStore'
 import { CheckCircle2, CircleDashed, Loader2, ListTodo, XCircle, ChevronDown, ChevronUp } from 'lucide-react'
 import type { TaskItem, TaskStatus } from '../../../../shared/types/task'
-import '../PlanCapsule.css'
 import './TaskCapsule.css'
 
 /** 展示顺序：in_progress → pending → completed → cancelled */
@@ -39,9 +38,12 @@ export const TaskCapsule: React.FC = () => {
 
   const sorted = [...tasks].sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status])
 
-  // 从 tasks 里取第一个有 title/subtitle 的值作为清单头
-  const listTitle = tasks.find(t => t.title)?.title
-  const listSubtitle = tasks.find(t => t.subtitle)?.subtitle
+  // 从 tasks 里取第一个 TaskGroup 元数据作为清单头，兼容旧 title/subtitle
+  const listTitle = tasks.find(t => t.groupTitle)?.groupTitle || tasks.find(t => t.title)?.title
+  const listSubtitle = tasks.find(t => t.groupSubtitle)?.groupSubtitle || tasks.find(t => t.subtitle)?.subtitle
+  const groupRisk = tasks.find(t => t.riskLevel)?.riskLevel
+  const approvalStatus = tasks.find(t => t.approvalStatus)?.approvalStatus
+  const requiresApproval = tasks.some(t => t.requiresApproval)
 
   const getStatusIcon = (status: TaskStatus) => {
     switch (status) {
@@ -78,6 +80,13 @@ export const TaskCapsule: React.FC = () => {
             <div>
               {listTitle ? <h4>{listTitle}</h4> : <h4>任务清单</h4>}
               {listSubtitle ? <p className="task-list-subtitle">{listSubtitle}</p> : null}
+              {(groupRisk || requiresApproval) ? (
+                <p className="task-list-subtitle">
+                  {groupRisk ? `风险: ${groupRisk}` : null}
+                  {groupRisk && requiresApproval ? ' · ' : null}
+                  {requiresApproval ? `审批: ${approvalStatus || 'pending'}` : null}
+                </p>
+              ) : null}
             </div>
             <span className="plan-progress">
               {total > 0 ? Math.round((completed / total) * 100) : 0}%
@@ -90,6 +99,9 @@ export const TaskCapsule: React.FC = () => {
                   {getStatusIcon(task.status)}
                   <div className="step-info">
                     <span className="step-title">{task.subject}</span>
+                    {task.acceptanceCriteria && task.acceptanceCriteria.length > 0 ? (
+                      <span className="step-desc">{task.acceptanceCriteria.join(' / ')}</span>
+                    ) : null}
                   </div>
                 </li>
               ))}

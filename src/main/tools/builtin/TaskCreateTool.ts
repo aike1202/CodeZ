@@ -1,5 +1,9 @@
 import { Tool, ToolContext } from '../Tool'
 import { TaskStore } from '../../services/TaskStore'
+import type { TaskApprovalStatus, TaskRiskLevel } from '../../../shared/types/task'
+
+const VALID_RISK_LEVELS: TaskRiskLevel[] = ['low', 'medium', 'high']
+const VALID_APPROVAL_STATUSES: TaskApprovalStatus[] = ['not_required', 'pending', 'approved', 'changes_requested', 'rejected']
 
 /**
  * 创建一个或多个轻量 Task（待办）。
@@ -31,8 +35,12 @@ export class TaskCreateTool extends Tool {
       'Tasks start as "pending". Declare `files` if you know which files a task will touch — this enables',
       'parallel delegation with conflict checking.',
       '',
-      'Optionally include `title` and `subtitle` at the list level (first task only) — these appear in the',
-      'task capsule header and help the user recognize the project context when resuming a session.'
+      'Use `groupTitle`/`groupSubtitle` as internal display metadata for multi-step work, but describe it',
+      'to the user as steps, phases, or current progress — do not expose the term "TaskGroup".',
+      'For high-risk work, set `riskLevel` to "high", `requiresApproval` to true, and `approvalStatus`',
+      'to "pending"; ask for approval before editing files.',
+      '',
+      'Optionally include `title` and `subtitle` as legacy display aliases. Prefer group metadata for new work.'
     ].join('\n')
   }
 
@@ -47,6 +55,32 @@ export class TaskCreateTool extends Tool {
         subtitle: {
           type: 'string',
           description: 'Optional list-level subheading, e.g. "React + Electron desktop todo app".'
+        },
+        groupId: {
+          type: 'string',
+          description: 'Optional stable group id. If omitted, TaskStore keeps tasks ungrouped.'
+        },
+        groupTitle: {
+          type: 'string',
+          description: 'Internal heading for multi-step work. Prefer this over title for new work.'
+        },
+        groupSubtitle: {
+          type: 'string',
+          description: 'Internal subheading or short summary for multi-step work.'
+        },
+        riskLevel: {
+          type: 'string',
+          enum: VALID_RISK_LEVELS,
+          description: 'Risk level for this multi-step work. High-risk work usually requires approval.'
+        },
+        requiresApproval: {
+          type: 'boolean',
+          description: 'Whether this work must be approved before implementation.'
+        },
+        approvalStatus: {
+          type: 'string',
+          enum: VALID_APPROVAL_STATUSES,
+          description: 'Approval status for this work. Use pending when approval is required but not granted.'
         },
         tasks: {
           type: 'array',
@@ -70,6 +104,15 @@ export class TaskCreateTool extends Tool {
               activeForm: {
                 type: 'string',
                 description: 'Present-continuous label for the progress spinner, e.g. "Extracting useAuth hook".'
+              },
+              acceptanceCriteria: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Concrete checks that must be true before marking this task completed.'
+              },
+              verificationCommand: {
+                type: 'string',
+                description: 'Recommended command to verify this task.'
               }
             },
             required: ['subject']
@@ -86,7 +129,24 @@ export class TaskCreateTool extends Tool {
       return JSON.stringify({ ok: false, error: 'TaskCreate requires an active session.' })
     }
 
-    let parsed: { title?: string; subtitle?: string; tasks?: Array<{ subject?: string; description?: string; files?: string[]; activeForm?: string }> }
+    let parsed: {
+      title?: string
+      subtitle?: string
+      groupId?: string
+      groupTitle?: string
+      groupSubtitle?: string
+      riskLevel?: string
+      requiresApproval?: boolean
+      approvalStatus?: string
+      tasks?: Array<{
+        subject?: string
+        description?: string
+        files?: string[]
+        activeForm?: string
+        acceptanceCriteria?: string[]
+        verificationCommand?: string
+      }>
+    }
     try {
       parsed = JSON.parse(args || '{}')
     } catch {
@@ -97,8 +157,16 @@ export class TaskCreateTool extends Tool {
     if (items.length === 0) {
       return JSON.stringify({ ok: false, error: 'TaskCreate requires a non-empty `tasks` array with subjects.' })
     }
+    if (parsed.riskLevel && !VALID_RISK_LEVELS.includes(parsed.riskLevel as TaskRiskLevel)) {
+      return JSON.stringify({ ok: false, error: `Invalid riskLevel '${parsed.riskLevel}'. Must be one of: ${VALID_RISK_LEVELS.join(', ')}.` })
+    }
+    if (parsed.approvalStatus && !VALID_APPROVAL_STATUSES.includes(parsed.approvalStatus as TaskApprovalStatus)) {
+      return JSON.stringify({ ok: false, error: `Invalid approvalStatus '${parsed.approvalStatus}'. Must be one of: ${VALID_APPROVAL_STATUSES.join(', ')}.` })
+    }
 
     const store = TaskStore.getInstance()
+    const approvalStatus: TaskApprovalStatus = parsed.approvalStatus as TaskApprovalStatus
+      || (parsed.requiresApproval ? 'pending' : 'not_required')
     const created = store.create(
       sessionId,
       items.map((t, i) => ({
@@ -106,6 +174,14 @@ export class TaskCreateTool extends Tool {
         description: t.description,
         files: t.files,
         activeForm: t.activeForm,
+        groupId: parsed.groupId,
+        groupTitle: parsed.groupTitle || parsed.title,
+        groupSubtitle: parsed.groupSubtitle || parsed.subtitle,
+        riskLevel: parsed.riskLevel as TaskRiskLevel | undefined,
+        requiresApproval: parsed.requiresApproval,
+        approvalStatus,
+        acceptanceCriteria: t.acceptanceCriteria,
+        verificationCommand: t.verificationCommand,
         // 仅第一项携带 title/subtitle（列表头，不是每个 task 都有）
         ...(i === 0 && parsed.title ? { title: parsed.title } : {}),
         ...(i === 0 && parsed.subtitle ? { subtitle: parsed.subtitle } : {}),

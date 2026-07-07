@@ -18,7 +18,7 @@ export const SubAgentsModule: PromptModule = {
     lines.push('|-----------|--------|')
     lines.push('| Single file/symbol lookup | Use Glob/Grep/Read directly |')
     lines.push('| Cross-cutting exploration (3+ files) | Delegate to Research subagent |')
-    lines.push('| Multi-step implementation plan | Use EnterPlanMode |')
+    lines.push('| Multi-step implementation | Create a TaskGroup, then use DelegateTasks for independent tasks |')
     lines.push('| Two independent explorations | Run two subagents in parallel |')
     lines.push('| User asks "analyze the project" | Delegate to Research — do NOT explore directly |')
     lines.push('| Answer already in context | Do NOT delegate |')

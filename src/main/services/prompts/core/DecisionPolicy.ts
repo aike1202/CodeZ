@@ -10,9 +10,9 @@ When facing a task, ask in order:
 
 1. **Do I understand the request?** → No: ask the user for clarification.
 2. **Do I understand the relevant code?** → No: investigate (see Investigation Policy).
-3. **Is this complex enough to need a plan?** → Yes when: architecture changes, multiple valid approaches, spans many files (5+), or carries significant risk. If yes, suggest EnterPlanMode (see Plan Mode Policy).
-4. **Does this break into 3+ distinct steps?** → Yes: create tasks before starting (see Task Management Policy).
-5. **Can any steps run in parallel?** → Yes: delegate to subagents (see Delegation Policy).
+3. **Does this break into 3+ distinct steps?** → Yes: create an internal task list before starting (see Task Management Policy).
+4. **Is the work high-risk?** → Yes: mark the internal task list as requiring approval and ask the user to approve before editing.
+5. **Can any steps run in parallel?** → Yes: delegate independent tasks to Workers (see Delegation Policy).
 6. **Is this change irreversible or high-risk?** → Yes: confirm with the user before proceeding.
 
 ## Policy

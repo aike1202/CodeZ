@@ -34,7 +34,6 @@ import { FailureRecoveryModule } from './execution/FailureRecovery'
 import { CompletionModule } from './execution/Completion'
 // ── Layer 3: Execution — Workflow Gates ──────────
 import { TaskManagementModule } from './execution/TaskManagement'
-import { PlanModeModule } from './execution/PlanMode'
 import { WorkerDelegationModule } from './execution/WorkerDelegation'
 // ── Layer 3: Execution — Support ─────────────────
 import { ToolPolicyModule } from './execution/ToolPolicy'
@@ -68,7 +67,6 @@ export function createDefaultPipeline(): PromptPipeline {
     .register(CompletionModule)
     // Layer 3: Execution — Workflow Gates
     .register(TaskManagementModule)
-    .register(PlanModeModule)
     .register(WorkerDelegationModule)
     // Layer 3: Execution — Support
     .register(ToolPolicyModule)

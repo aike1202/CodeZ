@@ -1,14 +1,19 @@
 /**
  * 轻量 Task（待办）类型定义。
  *
- * Task 是"本次会话内"的执行追踪单元，与重型 Plan 互补：
- * - Plan 回答"该做什么"（规划 + 用户审批 + 跨会话落盘）
- * - Task 回答"做到哪了"（模型自主创建/打勾，仅会话内存，不落盘）
+ * Task 是会话级执行追踪单元，会随 SessionData.tasks 落盘并在会话恢复时加载。
+ * 统一 Task 系统承担：
+ * - 简单任务：直接执行，不创建 Task
+ * - 多步任务：创建 TaskGroup 并持续更新状态
+ * - 高风险任务：TaskGroup 标记 requiresApproval，先审批再执行
+ * - 独立任务：通过 DelegateTasks 并行委派
  *
- * Task 可脱离 Plan 独立存在；需要并行时通过 DelegateTasks 委派给多个 Worker。
+ * Legacy Plan 仍可兼容读取，但默认执行路径应优先使用 Task。
  */
 
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
+export type TaskRiskLevel = 'low' | 'medium' | 'high'
+export type TaskApprovalStatus = 'not_required' | 'pending' | 'approved' | 'changes_requested' | 'rejected'
 
 export interface TaskItem {
   /** 稳定短 ID（t1 / t2 ...）；委派 Worker 时按此引用 */
@@ -22,6 +27,22 @@ export interface TaskItem {
   /** 详细描述：目标 + 验收标准 */
   description: string
   status: TaskStatus
+  /** TaskGroup 标识；同一组任务共享审批与目标上下文 */
+  groupId?: string
+  /** TaskGroup 展示标题；前端优先使用该字段作为清单头 */
+  groupTitle?: string
+  /** TaskGroup 副标题/摘要 */
+  groupSubtitle?: string
+  /** 风险等级：high 通常需要用户审批后再执行 */
+  riskLevel?: TaskRiskLevel
+  /** 是否要求用户审批该 TaskGroup */
+  requiresApproval?: boolean
+  /** 审批状态；requiresApproval=false 时为 not_required */
+  approvalStatus?: TaskApprovalStatus
+  /** 结构化验收标准，避免只把验收条件塞进 description */
+  acceptanceCriteria?: string[]
+  /** 推荐验证命令，完成任务前优先运行 */
+  verificationCommand?: string
   /** 涉及文件路径列表（相对 workspaceRoot）；委派 Worker 时用于冲突校验与共享工作区写权限范围 */
   files?: string[]
   /** 进行时文案，给进度条显示，如 "提取 useAuth hook 中" */

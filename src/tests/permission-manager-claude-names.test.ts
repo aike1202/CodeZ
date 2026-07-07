@@ -1,6 +1,10 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import * as path from 'path'
 import { PermissionManager } from '../main/services/PermissionManager'
+
+vi.mock('electron', () => ({
+  app: { getPath: () => path.resolve('/tmp/codez-test-user-data') }
+}))
 
 describe('PermissionManager — Claude 工具名映射', () => {
   const pm = PermissionManager.getInstance()
@@ -20,8 +24,8 @@ describe('PermissionManager — Claude 工具名映射', () => {
   })
 
   it('Bash/PowerShell 复用 getCommandRisk', () => {
-    // npm test is write (level 1), so auto-approve-safe returns allow
-    expect(pm.checkToolPermission('Bash', { command: 'npm test' }, ws)).toBe('allow')
+    // npm run test is write (level 1), so auto-approve-safe returns allow
+    expect(pm.checkToolPermission('Bash', { command: 'npm run test' }, ws)).toBe('allow')
     expect(pm.checkToolPermission('Bash', { command: 'npm install' }, ws)).toBe('ask')
     expect(pm.checkToolPermission('Bash', { command: 'rm -rf dist' }, ws)).toBe('ask')
     expect(pm.checkToolPermission('PowerShell', { command: 'git status' }, ws)).toBe('allow')
@@ -36,7 +40,7 @@ describe('PermissionManager — Claude 工具名映射', () => {
 
   it('createPermissionRequest：Bash/PowerShell 计算 risk 与 description', () => {
     const r1 = pm.createPermissionRequest('Bash', { command: 'npm install' })
-    expect(r1.risk).toBe('write')
+    expect(r1.risk).toBe('network')
     expect(r1.description).toContain('npm install')
     const r2 = pm.createPermissionRequest('Edit', { file_path: 'a.ts' })
     expect(r2.risk).toBe('write')

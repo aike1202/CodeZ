@@ -5,7 +5,7 @@ import type { ToolDefinition } from '../../../shared/types/provider'
 /**
  * Research 研究子智能体：
  * 只读探索代码库，返回 Markdown 研究报告 + 结构化元信息。
- * 与 PlanSubAgent 正交 —— Plan 探索为出计划，Research 探索为返回发现。
+ * 与执行型 Worker 正交：Research 只返回发现，不创建计划、不写文件。
  */
 export const ResearchSubAgent: SubAgentDefinition = {
   type: 'Research',
@@ -22,7 +22,7 @@ export const ResearchSubAgent: SubAgentDefinition = {
   whenNotToUse: [
     'Single file or single symbol lookup — use Glob/Grep/Read directly.',
     'The answer is already available in your conversation context.',
-    'The task requires writing or modifying files (use EnterPlanMode → Plan subagent instead).',
+    'The task requires writing or modifying files (use TaskGroup in the main agent instead).',
   ].join('\n'),
   costHint: 'Up to 12 read-only tool calls. Good for medium-complexity exploration.',
 

@@ -41,6 +41,28 @@ describe('ToolManager.getReadOnlyTools()', () => {
 })
 
 describe('Plan mode 工具一致性', () => {
+  it('默认工具集应使用 Task 系统而不是暴露 Plan 入口', () => {
+    const tm = new ToolManager()
+    const names = new Set(tm.getToolDefinitions().map(t => t.function.name))
+
+    expect(names.has('TaskCreate')).toBe(true)
+    expect(names.has('TaskUpdate')).toBe(true)
+    expect(names.has('TaskGet')).toBe(true)
+    expect(names.has('TaskList')).toBe(true)
+    expect(names.has('DelegateTasks')).toBe(true)
+
+    expect(names.has('EnterPlanMode')).toBe(false)
+    expect(names.has('ExitPlanMode')).toBe(false)
+    expect(names.has('UpdatePlanStep')).toBe(false)
+    expect(names.has('ExecutePlanParallel')).toBe(false)
+  })
+
+  it('不再提供 legacy Plan 工具定义接口', () => {
+    const tm = new ToolManager()
+
+    expect('getLegacyPlanToolDefinitions' in tm).toBe(false)
+  })
+
   it('只读工具集合应是全部工具的子集', () => {
     const tm = new ToolManager()
     const all = tm.getToolDefinitions()

@@ -75,8 +75,6 @@ export function getToolNoun(toolName: string): string {
     case 'Write':
     case 'write_to_file':
       return '保存文件'
-    case 'UpdatePlanStep':
-      return '更新计划'
     case 'Skill':
     case 'invoke_skill':
       return '技能'

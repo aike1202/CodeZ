@@ -72,6 +72,14 @@ export class TaskGetTool extends Tool {
         subject: task.subject,
         description: task.description,
         status: task.status,
+        ...(task.groupId ? { groupId: task.groupId } : {}),
+        ...(task.groupTitle ? { groupTitle: task.groupTitle } : {}),
+        ...(task.groupSubtitle ? { groupSubtitle: task.groupSubtitle } : {}),
+        ...(task.riskLevel ? { riskLevel: task.riskLevel } : {}),
+        ...(task.requiresApproval !== undefined ? { requiresApproval: task.requiresApproval } : {}),
+        ...(task.approvalStatus ? { approvalStatus: task.approvalStatus } : {}),
+        ...(task.acceptanceCriteria && task.acceptanceCriteria.length > 0 ? { acceptanceCriteria: task.acceptanceCriteria } : {}),
+        ...(task.verificationCommand ? { verificationCommand: task.verificationCommand } : {}),
         ...(task.files && task.files.length > 0 ? { files: task.files } : {}),
         ...(task.activeForm ? { activeForm: task.activeForm } : {})
       }

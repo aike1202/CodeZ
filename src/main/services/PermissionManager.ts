@@ -1,5 +1,5 @@
 import { PermissionRuleStore } from './PermissionRuleStore'
-import { CommandAnalyzer, CommandRisk } from './CommandAnalyzer'
+import { CommandAnalyzer, CommandRisk, type CommandAction, type CommandRuleOption } from './CommandAnalyzer'
 import * as path from 'path'
 
 export type PermissionResult = 'allow' | 'ask' | 'deny'
@@ -8,8 +8,12 @@ export interface PermissionRequest {
   id: string
   toolName: string
   risk: CommandRisk
+  action?: CommandAction
+  reason?: string
+  impacts?: string[]
   description: string
   args: any
+  ruleOptions?: CommandRuleOption[]
 }
 
 export class PermissionManager {
@@ -34,7 +38,7 @@ export class PermissionManager {
 
   public checkToolPermission(toolName: string, parsedArgs: any, workspaceRoot: string, workspaceMode: 'ask' | 'auto-approve-safe' | 'full-access' = 'auto-approve-safe'): PermissionResult {
     // 0. Base safe tools
-    if (['list_files', 'update_resume_state', 'UpdatePlanStep', 'ExitPlanMode', 'Read', 'NotebookEdit', 'Glob', 'Grep', 'Skill', 'PushNotification', 'AskUserQuestion', 'view_file', 'grep_search', 'TaskCreate', 'TaskUpdate', 'TaskList'].includes(toolName)) {
+    if (['list_files', 'update_resume_state', 'Read', 'NotebookEdit', 'Glob', 'Grep', 'Skill', 'PushNotification', 'AskUserQuestion', 'view_file', 'grep_search', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'].includes(toolName)) {
       return 'allow'
     }
 
@@ -52,16 +56,17 @@ export class PermissionManager {
     // 1. Terminal Commands
     if (toolName === 'Bash' || toolName === 'PowerShell' || toolName === 'run_command') {
       const command = this.getCommandFromArgs(parsedArgs)
-      const risk = this.getCommandRisk(command)
+      const analysis = CommandAnalyzer.analyzeDetailed(command)
+      const risk = analysis.risk
 
       // User request: full-access should also ask for dangerous commands
       if (workspaceMode === 'full-access' && risk !== 'destructive') {
         return 'allow'
       }
 
-      // Check Whitelist first
-      if (PermissionRuleStore.getInstance().isCommandWhitelisted(command)) {
-        return 'allow'
+      const ruleEffect = PermissionRuleStore.getInstance().getCommandRuleEffect(command, workspaceRoot)
+      if (ruleEffect) {
+        return ruleEffect
       }
 
       if (risk === 'destructive') return 'ask' // always ask for destructive
@@ -84,7 +89,7 @@ export class PermissionManager {
           targetPath = path.resolve(workspaceRoot, targetPath)
         }
         
-        if (PermissionRuleStore.getInstance().isPathWhitelisted(targetPath)) {
+        if (PermissionRuleStore.getInstance().isPathWhitelisted(targetPath, workspaceRoot)) {
           return 'allow'
         }
 
@@ -115,8 +120,20 @@ export class PermissionManager {
 
     if (toolName === 'Bash' || toolName === 'PowerShell' || toolName === 'run_command') {
       const cmd = this.getCommandFromArgs(parsedArgs)
-      risk = this.getCommandRisk(cmd)
+      const analysis = CommandAnalyzer.analyzeDetailed(cmd)
+      risk = analysis.risk
       description = `Execute command: ${cmd}`
+      return {
+        id: `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+        toolName,
+        risk,
+        action: analysis.action,
+        reason: analysis.reason,
+        impacts: analysis.impacts,
+        description,
+        args: parsedArgs,
+        ruleOptions: analysis.ruleOptions
+      }
     } else if (['Edit', 'Write', 'write_to_file', 'replace_file_content', 'multi_replace_file_content'].includes(toolName)) {
       const targetPath = parsedArgs?.file_path || parsedArgs?.filePath || parsedArgs?.TargetFile || parsedArgs?.path || 'unknown path'
       risk = 'write'
