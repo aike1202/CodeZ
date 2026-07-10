@@ -120,11 +120,15 @@ export async function streamWithTimeoutRetry(
         clearTimers()
         callbacks.onDone(fullContent, stopReason, txId)
       },
-      onError: (error) => {
+      onError: (error, code) => {
         if (suppressCallbacks || externalSignal.aborted) return
         completed = true
         clearTimers()
-        callbacks.onError(error)
+        callbacks.onError(error, code)
+      },
+      onUsage: (usage) => {
+        if (suppressCallbacks || externalSignal.aborted) return
+        callbacks.onUsage?.(usage)
       }
     }
 

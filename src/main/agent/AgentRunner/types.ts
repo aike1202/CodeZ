@@ -1,9 +1,13 @@
 import type { StreamCallbacks, ChatRequestConfig } from '../../services/ChatService'
-import type { ToolDefinition } from '../../../shared/types/provider'
+import type { ModelContextCapabilities, ToolDefinition } from '../../../shared/types/provider'
 import type { AskUserRequest, AskUserAnswer } from '../../tools/builtin/AskUserQuestionTool'
 import type { PermissionRequest } from '../../services/PermissionManager'
 import type { PermissionApprovalResponse } from '../../../shared/types/permission'
 import type { Plan } from '../../../shared/types/plan'
+import type { ContextBudgetSnapshot } from '../../../shared/types/context'
+import type { RuntimeTurnHandle, SessionRuntimeCoordinator } from '../../services/context/SessionRuntimeCoordinator'
+import type { ModelContextBuilder } from '../../services/context/ModelContextBuilder'
+import type { CompactionService } from '../../services/context/CompactionService'
 
 export interface SubAgentStartMeta {
   type: string
@@ -42,11 +46,19 @@ export interface AgentRunnerCallbacks extends StreamCallbacks {
     thoughtSignature?: string
   ) => void
   onSubAgentToolEnd?: (subAgentId: string, toolCallId: string, result: string) => void
+  onContextBudget?: (snapshot: ContextBudgetSnapshot) => void
 }
 
-export interface AgentRunConfig extends ChatRequestConfig {
+export interface AgentRunConfig extends Omit<ChatRequestConfig, 'messages'> {
   workspaceRoot: string
   tools?: ToolDefinition[]
   sessionId?: string
-  contextWindowTokens?: number
+  providerId?: string
+  runtimeTurn?: RuntimeTurnHandle
+  runtimeCoordinator?: SessionRuntimeCoordinator
+  contextBuilder?: ModelContextBuilder
+  compactionService?: CompactionService
+  contextCapabilities?: ModelContextCapabilities
+  systemPrompt?: string
+  contextInstructions?: string[]
 }

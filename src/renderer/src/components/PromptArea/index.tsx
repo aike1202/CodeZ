@@ -51,7 +51,8 @@ export default function PromptArea({
   const streamCleanups = useChatStore((s) => s.streamCleanups)
   const isStreaming = activeSessionId ? !!streamCleanups[activeSessionId] : false
   const stopStream = activeSessionId ? streamCleanups[activeSessionId] ?? null : null
-  const messages = useChatStore((s) => s.messages)
+  const contextSnapshot = useChatStore((s) => activeSessionId ? s.contextBudgets[activeSessionId] : undefined)
+  const compactionState = useChatStore((s) => activeSessionId ? s.compactionStates[activeSessionId] : undefined)
 
   const {
     text,
@@ -68,9 +69,7 @@ export default function PromptArea({
     filteredMentions,
     filteredCommands,
     filteredSkills,
-    popupItems,
-    maxContextTokens,
-    dynamicSkills
+    popupItems
   } = usePromptEditor(onSend, workspace)
 
   const activeProviderId = useProviderStore((s) => s.activeProviderId)
@@ -187,9 +186,8 @@ export default function PromptArea({
 
 
                 <ContextTracker
-                  messages={messages}
-                  maxContextTokens={maxContextTokens}
-                  skillsCount={dynamicSkills.length}
+                  snapshot={contextSnapshot}
+                  compactionState={compactionState}
                 />
 
                 <ModelSelector

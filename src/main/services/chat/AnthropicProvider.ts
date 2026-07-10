@@ -2,6 +2,14 @@ import { IChatProvider, ChatRequestConfig, StreamCallbacks } from './types'
 import type { AgentStopReason } from '../../../shared/types/provider'
 import log from '../../logger'
 import { logPrompt } from '../PromptLogger'
+import type { ProviderTokenUsage } from '../../../shared/types/provider'
+import { classifyProviderError } from './errors'
+
+export function extractAnthropicUsage(value: any): ProviderTokenUsage {
+  const inputTokens = Number(value?.input_tokens || 0)
+  const outputTokens = Number(value?.output_tokens || 0)
+  return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens }
+}
 
 export interface AnthropicDeltaParts {
   textDelta: string
@@ -146,7 +154,10 @@ export class AnthropicProvider implements IChatProvider {
 
       if (!response.ok) {
         const body = await response.text().catch(() => '')
-        callbacks.onError(`请求失败 (${response.status}): ${body.slice(0, 300)}`)
+        callbacks.onError(
+          `请求失败 (${response.status}): ${body.slice(0, 300)}`,
+          classifyProviderError(response.status, body)
+        )
         return
       }
 
@@ -191,6 +202,12 @@ export class AnthropicProvider implements IChatProvider {
 
             try {
               const json = JSON.parse(dataStr)
+
+              if (currentEvent === 'message_start' && json.message?.usage) {
+                callbacks.onUsage?.(extractAnthropicUsage(json.message.usage))
+              } else if (currentEvent === 'message_delta' && json.usage) {
+                callbacks.onUsage?.(extractAnthropicUsage(json.usage))
+              }
 
               if (currentEvent === 'content_block_start') {
                 if (json.content_block?.type === 'tool_use') {

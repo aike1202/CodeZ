@@ -55,3 +55,28 @@ export type {
 } from './permission'
 
 export { DEFAULT_PERMISSION_MODE, allowedScopesForRisk } from './permission'
+
+export type {
+  ContextScopeId,
+  LedgerEventType,
+  GoalSnapshot,
+  TaskPlan,
+  ResumeState,
+  VersionedResumeState,
+  NormalizedToolCall,
+  NormalizedModelMessage,
+  ModelContextItem,
+  CompactionSummaryV1,
+  ContextBudgetSnapshot,
+  CompactionTrigger,
+  ContextErrorCode,
+  LedgerPayloadByType,
+  LedgerEvent,
+  AnyLedgerEvent,
+  SessionRuntimeScopeSnapshot,
+  SessionRuntimeSnapshot,
+  SessionRuntimeRef,
+  StreamRequestV2
+} from './context'
+
+export { MAIN_CONTEXT_SCOPE, CONTEXT_SCHEMA_VERSION, contextScopeForSubAgent, eventChangesHistory } from './context'

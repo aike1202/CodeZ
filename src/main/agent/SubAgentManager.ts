@@ -1,9 +1,14 @@
 import { ChatService } from '../services/ChatService'
 import { streamWithTimeoutRetry } from '../services/chat/retry'
 import { ToolManager } from '../tools/ToolManager'
-import { ContextManager } from './ContextManager'
 import * as path from 'path'
-import type { ChatMessage, ToolDefinition } from '../../shared/types/provider'
+import type {
+  ChatMessage,
+  ModelContextCapabilities,
+  ProviderTokenUsage,
+  ThinkingConfig,
+  ToolDefinition
+} from '../../shared/types/provider'
 import type { StreamCallbacks } from '../services/ChatService'
 import type { AgentRunnerCallbacks } from './AgentRunner'
 import type { SubAgentDetail } from '../../shared/types/subagent'
@@ -19,6 +24,11 @@ import {
   isRecoverableProviderError,
   shouldRetryAfterUserMaintenance,
 } from './AgentRunner/subagentRecoveryHelper'
+import { contextScopeForSubAgent } from '../../shared/types/context'
+import type { ModelContextBuilder } from '../services/context/ModelContextBuilder'
+import type { SessionRuntimeCoordinator, RuntimeTurnHandle } from '../services/context/SessionRuntimeCoordinator'
+import { getContextCoreServices } from '../services/context/ContextRuntimeServices'
+import { ModelContextBuilder as CanonicalModelContextBuilder } from '../services/context/ModelContextBuilder'
 
 // ─── 子 Agent 写权限范围（并行 Worker 用） ──────────────────
 
@@ -79,6 +89,9 @@ export interface SubAgentContext {
   parentMessages?: ChatMessage[]
   modelOverride?: string
   maxLoopsOverride?: number
+  contextCapabilities?: ModelContextCapabilities
+  runtimeCoordinator?: SessionRuntimeCoordinator
+  contextBuilder?: ModelContextBuilder
 
   /**
    * 可写子 Agent 的写权限范围（非交互式校验）。
@@ -92,7 +105,11 @@ export interface SubAgentContext {
     apiKey: string
     apiFormat: string
     model: string
-    thinking?: boolean
+    thinking?: ThinkingConfig
+    contextWindowTokens?: number
+    maxInputTokens?: number
+    maxOutputTokens?: number
+    reasoningCountsAgainstContext?: boolean
   }
 }
 
@@ -398,6 +415,7 @@ export class SubAgentManager {
         apiFormat: 'openai',
         model: '{{model}}',
       },
+      contextCapabilities: { contextWindowTokens: 1 },
     }
 
     let systemPrompt: string
@@ -497,10 +515,22 @@ export class SubAgentManager {
     const systemPrompt = await buildExtendedSystemPrompt(def, ctx)
 
     const task = ctx.task || ctx.parentPrompt || ''
-    const messages: ChatMessage[] = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: task }
-    ]
+    const core = ctx.runtimeCoordinator
+      ? { coordinator: ctx.runtimeCoordinator, ledger: ctx.runtimeCoordinator.ledger }
+      : getContextCoreServices()
+    const contextBuilder = ctx.contextBuilder || new CanonicalModelContextBuilder(core.ledger)
+    if (!ctx.contextCapabilities) {
+      throw new Error('SubAgent requires resolved model context capabilities')
+    }
+    const contextCapabilities: ModelContextCapabilities = ctx.contextCapabilities
+    const contextScopeId = contextScopeForSubAgent(handleId)
+    const runtimeTurn = await core.coordinator.beginTurn({
+      sessionId: ctx.sessionId,
+      contextScopeId,
+      text: task,
+      model: ctx.modelOverride || ctx.apiConfig.model
+    })
+    let runtimeClosed = false
 
     const chatService = new ChatService()
     let loopCount = 0
@@ -514,15 +544,22 @@ export class SubAgentManager {
       while (loopCount < effectiveMaxLoops && !abortController.signal.aborted) {
         loopCount++
 
-        // 上下文裁剪
-        const trimResult = ContextManager.trimMessages(messages, 32000)
-        const trimmedMessages = trimResult.messages
+        const builtContext = await contextBuilder.build({
+          sessionId: ctx.sessionId,
+          contextScopeId,
+          currentInputMessageId: runtimeTurn.userMessageId,
+          currentInput: runtimeTurn.inputText,
+          capabilities: contextCapabilities,
+          systemPrompt,
+          toolSchemas: availableTools
+        })
 
         let currentContent = ''
         let toolCallsAcc: Record<number, { id: string; type: 'function'; function: { name: string; arguments: string }; thought_signature?: string }> = {}
         let gotError = false
         let lastError = ''
         let thoughtSig: string | undefined
+        let currentUsage: ProviderTokenUsage | undefined
 
         await new Promise<void>((resolve) => {
           streamWithTimeoutRetry(
@@ -533,9 +570,9 @@ export class SubAgentManager {
                   apiKey: ctx.apiConfig.apiKey,
                   apiFormat: ctx.apiConfig.apiFormat,
                   model: ctx.modelOverride || ctx.apiConfig.model,
-                  messages: trimmedMessages,
+                  messages: builtContext.messages,
                   tools: availableTools,
-                  thinking: ctx.apiConfig.thinking as any
+                  thinking: ctx.apiConfig.thinking
                 },
                 attemptCallbacks,
                 signal
@@ -563,11 +600,11 @@ export class SubAgentManager {
                     if (tc.function?.arguments) acc.function.arguments += tc.function.arguments
                     if (tc.thought_signature) acc.thought_signature = tc.thought_signature
                     else if (thoughtSignature) acc.thought_signature = thoughtSignature
-                    if (acc.id) callbacks.onSubAgentToolStart?.(subAgentId, acc.id, acc.function.name, acc.function.arguments, acc.thought_signature)
                   }
                 }
               },
               onDone: () => resolve(),
+              onUsage: (usage) => { currentUsage = usage },
               onError: (err) => {
                 gotError = true
                 lastError = err
@@ -650,18 +687,47 @@ export class SubAgentManager {
           }
         })
 
-        if (toolCallsArray.length > 0) {
-          messages.push({
-            role: 'assistant',
-            content: currentContent || '',
-            tool_calls: toolCallsArray,
-            thought_signature: thoughtSig || 'skip_thought_signature_validator',
-            provider_specific_fields: { thought_signature: thoughtSig || 'skip_thought_signature_validator' }
-          } as any)
+        await core.coordinator.recordAssistant(runtimeTurn, {
+          content: currentContent || '',
+          toolCalls: toolCallsArray.map((toolCall) => ({
+            id: toolCall.id,
+            name: toolCall.function.name,
+            arguments: toolCall.function.arguments,
+            thoughtSignature: toolCall.thought_signature
+          })),
+          usage: currentUsage
+        })
+        for (const toolCall of toolCallsArray) {
+          callbacks.onSubAgentToolStart?.(
+            subAgentId,
+            toolCall.id,
+            toolCall.function.name,
+            toolCall.function.arguments,
+            toolCall.thought_signature
+          )
+        }
 
+        if (toolCallsArray.length > 0) {
           // 检查是否有 submit_result 调用
           const submitCall = toolCallsArray.find(tc => tc.function.name === 'submit_result')
           if (submitCall && def.outputSpec) {
+            const closeSiblingCalls = async (reason: string) => {
+              for (const sibling of toolCallsArray) {
+                if (sibling.id === submitCall.id) continue
+                const interrupted = JSON.stringify({
+                  ok: false,
+                  error: { code: 'EXECUTION_INTERRUPTED', message: reason }
+                })
+                await core.coordinator.recordToolResult(runtimeTurn, {
+                  callId: sibling.id,
+                  name: sibling.function.name,
+                  content: interrupted,
+                  status: 'interrupted'
+                })
+                callbacks.onSubAgentToolEnd?.(subAgentId, sibling.id, interrupted)
+              }
+            }
+
             // 处理 submit_result
             let structuredOutput: SubAgentStructuredOutput | undefined
             try {
@@ -672,13 +738,15 @@ export class SubAgentManager {
             }
 
             if (structuredOutput) {
-              // 推送 submit_result 的 ack 消息
-              messages.push({
-                role: 'tool' as const,
-                tool_call_id: submitCall.id,
+              const ack = JSON.stringify({ ok: true, data: 'Results submitted and validated.' })
+              await core.coordinator.recordToolResult(runtimeTurn, {
+                callId: submitCall.id,
                 name: 'submit_result',
-                content: JSON.stringify({ ok: true, data: 'Results submitted and validated.' })
+                content: ack,
+                status: 'success'
               })
+              callbacks.onSubAgentToolEnd?.(subAgentId, submitCall.id, ack)
+              await closeSiblingCalls('submit_result completed this subagent run')
 
               finalOutput = currentContent
 
@@ -704,21 +772,27 @@ export class SubAgentManager {
                 await def.onAfterComplete(ctx, subResult)
               }
 
+              await core.coordinator.completeTurn(runtimeTurn, { stopReason: 'tool_calls', usage: currentUsage })
+              runtimeClosed = true
+
               return subResult
             } else {
               // submit_result 验证失败 — 推送错误让模型重试
-              messages.push({
-                role: 'tool' as const,
-                tool_call_id: submitCall.id,
-                name: 'submit_result',
-                content: JSON.stringify({
-                  ok: false,
-                  error: {
-                    code: 'VALIDATION_ERROR',
-                    message: formatSubmitResultValidationMessage(def.outputSpec)
-                  }
-                })
+              const validationError = JSON.stringify({
+                ok: false,
+                error: {
+                  code: 'VALIDATION_ERROR',
+                  message: formatSubmitResultValidationMessage(def.outputSpec)
+                }
               })
+              await core.coordinator.recordToolResult(runtimeTurn, {
+                callId: submitCall.id,
+                name: 'submit_result',
+                content: validationError,
+                status: 'error'
+              })
+              callbacks.onSubAgentToolEnd?.(subAgentId, submitCall.id, validationError)
+              await closeSiblingCalls('submit_result validation failed; other calls were skipped')
               continue  // 不执行其他工具，让模型重新提交
             }
           }
@@ -729,8 +803,6 @@ export class SubAgentManager {
               const name = tc.function.name
               const args = tc.function.arguments
               toolCallCount++
-
-              callbacks.onSubAgentToolStart?.(subAgentId, tc.id, name, args)
 
               const toolInstance = toolManager.getTool(name)
               let result = ''
@@ -743,6 +815,9 @@ export class SubAgentManager {
                 const denyReason = checkSubAgentToolPermission(name, parsedArgs, ctx.workspaceRoot, ctx.permissionScope)
                 if (denyReason) {
                   result = JSON.stringify({ ok: false, error: { code: 'PERMISSION_DENIED', message: denyReason } })
+                  await core.coordinator.recordToolResult(runtimeTurn, {
+                    callId: tc.id, name, content: result, status: 'error'
+                  })
                   callbacks.onSubAgentToolEnd?.(subAgentId, tc.id, result)
                   return { role: 'tool' as const, tool_call_id: tc.id, name, content: result }
                 }
@@ -759,12 +834,16 @@ export class SubAgentManager {
                 }
               }
 
+              let resultStatus: 'success' | 'error' = 'error'
+              try { resultStatus = JSON.parse(result).ok === true ? 'success' : 'error' } catch {}
+              await core.coordinator.recordToolResult(runtimeTurn, {
+                callId: tc.id, name, content: result, status: resultStatus
+              })
               callbacks.onSubAgentToolEnd?.(subAgentId, tc.id, result)
               return { role: 'tool' as const, tool_call_id: tc.id, name, content: result }
             })
           )
 
-          messages.push(...toolResults)
         } else {
           // SubAgent 产出最终文本（未调用 submit_result 的纯文本回退）
           finalOutput = currentContent
@@ -791,11 +870,15 @@ export class SubAgentManager {
                 if (def.onAfterComplete) {
                   await def.onAfterComplete(ctx, subResult)
                 }
+                await core.coordinator.completeTurn(runtimeTurn, { stopReason: 'stop', usage: currentUsage })
+                runtimeClosed = true
                 return subResult
               }
             }
           }
 
+          await core.coordinator.completeTurn(runtimeTurn, { stopReason: 'stop', usage: currentUsage })
+          runtimeClosed = true
           break
         }
       }
@@ -832,6 +915,13 @@ export class SubAgentManager {
       handle.status = 'failed'
       throw err
     } finally {
+      if (!runtimeClosed) {
+        await core.coordinator.interruptTurn(
+          runtimeTurn,
+          abortController.signal.aborted ? 'Subagent was cancelled' : 'Subagent ended before a completed protocol turn'
+        ).catch(() => undefined)
+        runtimeClosed = true
+      }
       this.activeHandles.delete(handleId)
     }
   }

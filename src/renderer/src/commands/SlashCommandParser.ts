@@ -42,6 +42,18 @@ export function parseSlashCommand(
 ): ParseResult {
   const trimMsg = message.trim()
 
+  if (trimMsg === '/compact' || trimMsg.startsWith('/compact ')) {
+    return {
+      isCommand: true,
+      commandName: 'compact',
+      processedMessage: '',
+      clientAction: {
+        type: 'context:compact',
+        payload: { instructions: trimMsg.slice('/compact'.length).trim() }
+      }
+    }
+  }
+
   // ── Plan commands: /plan, /plans, /plan list, /plan new <description> ──
   if (trimMsg === '/plan' || trimMsg === '/plans' || trimMsg.startsWith('/plan ')) {
     const rest = trimMsg.startsWith('/plans') ? trimMsg.slice(6).trim() : trimMsg.slice(5).trim() // after '/plan' or '/plans'

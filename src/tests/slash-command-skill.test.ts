@@ -46,4 +46,13 @@ describe('parseSlashCommand — 技能优先于 plan slug', () => {
     expect(r.processedMessage).toContain('do stuff')
     expect(r.processedMessage).toContain('帮我写一个技能')
   })
+
+  it('/compact 被识别为本地压缩动作', () => {
+    expect(parseSlashCommand('/compact 保留迁移决定', skills)).toEqual({
+      isCommand: true,
+      commandName: 'compact',
+      processedMessage: '',
+      clientAction: { type: 'context:compact', payload: { instructions: '保留迁移决定' } }
+    })
+  })
 })

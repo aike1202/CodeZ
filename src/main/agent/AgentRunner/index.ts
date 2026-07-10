@@ -1,12 +1,11 @@
 import { ChatService } from '../../services/ChatService'
 import { ToolManager } from '../../tools/ToolManager'
 import { EditTransactionService, getEditTransactionService } from '../../services/EditTransactionService'
-import { ContextManager } from '../ContextManager'
 import { PermissionManager } from '../../services/PermissionManager'
 import { interceptAskUser } from '../../tools/builtin/AskUserQuestionTool'
 import { TaskStore } from '../../services/TaskStore'
 import { SubAgentManager } from '../SubAgentManager'
-import type { ToolDefinition } from '../../../shared/types/provider'
+import type { ChatProviderErrorCode, ProviderTokenUsage, ToolDefinition } from '../../../shared/types/provider'
 import log from '../../logger'
 import { logPrompt } from '../../services/PromptLogger'
 
@@ -38,6 +37,21 @@ function normalizeProviderStopReason(reason?: string): NormalizedStopReason {
   if (lower === 'tool_calls' || lower === 'tool_use') return NormalizedStopReason.ToolUse;
   if (lower === 'content_filter' || lower === 'safety') return NormalizedStopReason.Blocked;
   return NormalizedStopReason.Unknown;
+}
+
+export function unwrapModelToolResultForUi(content: string): string {
+  try {
+    const parsed = JSON.parse(content)
+    if (parsed?.ok === true) {
+      return typeof parsed.data === 'string' ? parsed.data : JSON.stringify(parsed.data)
+    }
+    if (parsed?.ok === false) {
+      if (typeof parsed.error === 'string') return parsed.error
+      if (typeof parsed.error?.message === 'string') return parsed.error.message
+      return JSON.stringify(parsed.error)
+    }
+  } catch {}
+  return content
 }
 
 export interface ToolAuthorization {
@@ -142,18 +156,32 @@ export class AgentRunner {
   private toolManager: ToolManager
   private editTransactionService: EditTransactionService
   private abortController: AbortController | null = null
-  private hasWarnedTrim: boolean = false
 
-  constructor() {
-    this.chatService = new ChatService()
-    this.toolManager = new ToolManager()
-    this.editTransactionService = getEditTransactionService()
+  constructor(dependencies: {
+    chatService?: ChatService
+    toolManager?: ToolManager
+    editTransactionService?: EditTransactionService
+  } = {}) {
+    this.chatService = dependencies.chatService || new ChatService()
+    this.toolManager = dependencies.toolManager || new ToolManager()
+    this.editTransactionService = dependencies.editTransactionService || getEditTransactionService()
   }
 
   async run(config: AgentRunConfig, callbacks: AgentRunnerCallbacks): Promise<void> {
     this.abortController = new AbortController()
 
-    let allMessages = [...config.messages]
+    if (!(
+      config.runtimeTurn && config.runtimeCoordinator && config.contextBuilder &&
+      config.contextCapabilities && config.systemPrompt
+    )) {
+      throw new Error('AgentRunner requires the canonical model ledger runtime')
+    }
+    const runtimeTurn = config.runtimeTurn
+    const runtimeCoordinator = config.runtimeCoordinator
+    let runtimeClosed = false
+    let overflowRetried = false
+    let allMessages: import('../../../shared/types/provider').ChatMessage[] = []
+    const runtimeInstructions: string[] = [...(config.contextInstructions || [])]
     const MAX_LOOPS = 30
     let loopCount = 0
     let consecutiveFailures = 0
@@ -167,7 +195,7 @@ export class AgentRunner {
     const taskStore = TaskStore.getInstance()
     let availableTools: ToolDefinition[] = config.tools || this.toolManager.getToolDefinitions()
 
-    const sessionId = config.sessionId || `session_${Date.now()}`
+    const sessionId = runtimeTurn?.sessionId || config.sessionId || `session_${Date.now()}`
 
     log.info('[AgentRunner] run start', { sessionId, model: config.model, loopMax: MAX_LOOPS, msgCount: allMessages.length })
 
@@ -200,15 +228,7 @@ export class AgentRunner {
           '</active_tasks>'
         ].join('\n')
 
-        allMessages = allMessages.filter(
-          (m) =>
-            !(
-              m.role === 'system' &&
-              typeof m.content === 'string' &&
-              m.content.includes('<active_tasks>')
-            )
-        )
-        allMessages.push({ role: 'system', content: taskMsg } as any)
+        runtimeInstructions.push(taskMsg)
       }
     } catch (e) {
       console.error('[AgentRunner] Failed to load active plan:', e)
@@ -221,19 +241,6 @@ export class AgentRunner {
       console.error('[AgentRunner] Failed to begin transaction:', err.message)
     }
 
-    const resumeStateKey = ContextManager.createResumeStateKey(config.workspaceRoot, sessionId)
-
-    try {
-      const resumeState = await ContextManager.loadResumeState(resumeStateKey)
-      if (resumeState && allMessages.length > 0 && allMessages[0].role === 'system') {
-        const stateStr = `\n\n<resume_state>\nPrevious task state loaded:\n${JSON.stringify(resumeState, null, 2)}\n</resume_state>\n`
-        allMessages[0] = {
-          ...allMessages[0],
-          content: allMessages[0].content + stateStr
-        }
-      }
-    } catch (e) {}
-
     let consecutiveIdleTurns = 0
     let currentState = AgentState.Running
 
@@ -243,42 +250,19 @@ export class AgentRunner {
 
         log.info('[AgentRunner] loop start', { loopCount, msgCount: allMessages.length })
 
-        const trimResult = ContextManager.trimMessages(
-          allMessages,
-          config.contextWindowTokens || 32000
-        )
-        allMessages = trimResult.messages
-
-        // System prompt is always at index 0
-        const systemPrompt = allMessages[0]
-
-        if (trimResult.willTrimSoon && !this.hasWarnedTrim) {
-          this.hasWarnedTrim = true
-          systemPrompt.content += `\n\n⚠️ [SYSTEM NOTIFICATION]: 当前历史消息已达到容量上限的 65%，即将触发自动裁剪。为了防止丢失早期的任务目标和上下文，请**立即调用 update_resume_state 工具**把当前的任务进度、已完成和未完成的步骤进行总结存档！`
-        } else if (trimResult.trimmed) {
-          this.hasWarnedTrim = false
-          systemPrompt.content += `\n\n⚠️ [SYSTEM NOTIFICATION]: 刚才有 ${trimResult.trimmedCount} 条旧消息被移除。如果你的部分早期记忆变得模糊，请查阅或更新你的 resume_state。`
-        }
-
-        if (loopCount === MAX_LOOPS - 2) {
-          try {
-            const { UpdateResumeStateTool } = await import('../../tools/builtin/UpdateResumeStateTool')
-            const resumeTool = new UpdateResumeStateTool()
-            await resumeTool.execute(
-              JSON.stringify({
-                currentGoalId: 'auto-save',
-                currentPhase: 'auto-save-before-limit',
-                currentStep: `Loop ${loopCount}/${MAX_LOOPS}`,
-                nextAction: 'User needs to continue the task'
-              }),
-              { workspaceRoot: config.workspaceRoot, sessionId, resumeStateKey }
-            )
-            console.log('[AgentRunner] Auto-saved resume state before step limit.')
-          } catch (e: any) {
-            console.error('[AgentRunner] Auto-save resume state failed:', e.message)
-          }
-          systemPrompt.content += `\n\n⚠️ [SYSTEM WARNING]: 当前任务即将在 2 步后达到最大执行上限并挂起。框架已自动保存了一份进度快照。请务必在下一步调用 update_resume_state 补充更详细的任务状态以确保恢复时不丢失关键信息。`
-        }
+        const built = await config.contextBuilder!.build({
+          sessionId,
+          contextScopeId: runtimeTurn!.contextScopeId,
+          currentInputMessageId: runtimeTurn!.userMessageId,
+          currentInput: runtimeTurn!.inputText,
+          capabilities: config.contextCapabilities!,
+          systemPrompt: config.systemPrompt!,
+          toolSchemas: availableTools,
+          instructions: runtimeInstructions,
+          reasoningBudgetTokens: config.thinking?.budgetTokens
+        })
+        allMessages = built.messages
+        callbacks.onContextBudget?.(built.budget)
 
         let currentFullContent = ''
         let currentReasoningContent = ''
@@ -294,7 +278,11 @@ export class AgentRunner {
         let thoughtSignatureForThisTurn: string | undefined = undefined
 
         let gotError = false
+        let errorReported = false
+        let providerErrorMessage = ''
         let currentStopReason: import('../../../shared/types/provider').AgentStopReason | undefined = undefined
+        let currentUsage: ProviderTokenUsage | undefined
+        let providerErrorCode: ChatProviderErrorCode | undefined
 
         log.info('[AgentRunner] calling streamChat', { loopCount, model: config.model })
 
@@ -354,14 +342,6 @@ export class AgentRunner {
                     acc.thought_signature = thoughtSignature
                   }
 
-                  if (acc.id) {
-                    callbacks.onToolStart?.(
-                      acc.id,
-                      acc.function.name,
-                      acc.function.arguments,
-                      acc.thought_signature
-                    )
-                  }
                 }
               }
             },
@@ -369,10 +349,23 @@ export class AgentRunner {
               currentStopReason = stopReason
               log.info('[AgentRunner] streamChat done', { loopCount, stopReason, contentLen: fullContent.length })
             },
-            onError: (err) => {
+            onError: (err, code) => {
               gotError = true
+              providerErrorCode = code
+              providerErrorMessage = err
               log.error('[AgentRunner] streamChat error', { loopCount, error: err })
-              callbacks.onError(err)
+              if (code !== 'CONTEXT_OVERFLOW') {
+                callbacks.onError(err, code)
+                errorReported = true
+              }
+            },
+            onUsage: (usage) => {
+              currentUsage = {
+                inputTokens: Math.max(currentUsage?.inputTokens || 0, usage.inputTokens),
+                outputTokens: Math.max(currentUsage?.outputTokens || 0, usage.outputTokens),
+                reasoningTokens: Math.max(currentUsage?.reasoningTokens || 0, usage.reasoningTokens || 0),
+                totalTokens: Math.max(currentUsage?.totalTokens || 0, usage.totalTokens || 0)
+              }
             }
           },
           this.abortController!.signal,
@@ -386,7 +379,41 @@ export class AgentRunner {
           }
         )
 
+        if (
+          gotError && providerErrorCode === 'CONTEXT_OVERFLOW' &&
+          !overflowRetried && config.compactionService
+        ) {
+          overflowRetried = true
+          const compacted = await config.compactionService.compact({
+            sessionId,
+            contextScopeId: runtimeTurn!.contextScopeId,
+            trigger: 'provider_overflow',
+            capabilities: config.contextCapabilities!,
+            systemPrompt: config.systemPrompt!,
+            toolSchemas: availableTools,
+            instructions: runtimeInstructions
+          })
+          if (compacted.status === 'completed') {
+            loopCount--
+            continue
+          }
+          callbacks.onError('上下文压缩失败，无法从 Provider 上下文溢出中恢复。', 'CONTEXT_OVERFLOW')
+          errorReported = true
+        }
+
+        if (gotError && providerErrorCode === 'CONTEXT_OVERFLOW' && !errorReported) {
+          callbacks.onError(providerErrorMessage || 'Provider context overflow', 'CONTEXT_OVERFLOW')
+          errorReported = true
+        }
+
         if (gotError || this.abortController?.signal.aborted) {
+          if (!runtimeClosed) {
+            await runtimeCoordinator!.interruptTurn(
+              runtimeTurn!,
+              this.abortController?.signal.aborted ? 'User aborted the turn' : 'Provider request failed'
+            )
+            runtimeClosed = true
+          }
           break
         }
 
@@ -411,16 +438,27 @@ export class AgentRunner {
           return result
         })
 
+        await runtimeCoordinator!.recordAssistant(runtimeTurn!, {
+          content: currentFullContent || '',
+          toolCalls: toolCallsArray.map((toolCall) => ({
+            id: toolCall.id,
+            name: toolCall.function.name,
+            arguments: toolCall.function.arguments,
+            thoughtSignature: toolCall.thought_signature
+          })),
+          usage: currentUsage
+        })
+        for (const toolCall of toolCallsArray) {
+          callbacks.onToolStart?.(
+            toolCall.id,
+            toolCall.function.name,
+            toolCall.function.arguments,
+            toolCall.thought_signature
+          )
+        }
+
         if (toolCallsArray.length > 0) {
-          allMessages.push({
-            role: 'assistant',
-            content: currentFullContent || '',
-            tool_calls: toolCallsArray,
-            thought_signature: finalSig || 'skip_thought_signature_validator',
-            provider_specific_fields: {
-              thought_signature: finalSig || 'skip_thought_signature_validator'
-            }
-          } as any)
+          const toolCallbacks: AgentRunnerCallbacks = { ...callbacks, onToolEnd: undefined }
 
           const toolResults = await Promise.all(
             toolCallsArray.map(async (tc) => {
@@ -429,8 +467,6 @@ export class AgentRunner {
               const args = tc.function.arguments
 
               if (loopCount >= MAX_LOOPS - 1 || consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-                callbacks.onToolStart?.(toolCallId, name, args)
-
                 const reason =
                   loopCount >= MAX_LOOPS - 1
                     ? `已达 ${MAX_LOOPS} 步的安全上限`
@@ -445,8 +481,6 @@ export class AgentRunner {
                   '3. 温馨提示用户：如果需要继续，可以直接点击右上角的“继续”按钮，或者在对话框中回复“继续”或“继续推进”。'
                 ].join('\n')
 
-                callbacks.onToolEnd?.(toolCallId, errMsg)
-
                 return {
                   role: 'tool' as const,
                   tool_call_id: toolCallId,
@@ -454,8 +488,6 @@ export class AgentRunner {
                   content: JSON.stringify({ ok: false, error: errMsg })
                 }
               }
-
-              callbacks.onToolStart?.(toolCallId, name, args)
 
               log.info('[AgentRunner] tool start', { name, loopCount })
 
@@ -479,7 +511,6 @@ export class AgentRunner {
 
               if (!authorization.allowed) {
                 const resultMessage = authorization.error || 'Error: Tool execution denied.'
-                callbacks.onToolEnd?.(toolCallId, resultMessage)
                 log.info('[AgentRunner] tool end', { name, isError: true, loopCount })
                 return {
                   role: 'tool' as const,
@@ -498,14 +529,14 @@ export class AgentRunner {
                   toolCallId,
                   args,
                   config,
-                  callbacks
+                  toolCallbacks
                 )
               } else if (name === 'DelegateTasks') {
                 return await handleDelegateTasks(
                   toolCallId,
                   args,
                   config,
-                  callbacks
+                  toolCallbacks
                 )
               }
 
@@ -532,7 +563,8 @@ export class AgentRunner {
                     resultMessage = await toolInstance.execute(args, {
                       workspaceRoot: config.workspaceRoot,
                       sessionId,
-                      resumeStateKey,
+                      runtimeCoordinator,
+                      runtimeTurn,
                       transactionId: txId || undefined,
                       editTransactionService: this.editTransactionService
                     })
@@ -545,8 +577,6 @@ export class AgentRunner {
                   isError = true
                 }
               }
-
-              callbacks.onToolEnd?.(toolCallId, resultMessage)
 
               log.info('[AgentRunner] tool end', { name, isError, loopCount })
 
@@ -569,6 +599,23 @@ export class AgentRunner {
               }
             })
           )
+
+          for (const toolResult of toolResults) {
+            let status: 'success' | 'error' = 'error'
+            try {
+              status = JSON.parse(toolResult.content).ok === true ? 'success' : 'error'
+            } catch {}
+            await runtimeCoordinator!.recordToolResult(runtimeTurn!, {
+              callId: toolResult.tool_call_id,
+              name: toolResult.name,
+              content: toolResult.content,
+              status
+            })
+            callbacks.onToolEnd?.(
+              toolResult.tool_call_id,
+              unwrapModelToolResultForUi(toolResult.content)
+            )
+          }
 
           for (const tr of toolResults) {
             try {
@@ -599,8 +646,6 @@ export class AgentRunner {
 
             delete (tr as any)._rawArgs
           }
-
-          allMessages.push(...toolResults)
 
           const hasSuccess = toolResults.some((tr) => {
             try {
@@ -635,6 +680,13 @@ export class AgentRunner {
         if (currentState === AgentState.Terminated) {
           const finishReason = transitionEvent === TransitionEvent.Completed ? TerminationReason.Completed : TerminationReason.Failed;
           if (!gotError && callbacks.onDone) {
+            if (!runtimeClosed) {
+              await runtimeCoordinator!.completeTurn(runtimeTurn!, {
+                stopReason: currentStopReason || 'unknown',
+                usage: currentUsage
+              })
+              runtimeClosed = true
+            }
             log.info('[AgentRunner] run complete', { sessionId, loops: loopCount, finalContentLen: currentFullContent.length, finishReason });
             callbacks.onDone(currentFullContent, currentStopReason, txId || undefined);
           }
@@ -643,6 +695,13 @@ export class AgentRunner {
 
         if (currentState === AgentState.WaitingUser || currentState === AgentState.Suspended) {
            if (!gotError && callbacks.onDone) {
+             if (!runtimeClosed) {
+               await runtimeCoordinator!.completeTurn(runtimeTurn!, {
+                 stopReason: currentStopReason || 'unknown',
+                 usage: currentUsage
+               })
+               runtimeClosed = true
+             }
              log.info('[AgentRunner] run suspended/waiting', { sessionId, loops: loopCount, finalContentLen: currentFullContent.length, state: currentState });
              callbacks.onDone(currentFullContent, currentStopReason, txId || undefined);
            }
@@ -668,12 +727,8 @@ export class AgentRunner {
             loopCount
           });
 
-          allMessages.push({ role: 'assistant', content: currentFullContent.trim() ? currentFullContent : '(Acknowledged)' } as any);
-
-          allMessages.push({
-            role: 'user',
-            content: `⚠️ [Verification Failed] The command (${lastVerificationResult!.command}) failed. Please fix the error and try again.`
-          } as any);
+          const retryMessage = `⚠️ [Verification Failed] The command (${lastVerificationResult!.command}) failed. Please fix the error and try again.`
+          await runtimeCoordinator!.recordUserContinuation(runtimeTurn!, retryMessage)
 
           if (callbacks.onChunk) {
             callbacks.onChunk(`\n\n[系统拦截：验证失败，重试 ${verificationRetryCount}/${MAX_VERIFICATION_RETRIES}...]\n\n`, '');
@@ -681,9 +736,21 @@ export class AgentRunner {
           continue;
         }
 
+        if (!runtimeClosed) {
+          await runtimeCoordinator!.interruptTurn(runtimeTurn!, 'Runner stopped without a terminal transition')
+          runtimeClosed = true
+        }
         break;
       }
+      if (!runtimeClosed) {
+        await runtimeCoordinator!.interruptTurn(runtimeTurn!, 'Agent loop ended before completion')
+        runtimeClosed = true
+      }
     } catch (err) {
+      if (!runtimeClosed) {
+        await runtimeCoordinator!.interruptTurn(runtimeTurn!, err instanceof Error ? err.message : String(err)).catch(() => undefined)
+        runtimeClosed = true
+      }
       if (txId) {
         try {
           await this.editTransactionService.rollback(txId)

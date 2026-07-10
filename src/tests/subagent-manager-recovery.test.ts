@@ -60,6 +60,7 @@ describe('SubAgentManager recoverable provider errors', () => {
           apiFormat: 'openai',
           model: 'test-model',
         },
+        contextCapabilities: { contextWindowTokens: 65_536, maxOutputTokens: 4_096 },
       },
       {
         onChunk: vi.fn(),
@@ -108,6 +109,7 @@ describe('SubAgentManager recoverable provider errors', () => {
           apiFormat: 'openai',
           model: 'test-model',
         },
+        contextCapabilities: { contextWindowTokens: 65_536, maxOutputTokens: 4_096 },
       },
       {
         onChunk: vi.fn(),

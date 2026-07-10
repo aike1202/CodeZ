@@ -4,8 +4,8 @@ export interface ToolContext {
   workspaceRoot: string
   /** 当前会话 ID */
   sessionId?: string
-  /** ResumeState 保存/加载 key */
-  resumeStateKey?: string
+  runtimeCoordinator?: import('../services/context/SessionRuntimeCoordinator').SessionRuntimeCoordinator
+  runtimeTurn?: import('../services/context/SessionRuntimeCoordinator').RuntimeTurnHandle
   /** 当前活跃的修改事务 ID */
   transactionId?: string
   /** 修改事务管理服务实例 */

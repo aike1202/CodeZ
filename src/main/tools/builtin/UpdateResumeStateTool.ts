@@ -1,5 +1,6 @@
 import { Tool, ToolContext } from '../Tool'
-import { ContextManager, ResumeState } from '../../agent/ContextManager'
+import type { ResumeState } from '../../../shared/types/context'
+import { ResumeStateManager } from '../../services/context/ResumeStateManager'
 
 export class UpdateResumeStateTool extends Tool {
   get name() { return 'update_resume_state' }
@@ -81,14 +82,28 @@ export class UpdateResumeStateTool extends Tool {
       lastTrimmedAt: Date.now()
     }
 
-    const stateKey = context.resumeStateKey || ContextManager.createResumeStateKey(context.workspaceRoot, context.sessionId)
-    await ContextManager.saveResumeState(stateKey, state)
+    if (!context.runtimeCoordinator || !context.runtimeTurn) {
+      throw new Error('update_resume_state requires the canonical model ledger runtime')
+    }
 
+    const scope = await context.runtimeCoordinator.getScopeView(
+      context.runtimeTurn.sessionId,
+      context.runtimeTurn.contextScopeId
+    )
+    const manager = new ResumeStateManager()
+    const coveredThroughSequence = await context.runtimeCoordinator.getThroughSequence(context.runtimeTurn.sessionId)
+    const candidate = manager.create(
+      state,
+      'explicit_tool',
+      coveredThroughSequence,
+      scope?.resumeState?.revision || 0
+    )
+    const merged = manager.merge(scope?.resumeState, candidate)
+    await context.runtimeCoordinator.recordResumeState(context.runtimeTurn, merged)
     return JSON.stringify({
       ok: true,
-      resumeStateKey: stateKey,
       summary: `ResumeState updated for phase "${state.currentPhase}" step "${state.currentStep}".`,
-      state
+      state: merged
     }, null, 2)
   }
 }

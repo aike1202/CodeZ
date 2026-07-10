@@ -1,8 +1,11 @@
 import * as fs from 'fs/promises'
 import * as path from 'path'
+import * as os from 'os'
 import { app } from 'electron'
 
 import { SessionData } from '../../shared/types'
+import type { SessionRuntimeRef } from '../../shared/types/context'
+import { atomicWriteJson } from './context/atomicFile'
 
 const SESSIONS_FILE = 'sessions.json'
 const MAX_SESSIONS = 50
@@ -10,9 +13,13 @@ const MAX_SESSIONS = 50
 export class SessionStore {
   private filePath: string
   private cache: SessionData[] = []
+  private writeQueue: Promise<void> = Promise.resolve()
 
-  constructor() {
-    this.filePath = path.join(app.getPath('userData'), SESSIONS_FILE)
+  constructor(filePath?: string) {
+    const userDataPath = app?.getPath
+      ? app.getPath('userData')
+      : path.join(os.tmpdir(), `codez-session-store-${process.pid}`)
+    this.filePath = filePath ?? path.join(userDataPath, SESSIONS_FILE)
   }
 
   async load(): Promise<void> {
@@ -50,42 +57,59 @@ export class SessionStore {
   }
 
   async save(session: SessionData): Promise<void> {
-    const idx = this.cache.findIndex((s) => s.id === session.id)
-    if (idx >= 0) {
-      this.cache[idx] = session
-    } else {
-      this.cache.unshift(session)
-      if (this.cache.length > MAX_SESSIONS) {
-        const removed = this.cache.slice(MAX_SESSIONS)
-        this.cache = this.cache.slice(0, MAX_SESSIONS)
-        console.warn(`[SessionStore] 会话数超过 ${MAX_SESSIONS}，已移除最旧会话:`, removed.map(s => s.id))
+    return this.enqueueMutation(async () => {
+      const idx = this.cache.findIndex((s) => s.id === session.id)
+      if (idx >= 0) {
+        this.cache[idx] = session
+      } else {
+        this.cache.unshift(session)
+        if (this.cache.length > MAX_SESSIONS) {
+          const removed = this.cache.slice(MAX_SESSIONS)
+          this.cache = this.cache.slice(0, MAX_SESSIONS)
+          console.warn(`[SessionStore] 会话数超过 ${MAX_SESSIONS}，已移除最旧会话:`, removed.map(s => s.id))
+        }
       }
-    }
-    await this.persist()
+    })
   }
 
   async delete(sessionId: string): Promise<void> {
-    const session = this.cache.find((s) => s.id === sessionId)
-    if (session && !session.isDeleted) {
-      session.isDeleted = true
-      session.deletedAt = Date.now()
-    } else {
-      this.cache = this.cache.filter((s) => s.id !== sessionId)
-    }
-    await this.persist()
+    return this.enqueueMutation(async () => {
+      const session = this.cache.find((s) => s.id === sessionId)
+      if (session && !session.isDeleted) {
+        this.cache = this.cache.map((item) => item.id === sessionId
+          ? { ...item, isDeleted: true, deletedAt: Date.now() }
+          : item)
+      } else {
+        this.cache = this.cache.filter((s) => s.id !== sessionId)
+      }
+    })
+  }
+
+  async setRuntimeRef(sessionId: string, runtime: SessionRuntimeRef): Promise<void> {
+    return this.enqueueMutation(async () => {
+      const idx = this.cache.findIndex((session) => session.id === sessionId)
+      if (idx < 0) throw new Error(`Session not found: ${sessionId}`)
+      this.cache[idx] = { ...this.cache[idx], runtime: { ...runtime } }
+    })
   }
 
   private async persist(): Promise<void> {
-    try {
-      const dir = path.dirname(this.filePath)
-      await fs.mkdir(dir, { recursive: true })
-      await fs.writeFile(
-        this.filePath,
-        JSON.stringify({ sessions: this.cache }, null, 2),
-        'utf-8'
-      )
-    } catch (error) {
-      console.error('SessionStore persist error:', error)
-    }
+    await atomicWriteJson(this.filePath, { sessions: this.cache })
+  }
+
+  private enqueueMutation(mutate: () => Promise<void>): Promise<void> {
+    const operation = this.writeQueue.catch(() => undefined).then(async () => {
+      const previous = this.cache
+      this.cache = [...this.cache]
+      try {
+        await mutate()
+        await this.persist()
+      } catch (error) {
+        this.cache = previous
+        throw error
+      }
+    })
+    this.writeQueue = operation.then(() => undefined, () => undefined)
+    return operation
   }
 }

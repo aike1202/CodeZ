@@ -1,7 +1,7 @@
 import { orchestrateParallelExecution } from './parallelOrchestrator'
 import { TaskStore } from '../../services/TaskStore'
 import { WorktreeService } from '../../services/WorktreeService'
-import type { AgentRunnerCallbacks } from './types'
+import type { AgentRunConfig, AgentRunnerCallbacks } from './types'
 import type { ExecUnit, ExecutionGroupingResult, ExecutionWave } from '../../../shared/types/parallel'
 import type { TaskStatus } from '../../../shared/types/task'
 
@@ -77,15 +77,7 @@ export function compactIndependentSingletonWaves(
 export async function handleDelegateTasks(
   toolCallId: string,
   rawArgs: string,
-  config: {
-    workspaceRoot: string
-    sessionId?: string
-    baseUrl?: string
-    apiKey?: string
-    apiFormat?: string
-    model?: string
-    thinking?: any
-  },
+  config: AgentRunConfig,
   callbacks: AgentRunnerCallbacks
 ): Promise<{ role: 'tool'; tool_call_id: string; name: string; content: string }> {
   const name = 'DelegateTasks'
@@ -253,7 +245,14 @@ export async function handleDelegateTasks(
           apiFormat: config.apiFormat || 'openai',
           model: config.model || '',
           thinking: config.thinking,
+          contextWindowTokens: config.contextCapabilities?.contextWindowTokens,
+          maxInputTokens: config.contextCapabilities?.maxInputTokens,
+          maxOutputTokens: config.contextCapabilities?.maxOutputTokens,
+          reasoningCountsAgainstContext: config.contextCapabilities?.reasoningCountsAgainstContext,
         },
+        contextCapabilities: config.contextCapabilities,
+        runtimeCoordinator: config.runtimeCoordinator,
+        contextBuilder: config.contextBuilder,
       },
       callbacks
     )

@@ -3,16 +3,20 @@ import { IPC_CHANNELS } from '../../shared/ipc/channels'
 
 import { getProviderService } from './provider.handlers'
 import { getWorkspaceService } from './workspace.handlers'
-import type { ChatMessage } from '../../shared/types/provider'
+import { MAIN_CONTEXT_SCOPE, type StreamRequestV2 } from '../../shared/types/context'
 import { mergeModelThinkingConfig } from '../../shared/utils/reasoningCapabilities'
 import log from '../logger'
-
-interface StreamRequest {
-  providerId: string
-  model: string
-  messages: ChatMessage[]
-  sessionId?: string
-}
+import { getSessionStoreReady } from './session.handlers'
+import {
+  ChatCompactionModelClient,
+  CompactionService,
+  LegacySessionMigrationService,
+  ModelContextBuilder,
+  getContextCoreServices,
+  parseAndValidateSummary,
+  evaluateModelDownshiftCompaction,
+  readContextFeatureFlags
+} from '../services/context'
 
 import type { AgentRunner } from '../agent/AgentRunner'
 const activeRunners = new Map<string, AgentRunner>()
@@ -20,15 +24,29 @@ const activeRunners = new Map<string, AgentRunner>()
 export function registerChatIpc(): void {
   ipcMain.handle(
     IPC_CHANNELS.CHAT_STREAM_START,
-    async (event, request: StreamRequest): Promise<string> => {
-      const streamId = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+    async (event, request: StreamRequestV2): Promise<string> => {
+      const streamId = request.streamId || `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
       const sender = event.sender
       const win = BrowserWindow.fromWebContents(sender)
       if (!win) {
         throw new Error('无法获取窗口引用')
       }
 
-      log.info('[Chat] stream start', { streamId, providerId: request.providerId, model: request.model, sessionId: request.sessionId, msgCount: request.messages?.length ?? 0 })
+      log.info('[Chat] stream start', { streamId, providerId: request.providerId, model: request.model, sessionId: request.sessionId })
+
+      if (!request.sessionId || !request.input?.text?.trim()) {
+        sender.send(IPC_CHANNELS.CHAT_STREAM_ERROR, streamId, '会话 ID 和本次输入不能为空')
+        return streamId
+      }
+      const contextFlags = readContextFeatureFlags()
+      if (!contextFlags.authoritativeLedger) {
+        sender.send(
+          IPC_CHANNELS.CHAT_STREAM_ERROR,
+          streamId,
+          '规范化模型账本已通过环境变量禁用；V2 请求不会回退到 Renderer 历史。'
+        )
+        return streamId
+      }
 
       const providerSvc = getProviderService()
       const config = providerSvc.getConfig(request.providerId)
@@ -55,9 +73,14 @@ export function registerChatIpc(): void {
 
       const modelConfig = config.models?.find(m => m.id === request.model || m.name === request.model)
       const contextWindowTokens = modelConfig?.maxContextTokens || 32000
+      const contextCapabilities = {
+        contextWindowTokens,
+        maxInputTokens: modelConfig?.maxInputTokens,
+        maxOutputTokens: modelConfig?.maxOutputTokens,
+        reasoningCountsAgainstContext: modelConfig?.reasoningCountsAgainstContext
+      }
       const { AgentRunner } = await import('../agent/AgentRunner')
       const runner = new AgentRunner()
-      activeRunners.set(streamId, runner)
 
       const { SystemPromptService } = await import('../services/SystemPromptService')
 
@@ -69,22 +92,88 @@ export function registerChatIpc(): void {
         sessionId: request.sessionId
       })
 
-      const messages: ChatMessage[] = [
-        { role: 'system', content: sysPrompt },
-        ...request.messages
-      ]
-
-      // Inject <system_reminder> before the first user message
       const reminder = await SystemPromptService.buildSystemReminder(currentWorkspace)
-      if (reminder && messages.length > 1 && messages[1]?.role === 'user') {
-        messages[1] = {
-          ...messages[1],
-          content: reminder + '\n\n' + messages[1].content
+
+      const sessionStore = await getSessionStoreReady()
+      const core = getContextCoreServices()
+      const compactionModel = new ChatCompactionModelClient({
+        baseUrl: config.baseUrl,
+        apiKey,
+        apiFormat: modelConfig?.apiFormat || config.apiFormat,
+        model: request.model,
+        thinking: mergeModelThinkingConfig(config.thinking, modelConfig)
+      })
+      const migration = new LegacySessionMigrationService(sessionStore, core.ledger, {
+        summarize: async ({ transcript }) => {
+          const raw = await compactionModel.generate({
+            coveredThroughSequence: 0,
+            messages: [{
+              id: 'legacy-transcript', turnId: 'legacy-import', role: 'user',
+              content: transcript, status: 'complete', createdAt: new Date().toISOString(), sourceSequence: 0
+            }]
+          })
+          return parseAndValidateSummary(raw, 0)
         }
+      })
+      const commandMetadata = request.input.commandMetadata as { uiMessageId?: string } | undefined
+      await migration.ensureMigrated(request.sessionId, { excludeMessageId: commandMetadata?.uiMessageId })
+      const compactionObserver = {
+        onStarted: (payload: unknown) => sender.send(IPC_CHANNELS.CHAT_COMPACTION_STARTED, streamId, request.sessionId, payload),
+        onCompleted: (payload: unknown) => sender.send(IPC_CHANNELS.CHAT_COMPACTION_COMPLETED, streamId, request.sessionId, payload),
+        onFailed: (payload: unknown) => sender.send(IPC_CHANNELS.CHAT_COMPACTION_FAILED, streamId, request.sessionId, payload)
       }
+      const compactionService = contextFlags.compaction
+        ? new CompactionService(core.ledger, compactionModel, undefined, compactionObserver)
+        : undefined
+      const contextBuilder = new ModelContextBuilder(core.ledger, undefined, undefined, undefined, compactionService)
+
+      const migratedState = await core.ledger.load(request.sessionId)
+      const mainScope = migratedState.scopes[MAIN_CONTEXT_SCOPE]
+      const downshift = evaluateModelDownshiftCompaction({
+        previousModel: mainScope?.lastModel,
+        nextModel: request.model,
+        scope: mainScope,
+        capabilities: contextCapabilities,
+        systemPrompt: sysPrompt
+      })
+      if (downshift.required) {
+          if (!compactionService) {
+            sender.send(
+              IPC_CHANNELS.CHAT_STREAM_ERROR,
+              streamId,
+              '新模型的输入预算不足，且正式压缩已通过环境变量禁用。'
+            )
+            return streamId
+          }
+          const result = await compactionService.compact({
+            sessionId: request.sessionId,
+            contextScopeId: MAIN_CONTEXT_SCOPE,
+            trigger: 'model_downshift',
+            capabilities: contextCapabilities,
+            systemPrompt: sysPrompt
+          })
+          if (result.status !== 'completed') {
+            sender.send(
+              IPC_CHANNELS.CHAT_STREAM_ERROR,
+              streamId,
+              `切换到 ${request.model} 前无法将历史压缩到新模型预算内：${result.message || result.errorCode}`
+            )
+            return streamId
+          }
+      }
+
+      const runtimeTurn = await core.coordinator.beginTurn({
+        sessionId: request.sessionId,
+        contextScopeId: MAIN_CONTEXT_SCOPE,
+        text: request.input.text,
+        providerId: request.providerId,
+        model: request.model,
+        commandMetadata: request.input.commandMetadata
+      })
 
       // 异步执行 Agent 循环，通过 webContents.send 推送
       log.info('[Chat] runner start', { streamId, model: request.model, contextWindowTokens })
+      activeRunners.set(streamId, runner)
 
       runner.run(
         {
@@ -92,11 +181,17 @@ export function registerChatIpc(): void {
           apiFormat: modelConfig?.apiFormat || config.apiFormat,
           apiKey,
           model: request.model,
-          messages,
           workspaceRoot: currentWorkspace,
           thinking: mergeModelThinkingConfig(config.thinking, modelConfig),
-          sessionId: request.sessionId || undefined,
-          contextWindowTokens
+          sessionId: request.sessionId,
+          providerId: request.providerId,
+          runtimeTurn,
+          runtimeCoordinator: core.coordinator,
+          contextBuilder,
+          compactionService,
+          contextCapabilities,
+          systemPrompt: sysPrompt,
+          contextInstructions: reminder ? [reminder] : []
         },
         {
           onChunk: (delta, reasoningDelta) => {
@@ -111,6 +206,9 @@ export function registerChatIpc(): void {
             log.error('[Chat] error', { streamId, error })
             sender.send(IPC_CHANNELS.CHAT_STREAM_ERROR, streamId, error)
             activeRunners.delete(streamId)
+          },
+          onContextBudget: (snapshot) => {
+            sender.send(IPC_CHANNELS.CHAT_CONTEXT_BUDGET_UPDATED, streamId, request.sessionId, snapshot)
           },
           onToolStart: (toolCallId, name, args, thoughtSignature) => {
             log.info('[Chat] tool start', { streamId, name })
@@ -196,6 +294,68 @@ export function registerChatIpc(): void {
       activeRunners.delete(streamId)
     }
   })
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAT_COMPACT_START,
+    async (event, request: { sessionId: string; instructions?: string }) => {
+      const sender = event.sender
+      const streamId = `compact_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+      if (!readContextFeatureFlags().compaction) {
+        return { accepted: false, reason: 'FEATURE_DISABLED' }
+      }
+      const core = getContextCoreServices()
+      if (core.coordinator.isScopeBusy(request.sessionId, MAIN_CONTEXT_SCOPE)) {
+        return { accepted: false, reason: 'TURN_BUSY' }
+      }
+      const state = await core.ledger.load(request.sessionId)
+      const scope = state.scopes[MAIN_CONTEXT_SCOPE]
+      if (!scope?.lastProviderId || !scope.lastModel) {
+        return { accepted: false, reason: 'NO_MODEL_CONTEXT' }
+      }
+      const providerSvc = getProviderService()
+      const provider = providerSvc.getConfig(scope.lastProviderId)
+      const apiKey = providerSvc.getApiKey(scope.lastProviderId)
+      const modelConfig = provider?.models.find((model) => model.id === scope.lastModel || model.name === scope.lastModel)
+      const workspace = getWorkspaceService()?.getCurrentWorkspace()
+      if (!provider || !apiKey || !workspace) return { accepted: false, reason: 'PROVIDER_UNAVAILABLE' }
+
+      const { SystemPromptService } = await import('../services/SystemPromptService')
+      const contextWindowTokens = modelConfig?.maxContextTokens || 32000
+      const systemPrompt = await SystemPromptService.buildSystemPrompt({
+        workspaceRoot: workspace,
+        modelId: scope.lastModel,
+        modelDisplayName: `${modelConfig?.name || scope.lastModel} (${contextWindowTokens.toLocaleString()} context)`,
+        contextWindowTokens,
+        sessionId: request.sessionId
+      })
+      const modelClient = new ChatCompactionModelClient({
+        baseUrl: provider.baseUrl,
+        apiKey,
+        apiFormat: modelConfig?.apiFormat || provider.apiFormat,
+        model: scope.lastModel,
+        thinking: mergeModelThinkingConfig(provider.thinking, modelConfig)
+      })
+      const service = new CompactionService(core.ledger, modelClient, undefined, {
+        onStarted: (payload) => sender.send(IPC_CHANNELS.CHAT_COMPACTION_STARTED, streamId, request.sessionId, payload),
+        onCompleted: (payload) => sender.send(IPC_CHANNELS.CHAT_COMPACTION_COMPLETED, streamId, request.sessionId, payload),
+        onFailed: (payload) => sender.send(IPC_CHANNELS.CHAT_COMPACTION_FAILED, streamId, request.sessionId, payload)
+      })
+      const result = await service.compact({
+        sessionId: request.sessionId,
+        contextScopeId: MAIN_CONTEXT_SCOPE,
+        trigger: 'manual',
+        capabilities: {
+          contextWindowTokens,
+          maxInputTokens: modelConfig?.maxInputTokens,
+          maxOutputTokens: modelConfig?.maxOutputTokens,
+          reasoningCountsAgainstContext: modelConfig?.reasoningCountsAgainstContext
+        },
+        systemPrompt,
+        manualInstructions: request.instructions
+      })
+      return { accepted: result.status === 'completed', result }
+    }
+  )
 
   ipcMain.handle(IPC_CHANNELS.CHAT_ACCEPT_FILE, async (_event, txId: string, filePath: string) => {
     const { getEditTransactionService } = await import('../services/EditTransactionService')

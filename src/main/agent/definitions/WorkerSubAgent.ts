@@ -77,11 +77,14 @@ export const WorkerSubAgent: SubAgentDefinition = {
   },
 
   systemPromptBuilder: async (ctx: SubAgentContext): Promise<string> => {
+    if (!ctx.contextCapabilities) {
+      throw new Error('Executor requires resolved model context capabilities')
+    }
     const sharedPrompt = await buildExecutorSharedPrompt({
       workspaceRoot: ctx.workspaceRoot,
       modelId: ctx.modelOverride || ctx.apiConfig.model,
       modelDisplayName: ctx.modelOverride || ctx.apiConfig.model,
-      contextWindowTokens: 32000,
+      contextWindowTokens: ctx.contextCapabilities.contextWindowTokens,
       sessionId: ctx.sessionId,
     })
 

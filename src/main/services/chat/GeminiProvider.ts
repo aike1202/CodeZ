@@ -2,6 +2,17 @@ import { IChatProvider, ChatRequestConfig, StreamCallbacks } from './types'
 import { buildThinkingPayload } from './utils'
 import log from '../../logger'
 import { logPrompt } from '../PromptLogger'
+import type { ProviderTokenUsage } from '../../../shared/types/provider'
+import { classifyProviderError } from './errors'
+
+export function extractGeminiUsage(value: any): ProviderTokenUsage {
+  return {
+    inputTokens: Number(value?.promptTokenCount || 0),
+    outputTokens: Number(value?.candidatesTokenCount || 0),
+    ...(value?.thoughtsTokenCount !== undefined ? { reasoningTokens: Number(value.thoughtsTokenCount) } : {}),
+    ...(value?.totalTokenCount !== undefined ? { totalTokens: Number(value.totalTokenCount) } : {})
+  }
+}
 
 export class GeminiProvider implements IChatProvider {
   async streamChat(config: ChatRequestConfig, callbacks: StreamCallbacks, signal: AbortSignal): Promise<void> {
@@ -148,7 +159,10 @@ export class GeminiProvider implements IChatProvider {
 
       if (!response.ok) {
         const body = await response.text().catch(() => '')
-        callbacks.onError(`请求失败 (${response.status}): ${body.slice(0, 300)}`)
+        callbacks.onError(
+          `请求失败 (${response.status}): ${body.slice(0, 300)}`,
+          classifyProviderError(response.status, body)
+        )
         return
       }
 
@@ -182,6 +196,7 @@ export class GeminiProvider implements IChatProvider {
 
           try {
             const json = JSON.parse(dataStr)
+            if (json?.usageMetadata) callbacks.onUsage?.(extractGeminiUsage(json.usageMetadata))
             
             const finishReason = json?.candidates?.[0]?.finishReason
             if (finishReason) {

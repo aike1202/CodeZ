@@ -36,8 +36,8 @@ declare global {
         stream: (
           providerId: string,
           model: string,
-          messages: any[],
-          sessionId: string | null,
+          sessionId: string,
+          input: import('@shared/types/context').StreamRequestV2['input'],
           callbacks: {
             onChunk: (delta: string, reasoningDelta?: string) => void
             onDone: (fullContent: string, stopReason?: string, txId?: string) => void
@@ -46,8 +46,13 @@ declare global {
             onToolEnd?: (toolCallId: string, result: string) => void
             onPermissionRequest?: (request: any) => void
             onAskUserRequest?: (request: any) => void
+            onContextBudget?: (snapshot: import('@shared/types/context').ContextBudgetSnapshot) => void
+            onCompactionStarted?: (payload: any) => void
+            onCompactionCompleted?: (payload: any) => void
+            onCompactionFailed?: (payload: any) => void
           }
         ) => () => void
+        compact: (sessionId: string, instructions?: string) => Promise<any>
         acceptFile: (txId: string, filePath: string) => Promise<boolean>
         rejectFile: (txId: string, filePath: string) => Promise<boolean>
         getDiff: (txId: string) => Promise<Array<{ path: string; diff: string }>>

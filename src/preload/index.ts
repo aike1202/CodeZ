@@ -1,8 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { IPC_CHANNELS } from '../shared/ipc/channels'
-import type { ProviderFormData, ProviderInfo, ConnectionTestResult, ChatMessage } from '../shared/types/provider'
+import type { ProviderFormData, ProviderInfo, ConnectionTestResult } from '../shared/types/provider'
 import type { SessionData } from '../shared/types/session'
+import type { StreamRequestV2 } from '../shared/types/context'
 
 const api = {
   workspace: {
@@ -76,8 +77,8 @@ const api = {
     stream: (
       providerId: string,
       model: string,
-      messages: ChatMessage[],
-      sessionId: string | null,
+      sessionId: string,
+      input: StreamRequestV2['input'],
       callbacks: {
         onChunk: (delta: string, reasoningDelta?: string) => void
         onDone: (fullContent: string, stopReason?: string, txId?: string) => void
@@ -91,9 +92,15 @@ const api = {
         onSubAgentChunk?: (subAgentId: string, delta: string, reasoningDelta: string) => void
         onSubAgentToolStart?: (subAgentId: string, toolCallId: string, name: string, args: string, thoughtSignature?: string) => void
         onSubAgentToolEnd?: (subAgentId: string, toolCallId: string, result: string) => void
+        onContextBudget?: (snapshot: import('../shared/types/context').ContextBudgetSnapshot) => void
+        onCompactionStarted?: (payload: any) => void
+        onCompactionCompleted?: (payload: any) => void
+        onCompactionFailed?: (payload: any) => void
       }
     ): (() => void) => {
-      let activeStreamId: string | null = null
+      const requestedStreamId = `stream_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+      let activeStreamId: string | null = requestedStreamId
+      let cleanedUp = false
 
       // 注册监听
       const chunkHandler = (_event: unknown, streamId: string, delta: string, reasoningDelta?: string) => {
@@ -109,6 +116,22 @@ const api = {
         if (streamId !== activeStreamId) return
         cleanup()
         callbacks.onError(error)
+      }
+      const contextBudgetHandler = (_event: unknown, streamId: string, _sessionId: string, snapshot: import('../shared/types/context').ContextBudgetSnapshot) => {
+        if (streamId !== activeStreamId) return
+        callbacks.onContextBudget?.(snapshot)
+      }
+      const compactionStartedHandler = (_event: unknown, streamId: string, _sessionId: string, payload: any) => {
+        if (streamId !== activeStreamId) return
+        callbacks.onCompactionStarted?.(payload)
+      }
+      const compactionCompletedHandler = (_event: unknown, streamId: string, _sessionId: string, payload: any) => {
+        if (streamId !== activeStreamId) return
+        callbacks.onCompactionCompleted?.(payload)
+      }
+      const compactionFailedHandler = (_event: unknown, streamId: string, _sessionId: string, payload: any) => {
+        if (streamId !== activeStreamId) return
+        callbacks.onCompactionFailed?.(payload)
       }
       const toolStartHandler = (_event: unknown, streamId: string, toolCallId: string, name: string, args: string, thoughtSignature?: string) => {
         if (streamId !== activeStreamId) return
@@ -158,8 +181,12 @@ const api = {
       }
 
       const cleanup = () => {
-        if (activeStreamId) {
-          ipcRenderer.invoke(IPC_CHANNELS.CHAT_STREAM_STOP, activeStreamId)
+        if (cleanedUp) return
+        cleanedUp = true
+        const streamId = activeStreamId
+        activeStreamId = null
+        if (streamId) {
+          ipcRenderer.invoke(IPC_CHANNELS.CHAT_STREAM_STOP, streamId)
         }
         ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_CHUNK, chunkHandler)
         ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_END, endHandler)
@@ -173,6 +200,10 @@ const api = {
         ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_SUBAGENT_TOOL_END, subAgentToolEndHandler)
         ipcRenderer.removeListener(IPC_CHANNELS.CHAT_REQUEST_APPROVAL, approvalHandler)
         ipcRenderer.removeListener(IPC_CHANNELS.CHAT_REQUEST_ASK_USER, askUserHandler)
+        ipcRenderer.removeListener(IPC_CHANNELS.CHAT_CONTEXT_BUDGET_UPDATED, contextBudgetHandler)
+        ipcRenderer.removeListener(IPC_CHANNELS.CHAT_COMPACTION_STARTED, compactionStartedHandler)
+        ipcRenderer.removeListener(IPC_CHANNELS.CHAT_COMPACTION_COMPLETED, compactionCompletedHandler)
+        ipcRenderer.removeListener(IPC_CHANNELS.CHAT_COMPACTION_FAILED, compactionFailedHandler)
       }
 
       ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_CHUNK, chunkHandler)
@@ -187,11 +218,25 @@ const api = {
       ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_SUBAGENT_TOOL_END, subAgentToolEndHandler)
       ipcRenderer.on(IPC_CHANNELS.CHAT_REQUEST_APPROVAL, approvalHandler)
       ipcRenderer.on(IPC_CHANNELS.CHAT_REQUEST_ASK_USER, askUserHandler)
+      ipcRenderer.on(IPC_CHANNELS.CHAT_CONTEXT_BUDGET_UPDATED, contextBudgetHandler)
+      ipcRenderer.on(IPC_CHANNELS.CHAT_COMPACTION_STARTED, compactionStartedHandler)
+      ipcRenderer.on(IPC_CHANNELS.CHAT_COMPACTION_COMPLETED, compactionCompletedHandler)
+      ipcRenderer.on(IPC_CHANNELS.CHAT_COMPACTION_FAILED, compactionFailedHandler)
 
       // 发起请求
-      ipcRenderer.invoke(IPC_CHANNELS.CHAT_STREAM_START, { providerId, model, messages, sessionId })
-        .then((streamId) => {
-          activeStreamId = streamId
+      ipcRenderer.invoke(IPC_CHANNELS.CHAT_STREAM_START, {
+        streamId: requestedStreamId,
+        providerId,
+        model,
+        sessionId,
+        input
+      } satisfies StreamRequestV2)
+        .then((streamId: string) => {
+          if (cleanedUp) return
+          if (streamId !== requestedStreamId) {
+            cleanup()
+            callbacks.onError('IPC 错误: 主进程返回了不匹配的 stream ID')
+          }
         })
         .catch((err) => {
           cleanup()
@@ -200,6 +245,9 @@ const api = {
 
       return cleanup
     },
+
+    compact: (sessionId: string, instructions?: string): Promise<any> =>
+      ipcRenderer.invoke(IPC_CHANNELS.CHAT_COMPACT_START, { sessionId, instructions }),
 
     acceptFile: (txId: string, filePath: string): Promise<boolean> =>
       ipcRenderer.invoke(IPC_CHANNELS.CHAT_ACCEPT_FILE, txId, filePath),

@@ -3,6 +3,33 @@ import { useWorkspaceStore } from '../../../stores/workspaceStore'
 import { useProviderStore } from '../../../stores/providerStore'
 import { useChatStore } from '../../../stores/chatStore'
 import { parseSlashCommand } from '../../../commands/SlashCommandParser'
+import type { SkillDefinition } from '../../../../../shared/types/skill'
+
+export function buildChatStreamInput(
+  message: string,
+  dynamicSkills: SkillDefinition[],
+  uiMessageId: string,
+  isSystem = false
+) {
+  const parsed = isSystem ? { isCommand: false, processedMessage: message } : parseSlashCommand(message, dynamicSkills)
+  let text = parsed.isCommand ? parsed.processedMessage : message
+  const referencedFiles: string[] = []
+  const fileRegex = /\[([^$\]][^\]]*)\]\(([^)]+)\)/g
+  let match: RegExpExecArray | null
+  while ((match = fileRegex.exec(text)) !== null) referencedFiles.push(match[2])
+  if (referencedFiles.length > 0) {
+    text += `\n\n【系统提示：用户在本次交互中明确引用了以下工作区文件：\n${referencedFiles.map((file) => `- ${file}`).join('\n')}\n如需了解其详细内容，请主动调用 read_file 工具读取。】`
+  }
+  return {
+    text,
+    isSystem,
+    commandMetadata: {
+      uiMessageId,
+      commandName: parsed.isCommand ? parsed.commandName : undefined,
+      referencedFiles
+    }
+  }
+}
 
 function genId(): string {
   return '_' + Math.random().toString(36).substring(2, 9)
@@ -50,6 +77,25 @@ export function useSendMessage() {
       }
 
       if (clientAction) {
+        if (clientAction.type === 'context:compact') {
+          const sessionId = useChatStore.getState().activeSessionId
+          if (!sessionId) return
+          useChatStore.getState().setCompactionState(sessionId, { status: 'running', trigger: 'manual' })
+          try {
+            const response = await (window as any).api.chat.compact(
+              sessionId,
+              clientAction.payload?.instructions || undefined
+            )
+            useChatStore.getState().setCompactionState(sessionId, response?.accepted
+              ? { status: 'completed', trigger: 'manual', ...response.result }
+              : { status: 'failed', trigger: 'manual', error: response?.reason || response?.result?.message || 'Compaction failed' })
+          } catch (error) {
+            useChatStore.getState().setCompactionState(sessionId, {
+              status: 'failed', trigger: 'manual', error: error instanceof Error ? error.message : String(error)
+            })
+          }
+          return
+        }
         if (clientAction.type === 'plan:show-list') {
           useChatStore.getState().setPlanListModalOpen(true)
           return
@@ -121,90 +167,17 @@ export function useSendMessage() {
         }
       }
 
+      let uiMessageId: string
       if (isSystem) {
-        useChatStore.getState().addSystemMessage(message)
+        uiMessageId = useChatStore.getState().addSystemMessage(message).id
       } else {
-        addUserMessage(message)
+        uiMessageId = addUserMessage(message).id
       }
+      await useChatStore.getState().persistSession(sid)
       const agentId = startStreamingReply()
 
       const model = modelName || activeProv.models[0]?.name || 'gpt-4o'
-      const currentMsgs = useChatStore.getState().messages
-      const chatMessages: Array<any> = [
-        {
-          role: 'system',
-          content: `你是一个 AI 编程助手，运行在 Codez 桌面应用中。当前项目：${ws.name}（${ws.projectType}）。请用中文回复，保持简洁专业。`
-        },
-        ...currentMsgs
-          .filter((m) => {
-            // 过滤崩溃残留的空壳 assistant 消息（content 为空且无 toolCalls）
-            if (m.role === 'agent' && !m.content && !m.toolCalls?.length) return false
-            return true
-          })
-          .flatMap((m, index, arr) => {
-            const isLastMessage = index === arr.length - 1
-            const mapped: Array<{ role: 'system' | 'user' | 'assistant' | 'tool'; content: string; tool_calls?: any[]; tool_call_id?: string; name?: string; thought_signature?: string; provider_specific_fields?: any }> = []
-            if (m.role === 'user') {
-              let c = m.content
-              if (isLastMessage) {
-                const { isCommand, processedMessage } = parseSlashCommand(c, allSkills)
-                if (isCommand) {
-                  c = processedMessage
-                } else {
-                  // If not a skill command, let's look for explicitly referenced files
-                  const fileRegex = /\[([^$\]][^\]]*)\]\(([^)]+)\)/g
-                  const referencedFiles: string[] = []
-                  let match
-                  while ((match = fileRegex.exec(c)) !== null) {
-                    referencedFiles.push(match[2])
-                  }
-                  if (referencedFiles.length > 0) {
-                    c += `\n\n【系统提示：用户在本次交互中明确引用了以下工作区文件：\n${referencedFiles.map(f => `- ${f}`).join('\n')}\n如需了解其详细内容，请主动调用 read_file 工具读取。】`
-                  }
-                }
-              }
-              mapped.push({ role: 'user', content: c })
-            } else if (m.role === 'system' as any) {
-              mapped.push({ role: 'user', content: `[System] ${m.content}` })
-            } else {
-              const assistantMsg: any = { role: 'assistant', content: m.content || '' }
-              if (m.toolCalls && m.toolCalls.length > 0) {
-                const finalSig = m.toolCalls[m.toolCalls.length - 1].thoughtSignature || 'skip_thought_signature_validator'
-                assistantMsg.tool_calls = m.toolCalls.map((tc: any) => ({
-                  id: tc.id,
-                  type: 'function',
-                  function: { name: tc.name, arguments: tc.args },
-                  thought_signature: tc.thoughtSignature || finalSig
-                }))
-                assistantMsg.thought_signature = finalSig
-                assistantMsg.provider_specific_fields = { thought_signature: finalSig }
-              }
-              mapped.push(assistantMsg)
-              
-              if (m.toolCalls && m.toolCalls.length > 0) {
-                for (const tc of m.toolCalls) {
-                  if (tc.status === 'success' || tc.status === 'error') {
-                    mapped.push({
-                      role: 'tool',
-                      tool_call_id: tc.id,
-                      name: tc.name,
-                      content: tc.result || ''
-                    })
-                  } else {
-                    // Inject a mock response for interrupted tool calls to keep API sequence valid
-                    mapped.push({
-                      role: 'tool',
-                      tool_call_id: tc.id,
-                      name: tc.name,
-                      content: '{"ok":false,"error":"Execution interrupted or incomplete."}'
-                    })
-                  }
-                }
-              }
-            }
-            return mapped
-          })
-      ]
+      const streamInput = buildChatStreamInput(message, allSkills, uiMessageId, isSystem)
 
       // 前端兜底 watchdog：90s 无首字节提示（后端 60s watchdog 通常先触发，此为兜底）
       let firstByteTimer: ReturnType<typeof setTimeout> | null = null
@@ -213,8 +186,8 @@ export function useSendMessage() {
       const cleanup = (window as any).api.chat.stream(
         activeProv.id,
         model,
-        chatMessages,
         sid,
+        streamInput,
         {
           onChunk: (delta: string, reasoningDelta?: string) => {
             if (!gotFirstByte) {
@@ -267,6 +240,25 @@ export function useSendMessage() {
           },
           onAskUserRequest: (request: any) => {
             addAskUserRequest(agentId, request)
+          },
+          onContextBudget: (snapshot: any) => {
+            useChatStore.getState().setContextBudget(sid, snapshot)
+          },
+          onCompactionStarted: (payload: any) => {
+            useChatStore.getState().setCompactionState(sid, {
+              status: 'running', trigger: payload?.trigger, tokensBefore: payload?.tokensBefore
+            })
+          },
+          onCompactionCompleted: (payload: any) => {
+            useChatStore.getState().setCompactionState(sid, {
+              status: 'completed', trigger: payload?.trigger,
+              tokensBefore: payload?.tokensBefore, tokensAfter: payload?.tokensAfter
+            })
+          },
+          onCompactionFailed: (payload: any) => {
+            useChatStore.getState().setCompactionState(sid, {
+              status: 'failed', trigger: payload?.trigger, error: payload?.message || payload?.errorCode
+            })
           },
           onSubAgentStart: (subAgentId: string, meta: any) => {
             startSubAgent(agentId, subAgentId, meta)

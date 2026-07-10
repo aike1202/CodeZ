@@ -1,5 +1,5 @@
 import { app, BrowserWindow, shell, ipcMain, globalShortcut } from 'electron'
-import { setupLogger } from './logger'
+import log, { setupLogger } from './logger'
 
 // 初始化日志记录器
 setupLogger()
@@ -9,7 +9,7 @@ import { electronApp, is } from '@electron-toolkit/utils'
 import { registerWorkspaceIpc } from './ipc/workspace.handlers'
 import { registerProviderIpc } from './ipc/provider.handlers'
 import { registerChatIpc } from './ipc/chat.handlers'
-import { registerSessionIpc } from './ipc/session.handlers'
+import { initializeSessionStore, registerSessionIpc } from './ipc/session.handlers'
 import { registerTerminalIpc } from './ipc/terminal.handlers'
 import { registerThemeIpc } from './ipc/theme.handlers'
 import { registerSkillIpc } from './ipc/skill.handlers'
@@ -19,6 +19,7 @@ import { registerPermissionIpc } from './ipc/permission.handlers'
 import { registerSubAgentIpc, syncDisabledSubAgents } from './ipc/subagent.handlers'
 import { registerPlanIpc } from './ipc/plan.handlers'
 import { TerminalService } from './services/TerminalService'
+import { getContextCoreServices } from './services/context'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -78,13 +79,30 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.codez.desktop')
+
+  const sessionStore = await initializeSessionStore()
+  const contextCore = getContextCoreServices()
+  for (const session of sessionStore.getAll()) {
+    if (session.isDeleted || session.runtime?.schemaVersion !== 2) continue
+    try {
+      const recovery = await contextCore.coordinator.recoverSession(session.id)
+      if (recovery.recoveredScopes.length > 0 || recovery.warnings.length > 0) {
+        log.warn('[Context] recovered persisted session history', recovery)
+      }
+    } catch (error) {
+      log.error('[Context] failed to recover persisted session history', {
+        sessionId: session.id,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    }
+  }
 
   registerWorkspaceIpc()
   registerProviderIpc()
-  registerChatIpc()
   registerSessionIpc()
+  registerChatIpc()
   registerTerminalIpc()
   registerThemeIpc()
   registerSkillIpc()

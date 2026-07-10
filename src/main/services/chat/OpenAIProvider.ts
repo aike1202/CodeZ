@@ -2,6 +2,16 @@ import { IChatProvider, ChatRequestConfig, StreamCallbacks } from './types'
 import { buildThinkingPayload } from './utils'
 import log from '../../logger'
 import { logPrompt } from '../PromptLogger'
+import type { ProviderTokenUsage } from '../../../shared/types/provider'
+import { classifyProviderError } from './errors'
+
+export function extractOpenAIUsage(value: any): ProviderTokenUsage {
+  return {
+    inputTokens: Number(value?.prompt_tokens || 0),
+    outputTokens: Number(value?.completion_tokens || 0),
+    ...(value?.total_tokens !== undefined ? { totalTokens: Number(value.total_tokens) } : {})
+  }
+}
 
 export interface ThinkParserState {
   inThinkTag: boolean
@@ -96,6 +106,7 @@ export class OpenAIProvider implements IChatProvider {
       messages,
       tools: tools && tools.length > 0 ? tools : undefined,
       stream: true,
+      stream_options: { include_usage: true },
       ...buildThinkingPayload(thinking, model, baseUrl, !!(tools && tools.length > 0), 'openai')
     }
 
@@ -116,14 +127,15 @@ export class OpenAIProvider implements IChatProvider {
 
       if (!response.ok) {
         const body = await response.text().catch(() => '')
+        const code = classifyProviderError(response.status, body)
         if (response.status === 401 || response.status === 403) {
-          callbacks.onError(`鉴权失败 (${response.status}): 请检查 API Key`)
+          callbacks.onError(`鉴权失败 (${response.status}): 请检查 API Key`, code)
         } else if (response.status === 404) {
-          callbacks.onError('模型或端点不存在 (404)')
+          callbacks.onError('模型或端点不存在 (404)', code)
         } else if (response.status === 429) {
-          callbacks.onError('请求过于频繁 (429): 请稍后重试')
+          callbacks.onError('请求过于频繁 (429): 请稍后重试', code)
         } else {
-          callbacks.onError(`请求失败 (${response.status}): ${body.slice(0, 300)}`)
+          callbacks.onError(`请求失败 (${response.status}): ${body.slice(0, 300)}`, code)
         }
         return
       }
@@ -160,6 +172,7 @@ export class OpenAIProvider implements IChatProvider {
 
           try {
             const json = JSON.parse(dataStr)
+            if (json?.usage) callbacks.onUsage?.(extractOpenAIUsage(json.usage))
 
             const finishReason = json?.choices?.[0]?.finish_reason
             if (finishReason) {

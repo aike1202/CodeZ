@@ -1,5 +1,6 @@
 import type { TaskItem } from '../../../../shared/types/task'
 import type { PermissionApprovalResponse, PermissionRequest } from '../../../../shared/types/permission'
+import type { ContextBudgetSnapshot } from '../../../../shared/types/context'
 
 export type AgentStateType =
   | 'processing'
@@ -150,6 +151,14 @@ export interface ChatSession {
   tasks?: TaskItem[]
 }
 
+export interface CompactionUiState {
+  status: 'idle' | 'running' | 'completed' | 'failed'
+  trigger?: string
+  tokensBefore?: number
+  tokensAfter?: number
+  error?: string
+}
+
 export interface ChatState {
   sessions: ChatSession[]
   activeSessionId: string | null
@@ -163,6 +172,8 @@ export interface ChatState {
   activePlanStreamId: string | null
   pendingPrompt: string | null
   tasks: TaskItem[]
+  contextBudgets: Record<string, ContextBudgetSnapshot | undefined>
+  compactionStates: Record<string, CompactionUiState | undefined>
 
   loadSessions: () => Promise<void>
   createSession: (projectId: string) => string
@@ -228,6 +239,8 @@ export interface ChatState {
   setActivePlan: (plan: any | null) => void
   setPlanReview: (review: { plan: any; status: string } | null) => void
   setActivePlanStreamId: (streamId: string | null) => void
+  setContextBudget: (sessionId: string, snapshot: ContextBudgetSnapshot) => void
+  setCompactionState: (sessionId: string, state: CompactionUiState) => void
   setPendingPrompt: (prompt: string | null) => void
   setTasks: (tasks: TaskItem[]) => void
 }

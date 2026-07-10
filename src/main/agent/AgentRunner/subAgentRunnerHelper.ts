@@ -1,7 +1,7 @@
 import { SubAgentManager } from '../SubAgentManager'
 import { BrowserWindow } from 'electron'
 import { IPC_CHANNELS } from '../../../shared/ipc/channels'
-import type { AgentRunnerCallbacks } from './types'
+import type { AgentRunConfig, AgentRunnerCallbacks } from './types'
 
 /**
  * 通用子智能体 spawn 拦截处理。
@@ -16,7 +16,7 @@ import type { AgentRunnerCallbacks } from './types'
 export async function handleSubAgentRunnerSpawn(
   toolCallId: string,
   rawArgs: string,
-  config: { workspaceRoot: string; sessionId?: string; baseUrl?: string; apiKey?: string; apiFormat?: string; model?: string; thinking?: any },
+  config: AgentRunConfig,
   callbacks: AgentRunnerCallbacks
 ): Promise<{ role: 'tool'; tool_call_id: string; name: string; content: string }> {
   const name = 'SubAgentRunner'
@@ -93,12 +93,19 @@ export async function handleSubAgentRunnerSpawn(
         context: parsed.context,
         scope: parsed.scope,
         depth: parsed.depth,
+        contextCapabilities: config.contextCapabilities,
+        runtimeCoordinator: config.runtimeCoordinator,
+        contextBuilder: config.contextBuilder,
         apiConfig: {
           baseUrl: config.baseUrl || '',
           apiKey: config.apiKey || '',
           apiFormat: config.apiFormat || 'openai',
           model: config.model || '',
-          thinking: config.thinking as any
+          thinking: config.thinking,
+          contextWindowTokens: config.contextCapabilities?.contextWindowTokens,
+          maxInputTokens: config.contextCapabilities?.maxInputTokens,
+          maxOutputTokens: config.contextCapabilities?.maxOutputTokens,
+          reasoningCountsAgainstContext: config.contextCapabilities?.reasoningCountsAgainstContext
         }
       },
       callbacks

@@ -14,6 +14,9 @@ export interface ModelConfig {
   name: string
   /** 最大上下文长度（tokens），0 表示不限制 */
   maxContextTokens: number
+  maxInputTokens?: number
+  maxOutputTokens?: number
+  reasoningCountsAgainstContext?: boolean
   /** 单独覆盖该模型使用的接口协议 */
   apiFormat?: ApiFormat
   /** 单独覆盖该模型使用的思考模式 */
@@ -23,6 +26,28 @@ export interface ModelConfig {
   /** 单独覆盖该模型使用的思考 Token 预算 */
   thinkingBudgetTokens?: number | null
 }
+
+export interface ModelContextCapabilities {
+  contextWindowTokens: number
+  maxInputTokens?: number
+  maxOutputTokens?: number
+  reasoningCountsAgainstContext?: boolean
+}
+
+export interface ProviderTokenUsage {
+  inputTokens: number
+  outputTokens: number
+  reasoningTokens?: number
+  totalTokens?: number
+}
+
+export type ChatProviderErrorCode =
+  | 'CONTEXT_OVERFLOW'
+  | 'AUTHENTICATION'
+  | 'RATE_LIMIT'
+  | 'NOT_FOUND'
+  | 'NETWORK'
+  | 'UNKNOWN'
 
 export type ApiFormat = 'openai' | 'anthropic' | 'gemini'
 
@@ -132,8 +157,5 @@ export interface ChatStreamEnd {
   /** 完整消息内容 */
   fullContent: string
   /** token 用量（可选） */
-  usage?: {
-    promptTokens: number
-    completionTokens: number
-  }
+  usage?: ProviderTokenUsage
 }

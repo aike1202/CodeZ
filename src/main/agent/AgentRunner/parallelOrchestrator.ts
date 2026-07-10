@@ -4,6 +4,9 @@ import { IPC_CHANNELS } from '../../../shared/ipc/channels'
 import { WorktreeService } from '../../services/WorktreeService'
 import { SubAgentManager } from '../SubAgentManager'
 import type { AgentRunnerCallbacks } from './types'
+import type { ModelContextCapabilities, ThinkingConfig } from '../../../shared/types/provider'
+import type { SessionRuntimeCoordinator } from '../../services/context/SessionRuntimeCoordinator'
+import type { ModelContextBuilder } from '../../services/context/ModelContextBuilder'
 import type {
   ExecUnit,
   ExecutionGroupingResult,
@@ -25,8 +28,15 @@ export interface ParallelOrchestratorConfig {
     apiKey: string
     apiFormat: string
     model: string
-    thinking?: boolean
+    thinking?: ThinkingConfig
+    contextWindowTokens?: number
+    maxInputTokens?: number
+    maxOutputTokens?: number
+    reasoningCountsAgainstContext?: boolean
   }
+  contextCapabilities?: ModelContextCapabilities
+  runtimeCoordinator?: SessionRuntimeCoordinator
+  contextBuilder?: ModelContextBuilder
 }
 
 /**
@@ -422,6 +432,9 @@ async function spawnWorker(
         task,
         parentPrompt: task,
         subAgentId,
+        contextCapabilities: config.contextCapabilities,
+        runtimeCoordinator: config.runtimeCoordinator,
+        contextBuilder: config.contextBuilder,
         permissionScope:
           isolation === 'worktree'
             ? { allowAllWritesInWorkspace: true, allowBash: true }

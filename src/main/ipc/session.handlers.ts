@@ -3,11 +3,23 @@ import { IPC_CHANNELS } from '../../shared/ipc/channels'
 import { SessionStore } from '../services/SessionStore'
 
 let sessionStore: SessionStore | null = null
+let loadPromise: Promise<void> | null = null
+
+export async function initializeSessionStore(): Promise<SessionStore> {
+  if (!sessionStore) sessionStore = new SessionStore()
+  if (!loadPromise) loadPromise = sessionStore.load()
+  await loadPromise
+  return sessionStore
+}
+
+export async function getSessionStoreReady(): Promise<SessionStore> {
+  return initializeSessionStore()
+}
 
 export function getSessionStore(): SessionStore {
   if (!sessionStore) {
     sessionStore = new SessionStore()
-    sessionStore.load()
+    loadPromise = sessionStore.load()
   }
   return sessionStore
 }
