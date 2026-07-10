@@ -14,6 +14,8 @@ describe('CommandAnalyzer detailed analysis', () => {
       '$PSVersionTable.PSVersion',
       '$PWD.Path',
       '$env:PATH',
+      '[byte[]]$bytes = @(0x00,0x01)',
+      '[System.IO.File]::ReadAllBytes("src-tauri/icons/icon.ico")',
       '(Get-Command node).Source',
       'Resolve-Path .',
       'Join-Path src main',
@@ -61,6 +63,16 @@ describe('CommandAnalyzer detailed analysis', () => {
       'New-Item -ItemType Directory tmp',
       'New-Item -ItemType Directory -Force -Path docs/superpowers/specs | Out-Null',
       '$null = New-Item -ItemType Directory -Force -Path docs/superpowers/plans',
+      '[System.IO.File]::WriteAllBytes("src-tauri/icons/icon.ico", $bytes)',
+      '[System.IO.File]::WriteAllText("out.txt", "hello")',
+      '[System.IO.File]::AppendAllText("out.txt", "hello")',
+      '[System.IO.Directory]::CreateDirectory("src-tauri/icons")',
+      `New-Item -ItemType Directory -Force src-tauri/icons | Out-Null
+[byte[]]$bytes = @(
+  0x00,0x00,0x01,0x00,
+  0x7C,0x3A,0x10,0xFF
+)
+[System.IO.File]::WriteAllBytes('src-tauri/icons/icon.ico', $bytes)`,
       'if (-not (Test-Path docs)) { New-Item -ItemType Directory docs }',
       'Copy-Item a b',
       'Move-Item a b',
@@ -108,6 +120,8 @@ describe('CommandAnalyzer detailed analysis', () => {
       'taskkill /PID 1234 /F',
       'docker rm container',
       'kubectl delete pod x',
+      '[System.IO.File]::Delete("out.txt")',
+      '[System.IO.Directory]::Delete("dist", $true)',
       'chmod -R 777 .'
     ]
 

@@ -45,6 +45,15 @@ describe('PermissionManager', () => {
   it('完全访问模式应放行非破坏性终端命令', () => {
     expect(pm.checkToolPermission('PowerShell', { command: 'npm install' }, workspaceRoot, 'full-access')).toBe('allow')
     expect(pm.checkToolPermission('PowerShell', { command: 'Remove-Item -Recurse -Force dist' }, workspaceRoot, 'full-access')).toBe('ask')
+    expect(pm.checkToolPermission('PowerShell', { command: '[System.IO.File]::Delete("out.txt")' }, workspaceRoot, 'full-access')).toBe('ask')
+  })
+
+  it('应自动放行 workspace 写入类 PowerShell 脚本', () => {
+    const command = `New-Item -ItemType Directory -Force src-tauri/icons | Out-Null
+[byte[]]$bytes = @(0x00,0x01)
+[System.IO.File]::WriteAllBytes('src-tauri/icons/icon.ico', $bytes)`
+
+    expect(pm.checkToolPermission('PowerShell', { command }, workspaceRoot)).toBe('allow')
   })
 
   it('只读工具应 allow，rollback 和写入工具应 allow(边界内)', () => {

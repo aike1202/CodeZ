@@ -89,7 +89,10 @@ export class TaskStore {
       verificationCommand?: string
     }>
   ): TaskItem[] {
-    const list = this.bySession.get(sessionId) ?? []
+    const existing = this.bySession.get(sessionId) ?? []
+    const list = existing.length > 0 && existing.every(task =>
+      task.status === 'completed' || task.status === 'cancelled'
+    ) ? [] : existing
     for (const item of items) {
       list.push({
         id: this.nextId(sessionId),

@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import type { ThinkingConfig, ThinkingMode, ThinkingEffort, ApiFormat } from '@shared/types/provider'
+import { getReasoningCapabilities } from '@shared/utils/reasoningCapabilities'
 import { IconAdd, IconEye, IconEyeOff, IconTrash, IconClose } from './Icons'
 import Button from './ui/Button'
 import Input from './ui/Input'
@@ -12,6 +13,8 @@ export interface ModelFormData {
   maxContextTokens: number
   apiFormat?: ApiFormat
   thinkingMode?: ThinkingMode
+  thinkingEffort?: ThinkingEffort
+  thinkingBudgetTokens?: number | null
 }
 
 interface ProviderFormData {
@@ -37,7 +40,7 @@ function genModelId(): string {
 }
 
 function getDefaultThinking(): ThinkingConfig {
-  return { enabled: true, mode: 'openai', effort: 'auto' }
+  return { enabled: true, mode: 'auto', effort: 'auto' }
 }
 
 export default function SettingsPanel({
@@ -66,6 +69,14 @@ export default function SettingsPanel({
     (name || '').trim() !== '' &&
     (baseUrl || '').trim() !== '' &&
     models.some((m) => (m?.name || '').trim() !== '')
+  const supportsBudgetControl = models.some((model) =>
+    model?.name?.trim() && getReasoningCapabilities({
+      model: model.name,
+      apiFormat: model.apiFormat || apiFormat,
+      baseUrl,
+      mode: model.thinkingMode || thinking.mode
+    }).supportsBudget === true
+  )
 
   const handleSave = async () => {
     setSaveStatus('saving')
@@ -180,15 +191,22 @@ export default function SettingsPanel({
                 />
                 启用模型 reasoning / thinking 输出
               </label>
-              {thinking.enabled && (
+              {thinking.enabled && supportsBudgetControl && (
                 <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>自定义思考 Token 数量：</span>
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>默认思考 Token：</span>
                   <Input
                     type="number"
                     style={{ width: '120px' }}
                     placeholder="如 8192"
                     value={thinking.budgetTokens || ''}
-                    onChange={(e) => setThinking({ ...thinking, budgetTokens: parseInt(e.target.value) || undefined })}
+                    onChange={(e) => {
+                      const budgetTokens = parseInt(e.target.value) || undefined
+                      setThinking({
+                        ...thinking,
+                        effort: budgetTokens ? 'custom' : 'auto',
+                        budgetTokens
+                      })
+                    }}
                   />
                 </div>
               )}

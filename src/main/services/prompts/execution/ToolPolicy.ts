@@ -1,6 +1,6 @@
 import type { PromptModule, PromptContext } from '../PromptTypes'
 
-const TEXT = `# Tool Selection
+const TEXT = `# Tool Policy
 
 ## Purpose
 Guide which tool to reach for — simplest tool that works.
@@ -23,7 +23,7 @@ Prefer: search before read, read before edit, verify before complete.
 
 ## Never
 - Never use Bash for file operations — Read, Edit, Write exist for that.
-- Never use a subagent for a single-file lookup (see Delegation Policy).
+- Never use a subagent for a single-file lookup.
 
 ## Golden Rule
 Use the simplest tool that accomplishes the task.`

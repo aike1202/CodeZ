@@ -96,7 +96,7 @@ export class OpenAIProvider implements IChatProvider {
       messages,
       tools: tools && tools.length > 0 ? tools : undefined,
       stream: true,
-      ...buildThinkingPayload(thinking, model, baseUrl, !!(tools && tools.length > 0))
+      ...buildThinkingPayload(thinking, model, baseUrl, !!(tools && tools.length > 0), 'openai')
     }
 
     log.info(`[OpenAIProvider] Invoking model: ${model}`);

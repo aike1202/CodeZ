@@ -1,19 +1,20 @@
-import { SubAgentDefinition, SubAgentContext } from '../SubAgentManager'
+import type { SubAgentDefinition, SubAgentContext } from '../SubAgentManager'
 import { ToolManager } from '../../tools/ToolManager'
+import { buildExecutorSharedPrompt } from '../../services/prompts/SubAgentPrompts'
 import type { ToolDefinition } from '../../../shared/types/provider'
 
 /**
- * Worker 执行器（可写）：
+ * Executor 执行器（可写）：
  * 领取单个 PlanStep → 用完整读写工具实现 → submit_result 汇报改动。
- * 与同波兄弟 Worker 并行运行；写权限由编排协调器通过 permissionScope 非交互式约束。
+ * 与同波兄弟 Executor 并行运行；写权限由编排协调器通过 permissionScope 非交互式约束。
  *
  * isolation 字段默认 'none'（shared 档，直接写主工作区）；worktree 档由编排协调器
  * 通过覆盖 ctx.workspaceRoot（指向各自 worktree）实现物理隔离。
  */
 export const WorkerSubAgent: SubAgentDefinition = {
-  type: 'Worker',
+  type: 'Executor',
   description:
-    'Executes a single plan step end-to-end: reads context, writes/edits code, and reports what changed. Runs in parallel with sibling workers in the same wave.',
+    'Executes a single plan step end-to-end: reads context, writes/edits code, and reports what changed. Runs in parallel with sibling executors in the same wave.',
   maxLoops: 20,
   canRunInBackground: true,
   isolation: 'none',
@@ -21,9 +22,9 @@ export const WorkerSubAgent: SubAgentDefinition = {
   whenToUse: ['Executing one independent step of an approved plan.'].join('\n'),
   whenNotToUse: [
     'The step depends on another step not yet completed.',
-    'The step touches files a sibling worker is editing in the same wave.',
+    'The step touches files a sibling executor is editing in the same wave.',
   ].join('\n'),
-  costHint: 'Up to 20 tool calls including file edits. One worker per plan step.',
+  costHint: 'Up to 20 tool calls including file edits. One executor per plan step.',
 
   getTools: (toolManager: ToolManager): ToolDefinition[] => {
     const readOnly = toolManager.getReadOnlyTools()
@@ -75,10 +76,20 @@ export const WorkerSubAgent: SubAgentDefinition = {
     ],
   },
 
-  systemPromptBuilder: (ctx: SubAgentContext): string => {
-    return [
-      'You are a Worker SubAgent for the CodeZ coding assistant.',
-      'You execute exactly ONE step of an approved plan, in parallel with sibling workers.',
+  systemPromptBuilder: async (ctx: SubAgentContext): Promise<string> => {
+    const sharedPrompt = await buildExecutorSharedPrompt({
+      workspaceRoot: ctx.workspaceRoot,
+      modelId: ctx.modelOverride || ctx.apiConfig.model,
+      modelDisplayName: ctx.modelOverride || ctx.apiConfig.model,
+      contextWindowTokens: 32000,
+      sessionId: ctx.sessionId,
+    })
+
+    const executorPrompt = [
+      '# Executor Constraints',
+      '',
+      'You are an Executor SubAgent for the CodeZ coding assistant.',
+      'You execute exactly ONE step of an approved plan, in parallel with sibling executors.',
       '',
       '## Your Workflow',
       '1. Read the step description and the files it involves.',
@@ -89,7 +100,7 @@ export const WorkerSubAgent: SubAgentDefinition = {
       '## Critical Constraints',
       '- Work on YOUR assigned step ONLY. Do not touch other steps.',
       '- STAY IN BOUNDS: if you must touch a file OUTSIDE your assigned file set, STOP and report a',
-      '  blocker (status="failed", explain in blockers). A sibling worker may be editing it right now —',
+      '  blocker (status="failed", explain in blockers). A sibling executor may be editing it right now —',
       '  editing it yourself would corrupt their work. The framework will also hard-block such writes.',
       '- Shell commands are restricted to safe verification (no install/network/destructive commands).',
       '  If a blocked command is needed, report it as a blocker instead.',
@@ -98,5 +109,7 @@ export const WorkerSubAgent: SubAgentDefinition = {
       `Project Workspace: ${ctx.workspaceRoot}`,
       `Assigned Step: ${ctx.task || ctx.parentPrompt}`,
     ].join('\n')
+
+    return [sharedPrompt, executorPrompt].join('\n\n')
   },
 }

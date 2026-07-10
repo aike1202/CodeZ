@@ -4,6 +4,7 @@ import { IPC_CHANNELS } from '../../shared/ipc/channels'
 import { getProviderService } from './provider.handlers'
 import { getRecentStore, getWorkspaceService } from './workspace.handlers'
 import type { ChatMessage } from '../../shared/types/provider'
+import { mergeModelThinkingConfig } from '../../shared/utils/reasoningCapabilities'
 import log from '../logger'
 import * as path from 'path'
 
@@ -100,9 +101,7 @@ export function registerChatIpc(): void {
           messages,
           workspaceRoot: currentWorkspace,
           workspaceMode,
-          thinking: modelConfig?.thinkingMode 
-            ? { ...config.thinking, mode: modelConfig.thinkingMode }
-            : config.thinking,
+          thinking: mergeModelThinkingConfig(config.thinking, modelConfig),
           sessionId: request.sessionId || undefined,
           contextWindowTokens
         },

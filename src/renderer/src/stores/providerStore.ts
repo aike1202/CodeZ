@@ -19,8 +19,8 @@ interface ProviderState {
   loading: boolean
 
   loadProviders: () => Promise<void>
-  addProvider: (form: { name: string; baseUrl: string; apiKey: string; models: ModelConfig[]; thinking: ThinkingConfig }) => Promise<ProviderInfo>
-  updateProvider: (id: string, form: Partial<{ name: string; baseUrl: string; apiKey: string; models: ModelConfig[]; thinking: ThinkingConfig }>) => Promise<void>
+  addProvider: (form: { name: string; baseUrl: string; apiFormat?: ApiFormat; apiKey: string; models: ModelConfig[]; thinking: ThinkingConfig }) => Promise<ProviderInfo>
+  updateProvider: (id: string, form: Partial<{ name: string; baseUrl: string; apiFormat: ApiFormat; apiKey: string; models: ModelConfig[]; thinking: ThinkingConfig }>) => Promise<void>
   removeProvider: (id: string) => Promise<void>
   testConnection: (id: string) => Promise<{ success: boolean; message: string; models?: string[] }>
   setActiveProvider: (id: string) => Promise<void>

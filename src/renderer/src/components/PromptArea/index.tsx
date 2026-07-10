@@ -1,7 +1,12 @@
 import React, { useState } from 'react'
 import { useChatStore } from '../../stores/chatStore'
 import { useProviderStore } from '../../stores/providerStore'
-import type { ThinkingEffort } from '@shared/types/provider'
+import type { ModelConfig, ThinkingEffort } from '@shared/types/provider'
+import {
+  getReasoningCapabilities,
+  mergeModelThinkingConfig,
+  resolveReasoningBudgetTokens
+} from '@shared/utils/reasoningCapabilities'
 import Button from '../ui/Button'
 import Flex from '../ui/Flex'
 import Stack from '../ui/Stack'
@@ -22,6 +27,16 @@ import ModelSelector from './components/ModelSelector'
 import PermissionSelector from './components/PermissionSelector'
 import PlusActionMenu from './components/PlusActionMenu'
 import SlashMentionMenu from './components/SlashMentionMenu'
+
+const EFFORT_LABELS: Partial<Record<ThinkingEffort, string>> = {
+  none: '关闭',
+  minimal: '极低',
+  low: '轻度',
+  medium: '中',
+  high: '高',
+  xhigh: '极高',
+  max: '最高'
+}
 
 export default function PromptArea({
   onSend,
@@ -63,16 +78,46 @@ export default function PromptArea({
   const providers = useProviderStore((s) => s.providers)
   const activeProvider = providers.find((p) => p.id === activeProviderId)
   const updateProvider = useProviderStore((s) => s.updateProvider)
+  const activeModel = activeProvider?.models.find((model) => model.name === selectedModelName)
+  const activeThinking = activeProvider
+    ? mergeModelThinkingConfig(activeProvider.thinking, activeModel)
+    : null
+  const activeEffort = activeThinking?.effort
+  const activeBudget = activeThinking
+    ? resolveReasoningBudgetTokens(activeThinking)
+    : undefined
+  const reasoningCapabilities = activeProvider && activeModel
+    ? getReasoningCapabilities({
+        model: activeModel.name,
+        apiFormat: activeModel.apiFormat || activeProvider.apiFormat,
+        baseUrl: activeProvider.baseUrl,
+        mode: activeThinking?.mode
+      })
+    : null
+
+  const updateActiveModel = (patch: Partial<ModelConfig>) => {
+    if (!activeProvider || !activeModel) return
+    updateProvider(activeProvider.id, {
+      models: activeProvider.models.map((model) =>
+        model.id === activeModel.id ? { ...model, ...patch } : model
+      )
+    })
+  }
 
   const handleEffortChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    if (activeProvider) {
-      updateProvider(activeProvider.id, {
-        thinking: {
-          ...activeProvider.thinking,
-          effort: e.target.value as ThinkingEffort
-        }
-      })
-    }
+    const effort = e.target.value as ThinkingEffort
+    updateActiveModel({
+      thinkingEffort: effort,
+      thinkingBudgetTokens: effort === 'auto' ? undefined : null
+    })
+  }
+
+  const handleBudgetChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const isAuto = e.target.value === 'auto'
+    updateActiveModel({
+      thinkingEffort: isAuto ? 'auto' : 'custom',
+      thinkingBudgetTokens: isAuto ? null : Number(e.target.value)
+    })
   }
 
   const closeAllDropdowns = () => {
@@ -162,18 +207,40 @@ export default function PromptArea({
                   setSelectedModelName={setSelectedModelName}
                 />
 
-                {activeProvider?.thinking?.enabled && (
+                {activeProvider?.thinking?.enabled && reasoningCapabilities?.control === 'effort' && (
                   <Select
                     className="prompt-effort-select"
-                    value={activeProvider.thinking.effort || 'custom'}
+                    value={activeEffort && reasoningCapabilities.efforts.includes(activeEffort)
+                      ? activeEffort
+                      : 'auto'}
                     onChange={handleEffortChange}
                   >
                     <optgroup label="推理">
-                      <option value="auto">自动</option>
-                      <option value="low">低</option>
-                      <option value="medium">中</option>
-                      <option value="high">高</option>
-                      <option value="custom">自定义</option>
+                      <option value="auto">默认</option>
+                      {reasoningCapabilities.efforts.map((effort) => (
+                        <option key={effort} value={effort}>{EFFORT_LABELS[effort] || effort}</option>
+                      ))}
+                    </optgroup>
+                  </Select>
+                )}
+
+                {activeProvider?.thinking?.enabled && reasoningCapabilities?.control === 'budget' && (
+                  <Select
+                    className="prompt-effort-select"
+                    value={activeBudget || 'auto'}
+                    onChange={handleBudgetChange}
+                  >
+                    <optgroup label="思考 Token">
+                      <option value="auto">动态</option>
+                      {reasoningCapabilities.budgetPresets?.map((tokens) => (
+                        <option key={tokens} value={tokens}>{`${tokens / 1024}K`}</option>
+                      ))}
+                      {activeBudget
+                        && !reasoningCapabilities.budgetPresets?.includes(activeBudget) && (
+                          <option value={activeBudget}>
+                            {`自定义 ${activeBudget}`}
+                          </option>
+                        )}
                     </optgroup>
                   </Select>
                 )}

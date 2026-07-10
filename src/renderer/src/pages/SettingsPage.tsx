@@ -133,7 +133,7 @@ export default function SettingsPage({ onBack, initialTab, onCreateFromSkill }: 
           {/* 右侧 - 详情配置区 */}
           {activeTabId === 'new' ? (
             <SettingsPanel
-              initialData={{ name: '', baseUrl: '', apiKey: '', models: [], thinking: { enabled: true, mode: 'openai' } }}
+              initialData={{ name: '', baseUrl: '', apiKey: '', models: [], thinking: { enabled: true, mode: 'auto', effort: 'auto' } }}
               isNew={true}
               onSave={async (data) => {
                 const newProv = await addProvider(data)
@@ -152,7 +152,7 @@ export default function SettingsPage({ onBack, initialTab, onCreateFromSkill }: 
                 apiFormat: activeProvider.apiFormat,
                 apiKey: activeProvider.apiKey,
                 models: activeProvider.models,
-                thinking: activeProvider.thinking || { enabled: true, mode: 'openai' }
+                thinking: activeProvider.thinking || { enabled: true, mode: 'auto', effort: 'auto' }
               }}
               isNew={false}
               onSave={async (data) => await updateProvider(activeProvider.id, data)}

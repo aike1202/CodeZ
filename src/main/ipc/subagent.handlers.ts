@@ -39,7 +39,7 @@ export function registerSubAgentIpc(): void {
   ipcMain.handle(
     IPC_CHANNELS.SUBAGENT_GET_DETAIL,
     async (_event, type: string): Promise<SubAgentDetail | null> => {
-      return SubAgentManager.getDetail(type) ?? null
+      return (await SubAgentManager.getDetail(type)) ?? null
     }
   )
 }

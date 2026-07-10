@@ -31,6 +31,9 @@ export class CommandAnalyzer {
     const sequenced = this.analyzeSequence(cmd)
     if (sequenced) return sequenced
 
+    const multiline = this.analyzeMultiline(cmd)
+    if (multiline) return multiline
+
     const piped = this.analyzePipeline(cmd)
     if (piped) return piped
 
@@ -39,6 +42,9 @@ export class CommandAnalyzer {
 
     const assignment = this.analyzePowerShellAssignment(cmd)
     if (assignment) return assignment
+
+    const dotNetIo = this.analyzeDotNetIoMethod(lowerCmd, cmd)
+    if (dotNetIo) return dotNetIo
 
     const memberAccess = this.analyzePowerShellMemberAccess(cmd)
     if (memberAccess) return memberAccess
@@ -144,6 +150,16 @@ export class CommandAnalyzer {
     return this.createAnalysis(command, safeSequence ? 'safe' : highest.risk, safeSequence ? 'read' : highest.action, safeSequence)
   }
 
+  private static analyzeMultiline(command: string): CommandAnalysis | null {
+    if (!command.includes('\n') && !command.includes('\r')) return null
+    const segments = this.splitTopLevel(command.replace(/\r\n/g, '\n'), '\n')
+    if (segments.length < 2) return null
+    const analyses = segments.map(segment => this.analyzeDetailed(segment))
+    const highest = analyses.reduce((current, next) => this.compareRisk(current.risk, next.risk) >= 0 ? current : next)
+    const safeSequence = analyses.every(analysis => analysis.risk === 'safe')
+    return this.createAnalysis(command, safeSequence ? 'safe' : highest.risk, safeSequence ? 'read' : highest.action, safeSequence)
+  }
+
   private static analyzePowerShellIf(command: string): CommandAnalysis | null {
     const match = command.match(/^if\s*\((.+)\)\s*\{(.+)\}(?:\s*else\s*\{(.+)\})?$/is)
     if (!match) return null
@@ -173,10 +189,40 @@ export class CommandAnalyzer {
     if (nullAssignment) {
       return this.analyzeDetailed(nullAssignment[1].trim())
     }
+    if (/^\[[^\r\n]+\]\s*\$[\w:]+\s*=/.test(command)) {
+      return this.createAnalysis(command, 'safe', 'read', true)
+    }
     if (/^\$[\w:]+\s*=/.test(command)) {
       return this.createAnalysis(command, 'destructive', 'modify', false)
     }
     return null
+  }
+
+  private static analyzeDotNetIoMethod(lowerCommand: string, command: string): CommandAnalysis | null {
+    const match = lowerCommand.match(/^\[(?:system\.)?io\.(file|directory|path)\]::([a-z]\w*)\s*\(/)
+    if (!match) return null
+
+    const [, target, method] = match
+    const destructiveMethods = new Set(['delete'])
+    const writeMethods = new Set([
+      'appendalllines', 'appendalltext', 'appendtext',
+      'copy', 'create', 'createtext', 'move', 'openwrite', 'replace',
+      'setattributes', 'setcreationtime', 'setcreationtimeutc',
+      'setlastaccesstime', 'setlastaccesstimeutc', 'setlastwritetime', 'setlastwritetimeutc',
+      'writeallbytes', 'writealllines', 'writealltext'
+    ])
+    const directoryWriteMethods = new Set(['createdirectory', 'move'])
+
+    if (destructiveMethods.has(method)) {
+      return this.createAnalysis(command, 'destructive', 'delete', false)
+    }
+    if (target === 'directory' && directoryWriteMethods.has(method)) {
+      return this.createAnalysis(command, 'write', 'modify', true)
+    }
+    if (target === 'file' && writeMethods.has(method)) {
+      return this.createAnalysis(command, 'write', 'modify', true)
+    }
+    return this.createAnalysis(command, 'safe', 'read', true)
   }
 
   private static analyzePowerShellMemberAccess(command: string): CommandAnalysis | null {

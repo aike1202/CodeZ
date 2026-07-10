@@ -407,7 +407,7 @@ async function spawnWorker(
   ].join('\n')
 
   callbacks.onSubAgentStart?.(subAgentId, {
-    type: 'Worker',
+    type: 'Executor',
     description: step.title,
     prompt: task,
     parentToolCallId: config.parentToolCallId || subAgentId,
@@ -415,7 +415,7 @@ async function spawnWorker(
 
   try {
     const result = await SubAgentManager.spawn(
-      'Worker',
+      'Executor',
       {
         workspaceRoot,
         sessionId: config.sessionId,

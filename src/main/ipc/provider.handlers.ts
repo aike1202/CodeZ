@@ -26,6 +26,7 @@ export function registerProviderIpc(): void {
       id: config.id,
       name: config.name,
       baseUrl: config.baseUrl,
+      apiFormat: config.apiFormat,
       apiKey: form.apiKey,
       models: config.models,
       thinking: config.thinking,

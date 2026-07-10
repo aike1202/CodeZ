@@ -92,19 +92,64 @@ describe('ChatService - buildThinkingPayload (自动适配与推导)', () => {
     const payload = buildThinkingPayload(
       { enabled: true, mode: 'auto' },
       'gemini-3.5-flash-high',
-      'http://127.0.0.1:8045/v1'
+      'http://127.0.0.1:8045/v1',
+      false,
+      'gemini'
     )
-    expect(payload).toHaveProperty('thinking_config')
-    expect(payload).toHaveProperty('google')
+    expect(payload).toEqual({
+      google: { thinkingConfig: { includeThoughts: true } }
+    })
   })
 
-  it('应当在 mode 为 auto 时，基于 baseUrl 自动选用 openrouter 配置', () => {
+  it('does not enable reasoning for known non-reasoning models through OpenRouter', () => {
     const payload = buildThinkingPayload(
       { enabled: true, mode: 'auto' },
       'gpt-4o',
       'https://openrouter.ai/api/v1'
     )
-    expect(payload).toEqual({ include_reasoning: true })
+    expect(payload).toEqual({})
+  })
+
+  it('uses documented OpenAI and Grok reasoning_effort values', () => {
+    expect(buildThinkingPayload(
+      { enabled: true, mode: 'openai', effort: 'max' },
+      'gpt-5.6',
+      'https://api.openai.com/v1'
+    )).toEqual({ reasoning_effort: 'max' })
+
+    expect(buildThinkingPayload(
+      { enabled: true, mode: 'grok', effort: 'high' },
+      'grok-4.5',
+      'https://api.x.ai/v1'
+    )).toEqual({ reasoning_effort: 'high' })
+  })
+
+  it('uses OpenRouter unified reasoning effort', () => {
+    expect(buildThinkingPayload(
+      { enabled: true, mode: 'auto', effort: 'xhigh' },
+      'anthropic/claude-opus-4.8',
+      'https://openrouter.ai/api/v1'
+    )).toEqual({ reasoning: { effort: 'xhigh' } })
+
+    expect(buildThinkingPayload(
+      { enabled: true, mode: 'auto', effort: 'high' },
+      'openai/o3',
+      'https://openrouter.ai/api/v1'
+    )).toEqual({ reasoning: { effort: 'high' } })
+  })
+
+  it('uses OpenRouter unified reasoning token budgets', () => {
+    expect(buildThinkingPayload(
+      { enabled: true, mode: 'auto', effort: 'custom', budgetTokens: 8192 },
+      'anthropic/claude-3.7-sonnet',
+      'https://openrouter.ai/api/v1'
+    )).toEqual({ reasoning: { max_tokens: 8192 } })
+
+    expect(buildThinkingPayload(
+      { enabled: true, mode: 'auto', effort: 'low', budgetTokens: 8192 },
+      'anthropic/claude-opus-4.5',
+      'https://openrouter.ai/api/v1'
+    )).toEqual({ reasoning: { max_tokens: 8192 } })
   })
 
   it('uses adaptive thinking for Claude Opus 4.8 without budget_tokens', () => {
@@ -148,13 +193,27 @@ describe('ChatService - buildThinkingPayload (自动适配与推导)', () => {
     expect(JSON.stringify(payload)).not.toContain('budget_tokens')
   })
 
+  it('uses adaptive thinking with effort for Claude Mythos Preview', () => {
+    const payload = buildThinkingPayload(
+      { enabled: true, mode: 'anthropic', effort: 'max' },
+      'claude-mythos-preview',
+      'https://api.anthropic.com/v1'
+    )
+
+    expect(payload).toEqual({
+      thinking: { type: 'adaptive', display: 'summarized' },
+      output_config: { effort: 'max' }
+    })
+    expect(JSON.stringify(payload)).not.toContain('budget_tokens')
+  })
+
   it('应当在 mode 为 auto 时，基于 model 自动选用 deepseek 配置', () => {
     const payload = buildThinkingPayload(
       { enabled: true, mode: 'auto' },
       'deepseek-r1-chat',
       'https://api.deepseek.com/v1'
     )
-    expect(payload).toEqual({ reasoning: { enabled: true }, thinking: { type: 'enabled' }, max_completion_tokens: undefined })
+    expect(payload).toEqual({ thinking: { type: 'enabled' } })
   })
 
   it('应当在 mode 为 auto 时，基于 model 自动选用 qwen 配置', () => {
@@ -163,7 +222,7 @@ describe('ChatService - buildThinkingPayload (自动适配与推导)', () => {
       'qwen-max-thinking',
       'https://dashscope.aliyuncs.com/api/v1'
     )
-    expect(payload).toEqual({ enable_thinking: true, max_completion_tokens: undefined })
+    expect(payload).toEqual({ enable_thinking: true })
   })
 
   it('应当直接输出显式指定的模式配置，不进行推导', () => {
@@ -172,16 +231,23 @@ describe('ChatService - buildThinkingPayload (自动适配与推导)', () => {
       'gemini-3.5-flash-high',
       'http://127.0.0.1:8045/v1'
     )
-    expect(payload).toEqual({ reasoning: { enabled: true }, thinking: { type: 'enabled' }, max_completion_tokens: undefined })
+    expect(payload).toEqual({ thinking: { type: 'enabled' } })
   })
 
-  it('应当在设置了 budgetTokens 时注入相应参数', () => {
+  it('only sends token budgets to providers that document token budgets', () => {
     const payload = buildThinkingPayload(
       { enabled: true, mode: 'deepseek', budgetTokens: 2000, effort: 'custom' },
       'deepseek-r1-chat',
       'https://api.deepseek.com/v1'
     )
-    expect(payload).toEqual({ reasoning: { enabled: true }, thinking: { type: 'enabled' }, max_completion_tokens: 2000 })
+    expect(payload).toEqual({ thinking: { type: 'enabled' } })
+
+    const payloadQwen = buildThinkingPayload(
+      { enabled: true, mode: 'qwen', budgetTokens: 2000, effort: 'custom' },
+      'qwen3.7-plus',
+      'https://dashscope.aliyuncs.com/compatible-mode/v1'
+    )
+    expect(payloadQwen).toEqual({ enable_thinking: true, thinking_budget: 2000 })
 
     const payloadAnthropic = buildThinkingPayload(
       { enabled: true, mode: 'anthropic', budgetTokens: 2000, effort: 'custom' },
@@ -198,7 +264,7 @@ describe('ChatService - buildThinkingPayload (自动适配与推导)', () => {
       'claude-3-7-sonnet',
       'https://api.anthropic.com/v1'
     )
-    expect(payloadLow).toEqual({ thinking: { type: 'enabled', budget_tokens: 1024 }, output_config: { effort: 'low' } })
+    expect(payloadLow).toEqual({ thinking: { type: 'enabled', budget_tokens: 1024 } })
 
     // Medium -> 4096 (Deepseek mode)
     const payloadMedium = buildThinkingPayload(
@@ -206,7 +272,7 @@ describe('ChatService - buildThinkingPayload (自动适配与推导)', () => {
       'deepseek-r1',
       'https://api.deepseek.com/v1'
     )
-    expect(payloadMedium).toEqual({ reasoning: { enabled: true }, thinking: { type: 'enabled' }, max_completion_tokens: 4096, reasoning_effort: 'medium' })
+    expect(payloadMedium).toEqual({ thinking: { type: 'enabled' } })
 
     // High -> 16384 (Qwen mode)
     const payloadHigh = buildThinkingPayload(
@@ -214,7 +280,29 @@ describe('ChatService - buildThinkingPayload (自动适配与推导)', () => {
       'qwen-max-thinking',
       'https://dashscope.aliyuncs.com/api/v1'
     )
-    expect(payloadHigh).toEqual({ enable_thinking: true, max_completion_tokens: 16384, reasoning_effort: 'high' })
+    expect(payloadHigh).toEqual({ enable_thinking: true, thinking_budget: 16384 })
+  })
+
+  it('uses native and OpenAI-compatible Gemini reasoning fields', () => {
+    expect(buildThinkingPayload(
+      { enabled: true, mode: 'gemini', effort: 'low' },
+      'gemini-3.5-flash',
+      'https://generativelanguage.googleapis.com/v1beta',
+      false,
+      'gemini'
+    )).toEqual({
+      google: {
+        thinkingConfig: { includeThoughts: true, thinkingLevel: 'low' }
+      }
+    })
+
+    expect(buildThinkingPayload(
+      { enabled: true, mode: 'gemini', effort: 'minimal' },
+      'gemini-2.5-flash',
+      'https://generativelanguage.googleapis.com/v1beta/openai',
+      false,
+      'openai'
+    )).toEqual({ reasoning_effort: 'minimal' })
   })
 })
 

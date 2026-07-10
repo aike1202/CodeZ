@@ -43,6 +43,42 @@ describe('TaskStore persistence', () => {
     }))
   })
 
+  it('starts a fresh task list after the previous list is finished', async () => {
+    const { TaskStore } = await import('../main/services/TaskStore')
+    const store = TaskStore.getInstance()
+    store.create('s1', [
+      { subject: 'First task' },
+      { subject: 'Second task' }
+    ])
+    store.update('s1', 't1', { status: 'completed' })
+    store.update('s1', 't2', { status: 'cancelled' })
+
+    store.create('s1', [{ subject: 'Next task' }])
+
+    expect(store.list('s1')).toEqual([
+      expect.objectContaining({ id: 't3', subject: 'Next task', status: 'pending' })
+    ])
+    expect(sessionRecord.tasks).toEqual(store.list('s1'))
+  })
+
+  it('keeps appending while the current task list has unfinished work', async () => {
+    const { TaskStore } = await import('../main/services/TaskStore')
+    const store = TaskStore.getInstance()
+    store.create('s1', [
+      { subject: 'Completed task' },
+      { subject: 'Pending task' }
+    ])
+    store.update('s1', 't1', { status: 'completed' })
+
+    store.create('s1', [{ subject: 'Appended task' }])
+
+    expect(store.list('s1').map(task => ({ id: task.id, status: task.status }))).toEqual([
+      { id: 't1', status: 'completed' },
+      { id: 't2', status: 'pending' },
+      { id: 't3', status: 'pending' }
+    ])
+  })
+
   it('persists task group approval metadata on created tasks', async () => {
     const { TaskStore } = await import('../main/services/TaskStore')
     const store = TaskStore.getInstance()

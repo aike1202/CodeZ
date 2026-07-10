@@ -108,7 +108,7 @@ export class AnthropicProvider implements IChatProvider {
       input_schema: t.function.parameters
     }))
 
-    const thinkingPayload = await import('./utils').then(m => m.buildThinkingPayload(thinking, model, baseUrl, !!(tools && tools.length > 0)))
+    const thinkingPayload = await import('./utils').then(m => m.buildThinkingPayload(thinking, model, baseUrl, !!(tools && tools.length > 0), 'anthropic'))
     const requestPayload: any = {
       model,
       messages: anthropicMessages,

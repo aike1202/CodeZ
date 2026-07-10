@@ -1,6 +1,6 @@
-export type ThinkingMode = 'auto' | 'none' | 'openai' | 'deepseek' | 'qwen' | 'anthropic' | 'gemini' | 'openrouter'
+export type ThinkingMode = 'auto' | 'none' | 'openai' | 'deepseek' | 'qwen' | 'anthropic' | 'gemini' | 'grok' | 'openrouter'
 
-export type ThinkingEffort = 'auto' | 'low' | 'medium' | 'high' | 'custom'
+export type ThinkingEffort = 'auto' | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'custom'
 
 export interface ThinkingConfig {
   enabled: boolean
@@ -18,6 +18,10 @@ export interface ModelConfig {
   apiFormat?: ApiFormat
   /** 单独覆盖该模型使用的思考模式 */
   thinkingMode?: ThinkingMode
+  /** 单独覆盖该模型使用的推理强度 */
+  thinkingEffort?: ThinkingEffort
+  /** 单独覆盖该模型使用的思考 Token 预算 */
+  thinkingBudgetTokens?: number | null
 }
 
 export type ApiFormat = 'openai' | 'anthropic' | 'gemini'

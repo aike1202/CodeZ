@@ -118,7 +118,7 @@ export interface SubAgentDefinition {
   /** 调用成本提示 */
   costHint?: string
 
-  systemPromptBuilder: (ctx: SubAgentContext) => string
+  systemPromptBuilder: (ctx: SubAgentContext) => string | Promise<string>
   getTools(toolManager: ToolManager): ToolDefinition[]
 
   /** 输出规格 — 设置后框架自动注入 submit_result 工具 */
@@ -272,7 +272,7 @@ function buildRecoverableStopOutput(
 ): SubAgentStructuredOutput | undefined {
   if (!spec) return undefined
 
-  const summary = `Worker stopped after recoverable API/network error: ${error}`
+  const summary = `Executor stopped after recoverable API/network error: ${error}`
   const data: Record<string, unknown> = {}
   for (const field of spec.fields) {
     if (field.name === 'status') {
@@ -296,8 +296,8 @@ function buildRecoverableStopOutput(
 
 // ─── 系统提示扩展 ───────────────────────────────────────────
 
-function buildExtendedSystemPrompt(def: SubAgentDefinition, ctx: SubAgentContext): string {
-  const basePrompt = def.systemPromptBuilder(ctx)
+async function buildExtendedSystemPrompt(def: SubAgentDefinition, ctx: SubAgentContext): Promise<string> {
+  const basePrompt = await def.systemPromptBuilder(ctx)
   const parts: string[] = [basePrompt]
 
   // 验收标准清单
@@ -336,16 +336,21 @@ export class SubAgentManager {
   private static definitions = new Map<string, SubAgentDefinition>(
     allSubAgentDefinitions.map(def => [def.type, def])
   )
+  private static aliases = new Map<string, string>([['Worker', 'Executor']])
   private static activeHandles = new Map<string, SubAgentHandle>()
   /** 被禁用的子智能体 type —— 不在此集合中即为启用 */
   private static disabledTypes = new Set<string>()
+
+  private static canonicalType(type: string): string {
+    return this.aliases.get(type) || type
+  }
 
   static register(definition: SubAgentDefinition): void {
     this.definitions.set(definition.type, definition)
   }
 
   static getDefinition(type: string): SubAgentDefinition | undefined {
-    return this.definitions.get(type)
+    return this.definitions.get(this.canonicalType(type))
   }
 
   static listDefinitions(): SubAgentDefinition[] {
@@ -358,7 +363,8 @@ export class SubAgentManager {
   }
 
   static isEnabled(type: string): boolean {
-    return !this.disabledTypes.has(type)
+    const canonical = this.canonicalType(type)
+    return !this.disabledTypes.has(canonical) && !this.disabledTypes.has(type)
   }
 
   /** 仅返回启用的子智能体定义 —— 用于向主 Agent 广告可用类型 */
@@ -373,8 +379,9 @@ export class SubAgentManager {
    * 运行时才注入的动态值（workspaceRoot、task、scope 等）以 {{...}} 占位标注，
    * 因此看到的提示词结构与实际运行时完全一致。
    */
-  static getDetail(type: string): SubAgentDetail | undefined {
-    const def = this.definitions.get(type)
+  static async getDetail(type: string): Promise<SubAgentDetail | undefined> {
+    const canonical = this.canonicalType(type)
+    const def = this.definitions.get(canonical)
     if (!def) return undefined
 
     // 用占位上下文渲染提示词 —— 动态值显示为 {{...}} 便于阅读
@@ -401,7 +408,7 @@ export class SubAgentManager {
 
     let systemPrompt: string
     try {
-      systemPrompt = buildExtendedSystemPrompt(def, previewCtx)
+      systemPrompt = await buildExtendedSystemPrompt(def, previewCtx)
     } catch (e: any) {
       systemPrompt = `（提示词预览生成失败：${e?.message ?? e}）`
     }
@@ -455,22 +462,23 @@ export class SubAgentManager {
     ctx: SubAgentContext,
     callbacks: AgentRunnerCallbacks
   ): Promise<SubAgentResult> {
-    const def = this.definitions.get(type)
+    const canonical = this.canonicalType(type)
+    const def = this.definitions.get(canonical)
     if (!def) {
       throw new Error(`SubAgent type '${type}' is not registered`)
     }
-    if (!this.isEnabled(type)) {
+    if (!this.isEnabled(canonical)) {
       throw new Error(`SubAgent type '${type}' is disabled`)
     }
 
-    const handleId = `subagent_${type}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+    const handleId = `subagent_${canonical}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
     // SubAgent 事件作用域标识 — 优先用调用方注入的（与父工具调用绑定），否则回退到 handleId
     const subAgentId = ctx.subAgentId || handleId
     let abortController = new AbortController()
 
     const handle: SubAgentHandle = {
       id: handleId,
-      type,
+      type: canonical,
       status: 'running',
       cancel: () => {
         abortController.abort()
@@ -492,7 +500,7 @@ export class SubAgentManager {
       availableTools.push(generateSubmitResultTool(def.outputSpec))
     }
 
-    const systemPrompt = buildExtendedSystemPrompt(def, ctx)
+    const systemPrompt = await buildExtendedSystemPrompt(def, ctx)
 
     const task = ctx.task || ctx.parentPrompt || ''
     const messages: ChatMessage[] = [
@@ -600,22 +608,22 @@ export class SubAgentManager {
                 id: `subagent_recover_${subAgentId}_${Date.now()}`,
                 questions: [
                   {
-                    header: 'Worker恢复',
+                    header: '执行器恢复',
                     question: [
-                      'Worker 遇到 API/网络问题，当前步骤已暂停。',
+                      'Executor 遇到 API/网络问题，当前步骤已暂停。',
                       '',
                       `错误：${lastError}`,
                       '',
-                      '请维护网络、Provider、API Key、额度或模型配置后再继续。继续后会复用当前 Worker 上下文重试，不会重新开始。'
+                      '请维护网络、Provider、API Key、额度或模型配置后再继续。继续后会复用当前 Executor 上下文重试，不会重新开始。'
                     ].join('\n'),
                     options: [
                       {
                         label: '已修复，继续重试',
-                        description: '继续当前 Worker，不丢弃已积累的上下文。'
+                        description: '继续当前 Executor，不丢弃已积累的上下文。'
                       },
                       {
-                        label: '停止这个 Worker',
-                        description: '停止该 Worker，让主 Agent 接手或稍后重新分派。'
+                        label: '停止这个 Executor',
+                        description: '停止该 Executor，让主 Agent 接手或稍后重新分派。'
                       }
                     ],
                     multiSelect: false,
@@ -632,7 +640,7 @@ export class SubAgentManager {
             forcedStructuredOutput = buildRecoverableStopOutput(def.outputSpec, lastError)
             finalOutput =
               forcedStructuredOutput?.conclusion ||
-              `Worker stopped after recoverable API/network error: ${lastError}`
+              `Executor stopped after recoverable API/network error: ${lastError}`
           }
           break
         }
@@ -681,7 +689,7 @@ export class SubAgentManager {
               finalOutput = currentContent
 
               const subResult: SubAgentResult = {
-                type,
+                type: canonical,
                 output: finalOutput,
                 structuredOutput,
                 toolCallCount,
@@ -774,7 +782,7 @@ export class SubAgentManager {
               const structured = validateAgainstSpec(maybeJson, def.outputSpec)
               if (structured) {
                 const subResult: SubAgentResult = {
-                  type,
+                  type: canonical,
                   output: finalOutput,
                   structuredOutput: structured,
                   toolCallCount,
@@ -799,7 +807,7 @@ export class SubAgentManager {
       }
 
       const subResult: SubAgentResult = {
-        type,
+        type: canonical,
         output: finalOutput,
         structuredOutput: forcedStructuredOutput,
         toolCallCount,
@@ -808,13 +816,13 @@ export class SubAgentManager {
 
       // 如果设置了 outputSpec 但没有 structuredOutput，生成警告质量摘要
       if (def.outputSpec && !subResult.structuredOutput && ctx.expectations?.questions?.length) {
-              subResult.qualitySummary = {
-                coverage: 0,
-                confidence: 'low',
-                unresolvedCount: 0,
-                filesExaminedCount: 0,
-                warning: 'SubAgent produced plain text instead of structured output via submit_result. Findings may be incomplete.',
-              }
+        subResult.qualitySummary = {
+          coverage: 0,
+          confidence: 'low',
+          unresolvedCount: 0,
+          filesExaminedCount: 0,
+          warning: 'SubAgent produced plain text instead of structured output via submit_result. Findings may be incomplete.',
+        }
       }
 
       handle.status = 'completed'
