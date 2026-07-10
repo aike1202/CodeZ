@@ -32,13 +32,9 @@ describe('checkSubAgentToolPermission', () => {
     it('denies workspace-escaping writes', () => {
       expect(checkSubAgentToolPermission('Write', { file_path: path.resolve('/tmp/evil.ts') }, WS, scope)).toMatch(/escapes the workspace/)
     })
-    it('allows safe verification commands', () => {
+    it('delegates allowed shell commands to the runtime permission policy', () => {
       expect(checkSubAgentToolPermission('Bash', { command: 'npm test' }, WS, scope)).toBeNull()
-      expect(checkSubAgentToolPermission('PowerShell', { command: 'git status' }, WS, scope)).toBeNull()
-    })
-    it('blocks destructive and network commands', () => {
-      expect(checkSubAgentToolPermission('Bash', { command: 'rm -rf dist' }, WS, scope)).toMatch(/risk=destructive/)
-      expect(checkSubAgentToolPermission('Bash', { command: 'npm install' }, WS, scope)).toMatch(/risk=network/)
+      expect(checkSubAgentToolPermission('PowerShell', { command: 'npm run tauri dev' }, WS, scope)).toBeNull()
     })
   })
 

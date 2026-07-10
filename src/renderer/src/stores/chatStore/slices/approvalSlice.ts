@@ -1,13 +1,14 @@
 import type { StateCreator } from 'zustand'
 import type { ChatState, PermissionRequestState, AskUserRequestState } from '../types'
 import { updateMessageInState } from './messageSlice'
+import type { PermissionApprovalResponse } from '../../../../../shared/types/permission'
 
 export interface ApprovalSlice {
   addPermissionRequest: (
     msgId: string,
     request: Omit<PermissionRequestState, 'status' | 'createdAt'>
   ) => void
-  resolvePermissionRequest: (msgId: string, requestId: string, approved: boolean) => void
+  resolvePermissionRequest: (msgId: string, requestId: string, response: PermissionApprovalResponse) => void
   addAskUserRequest: (
     msgId: string,
     request: Omit<AskUserRequestState, 'status' | 'createdAt'>
@@ -39,14 +40,14 @@ export const createApprovalSlice: StateCreator<ChatState, [], [], ApprovalSlice>
     get().persistCurrentSession()
   },
 
-  resolvePermissionRequest: (msgId: string, requestId: string, approved: boolean) => {
+  resolvePermissionRequest: (msgId: string, requestId: string, response: PermissionApprovalResponse) => {
     set((s) => updateMessageInState(s, msgId, (m) => {
       if (!m.permissionRequests) return m
       return {
         ...m,
         permissionRequests: m.permissionRequests.map((req) =>
           req.id === requestId
-            ? { ...req, status: approved ? ('approved' as const) : ('denied' as const) }
+            ? { ...req, status: response.approved ? ('approved' as const) : ('denied' as const) }
             : req
         )
       }

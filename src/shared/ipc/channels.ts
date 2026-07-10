@@ -94,6 +94,10 @@ export const IPC_CHANNELS = {
   SETTINGS_GET: 'settings:get',
   SETTINGS_SAVE: 'settings:save',
 
+  // Permissions
+  PERMISSION_MODE_GET: 'permission:mode:get',
+  PERMISSION_MODE_SET: 'permission:mode:set',
+
   // SubAgents
   SUBAGENT_LIST: 'subagent:list',
   SUBAGENT_TOGGLE: 'subagent:toggle',

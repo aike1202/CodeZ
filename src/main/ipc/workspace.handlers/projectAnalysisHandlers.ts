@@ -3,8 +3,6 @@ import { IPC_CHANNELS } from '../../../shared/ipc/channels'
 import { WorkspaceService } from '../../services/WorkspaceService'
 import { RecentProjectsStore } from '../../services/RecentProjectsStore'
 import type { WorkspaceInfo } from '../../../shared/types/workspace'
-import { PermissionRuleStore, type PermissionRuleScope } from '../../services/PermissionRuleStore'
-import { getWorkspaceService } from './fileOpsHandlers'
 
 let recentStore: RecentProjectsStore | null = null
 
@@ -47,14 +45,6 @@ export function registerProjectAnalysisHandlers(): void {
     'workspace:update-project',
     async (_event, project: WorkspaceInfo): Promise<void> => {
       await store.updateProject(project)
-    }
-  )
-
-  ipcMain.handle(
-    'permissions:addRule',
-    async (_event, rule: string, scope: PermissionRuleScope) => {
-      const workspaceRoot = getWorkspaceService()?.getCurrentWorkspace()
-      await PermissionRuleStore.getInstance().addRule(rule, scope, workspaceRoot)
     }
   )
 

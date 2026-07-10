@@ -15,10 +15,12 @@ import { isToolErrorResult, buildToolError } from './agentErrorHandler'
 import { handleSubAgentRunnerSpawn } from './subAgentRunnerHelper'
 import { handleDelegateTasks } from './delegateTasksHelper'
 import { getSessionStore } from '../../ipc/session.handlers'
-import { getSettingsService } from '../../ipc/settings.handlers'
 import { LoopStateMachine, AgentState, TransitionEvent, TerminationReason } from './LoopStateMachine'
 import { streamWithTimeoutRetry } from '../../services/chat/retry'
-import type { GeneralSettings } from '../../../shared/types/settings'
+import { getWorkspacePermissionStore } from '../../services/permission/workspacePermissionStore'
+import type { PermissionApprovalResponse } from '../../../shared/types/permission'
+import type { SmartApprovalClient } from '../../services/permission/SmartApprovalService'
+import { ChatSmartApprovalClient } from '../../services/permission/ChatSmartApprovalClient'
 
 export enum NormalizedStopReason {
   Truncated = 'Truncated',
@@ -38,11 +40,76 @@ function normalizeProviderStopReason(reason?: string): NormalizedStopReason {
   return NormalizedStopReason.Unknown;
 }
 
-export function resolveRunnerWorkspaceMode(
-  configMode?: GeneralSettings['workspaceMode'],
-  settingsMode?: GeneralSettings['workspaceMode']
-): GeneralSettings['workspaceMode'] {
-  return configMode || settingsMode || 'auto-approve-safe'
+export interface ToolAuthorization {
+  allowed: boolean
+  requestId: string
+  error?: string
+}
+
+export async function authorizeToolCall(
+  toolName: string,
+  parsedArgs: unknown,
+  workspaceRoot: string,
+  onPermissionRequest?: AgentRunnerCallbacks['onPermissionRequest'],
+  smartApprovalClient?: SmartApprovalClient | null
+): Promise<ToolAuthorization> {
+  const permissionManager = PermissionManager.getInstance()
+  const context = {
+    workspaceRoot,
+    cwd: workspaceRoot,
+    platform: process.platform,
+    shellKind: toolName === 'PowerShell' ? 'powershell' as const : toolName === 'Bash' ? 'bash' as const : undefined,
+    mode: await getWorkspacePermissionStore().getMode(workspaceRoot),
+    smartApprovalClient
+  }
+  const decision = await permissionManager.evaluateToolCall(toolName, parsedArgs, context)
+  await permissionManager.audit(toolName, decision, context)
+  const request = permissionManager.createPermissionRequest(toolName, parsedArgs, context, decision)
+
+  if (decision.action === 'allow') {
+    return await permissionManager.revalidate(decision)
+      ? { allowed: true, requestId: request.id }
+      : { allowed: false, requestId: request.id, error: 'Error: Permission inputs changed before execution.' }
+  }
+  if (decision.action === 'deny') {
+    return {
+      allowed: false,
+      requestId: request.id,
+      error: 'Error: Tool execution denied by security policy.'
+    }
+  }
+  if (!onPermissionRequest) {
+    return {
+      allowed: false,
+      requestId: request.id,
+      error: 'Error: Tool execution denied. No approval handler registered.'
+    }
+  }
+
+  try {
+    const rawResponse = await onPermissionRequest(request)
+    const response: PermissionApprovalResponse = typeof rawResponse === 'boolean'
+      ? { approved: rawResponse, scope: 'once' }
+      : rawResponse
+    const valid = response.approved && await permissionManager.revalidate(decision)
+    if (valid) await permissionManager.rememberApproval(request, response, context)
+    await permissionManager.audit(toolName, decision, context, response)
+    return valid
+      ? { allowed: true, requestId: request.id }
+      : {
+          allowed: false,
+          requestId: request.id,
+          error: response.approved
+            ? 'Error: Permission inputs changed before execution.'
+            : 'Error: User denied permission for this operation.'
+        }
+  } catch (error: any) {
+    return {
+      allowed: false,
+      requestId: request.id,
+      error: `Error: Permission approval failed: ${error?.message || String(error)}`
+    }
+  }
 }
 
 export function resolveAgentTransition(input: {
@@ -392,6 +459,40 @@ export class AgentRunner {
 
               log.info('[AgentRunner] tool start', { name, loopCount })
 
+              let parsedArgs = {}
+              try {
+                parsedArgs = JSON.parse(args)
+              } catch {}
+
+              const authorization = await authorizeToolCall(
+                name,
+                parsedArgs,
+                config.workspaceRoot,
+                callbacks.onPermissionRequest,
+                new ChatSmartApprovalClient({
+                  baseUrl: config.baseUrl,
+                  apiKey: config.apiKey,
+                  model: config.model,
+                  apiFormat: config.apiFormat
+                })
+              )
+
+              if (!authorization.allowed) {
+                const resultMessage = authorization.error || 'Error: Tool execution denied.'
+                callbacks.onToolEnd?.(toolCallId, resultMessage)
+                log.info('[AgentRunner] tool end', { name, isError: true, loopCount })
+                return {
+                  role: 'tool' as const,
+                  tool_call_id: toolCallId,
+                  name,
+                  content: JSON.stringify({
+                    ok: false,
+                    error: buildToolError(resultMessage)
+                  }),
+                  _rawArgs: args
+                }
+              }
+
               if (name === 'SubAgentRunner') {
                 return await handleSubAgentRunnerSpawn(
                   toolCallId,
@@ -416,52 +517,15 @@ export class AgentRunner {
                 isError = true
               } else {
                 try {
-                  let parsedArgs = {}
-                  try {
-                    parsedArgs = JSON.parse(args)
-                  } catch {}
-
-                  const pm = PermissionManager.getInstance()
-                  const permReq = pm.createPermissionRequest(name, parsedArgs)
-                  const settingsService = getSettingsService()
-                  const workspaceMode = resolveRunnerWorkspaceMode(
-                    config.workspaceMode,
-                    settingsService.getSettings().workspaceMode
-                  )
-                  const permResult = pm.checkToolPermission(
+                  const askIntercept = await interceptAskUser(
                     name,
                     parsedArgs,
-                    config.workspaceRoot,
-                    workspaceMode
+                    authorization.requestId,
+                    callbacks.onAskUserRequest || null
                   )
-
-                  if (permResult === 'deny') {
-                    resultMessage = `Error: Tool execution denied by security policy.`
-                    isError = true
-                  } else if (permResult === 'ask') {
-                    if (callbacks.onPermissionRequest) {
-                      const approved = await callbacks.onPermissionRequest(permReq)
-                      if (!approved) {
-                        resultMessage = `Error: User denied permission for this operation.`
-                        isError = true
-                      }
-                    } else {
-                      resultMessage = `Error: Tool execution denied. No approval handler registered.`
-                      isError = true
-                    }
-                  }
-
-                  if (!resultMessage) {
-                    const askIntercept = await interceptAskUser(
-                      name,
-                      parsedArgs,
-                      permReq.id,
-                      callbacks.onAskUserRequest || null
-                    )
-                    if (askIntercept.handled) {
-                      resultMessage = askIntercept.result || ''
-                      if (askIntercept.isError) isError = true
-                    }
+                  if (askIntercept.handled) {
+                    resultMessage = askIntercept.result || ''
+                    if (askIntercept.isError) isError = true
                   }
 
                   if (!resultMessage) {

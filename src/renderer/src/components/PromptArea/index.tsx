@@ -24,9 +24,9 @@ import './PromptArea.css'
 import type { PromptAreaProps } from './types'
 import { usePromptEditor } from './hooks/usePromptEditor'
 import ModelSelector from './components/ModelSelector'
-import PermissionSelector from './components/PermissionSelector'
 import PlusActionMenu from './components/PlusActionMenu'
 import SlashMentionMenu from './components/SlashMentionMenu'
+import PermissionModeSelector from './components/PermissionModeSelector'
 
 const EFFORT_LABELS: Partial<Record<ThinkingEffort, string>> = {
   none: '关闭',
@@ -45,7 +45,6 @@ export default function PromptArea({
   workspace
 }: PromptAreaProps): React.ReactElement {
   const [dropdownOpen, setDropdownOpen] = useState(false)
-  const [permDropdownOpen, setPermDropdownOpen] = useState(false)
   const [plusDropdownOpen, setPlusDropdownOpen] = useState(false)
 
   const activeSessionId = useChatStore((s) => s.activeSessionId)
@@ -122,7 +121,6 @@ export default function PromptArea({
 
   const closeAllDropdowns = () => {
     setDropdownOpen(false)
-    setPermDropdownOpen(false)
     setPlusDropdownOpen(false)
   }
 
@@ -182,11 +180,7 @@ export default function PromptArea({
                   setIsOpen={setPlusDropdownOpen}
                   onCloseOthers={closeAllDropdowns}
                 />
-                <PermissionSelector
-                  isOpen={permDropdownOpen}
-                  setIsOpen={setPermDropdownOpen}
-                  onCloseOthers={closeAllDropdowns}
-                />
+                <PermissionModeSelector />
               </Flex>
 
               <Flex align="center" gap={3} className="prompt-actions-right">

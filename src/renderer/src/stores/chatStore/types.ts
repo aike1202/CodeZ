@@ -1,4 +1,5 @@
 import type { TaskItem } from '../../../../shared/types/task'
+import type { PermissionApprovalResponse, PermissionRequest } from '../../../../shared/types/permission'
 
 export type AgentStateType =
   | 'processing'
@@ -87,12 +88,7 @@ export interface SubAgentRecord {
   }
 }
 
-export interface PermissionRequestState {
-  id: string
-  toolName: string
-  risk: string
-  description: string
-  args: any
+export interface PermissionRequestState extends PermissionRequest {
   status: 'pending' | 'approved' | 'denied'
   createdAt: number
 }
@@ -182,7 +178,7 @@ export interface ChatState {
   setDiffEntries: (msgId: string, diffEntries: Array<{ path: string; diff: string }>) => void
   setEditStatus: (msgId: string, filePath: string, status: 'accepted' | 'rejected') => void
   addPermissionRequest: (msgId: string, request: Omit<PermissionRequestState, 'status' | 'createdAt'>) => void
-  resolvePermissionRequest: (msgId: string, requestId: string, approved: boolean) => void
+  resolvePermissionRequest: (msgId: string, requestId: string, response: PermissionApprovalResponse) => void
   addAskUserRequest: (msgId: string, request: Omit<AskUserRequestState, 'status' | 'createdAt'>) => void
   resolveAskUserRequest: (
     msgId: string,

@@ -2,11 +2,10 @@ import { ipcMain, BrowserWindow } from 'electron'
 import { IPC_CHANNELS } from '../../shared/ipc/channels'
 
 import { getProviderService } from './provider.handlers'
-import { getRecentStore, getWorkspaceService } from './workspace.handlers'
+import { getWorkspaceService } from './workspace.handlers'
 import type { ChatMessage } from '../../shared/types/provider'
 import { mergeModelThinkingConfig } from '../../shared/utils/reasoningCapabilities'
 import log from '../logger'
-import * as path from 'path'
 
 interface StreamRequest {
   providerId: string
@@ -56,11 +55,6 @@ export function registerChatIpc(): void {
 
       const modelConfig = config.models?.find(m => m.id === request.model || m.name === request.model)
       const contextWindowTokens = modelConfig?.maxContextTokens || 32000
-      const currentWorkspaceInfo = getRecentStore()
-        .getAll()
-        .find((project) => path.resolve(project.rootPath) === path.resolve(currentWorkspace))
-      const workspaceMode = currentWorkspaceInfo?.permissionMode
-
       const { AgentRunner } = await import('../agent/AgentRunner')
       const runner = new AgentRunner()
       activeRunners.set(streamId, runner)
@@ -100,7 +94,6 @@ export function registerChatIpc(): void {
           model: request.model,
           messages,
           workspaceRoot: currentWorkspace,
-          workspaceMode,
           thinking: mergeModelThinkingConfig(config.thinking, modelConfig),
           sessionId: request.sessionId || undefined,
           contextWindowTokens
@@ -146,8 +139,27 @@ export function registerChatIpc(): void {
             return new Promise((resolve) => {
               sender.send(IPC_CHANNELS.CHAT_REQUEST_APPROVAL, streamId, request)
               const responseChannel = `${IPC_CHANNELS.CHAT_APPROVAL_RESPONSE}:${request.id}`
-              ipcMain.handleOnce(responseChannel, (_event, approved: boolean) => {
-                resolve(approved)
+              let settled = false
+              let timer: NodeJS.Timeout | undefined
+              const finish = (response: unknown) => {
+                if (settled) return
+                settled = true
+                if (timer) clearTimeout(timer)
+                ipcMain.removeHandler(responseChannel)
+                sender.removeListener('destroyed', onDestroyed)
+                if (typeof response === 'boolean') return resolve(response)
+                if (
+                  response && typeof response === 'object' &&
+                  typeof (response as any).approved === 'boolean' &&
+                  ['once', 'session', 'workspace'].includes((response as any).scope)
+                ) return resolve(response as any)
+                resolve(false)
+              }
+              const onDestroyed = () => finish(false)
+              timer = setTimeout(() => finish(false), 10 * 60 * 1000)
+              sender.once('destroyed', onDestroyed)
+              ipcMain.handleOnce(responseChannel, (_event, response: unknown) => {
+                finish(response)
               })
             })
           },

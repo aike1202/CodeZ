@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useMemo, useCallback, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { WorkspaceInfo } from '@shared/types/workspace'
+import type { PermissionApprovalResponse } from '@shared/types/permission'
 import HomePage from '../../../pages/HomePage'
 import PromptArea from '../../PromptArea'
 import EditApprovalWidget from '../EditApprovalWidget'
@@ -173,13 +174,13 @@ export default function ChatArea({
   const { handleSendMessage } = useSendMessage()
 
   const handleResolvePermission = useCallback(
-    async (msgId: string, requestId: string, approved: boolean) => {
+    async (msgId: string, requestId: string, response: PermissionApprovalResponse) => {
       try {
-        await window.api.chat.respondToApproval(requestId, approved)
+        await window.api.chat.respondToApproval(requestId, response)
       } catch (error) {
         console.warn('Failed to send approval response to backend:', error)
       } finally {
-        resolvePermissionRequest(msgId, requestId, approved)
+        resolvePermissionRequest(msgId, requestId, response)
       }
     },
     [resolvePermissionRequest]

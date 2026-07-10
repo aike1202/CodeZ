@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { buildToolError, isToolErrorResult } from '../main/agent/AgentRunner'
+import { describe, it, expect, vi } from 'vitest'
+import { authorizeToolCall, buildToolError, isToolErrorResult } from '../main/agent/AgentRunner'
 
 describe('AgentRunner tool result helpers', () => {
   it('应识别字符串错误结果', () => {
@@ -31,4 +31,26 @@ describe('AgentRunner tool result helpers', () => {
     expect(fatalError.recoverable).toBe(false)
     expect(fatalError.suggestion).toBeUndefined()
   })
+
+  it.each(['SubAgentRunner', 'DelegateTasks'])(
+    '特殊工具 %s 没有审批处理器时 fail-closed',
+    async (toolName) => {
+      const result = await authorizeToolCall(toolName, {}, '/tmp/codez-workspace')
+
+      expect(result.allowed).toBe(false)
+      expect(result.error).toContain('No approval handler registered')
+    }
+  )
+
+  it.each(['SubAgentRunner', 'DelegateTasks'])(
+    '特殊工具 %s 仅在用户明确批准后放行',
+    async (toolName) => {
+      const approve = vi.fn().mockResolvedValue(true)
+      const result = await authorizeToolCall(toolName, { task: 'test' }, '/tmp/codez-workspace', approve)
+
+      expect(result.allowed).toBe(true)
+      expect(approve).toHaveBeenCalledOnce()
+      expect(approve.mock.calls[0][0]).toMatchObject({ toolName, args: { task: 'test' } })
+    }
+  )
 })

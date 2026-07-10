@@ -25,9 +25,6 @@ export interface GeneralSettings {
   archiveRetentionDays: number;
   dataStoragePath: string;
   experienceOptimization: boolean;
-  // Security
-  workspaceMode: 'ask' | 'auto-approve-safe' | 'full-access';
-
   // SubAgents — 被禁用的子智能体 type 列表（不在列表中即为启用）
   disabledSubAgents: string[];
 
@@ -79,7 +76,6 @@ export const defaultSettings: GeneralSettings = {
   archiveRetentionDays: 7,
   dataStoragePath: '',
   experienceOptimization: true,
-  workspaceMode: 'auto-approve-safe',
   disabledSubAgents: [],
   webSearch: defaultWebSearchSettings
 };

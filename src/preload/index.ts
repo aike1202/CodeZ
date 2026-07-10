@@ -43,6 +43,12 @@ const api = {
       ipcRenderer.invoke('workspace:detect-installed-editors')
   },
 
+  permission: {
+    getMode: (rootPath: string) => ipcRenderer.invoke(IPC_CHANNELS.PERMISSION_MODE_GET, rootPath),
+    setMode: (rootPath: string, mode: 'auto' | 'full-access') =>
+      ipcRenderer.invoke(IPC_CHANNELS.PERMISSION_MODE_SET, rootPath, mode)
+  },
+
   provider: {
     list: (): Promise<ProviderInfo[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.PROVIDER_LIST),
@@ -204,8 +210,8 @@ const api = {
     getDiff: (txId: string): Promise<Array<{ path: string; diff: string }>> =>
       ipcRenderer.invoke(IPC_CHANNELS.CHAT_GET_DIFF, txId),
       
-    respondToApproval: (requestId: string, approved: boolean): Promise<void> =>
-      ipcRenderer.invoke(`${IPC_CHANNELS.CHAT_APPROVAL_RESPONSE}:${requestId}`, approved),
+    respondToApproval: (requestId: string, response: import('../shared/types/permission').PermissionApprovalResponse): Promise<void> =>
+      ipcRenderer.invoke(`${IPC_CHANNELS.CHAT_APPROVAL_RESPONSE}:${requestId}`, response),
 
     respondAskUser: (requestId: string, answers: any): Promise<void> =>
       ipcRenderer.invoke(`${IPC_CHANNELS.CHAT_ASK_USER_RESPONSE}:${requestId}`, answers)
@@ -297,11 +303,6 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.RULES_DELETE, rulePath),
     rename: (oldPath: string, newFilename: string, workspaceRoot: string, scope: string): Promise<boolean> =>
       ipcRenderer.invoke(IPC_CHANNELS.RULES_RENAME, oldPath, newFilename, workspaceRoot, scope)
-  },
-
-  permissions: {
-    addRule: (rule: string, scope: 'session' | 'workspace' | 'global'): Promise<void> =>
-      ipcRenderer.invoke('permissions:addRule', rule, scope)
   },
 
   settings: {

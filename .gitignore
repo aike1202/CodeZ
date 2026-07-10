@@ -139,3 +139,4 @@ dist-app
 # Agent test temporaries
 tmp-agent-test/
 src/tests/tmp-*
+.superpowers/

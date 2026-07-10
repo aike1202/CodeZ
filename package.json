@@ -34,6 +34,9 @@
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "tree-sitter-bash": "^0.25.0",
+    "tree-sitter-powershell": "^0.25.10",
+    "web-tree-sitter": "^0.25.10",
     "zustand": "^5.0.14"
   },
   "devDependencies": {
@@ -78,6 +81,18 @@
       {
         "from": "resources/builtin-skills",
         "to": "builtin-skills"
+      },
+      {
+        "from": "node_modules/web-tree-sitter/tree-sitter.wasm",
+        "to": "permission-parsers/tree-sitter.wasm"
+      },
+      {
+        "from": "node_modules/tree-sitter-bash/tree-sitter-bash.wasm",
+        "to": "permission-parsers/tree-sitter-bash.wasm"
+      },
+      {
+        "from": "node_modules/tree-sitter-powershell/tree-sitter-powershell.wasm",
+        "to": "permission-parsers/tree-sitter-powershell.wasm"
       }
     ]
   }

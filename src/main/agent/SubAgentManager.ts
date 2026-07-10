@@ -2,7 +2,6 @@ import { ChatService } from '../services/ChatService'
 import { streamWithTimeoutRetry } from '../services/chat/retry'
 import { ToolManager } from '../tools/ToolManager'
 import { ContextManager } from './ContextManager'
-import { CommandAnalyzer } from '../services/CommandAnalyzer'
 import * as path from 'path'
 import type { ChatMessage, ToolDefinition } from '../../shared/types/provider'
 import type { StreamCallbacks } from '../services/ChatService'
@@ -36,7 +35,7 @@ export interface SubAgentPermissionScope {
    * 仅当 allowAllWritesInWorkspace 为 false 时生效。
    */
   allowedWriteFiles?: string[]
-  /** 是否允许运行 Bash/PowerShell 验证命令（destructive/network 命令始终拒绝）。 */
+  /** 预留的 Shell 权限开关；新权限策略接入前不执行 Shell。 */
   allowBash?: boolean
   /**
    * worktree 档：物理隔离已兜底，放宽到 workspaceRoot 内任意文件可写。
@@ -215,11 +214,6 @@ export function checkSubAgentToolPermission(
   if (SHELL_TOOL_NAMES.has(toolName)) {
     if (!scope.allowBash) {
       return `Shell commands are not permitted for this worker.`
-    }
-    const command = parsedArgs?.command || parsedArgs?.commandLine || parsedArgs?.CommandLine || ''
-    const risk = CommandAnalyzer.analyze(command)
-    if (risk === 'destructive' || risk === 'network') {
-      return `Command blocked (risk=${risk}): workers may only run safe verification commands. Report a blocker instead.`
     }
     return null
   }

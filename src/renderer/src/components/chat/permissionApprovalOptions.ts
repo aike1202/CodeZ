@@ -1,24 +1,18 @@
-export type PermissionRuleScope = 'once' | 'session' | 'workspace'
+import type { PermissionApprovalScope, PermissionRequest } from '../../../../shared/types/permission'
 
-export interface CommandRuleOption {
-  id: string
-  label: string
-  rule: string
-  description?: string
-}
-
-export interface PermissionScopeOption {
-  id: PermissionRuleScope
+export interface ApprovalOption {
+  scope: PermissionApprovalScope
   label: string
 }
 
-export const PERMISSION_SCOPE_OPTIONS: PermissionScopeOption[] = [
-  { id: 'once', label: '仅此次允许执行' },
-  { id: 'session', label: '允许本会话使用' },
-  { id: 'workspace', label: '始终允许本项目使用' }
-]
-
-export function generateCommandRuleOptions(command: string = ''): CommandRuleOption[] {
-  const trimmed = command.trim()
-  return [{ id: 'exact', label: '仅此完整命令', rule: trimmed, description: '只允许当前这条完整命令。' }]
+export function approvalOptionsForRequest(
+  request: Pick<PermissionRequest, 'riskLevel' | 'allowedScopes'>
+): ApprovalOption[] {
+  if (request.riskLevel === 4) return [{ scope: 'once', label: '仅本次允许' }]
+  const labels = {
+    once: '仅本次允许',
+    session: '本会话允许',
+    workspace: '当前工作区始终允许'
+  } as const
+  return request.allowedScopes.map((scope) => ({ scope, label: labels[scope] }))
 }

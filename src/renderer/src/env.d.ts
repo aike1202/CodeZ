@@ -17,6 +17,13 @@ declare global {
         renameRecentProject: (id: string, newName: string) => Promise<void>
         detectInstalledEditors: () => Promise<Array<{ id: string; name: string; exePath: string | null; iconPath: string | null }>>
       }
+      permission: {
+        getMode: (rootPath: string) => Promise<import('@shared/types/permission').PermissionMode>
+        setMode: (
+          rootPath: string,
+          mode: import('@shared/types/permission').PermissionMode
+        ) => Promise<import('@shared/types/permission').PermissionMode>
+      }
       provider: {
         list: () => Promise<any[]>
         add: (form: any) => Promise<any>
@@ -44,7 +51,10 @@ declare global {
         acceptFile: (txId: string, filePath: string) => Promise<boolean>
         rejectFile: (txId: string, filePath: string) => Promise<boolean>
         getDiff: (txId: string) => Promise<Array<{ path: string; diff: string }>>
-        respondToApproval: (requestId: string, approved: boolean) => Promise<void>
+        respondToApproval: (
+          requestId: string,
+          response: import('@shared/types/permission').PermissionApprovalResponse
+        ) => Promise<void>
         respondAskUser: (requestId: string, answers: any) => Promise<void>
       }
       session: {
@@ -88,9 +98,6 @@ declare global {
         save: (rule: any, workspaceRoot: string) => Promise<boolean>
         delete: (rulePath: string) => Promise<boolean>
         rename: (oldPath: string, newFilename: string, workspaceRoot: string, scope: string) => Promise<boolean>
-      }
-      permissions: {
-        addRule: (rule: string, scope: 'session' | 'workspace' | 'global') => Promise<void>
       }
       settings: {
         get: () => Promise<any>

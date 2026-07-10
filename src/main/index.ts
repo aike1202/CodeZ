@@ -15,6 +15,7 @@ import { registerThemeIpc } from './ipc/theme.handlers'
 import { registerSkillIpc } from './ipc/skill.handlers'
 import { registerRulesIpc } from './ipc/rules.handlers'
 import { registerSettingsIpc } from './ipc/settings.handlers'
+import { registerPermissionIpc } from './ipc/permission.handlers'
 import { registerSubAgentIpc, syncDisabledSubAgents } from './ipc/subagent.handlers'
 import { registerPlanIpc } from './ipc/plan.handlers'
 import { TerminalService } from './services/TerminalService'
@@ -89,6 +90,7 @@ app.whenReady().then(() => {
   registerSkillIpc()
   registerRulesIpc()
   registerSettingsIpc()
+  registerPermissionIpc()
   registerSubAgentIpc()
   registerPlanIpc()
 

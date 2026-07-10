@@ -1,14 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { resolveAgentTransition, resolveRunnerWorkspaceMode } from '../main/agent/AgentRunner'
+import { resolveAgentTransition } from '../main/agent/AgentRunner'
 import { TransitionEvent } from '../main/agent/AgentRunner/LoopStateMachine'
 
 describe('AgentRunner transition resolution', () => {
-  it('uses the per-run workspace permission mode before global settings', () => {
-    expect(resolveRunnerWorkspaceMode('full-access', 'auto-approve-safe')).toBe('full-access')
-    expect(resolveRunnerWorkspaceMode(undefined, 'ask')).toBe('ask')
-    expect(resolveRunnerWorkspaceMode(undefined, undefined)).toBe('auto-approve-safe')
-  })
-
   it('completes when the assistant stops despite pending tasks', () => {
     const transition = resolveAgentTransition({
       toolCallCount: 0,

@@ -1,24 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import {
-  generateCommandRuleOptions,
-  PERMISSION_SCOPE_OPTIONS
-} from '../renderer/src/components/chat/permissionApprovalOptions'
+import { approvalOptionsForRequest } from '../renderer/src/components/chat/permissionApprovalOptions'
 
-describe('permission approval command options', () => {
-  it('keeps frontend fallback command rules exact and separates approval scope choices', () => {
-    expect(generateCommandRuleOptions('Get-ChildItem -Force | Format-Table')).toEqual([
-      {
-        id: 'exact',
-        label: '仅此完整命令',
-        rule: 'Get-ChildItem -Force | Format-Table',
-        description: '只允许当前这条完整命令。'
-      }
-    ])
+describe('permission approval options', () => {
+  it('offers remembered scopes for L2/L3', () => {
+    expect(approvalOptionsForRequest({ riskLevel: 2, allowedScopes: ['once', 'session', 'workspace'] } as any).map((item) => item.scope)).toEqual(['once', 'session', 'workspace'])
+  })
 
-    expect(PERMISSION_SCOPE_OPTIONS).toEqual([
-      { id: 'once', label: '仅此次允许执行' },
-      { id: 'session', label: '允许本会话使用' },
-      { id: 'workspace', label: '始终允许本项目使用' }
-    ])
+  it('offers only once for L4', () => {
+    expect(approvalOptionsForRequest({ riskLevel: 4, allowedScopes: ['once'] } as any).map((item) => item.scope)).toEqual(['once'])
   })
 })

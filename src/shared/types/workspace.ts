@@ -4,7 +4,6 @@ export interface WorkspaceInfo {
   name: string
   projectType: string
   openedAt: string
-  permissionMode?: 'ask' | 'auto-approve-safe' | 'full-access'
 }
 
 export interface FileTreeNode {

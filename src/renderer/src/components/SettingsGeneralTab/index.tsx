@@ -6,7 +6,6 @@ import Select from '../ui/Select'
 import Input from '../ui/Input'
 import Button from '../ui/Button'
 import './SettingsGeneralTab.css'
-import { PermissionSettingsSection } from './components/PermissionSettingsSection'
 
 export default function SettingsGeneralTab(): React.ReactElement {
   const settings = useSettingsStore((s) => s.settings)
@@ -204,10 +203,7 @@ export default function SettingsGeneralTab(): React.ReactElement {
         </div>
       </div>
 
-      {/* 5. 权限说明 */}
-      <PermissionSettingsSection workspaceMode={settings.workspaceMode} onUpdate={handleUpdate} />
-
-      {/* 6. 联网搜索 */}
+      {/* 5. 联网搜索 */}
       <WebSearchSettingsSection settings={settings} onUpdate={handleUpdate} />
     </div>
   )

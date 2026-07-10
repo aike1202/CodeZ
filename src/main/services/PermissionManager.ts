@@ -1,159 +1,185 @@
-import { PermissionRuleStore } from './PermissionRuleStore'
-import { CommandAnalyzer, CommandRisk, type CommandAction, type CommandRuleOption } from './CommandAnalyzer'
+import { createHash, randomUUID } from 'crypto'
+import * as fs from 'fs/promises'
 import * as path from 'path'
+import type {
+  PermissionApprovalResponse,
+  PermissionDecision,
+  PermissionMode,
+  PermissionRequest,
+  PermissionRiskLevel
+} from '../../shared/types/permission'
+import { allowedScopesForRisk } from '../../shared/types/permission'
+import { CriticalOperationGuard } from './permission/CriticalOperationGuard'
+import { NestedCommandExpander } from './permission/NestedCommandExpander'
+import { PathImpactAnalyzer } from './permission/PathImpactAnalyzer'
+import { PermissionDecisionEngine } from './permission/PermissionDecisionEngine'
+import { getPermissionAuditLog } from './permission/PermissionAuditLog'
+import { getPermissionRuleStore } from './permission/PermissionRuleStore'
+import { ShellAnalysisService } from './permission/ShellAnalysisService'
+import { SmartApprovalService, type SmartApprovalClient } from './permission/SmartApprovalService'
+import { classifyKnownCommand, type CommandAssessment } from './permission/commandPolicies'
+import type { PermissionShellKind } from './permission/operationTypes'
 
 export type PermissionResult = 'allow' | 'ask' | 'deny'
+export type { PermissionRequest } from '../../shared/types/permission'
 
-export interface PermissionRequest {
-  id: string
-  toolName: string
-  risk: CommandRisk
-  action?: CommandAction
-  reason?: string
-  impacts?: string[]
-  description: string
-  args: any
-  ruleOptions?: CommandRuleOption[]
+export interface PermissionEvaluationContext {
+  workspaceRoot: string
+  cwd: string
+  platform: NodeJS.Platform
+  shellKind?: PermissionShellKind
+  sessionId?: string
+  agentId?: string
+  mode: PermissionMode
+  smartApprovalClient?: SmartApprovalClient | null
+}
+
+const READ_ONLY_TOOLS = new Set(['Read', 'list_files', 'Glob', 'Grep', 'Skill', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet', 'update_resume_state', 'AskUserQuestion'])
+const WRITE_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
+const WEB_TOOLS = new Set(['WebSearch', 'WebFetch'])
+
+function commandFromArgs(args: any): string {
+  return args?.command ?? args?.commandLine ?? args?.CommandLine ?? ''
+}
+
+function targetPathFromArgs(args: any): string | null {
+  return args?.file_path ?? args?.filePath ?? args?.TargetFile ?? args?.path ?? null
+}
+
+function assessmentDecision(assessment: CommandAssessment, pattern: string, action: PermissionResult, snapshots: PermissionDecision['snapshots'] = []): PermissionDecision {
+  return {
+    action,
+    riskLevel: assessment.riskLevel,
+    reason: assessment.reason,
+    ruleId: assessment.ruleId,
+    normalizedPattern: pattern,
+    impacts: [],
+    snapshots,
+    critical: assessment.riskLevel === 4
+  }
 }
 
 export class PermissionManager {
   private static instance: PermissionManager
+  constructor(
+    private readonly shellAnalysis = new ShellAnalysisService(),
+    private readonly criticalGuard = new CriticalOperationGuard(),
+    private readonly pathAnalyzer = new PathImpactAnalyzer(),
+    private readonly nestedExpander = new NestedCommandExpander(),
+    private readonly decisionEngine = new PermissionDecisionEngine()
+  ) {}
 
-  private constructor() {}
-
-  public static getInstance(): PermissionManager {
-    if (!PermissionManager.instance) {
-      PermissionManager.instance = new PermissionManager()
-    }
+  static getInstance(): PermissionManager {
+    if (!PermissionManager.instance) PermissionManager.instance = new PermissionManager()
     return PermissionManager.instance
   }
 
-  private getCommandFromArgs(parsedArgs: any): string {
-    return parsedArgs?.commandLine || parsedArgs?.CommandLine || parsedArgs?.command || ''
+  async evaluateToolCall(toolName: string, args: unknown, context: PermissionEvaluationContext): Promise<PermissionDecision> {
+    if (READ_ONLY_TOOLS.has(toolName)) return assessmentDecision({ riskLevel: 0, ruleId: `tool.read.${toolName}`, reason: '工作区只读工具' }, toolName, 'allow')
+    if (WRITE_TOOLS.has(toolName)) return this.evaluateWrite(toolName, args, context)
+    if (WEB_TOOLS.has(toolName)) return this.applyDecision({ riskLevel: 2, ruleId: `tool.network.${toolName}`, reason: '访问外部网络' }, toolName, context)
+    if (toolName === 'rollback_last_edit') return this.applyDecision({ riskLevel: 3, ruleId: 'tool.rollback', reason: '回滚工作区修改' }, toolName, context)
+    if (toolName === 'Bash' || toolName === 'PowerShell' || toolName === 'run_command') return this.evaluateShell(toolName, args, context)
+    return this.applyDecision(null, toolName, context)
   }
 
-  public getCommandRisk(command: string): CommandRisk {
-    return CommandAnalyzer.analyze(command)
+  private async evaluateWrite(toolName: string, args: unknown, context: PermissionEvaluationContext): Promise<PermissionDecision> {
+    const target = targetPathFromArgs(args)
+    if (!target) return assessmentDecision({ riskLevel: 2, ruleId: 'tool.write.unknown-path', reason: '写入目标路径未知' }, toolName, 'ask')
+    const impact = await this.pathAnalyzer.analyze(target, context.workspaceRoot, context.cwd)
+    if (impact.sensitive) return assessmentDecision({ riskLevel: 4, ruleId: 'critical.credential.access', reason: '修改敏感配置或凭据文件' }, target, 'ask')
+    const assessment: CommandAssessment = impact.insideWorkspace
+      ? { riskLevel: 1, ruleId: 'tool.write.workspace', reason: '修改工作区文件' }
+      : { riskLevel: 2, ruleId: 'tool.write.external', reason: '修改工作区外文件' }
+    const decision = this.applyDecision(assessment, impact.resolvedPath, context)
+    decision.impacts = [{ kind: impact.insideWorkspace ? 'workspace' : 'external-path', target: impact.resolvedPath }]
+    return decision
   }
 
-  public checkToolPermission(toolName: string, parsedArgs: any, workspaceRoot: string, workspaceMode: 'ask' | 'auto-approve-safe' | 'full-access' = 'auto-approve-safe'): PermissionResult {
-    // 0. Base safe tools
-    if (['list_files', 'update_resume_state', 'Read', 'NotebookEdit', 'Glob', 'Grep', 'Skill', 'PushNotification', 'AskUserQuestion', 'view_file', 'grep_search', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'].includes(toolName)) {
-      return 'allow'
-    }
-
-    if (toolName === 'rollback_last_edit') {
-      return 'ask'
-    }
-
-    // 0.5 联网工具（出网 + 将 query/url 发往第三方，非纯本地只读）
-    if (toolName === 'WebSearch' || toolName === 'WebFetch') {
-      if (workspaceMode === 'full-access') return 'allow'
-      // auto-approve-safe / ask 均走 ask（可选"本会话/永久允许"）
-      return 'ask'
-    }
-
-    // 1. Terminal Commands
-    if (toolName === 'Bash' || toolName === 'PowerShell' || toolName === 'run_command') {
-      const command = this.getCommandFromArgs(parsedArgs)
-      const analysis = CommandAnalyzer.analyzeDetailed(command)
-      const risk = analysis.risk
-
-      // User request: full-access should also ask for dangerous commands
-      if (workspaceMode === 'full-access' && risk !== 'destructive') {
-        return 'allow'
-      }
-
-      const ruleEffect = PermissionRuleStore.getInstance().getCommandRuleEffect(command, workspaceRoot)
-      if (ruleEffect) {
-        return ruleEffect
-      }
-
-      if (risk === 'destructive') return 'ask' // always ask for destructive
-      if (risk === 'safe') return 'allow' // safe commands are allowed in all modes
-
-      if (workspaceMode === 'ask') return 'ask'
-
-      // auto-approve-safe logic for terminal
-      if (risk === 'write') return 'allow'
-      if (risk === 'network') return 'ask'
-
-      return 'ask'
-    }
-
-    // 2. File Write/Edit Tools
-    if (['Edit', 'Write', 'write_to_file', 'replace_file_content', 'multi_replace_file_content'].includes(toolName)) {
-      let targetPath = parsedArgs?.filePath || parsedArgs?.TargetFile || parsedArgs?.file_path || parsedArgs?.path
-      if (targetPath) {
-        if (!path.isAbsolute(targetPath)) {
-          targetPath = path.resolve(workspaceRoot, targetPath)
-        }
-        
-        if (PermissionRuleStore.getInstance().isPathWhitelisted(targetPath, workspaceRoot)) {
-          return 'allow'
-        }
-
-        // Secure boundary check
-        const relativePath = path.relative(workspaceRoot, targetPath)
-        if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
-          return 'deny' // Escape attempt
+  private async evaluateShell(toolName: string, args: unknown, context: PermissionEvaluationContext): Promise<PermissionDecision> {
+    const command = commandFromArgs(args).trim()
+    if (!command) return assessmentDecision({ riskLevel: 4, ruleId: 'critical.hidden.dynamic-command', reason: 'Shell 命令为空或无法读取' }, toolName, 'deny')
+    const shell: PermissionShellKind = context.shellKind ?? (toolName === 'PowerShell' ? 'powershell' : 'bash')
+    const critical = await this.criticalGuard.analyzeRaw(shell, command, context.workspaceRoot)
+    if (critical) return critical
+    const explicitRule = await getPermissionRuleStore().resolve(context.workspaceRoot, context.sessionId, command)
+    if (explicitRule === 'deny') return assessmentDecision({ riskLevel: 0, ruleId: 'user.rule.deny', reason: '用户拒绝规则' }, command, 'deny')
+    const graph = await this.shellAnalysis.parse(shell, command)
+    let highest: CommandAssessment | null = null
+    const snapshots: PermissionDecision['snapshots'] = []
+    for (const operation of graph.operations) {
+      let assessment = classifyKnownCommand(operation.argv)
+      const expanded = await this.nestedExpander.expandCommand(shell, operation.argv, context.workspaceRoot, context.cwd)
+      snapshots.push(...expanded.snapshots)
+      if (expanded.opaqueReason) assessment = { riskLevel: 4, ruleId: 'critical.hidden.dynamic-command', reason: '嵌套命令无法可靠展开' }
+      if (expanded.command && expanded.shell) {
+        const nestedCritical = await this.criticalGuard.analyzeRaw(expanded.shell, expanded.command, context.workspaceRoot)
+        if (nestedCritical) return { ...nestedCritical, snapshots: [...nestedCritical.snapshots, ...snapshots] }
+        const nestedGraph = await this.shellAnalysis.parse(expanded.shell, expanded.command)
+        for (const child of nestedGraph.operations) {
+          const childAssessment = classifyKnownCommand(child.argv)
+          if (childAssessment && (!assessment || childAssessment.riskLevel > assessment.riskLevel)) assessment = childAssessment
         }
       }
-
-      if (workspaceMode === 'full-access') {
-        return 'allow'
-      }
-
-      return workspaceMode === 'ask' ? 'ask' : 'allow'
+      if (assessment && (!highest || assessment.riskLevel > highest.riskLevel)) highest = assessment
     }
-
-    if (workspaceMode === 'full-access') {
-      return 'allow'
+    if (!highest && context.mode === 'auto') {
+      highest = await new SmartApprovalService(context.smartApprovalClient ?? null).assess({ command, operations: graph.operations, impacts: [] })
     }
-
-    return 'ask'
+    const result = this.applyDecision(highest, command, context, explicitRule)
+    result.snapshots = snapshots
+    return result
   }
 
-  public createPermissionRequest(toolName: string, parsedArgs: any): PermissionRequest {
-    let risk: CommandRisk = 'unknown'
-    let description = `Requesting permission to run tool ${toolName}`
+  private applyDecision(assessment: CommandAssessment | null, pattern: string, context: PermissionEvaluationContext, explicitRule: 'allow' | null = null): PermissionDecision {
+    const riskLevel: PermissionRiskLevel = assessment?.riskLevel ?? 2
+    const { action } = this.decisionEngine.decide({ mode: context.mode, riskLevel, known: !!assessment, critical: riskLevel === 4, explicitRule })
+    return assessmentDecision(assessment ?? { riskLevel, ruleId: 'unknown.command', reason: '未能可靠归类命令' }, pattern, action)
+  }
 
-    if (toolName === 'Bash' || toolName === 'PowerShell' || toolName === 'run_command') {
-      const cmd = this.getCommandFromArgs(parsedArgs)
-      const analysis = CommandAnalyzer.analyzeDetailed(cmd)
-      risk = analysis.risk
-      description = `Execute command: ${cmd}`
-      return {
-        id: `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-        toolName,
-        risk,
-        action: analysis.action,
-        reason: analysis.reason,
-        impacts: analysis.impacts,
-        description,
-        args: parsedArgs,
-        ruleOptions: analysis.ruleOptions
-      }
-    } else if (['Edit', 'Write', 'write_to_file', 'replace_file_content', 'multi_replace_file_content'].includes(toolName)) {
-      const targetPath = parsedArgs?.file_path || parsedArgs?.filePath || parsedArgs?.TargetFile || parsedArgs?.path || 'unknown path'
-      risk = 'write'
-      description = `Modify file: ${targetPath}`
-    } else if (toolName === 'WebSearch') {
-      risk = 'network'
-      const query = parsedArgs?.query || ''
-      description = `搜索网络: ${query}`
-    } else if (toolName === 'WebFetch') {
-      risk = 'network'
-      const url = parsedArgs?.url || ''
-      description = `读取网页: ${url}`
-    }
-
+  createPermissionRequest(toolName: string, args: unknown, context: PermissionEvaluationContext, decision: PermissionDecision): PermissionRequest {
     return {
-      id: `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      ...decision,
+      id: randomUUID(),
+      sessionId: context.sessionId,
+      agentId: context.agentId,
       toolName,
-      risk,
-      description,
-      args: parsedArgs
+      description: decision.reason,
+      args,
+      allowedScopes: allowedScopesForRisk(decision.riskLevel)
     }
+  }
+
+  async rememberApproval(request: PermissionRequest, response: PermissionApprovalResponse, context: PermissionEvaluationContext): Promise<void> {
+    if (!response.approved || response.scope === 'once' || request.riskLevel === 4) return
+    await getPermissionRuleStore().remember({ workspaceRoot: context.workspaceRoot, sessionId: context.sessionId, pattern: request.normalizedPattern, action: 'allow', scope: response.scope, riskLevel: request.riskLevel })
+  }
+
+  async revalidate(decision: PermissionDecision): Promise<boolean> {
+    for (const snapshot of decision.snapshots) {
+      try {
+        const content = await fs.readFile(snapshot.path)
+        if (createHash('sha256').update(content).digest('hex') !== snapshot.sha256) return false
+      } catch {
+        return false
+      }
+    }
+    return true
+  }
+
+  async audit(
+    toolName: string,
+    decision: PermissionDecision,
+    context: PermissionEvaluationContext,
+    approvalResponse?: PermissionApprovalResponse
+  ): Promise<void> {
+    await getPermissionAuditLog().append({
+      toolName,
+      sessionId: context.sessionId,
+      agentId: context.agentId,
+      mode: context.mode,
+      decision,
+      approvalResponse
+    })
   }
 }

@@ -41,3 +41,17 @@ export type {
 export type {
   SkillDefinition
 } from './skill'
+
+export type {
+  PermissionMode,
+  PermissionRiskLevel,
+  PermissionAction,
+  PermissionApprovalScope,
+  PermissionImpact,
+  PermissionSnapshot,
+  PermissionDecision,
+  PermissionRequest,
+  PermissionApprovalResponse
+} from './permission'
+
+export { DEFAULT_PERMISSION_MODE, allowedScopesForRisk } from './permission'
