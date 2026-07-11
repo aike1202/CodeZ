@@ -82,6 +82,79 @@ describe('chat store task session restore', () => {
     expect(useChatStore.getState().expandedCapsule).toBeNull()
   })
 
+  it('createSession clears task presentation state and invalidates a pending selection', async () => {
+    const { useChatStore } = await import('../renderer/src/stores/chatStore')
+    let resolveSelection: ((session: any) => void) | undefined
+    ;(window as any).api.session.get.mockReturnValue(new Promise((resolve) => {
+      resolveSelection = resolve
+    }))
+
+    useChatStore.setState({
+      sessions: [
+        {
+          id: 'old',
+          projectId: 'p1',
+          summary: 'Old session',
+          relativeTime: 'now',
+          messages: [],
+          tasks: unfinishedTasks
+        } as any
+      ],
+      activeSessionId: 'old',
+      messages: [],
+      tasks: unfinishedTasks,
+      expandedCapsule: 'task'
+    })
+
+    const pendingSelection = useChatStore.getState().selectSession('old')
+    const newSessionId = useChatStore.getState().createSession('p1')
+    resolveSelection?.({
+      id: 'old',
+      projectId: 'p1',
+      summary: 'Old session',
+      relativeTime: 'now',
+      messages: [],
+      tasks: unfinishedTasks
+    })
+    await pendingSelection
+
+    const state = useChatStore.getState()
+    expect(state.activeSessionId).toBe(newSessionId)
+    expect(state.tasks).toEqual([])
+    expect(state.expandedCapsule).toBeNull()
+    expect(state.sessions.find((session) => session.id === newSessionId)?.tasks).toEqual([])
+  })
+
+  it('selectSession closes an inherited task capsule when the target has no active tasks', async () => {
+    const { useChatStore } = await import('../renderer/src/stores/chatStore')
+    const terminalTasks: TaskItem[] = [
+      { id: 't1', subject: 'Done', description: '', status: 'completed' },
+      { id: 't2', subject: 'Stopped', description: '', status: 'cancelled' }
+    ]
+    const session = {
+      id: 'done',
+      projectId: 'p1',
+      summary: 'Terminal tasks',
+      relativeTime: 'now',
+      messages: [],
+      tasks: terminalTasks
+    }
+
+    ;(window as any).api.session.get.mockResolvedValue(session)
+    useChatStore.setState({
+      sessions: [session as any],
+      activeSessionId: 'other',
+      messages: [],
+      tasks: unfinishedTasks,
+      expandedCapsule: 'task'
+    })
+
+    await useChatStore.getState().selectSession('done')
+
+    expect(useChatStore.getState().tasks).toEqual(terminalTasks)
+    expect(useChatStore.getState().expandedCapsule).toBeNull()
+  })
+
   it('setTasks also updates the active session so persisted session data stays current', async () => {
     const { useChatStore } = await import('../renderer/src/stores/chatStore')
     useChatStore.setState({

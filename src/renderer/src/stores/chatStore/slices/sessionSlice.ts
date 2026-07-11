@@ -91,17 +91,21 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
 
   createSession: (projectId: string) => {
     const id = genId()
+    _selectSessionSeq += 1
     const session: ChatSession = {
       id,
       projectId,
       summary: '新会话',
       relativeTime: '刚刚',
-      messages: []
+      messages: [],
+      tasks: []
     }
     set((s) => ({
       sessions: [session, ...s.sessions],
       activeSessionId: id,
-      messages: []
+      messages: [],
+      tasks: [],
+      expandedCapsule: s.expandedCapsule === 'task' ? null : s.expandedCapsule
     }))
     get().persistCurrentSession()
     return id
@@ -129,7 +133,11 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
             activeSessionId: sessionId,
             messages: healedSession.messages,
             tasks: freshSession.tasks || [],
-            expandedCapsule: hasUnfinishedTasks(freshSession.tasks) ? 'task' : s.expandedCapsule,
+            expandedCapsule: hasUnfinishedTasks(freshSession.tasks)
+              ? 'task'
+              : s.expandedCapsule === 'task'
+                ? null
+                : s.expandedCapsule,
             pendingPrompt: healed.prompt || s.pendingPrompt,
             activePlan: null
           }
@@ -160,14 +168,18 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     const session = get().sessions.find((s) => s.id === sessionId)
     if (session) {
       const healed = healInterruptedSubAgents(session.messages)
-      set({
+      set((s) => ({
         activeSessionId: sessionId,
         messages: healed.messages,
         tasks: (session as any).tasks || [],
-        expandedCapsule: hasUnfinishedTasks((session as any).tasks) ? 'task' : get().expandedCapsule,
-        pendingPrompt: healed.prompt || get().pendingPrompt,
+        expandedCapsule: hasUnfinishedTasks((session as any).tasks)
+          ? 'task'
+          : s.expandedCapsule === 'task'
+            ? null
+            : s.expandedCapsule,
+        pendingPrompt: healed.prompt || s.pendingPrompt,
         activePlan: null
-      })
+      }))
       if (session.linkedPlanSlug) {
         try {
           const workspace = useWorkspaceStore.getState().workspace
