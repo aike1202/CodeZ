@@ -24,6 +24,7 @@ export default function ExecutionLog({
   timeline,
   reasoning,
   agentStates,
+  toolCalls,
   onFileClick,
   onDiffClick,
   streaming,
@@ -35,7 +36,7 @@ export default function ExecutionLog({
 
   const normalizedTimeline = useMemo(() => buildFallbackTimeline(timeline, reasoning), [timeline, reasoning])
   const commands = useMemo(() => buildCommandItems(agentStates || []), [agentStates])
-  const edits = useMemo(() => buildEditItems(agentStates || []), [agentStates])
+  const edits = useMemo(() => buildEditItems(agentStates || [], toolCalls), [agentStates, toolCalls])
 
   const unifiedItems = useMemo(
     () => buildUnifiedTimeline(normalizedTimeline, commands, edits, reasoning, streaming),

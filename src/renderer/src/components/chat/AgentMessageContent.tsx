@@ -121,6 +121,7 @@ export function AgentMessageContent({
             timeline={[]}
             reasoning={msg.reasoningContent}
             agentStates={msg.agentStates}
+            toolCalls={msg.toolCalls}
             onFileClick={handleFileClick}
             onDiffClick={handleDiffClick}
             streaming={isStreaming && !msg.content}
@@ -153,6 +154,7 @@ export function AgentMessageContent({
                 timeline={chunk.items}
                 reasoning={idx === 0 ? msg.reasoningContent : undefined} // Only pass legacy reasoning to first block if any
                 agentStates={idx === 0 ? msg.agentStates : undefined}
+                toolCalls={msg.toolCalls}
                 onFileClick={handleFileClick}
                 onDiffClick={handleDiffClick}
                 streaming={chunk.streaming}

@@ -132,21 +132,62 @@ export function parseEditDetail(detail: string | undefined): { additions: string
   }
 }
 
-export function buildEditItems(states: AgentState[]): EditItemWithStatus[] {
+function normalizeFilePath(filePath: string): string {
+  return filePath.replace(/\\/g, '/').toLowerCase()
+}
+
+function getEditFilePath(toolCall: ToolCallState): string {
+  const args = parseArgs(toolCall.args)
+  const path = args.file_path || args.targetFile || args.TargetFile || args.filePath || args.path || args.notebook_path
+  return typeof path === 'string' ? path : ''
+}
+
+export function buildEditItems(
+  states: AgentState[],
+  toolCalls: ToolCallState[] = []
+): EditItemWithStatus[] {
+  const pendingToolCalls = toolCalls
+    .filter((toolCall) => [
+      'Edit',
+      'Write',
+      'NotebookEdit',
+      'write_to_file',
+      'replace_file_content',
+      'multi_replace_file_content',
+      'apply_patch'
+    ].includes(toolCall.name))
+    .sort((left, right) => left.sequence - right.sequence)
+
   return states
     .filter((state) => state.type === 'edit')
     .sort((a, b) => a.timestamp - b.timestamp)
     .map((state) => {
       const detail = parseEditDetail(state.detail)
       const isRunning = state.status === 'pending' || state.title.startsWith('正在编辑')
+      const filePath = state.title.replace(/^正在编辑\s*/u, '').replace(/^已编辑\s*/u, '').trim()
+      const normalizedFilePath = normalizeFilePath(filePath)
+      const matchingIndex = pendingToolCalls.findIndex((toolCall) => {
+        const normalizedToolPath = normalizeFilePath(getEditFilePath(toolCall))
+        return Boolean(normalizedToolPath && normalizedFilePath) && (
+          normalizedToolPath === normalizedFilePath ||
+          normalizedToolPath.endsWith(normalizedFilePath) ||
+          normalizedFilePath.endsWith(normalizedToolPath)
+        )
+      })
+      const matchingToolCall = matchingIndex >= 0
+        ? pendingToolCalls.splice(matchingIndex, 1)[0]
+        : undefined
+
       return {
         id: state.id,
-        filePath: state.title.replace(/^正在编辑\s*/u, '').replace(/^已编辑\s*/u, '').trim(),
+        filePath,
         additions: detail.additions,
         deletions: detail.deletions,
         timestamp: state.timestamp,
         status: state.status === 'error' ? 'error' : isRunning ? 'running' : 'success',
-        isRunning
+        isRunning,
+        toolName: matchingToolCall?.name,
+        args: matchingToolCall?.args
       }
     })
 }

@@ -11,6 +11,8 @@ export type EditItem = {
   additions: string
   deletions: string
   timestamp: number
+  toolName?: string
+  args?: string
 }
 
 export interface UnifiedTimelineItem {

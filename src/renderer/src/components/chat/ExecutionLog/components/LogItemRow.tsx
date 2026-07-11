@@ -163,11 +163,6 @@ export function LogItemRow({
                   <span className="timeline-edit-diff-add">{item.additions || '+0'}</span>
                   <span className="timeline-edit-diff-del">{item.deletions || '-0'}</span>
                 </button>
-              ) : isEditItem ? (
-                <span className="timeline-edit-diff-summary" title="此旧记录不包含可供预览的变更内容">
-                  <span className="timeline-edit-diff-add">{item.additions || '+0'}</span>
-                  <span className="timeline-edit-diff-del">{item.deletions || '-0'}</span>
-                </span>
               ) : null}
             </Flex>
           </Flex>

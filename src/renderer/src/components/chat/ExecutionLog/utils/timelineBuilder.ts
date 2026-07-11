@@ -518,9 +518,12 @@ export function buildUnifiedTimeline(
       status: isActuallyRunning ? 'running' : edit.status === 'running' ? 'error' : edit.status,
       verb: edit.isRunning && isActuallyRunning ? 'Editing' : 'Edited',
       target: edit.filePath,
+      realPath: edit.filePath,
       additions: edit.additions,
       deletions: edit.deletions,
-      fileName: edit.filePath.split(/[/\\]/).pop()
+      args: edit.args,
+      fileName: edit.filePath.split(/[/\\]/).pop(),
+      toolName: edit.toolName
     })
   })
 
