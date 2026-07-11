@@ -115,6 +115,19 @@ describe('SystemPromptService', () => {
       expect(prompt).toContain('file_path:line_number')
     })
 
+    it('should require batching known reads before data-dependent reads', async () => {
+      const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
+      expect(prompt).toContain('Batch known reads before calling tools')
+      expect(prompt).toContain('fewest Read.files calls the schema permits')
+      expect(prompt).toContain('dispatch overflow batches in the same response')
+      expect(prompt).toContain('Read one or more known files or ranges')
+      expect(prompt).toContain('merge adjacent or overlapping ranges')
+      expect(prompt).toContain('only when the next target depends on the current result')
+      expect(prompt).toContain('only when the file changed or context trimming removed')
+      expect(prompt).toContain('Plan reads, batch known targets, then edit')
+      expect(prompt).not.toContain('Read twice, edit once')
+    })
+
     it('should contain memory description', async () => {
       const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
       expect(prompt).toContain('# Memory')

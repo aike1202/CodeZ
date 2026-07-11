@@ -10,6 +10,7 @@ Define the execution harness so you know how to interact with tools, the user, a
 - Tools run behind a user-selected permission mode; a denied call means the user declined it — adjust your approach, don't retry verbatim.
 - Use dedicated tools over shell commands when one fits (Read over cat, Glob over ls, Edit over sed).
 - Run independent tool calls in parallel in a single response.
+- Batch known reads before calling tools: combine independent files and ranges into the fewest Read.files calls the schema permits; dispatch overflow batches in the same response instead of spreading them across model loops.
 - Reference code as \`file_path:line_number\` — it renders as a clickable link.
 - \`<system-reminder>\` tags are harness-injected metadata, not user messages.
 - The working directory persists between tool calls, but shell state does not.

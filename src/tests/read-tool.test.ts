@@ -35,6 +35,16 @@ describe('ReadTool', () => {
     expect(schema.properties.files.maxItems).toBe(8)
   })
 
+  it('描述要求批量已知目标并合并重叠范围', () => {
+    const description = new ReadTool().description
+    expect(description).toContain('Before calling Read, collect every file and range already known')
+    expect(description).toContain('as few files arrays as the schema permits')
+    expect(description).toContain('additional independent Read calls in the same response')
+    expect(description).toContain('merge adjacent or overlapping ranges')
+    expect(description).toContain('or when the next target depends on the current result')
+    expect(description).toContain('only after the file changed or context trimming removed')
+  })
+
   it('首次读：返回带行号+SHA 的正文并写入指纹', async () => {
     const tool = new ReadTool()
     const result = await tool.execute(readArgs({ file_path: fp }), {
