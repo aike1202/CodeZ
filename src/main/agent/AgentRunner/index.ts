@@ -562,6 +562,7 @@ export class AgentRunner {
                     resultMessage = await toolInstance.execute(args, {
                       workspaceRoot: config.workspaceRoot,
                       sessionId,
+                      contextScopeId: runtimeTurn?.contextScopeId,
                       runtimeCoordinator,
                       runtimeTurn,
                       transactionId: txId || undefined,

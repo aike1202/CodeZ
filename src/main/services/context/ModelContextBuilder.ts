@@ -79,10 +79,25 @@ export class ModelContextBuilder {
       8_000,
       Math.floor(budget.usableInputBudget * 0.1)
     )
+    let lastAssistantInCurrentTurn = -1
+    for (let index = activeMessages.length - 1; index >= 0; index--) {
+      const message = activeMessages[index]
+      if (message.turnId === current.turnId && message.role === 'assistant') {
+        lastAssistantInCurrentTurn = index
+        break
+      }
+    }
+    const unconsumedToolResultIds = new Set(
+      activeMessages
+        .slice(lastAssistantInCurrentTurn + 1)
+        .filter((message) => message.turnId === current.turnId && message.role === 'tool')
+        .map((message) => message.id)
+    )
     const emergencyPrune = this.pruner.prune(activeMessages, {
       targetTokens: Number.POSITIVE_INFINITY,
       protectedTailStart: activeMessages.length,
-      maxSingleToolTokens
+      maxSingleToolTokens,
+      protectedMessageIds: unconsumedToolResultIds
     })
     if (emergencyPrune.records.length > 0) {
       activeMessages = emergencyPrune.messages
@@ -103,7 +118,8 @@ export class ModelContextBuilder {
       activeMessages = this.pruner.prune(activeMessages, {
         targetTokens: Math.floor(budget.usableInputBudget * 0.75),
         protectedTailStart: Math.max(0, protectedTailStart),
-        maxSingleToolTokens
+        maxSingleToolTokens,
+        protectedMessageIds: unconsumedToolResultIds
       }).messages
       recentHistory = activeMessages.filter((message) => message.id !== current.id)
       budget = this.measure(

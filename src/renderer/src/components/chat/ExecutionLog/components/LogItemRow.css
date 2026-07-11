@@ -91,6 +91,56 @@
   font-weight: 600;
 }
 
+.timeline-edit-diff-button {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 4px;
+  min-height: 20px;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.timeline-edit-diff-summary {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 4px;
+  min-height: 20px;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.timeline-edit-diff-button:hover {
+  border-color: var(--primary-color);
+  background: var(--bg-hover-light);
+}
+
+.timeline-edit-diff-button:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 1px;
+}
+
+.timeline-edit-diff-add { color: var(--text-success, #059669); }
+
+.timeline-edit-diff-del { color: var(--color-error); }
+
 .timeline-verb-task-completed {
   color: #16803c;
   font-weight: 650;

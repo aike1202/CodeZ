@@ -51,6 +51,10 @@ export interface MessageSlice {
   startStreamingReply: () => string
   appendStreamChunk: (msgId: string, delta: string, reasoningDelta?: string) => void
   finishStreaming: (msgId: string, txId?: string) => void
+  setMessageExecutionStatus: (
+    msgId: string,
+    status: 'completed' | 'error' | 'interrupted'
+  ) => void
   setStreamCleanup: (sessionId: string, cleanup: (() => void) | null) => void
   setTransactionId: (msgId: string, txId: string) => void
   setDiffEntries: (msgId: string, diffEntries: Array<{ path: string; diff: string }>) => void
@@ -301,6 +305,14 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
         relativeTime: '刚刚'
       })
     ))
+  },
+
+  setMessageExecutionStatus: (msgId, status) => {
+    set((s) => updateMessageInState(s, msgId, (message) => ({
+      ...message,
+      executionStatus: status
+    })))
+    void get().persistCurrentSession()
   },
 
   setStreamCleanup: (sessionId, cleanup) => {

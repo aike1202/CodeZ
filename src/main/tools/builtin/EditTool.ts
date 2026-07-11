@@ -3,7 +3,7 @@ import { Tool, ToolContext } from '../Tool'
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import { createHash } from 'crypto'
-import { getReadFingerprintStore } from '../ReadFingerprintStore'
+import { getReadFingerprintStore, readStatSignature } from '../ReadFingerprintStore'
 
 interface EditArgs {
   file_path?: string
@@ -60,17 +60,27 @@ export class EditTool extends Tool {
         return 'Error: Access denied. Cannot modify file outside of workspace.'
       }
 
-      const sessionId = context.sessionId
-      if (!sessionId || !getReadFingerprintStore().isUnchangedKnown(sessionId, absolutePath)) {
-        return 'Error: You must Read this file in this conversation before editing it.'
-      }
-
       let fileContent: string
       try {
         fileContent = await fs.readFile(absolutePath, 'utf-8')
       } catch (err: any) {
         if (err.code === 'ENOENT') return 'Error: File not found. Use Write to create it.'
         return `Error: ${err.message}`
+      }
+
+      const sessionId = context.sessionId
+      const contextScopeId = context.contextScopeId ?? context.runtimeTurn?.contextScopeId ?? 'main'
+      const currentSha = createHash('sha256').update(fileContent).digest('hex')
+      if (
+        !sessionId ||
+        !getReadFingerprintStore().hasDelivery(
+          sessionId,
+          contextScopeId,
+          absolutePath,
+          currentSha
+        )
+      ) {
+        return 'Error: You must Read the current version of this file in this agent context before editing it.'
       }
 
       const target = stripLinePrefix(parsed.old_string.replace(/\r\n/g, '\n'))
@@ -101,7 +111,16 @@ export class EditTool extends Tool {
       await fs.writeFile(absolutePath, updated, 'utf-8')
 
       const newSha = createHash('sha256').update(updated).digest('hex')
-      if (sessionId) getReadFingerprintStore().record(sessionId, absolutePath, newSha)
+      if (sessionId) {
+        const nextStat = await fs.stat(absolutePath)
+        const store = getReadFingerprintStore()
+        store.recordSnapshot(sessionId, absolutePath, {
+          sha256: newSha,
+          buffer: Buffer.from(updated, 'utf-8'),
+          statSignature: readStatSignature(nextStat)
+        })
+        store.recordDelivery(sessionId, contextScopeId, absolutePath, newSha)
+      }
 
       let diff = ''
       if (context.editTransactionService && context.transactionId) {

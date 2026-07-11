@@ -49,6 +49,7 @@ export function useSendMessage() {
   const startStreamingReply = useChatStore((s) => s.startStreamingReply)
   const appendStreamChunk = useChatStore((s) => s.appendStreamChunk)
   const finishStreaming = useChatStore((s) => s.finishStreaming)
+  const setMessageExecutionStatus = useChatStore((s) => s.setMessageExecutionStatus)
   const persistCurrentSession = useChatStore((s) => s.persistCurrentSession)
   const setStreamCleanup = useChatStore((s) => s.setStreamCleanup)
   const createSession = useChatStore((s) => s.createSession)
@@ -247,6 +248,7 @@ export function useSendMessage() {
           onDone: async (fullContent: string, _stopReason?: string, txId?: string) => {
             if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
             finishStreaming(agentId, txId)
+            setMessageExecutionStatus(agentId, 'completed')
             if (txId) {
               useChatStore.getState().setTransactionId(agentId, txId)
               try {
@@ -265,6 +267,7 @@ export function useSendMessage() {
             if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
             appendStreamChunk(agentId, `\n\n⚠️ 错误：${error}`)
             finishStreaming(agentId)
+            setMessageExecutionStatus(agentId, 'error')
             useChatStore.getState().persistSession(sid)
             setStreamCleanup(sid, null)
           },
@@ -353,6 +356,7 @@ export function useSendMessage() {
         useChatStore.getState().markActiveRunUserAborted(sid)
         streamHandle.stop()
         finishStreaming(agentId)
+        setMessageExecutionStatus(agentId, 'interrupted')
         useChatStore.getState().persistSession(sid)
         setStreamCleanup(sid, null)
       }
@@ -397,6 +401,7 @@ export function useSendMessage() {
       startStreamingReply,
       appendStreamChunk,
       finishStreaming,
+      setMessageExecutionStatus,
       persistCurrentSession,
       setStreamCleanup,
       createSession,

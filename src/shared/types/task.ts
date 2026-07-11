@@ -15,6 +15,19 @@ export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
 export type TaskRiskLevel = 'low' | 'medium' | 'high'
 export type TaskApprovalStatus = 'not_required' | 'pending' | 'approved' | 'changes_requested' | 'rejected'
 
+export interface TaskContextBundle {
+  /** 研究阶段已经确认、执行阶段可直接使用的事实。 */
+  knownFacts?: string[]
+  /** 主 Agent 在 Plan 阶段确定的实现决策。 */
+  decisions?: string[]
+  /** 执行边界、兼容性要求等约束。 */
+  constraints?: string[]
+  /** 已调查且确认无需重复探索的方向。 */
+  excludedDirections?: string[]
+  /** 带行号和可选 SHA 的源码证据引用。 */
+  sourceReferences?: string[]
+}
+
 export interface TaskItem {
   /** 稳定短 ID（t1 / t2 ...）；委派 Worker 时按此引用 */
   id: string
@@ -43,6 +56,8 @@ export interface TaskItem {
   acceptanceCriteria?: string[]
   /** 推荐验证命令，完成任务前优先运行 */
   verificationCommand?: string
+  /** 从研究与 Plan 阶段传递给执行智能体的任务专属上下文。 */
+  contextBundle?: TaskContextBundle
   /** 涉及文件路径列表（相对 workspaceRoot）；委派 Worker 时用于冲突校验与共享工作区写权限范围 */
   files?: string[]
   /** 进行时文案，给进度条显示，如 "提取 useAuth hook 中" */

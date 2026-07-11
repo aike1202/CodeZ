@@ -1,9 +1,12 @@
 import type { EditTransactionService } from '../services/EditTransactionService'
+import type { ContextScopeId } from '../../shared/types/context'
 
 export interface ToolContext {
   workspaceRoot: string
   /** 当前会话 ID */
   sessionId?: string
+  /** 当前 Agent 的独立上下文作用域。 */
+  contextScopeId?: ContextScopeId
   runtimeCoordinator?: import('../services/context/SessionRuntimeCoordinator').SessionRuntimeCoordinator
   runtimeTurn?: import('../services/context/SessionRuntimeCoordinator').RuntimeTurnHandle
   /** 当前活跃的修改事务 ID */

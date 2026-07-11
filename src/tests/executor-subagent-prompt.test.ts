@@ -80,4 +80,32 @@ describe('Executor subagent prompt', () => {
     expect(detail?.type).toBe('Executor')
     expect(detail?.description).toContain('plan step')
   })
+
+  it('injects supplied research context and discourages broad rediscovery', async () => {
+    const { WorkerSubAgent } = await import('../main/agent/definitions/WorkerSubAgent')
+
+    const prompt = await WorkerSubAgent.systemPromptBuilder({
+      workspaceRoot: '/workspace',
+      sessionId: 's1',
+      task: 'Implement the renderer projection',
+      parentPrompt: 'Implement the renderer projection',
+      context: [
+        '### Known Facts',
+        '- Sidebar status comes from streamCleanups.',
+        '### Source References',
+        '- useAppWorkspace.ts:151-178 @ abc'
+      ].join('\n'),
+      apiConfig: {
+        baseUrl: 'https://example.invalid',
+        apiKey: 'key',
+        apiFormat: 'openai',
+        model: 'test-model'
+      },
+      contextCapabilities: { contextWindowTokens: 100_000 }
+    })
+
+    expect(prompt).toContain('## Supplied Research and Plan Context')
+    expect(prompt).toContain('Sidebar status comes from streamCleanups')
+    expect(prompt).toContain('Do not repeat broad repository exploration')
+  })
 })

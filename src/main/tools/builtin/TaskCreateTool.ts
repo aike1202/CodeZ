@@ -1,6 +1,6 @@
 import { Tool, ToolContext } from '../Tool'
 import { TaskStore } from '../../services/TaskStore'
-import type { TaskApprovalStatus, TaskRiskLevel } from '../../../shared/types/task'
+import type { TaskApprovalStatus, TaskContextBundle, TaskRiskLevel } from '../../../shared/types/task'
 
 const VALID_RISK_LEVELS: TaskRiskLevel[] = ['low', 'medium', 'high']
 const VALID_APPROVAL_STATUSES: TaskApprovalStatus[] = ['not_required', 'pending', 'approved', 'changes_requested', 'rejected']
@@ -34,6 +34,9 @@ export class TaskCreateTool extends Tool {
       'Each task gets a stable id (t1, t2 ...) you can later reference in TaskUpdate or DelegateTasks.',
       'Tasks start as "pending". Declare `files` if you know which files a task will touch — this enables',
       'parallel delegation with conflict checking.',
+      'When tasks follow research or a written Plan, populate each task `contextBundle` with the relevant',
+      'known facts, decisions, constraints, excluded directions, and source references. DelegateTasks',
+      'passes this bundle to the Executor so it does not repeat completed repository exploration.',
       '',
       'Use `groupTitle`/`groupSubtitle` as internal display metadata for multi-step work, but describe it',
       'to the user as steps, phases, or current progress — do not expose the term "TaskGroup".',
@@ -113,6 +116,18 @@ export class TaskCreateTool extends Tool {
               verificationCommand: {
                 type: 'string',
                 description: 'Recommended command to verify this task.'
+              },
+              contextBundle: {
+                type: 'object',
+                description: 'Important research and Plan context the Executor should reuse instead of rediscovering.',
+                properties: {
+                  knownFacts: { type: 'array', items: { type: 'string' } },
+                  decisions: { type: 'array', items: { type: 'string' } },
+                  constraints: { type: 'array', items: { type: 'string' } },
+                  excludedDirections: { type: 'array', items: { type: 'string' } },
+                  sourceReferences: { type: 'array', items: { type: 'string' } }
+                },
+                additionalProperties: false
               }
             },
             required: ['subject']
@@ -145,6 +160,7 @@ export class TaskCreateTool extends Tool {
         activeForm?: string
         acceptanceCriteria?: string[]
         verificationCommand?: string
+        contextBundle?: TaskContextBundle
       }>
     }
     try {
@@ -182,6 +198,7 @@ export class TaskCreateTool extends Tool {
         approvalStatus,
         acceptanceCriteria: t.acceptanceCriteria,
         verificationCommand: t.verificationCommand,
+        contextBundle: t.contextBundle,
         // 仅第一项携带 title/subtitle（列表头，不是每个 task 都有）
         ...(i === 0 && parsed.title ? { title: parsed.title } : {}),
         ...(i === 0 && parsed.subtitle ? { subtitle: parsed.subtitle } : {}),

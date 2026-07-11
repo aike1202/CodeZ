@@ -92,6 +92,19 @@ export function LogItemRow({
 
   const isFileItem =
     item.type === 'edit' || (item.type === 'tool' && item.verb === 'Analyzed' && item.fileName)
+  const isEditItem = item.type === 'edit'
+  const canOpenEditDiff = isEditItem && Boolean(item.args?.trim()) && Boolean(onDiffClick)
+
+  const openFile = (event: React.MouseEvent) => {
+    event.stopPropagation()
+    onFileClick?.(item.realPath || item.target)
+  }
+
+  const openEditDiff = (event: React.MouseEvent) => {
+    event.stopPropagation()
+    const diffInfo = buildDiffEditInfo(item.toolName || '', item.args || '')
+    onDiffClick?.(item.realPath || item.target, diffInfo)
+  }
 
   return (
     <div className="timeline-item-wrapper" style={{ display: 'flex', flexDirection: 'column', minWidth: 0, width: '100%' }}>
@@ -129,18 +142,7 @@ export function LogItemRow({
                 ) : isFileItem ? (
                   <span
                     className="timeline-target-link"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      const filePath = item.realPath || item.target
-                      if (item.type === 'edit') {
-                        const diffInfo = buildDiffEditInfo(item.toolName || '', item.args || '')
-                        if (diffInfo) {
-                          onDiffClick?.(filePath, diffInfo)
-                        }
-                      } else {
-                        onFileClick?.(filePath)
-                      }
-                    }}
+                    onClick={openFile}
                   >
                     {item.target}
                   </span>
@@ -150,6 +152,23 @@ export function LogItemRow({
                   </span>
                 )}
               </span>
+              {canOpenEditDiff ? (
+                <button
+                  type="button"
+                  className="timeline-edit-diff-button"
+                  aria-label={`查看 ${item.target} 的变更`}
+                  title="查看变更 Diff"
+                  onClick={openEditDiff}
+                >
+                  <span className="timeline-edit-diff-add">{item.additions || '+0'}</span>
+                  <span className="timeline-edit-diff-del">{item.deletions || '-0'}</span>
+                </button>
+              ) : isEditItem ? (
+                <span className="timeline-edit-diff-summary" title="此旧记录不包含可供预览的变更内容">
+                  <span className="timeline-edit-diff-add">{item.additions || '+0'}</span>
+                  <span className="timeline-edit-diff-del">{item.deletions || '-0'}</span>
+                </span>
+              ) : null}
             </Flex>
           </Flex>
 

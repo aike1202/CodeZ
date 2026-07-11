@@ -6,6 +6,7 @@ export interface ToolOutputPruneOptions {
   targetTokens: number
   protectedTailStart: number
   maxSingleToolTokens?: number
+  protectedMessageIds?: ReadonlySet<string>
 }
 
 export interface ToolOutputPruneRecord {
@@ -54,6 +55,7 @@ export class ToolOutputPruner {
       message.role === 'tool' &&
       message.status === 'complete' &&
       !PROTECTED_TOOLS.has(message.name || '') &&
+      !options.protectedMessageIds?.has(message.id) &&
       !isErrorResult(message.content) &&
       !prunedIds.has(message.id)
     const candidates = () => messages

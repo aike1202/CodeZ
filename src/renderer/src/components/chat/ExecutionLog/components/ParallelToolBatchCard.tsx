@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { CheckCircle2, ChevronDown, Loader2, XCircle, Zap } from 'lucide-react'
+import { CheckCircle2, ChevronDown, FolderSearch2, ListTree, Loader2, XCircle } from 'lucide-react'
 import type { ParallelToolBatchItem, UnifiedTimelineItem } from '../utils'
 import { getParallelBatchDuration } from '../utils'
 import type { SubAgentRecord } from '../../../../stores/chatStore'
@@ -40,7 +40,7 @@ export function ParallelToolBatchCard({
   onFileClick,
   onDiffClick
 }: ParallelToolBatchCardProps): React.ReactElement {
-  const [expanded, setExpanded] = useState(true)
+  const [expanded, setExpanded] = useState(batch.batchKind !== 'explore')
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -51,14 +51,21 @@ export function ParallelToolBatchCard({
   }, [batch.status])
 
   const failedCount = batch.items.filter((item) => item.status === 'error').length
+  const emptyCount = batch.batchKind === 'explore'
+    ? batch.items.filter((item) => item.detail?.trim() === 'No files matched.').length
+    : 0
   const duration = getParallelBatchDuration(batch, now)
-  const title = batch.batchKind === 'read'
+  const title = batch.batchKind === 'explore'
     ? batch.status === 'running'
-      ? `正在并行读取 ${batch.batchSize} 个文件`
-      : `并行读取 ${batch.batchSize} 个文件`
+      ? `本轮正在浏览 ${batch.batchSize} 处位置`
+      : `本轮浏览了 ${batch.batchSize} 处位置`
+    : batch.batchKind === 'read'
+    ? batch.status === 'running'
+      ? `本轮正在读取 ${batch.batchSize} 个文件`
+      : `本轮读取 ${batch.batchSize} 个文件`
     : batch.status === 'running'
-      ? `正在并行执行 ${batch.batchSize} 项`
-      : `并行执行 ${batch.batchSize} 项`
+      ? `本轮正在执行 ${batch.batchSize} 项`
+      : `本轮已执行 ${batch.batchSize} 项`
 
   const statusIcon = batch.status === 'running'
     ? <Loader2 size={14} className="parallel-tool-batch-icon parallel-tool-batch-icon--running" />
@@ -75,10 +82,15 @@ export function ParallelToolBatchCard({
         onClick={() => setExpanded((value) => !value)}
       >
         <span className="parallel-tool-batch-status">{statusIcon}</span>
-        <Zap size={13} className="parallel-tool-batch-zap" />
+        {batch.batchKind === 'explore'
+          ? <FolderSearch2 size={14} className="parallel-tool-batch-zap" />
+          : <ListTree size={14} className="parallel-tool-batch-zap" />}
         <span className="parallel-tool-batch-title">{title}</span>
         {failedCount > 0 && (
           <span className="parallel-tool-batch-failures">· {failedCount} 项失败</span>
+        )}
+        {emptyCount > 0 && (
+          <span className="parallel-tool-batch-empty">· {emptyCount} 项无匹配</span>
         )}
         <span className="parallel-tool-batch-time">{formatBatchDuration(duration)}</span>
         <ChevronDown

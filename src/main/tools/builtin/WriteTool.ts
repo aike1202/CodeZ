@@ -3,7 +3,7 @@ import { Tool, ToolContext } from '../Tool'
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import { createHash } from 'crypto'
-import { getReadFingerprintStore } from '../ReadFingerprintStore'
+import { getReadFingerprintStore, readStatSignature } from '../ReadFingerprintStore'
 
 interface WriteArgs {
   file_path?: string
@@ -50,9 +50,20 @@ export class WriteTool extends Tool {
       }
 
       const sessionId = context.sessionId
+      const contextScopeId = context.contextScopeId ?? context.runtimeTurn?.contextScopeId ?? 'main'
       const exists = await fs.access(absolutePath).then(() => true).catch(() => false)
       if (exists) {
-        if (!sessionId || !getReadFingerprintStore().isUnchangedKnown(sessionId, absolutePath)) {
+        const current = await fs.readFile(absolutePath)
+        const currentSha = createHash('sha256').update(current).digest('hex')
+        if (
+          !sessionId ||
+          !getReadFingerprintStore().hasDelivery(
+            sessionId,
+            contextScopeId,
+            absolutePath,
+            currentSha
+          )
+        ) {
           return 'Error: You must Read this file in this conversation before overwriting it. Use Edit for partial changes.'
         }
       }
@@ -69,7 +80,16 @@ export class WriteTool extends Tool {
       await fs.writeFile(absolutePath, parsed.content, 'utf-8')
 
       const newSha = createHash('sha256').update(parsed.content).digest('hex')
-      if (sessionId) getReadFingerprintStore().record(sessionId, absolutePath, newSha)
+      if (sessionId) {
+        const nextStat = await fs.stat(absolutePath)
+        const store = getReadFingerprintStore()
+        store.recordSnapshot(sessionId, absolutePath, {
+          sha256: newSha,
+          buffer: Buffer.from(parsed.content, 'utf-8'),
+          statSignature: readStatSignature(nextStat)
+        })
+        store.recordDelivery(sessionId, contextScopeId, absolutePath, newSha)
+      }
 
       let diff = ''
       if (context.editTransactionService && context.transactionId) {

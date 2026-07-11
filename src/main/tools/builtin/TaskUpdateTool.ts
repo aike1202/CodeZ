@@ -1,6 +1,6 @@
 import { Tool, ToolContext } from '../Tool'
 import { TaskStore } from '../../services/TaskStore'
-import type { TaskApprovalStatus, TaskRiskLevel, TaskStatus } from '../../../shared/types/task'
+import type { TaskApprovalStatus, TaskContextBundle, TaskRiskLevel, TaskStatus } from '../../../shared/types/task'
 
 const VALID_STATUSES: TaskStatus[] = ['pending', 'in_progress', 'completed', 'cancelled']
 const VALID_RISK_LEVELS: TaskRiskLevel[] = ['low', 'medium', 'high']
@@ -76,6 +76,18 @@ export class TaskUpdateTool extends Tool {
         verificationCommand: {
           type: 'string',
           description: 'Replace the recommended verification command.'
+        },
+        contextBundle: {
+          type: 'object',
+          description: 'Replace the task research/Plan context bundle.',
+          properties: {
+            knownFacts: { type: 'array', items: { type: 'string' } },
+            decisions: { type: 'array', items: { type: 'string' } },
+            constraints: { type: 'array', items: { type: 'string' } },
+            excludedDirections: { type: 'array', items: { type: 'string' } },
+            sourceReferences: { type: 'array', items: { type: 'string' } }
+          },
+          additionalProperties: false
         }
       },
       required: ['taskId']
@@ -100,6 +112,7 @@ export class TaskUpdateTool extends Tool {
       approvalStatus?: string
       acceptanceCriteria?: string[]
       verificationCommand?: string
+      contextBundle?: TaskContextBundle
     }
     try {
       parsed = JSON.parse(args || '{}')
@@ -146,7 +159,8 @@ export class TaskUpdateTool extends Tool {
       requiresApproval: parsed.requiresApproval,
       approvalStatus: parsed.approvalStatus as TaskApprovalStatus | undefined,
       acceptanceCriteria: parsed.acceptanceCriteria,
-      verificationCommand: parsed.verificationCommand
+      verificationCommand: parsed.verificationCommand,
+      contextBundle: parsed.contextBundle
     })
 
     // 单一 in_progress 校验：越界则回滚该次状态变更

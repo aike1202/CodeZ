@@ -50,4 +50,35 @@ describe('ReadFingerprintStore', () => {
   it('getReadFingerprintStore 返回同一单例', () => {
     expect(getReadFingerprintStore()).toBe(getReadFingerprintStore())
   })
+
+  it('合并同一文件的并发快照加载', async () => {
+    let loads = 0
+    const loader = async () => {
+      loads++
+      await Promise.resolve()
+      return {
+        sha256: 'sha-aaa',
+        buffer: Buffer.from('content'),
+        statSignature: '7:1:1'
+      }
+    }
+
+    const [first, second] = await Promise.all([
+      store.getOrLoadSnapshot(SESSION, ABS, '7:1:1', loader),
+      store.getOrLoadSnapshot(SESSION, ABS, '7:1:1', loader)
+    ])
+
+    expect(loads).toBe(1)
+    expect(first.source).toBe('filesystem')
+    expect(second.source).toBe('shared-cache')
+    expect(second.snapshot.buffer.toString()).toBe('content')
+  })
+
+  it('按 Agent scope 记录当前文件版本的交付', () => {
+    store.recordDelivery(SESSION, 'subagent:a', ABS, 'sha-aaa')
+
+    expect(store.hasDelivery(SESSION, 'subagent:a', ABS, 'sha-aaa')).toBe(true)
+    expect(store.hasDelivery(SESSION, 'subagent:b', ABS, 'sha-aaa')).toBe(false)
+    expect(store.hasDelivery(SESSION, 'subagent:a', ABS, 'sha-bbb')).toBe(false)
+  })
 })

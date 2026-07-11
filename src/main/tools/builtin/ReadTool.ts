@@ -3,7 +3,11 @@ import { Tool, ToolContext } from '../Tool'
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import { createHash } from 'crypto'
-import { getReadFingerprintStore } from '../ReadFingerprintStore'
+import {
+  getReadFingerprintStore,
+  readStatSignature,
+  type ReadSnapshotSource
+} from '../ReadFingerprintStore'
 import { parseNotebook, renderNotebook } from './NotebookUtils'
 
 interface ReadFileArgs {
@@ -18,8 +22,8 @@ interface ReadArgs {
 }
 
 const MAX_TOTAL_LINES = 1200
-const MAX_TOTAL_BYTES = 120000
 const MAX_CHARS_PER_FILE = 40000
+const MAX_CHARS_PER_BATCH = 24000
 const MAX_FILE_BYTES = 5 * 1024 * 1024
 const MAX_FILES_PER_READ = 8
 
@@ -41,7 +45,7 @@ export class ReadTool extends Tool {
   }
 
   get description() {
-    return 'Reads 1 to 8 files from the local filesystem in parallel. Pass every request through the required files array, including single-file reads. Before calling Read, collect every file and range already known. If two or more independent targets are known, put them in as few files arrays as the schema permits; when they exceed one array\'s capacity, issue the additional independent Read calls in the same response. For the same file, merge adjacent or overlapping ranges instead of issuing sequential calls. Use a one-item array only when there is truly one target or when the next target depends on the current result. Each file_path may be absolute or workspace-relative. For an initial read without an evidence-based relevant range, omit offset and limit. A known relevant range is permitted even on the first read. Do not probe arbitrary first 50 or 100 lines. Use offset/limit only for such a known range, when the default result was marked truncated or reached its documented content-budget boundary, or when context trimming removed earlier content. A default text read returns up to 1,200 lines and may stop earlier at other content budgets. Range reads bypass unchanged-file dedup for recovery after context trimming; do not use that escape hatch for redundant browsing. After a file changes, re-read it without an arbitrary range unless a permitted range condition applies. Results are returned in input order as <file path="..."> blocks with cat -n line numbers and SHA256. One file error does not prevent other files from returning. Binary files are not readable. Images and PDFs are not supported (pages is reserved and ignored). Jupyter notebooks render as <cell id="..."> blocks.'
+    return 'Reads 1 to 8 files from a session-shared versioned snapshot cache, loading each unchanged file from the filesystem at most once per workspace path. Pass every request through the required files array, including single-file reads. Before calling Read, collect every file and range already known. If two or more independent targets are known, put them in as few files arrays as the schema permits; when they exceed one array\'s capacity, issue the additional independent Read calls in the same response. For the same file, merge adjacent or overlapping ranges instead of issuing sequential calls. Use a one-item array only when there is truly one target or when the next target depends on the current result. Each file_path may be absolute or workspace-relative. For an initial read without an evidence-based relevant range, omit offset and limit. A known relevant range is permitted even on the first read. Do not probe arbitrary first 50 or 100 lines. Use offset/limit only for such a known range, when the default result was marked truncated or reached its documented content-budget boundary, or when context trimming removed earlier content. A default text read returns up to 1,200 lines and may stop earlier at the shared batch content budget. Cached and range reads return the requested content instead of a content-free deduplication response. After a file changes, re-read it without an arbitrary range unless a permitted range condition applies. Results are returned in input order as <file path="..."> blocks with cat -n line numbers, snapshot source, and SHA256. One file error does not prevent other files from returning. Binary files are not readable. Images and PDFs are not supported (pages is reserved and ignored). Jupyter notebooks render as <cell id="..."> blocks.'
   }
 
   get parameters_schema() {
@@ -86,7 +90,13 @@ export class ReadTool extends Tool {
       const invalidIndex = parsed.files.findIndex((file) => !file || typeof file.file_path !== 'string' || !file.file_path)
       if (invalidIndex >= 0) return `Error: files[${invalidIndex}].file_path is required.`
 
-      const results = await Promise.all(parsed.files.map((file) => this.readOneFile(file, context)))
+      const perFileCharBudget = Math.max(
+        2000,
+        Math.min(MAX_CHARS_PER_FILE, Math.floor(MAX_CHARS_PER_BATCH / parsed.files.length))
+      )
+      const results = await Promise.all(
+        parsed.files.map((file) => this.readOneFile(file, context, perFileCharBudget))
+      )
       return results
         .map((result, index) =>
           `<file path="${escapeAttribute(parsed.files![index].file_path)}">\n${result}\n</file>`
@@ -97,7 +107,11 @@ export class ReadTool extends Tool {
     }
   }
 
-  private async readOneFile(parsed: ReadFileArgs, context: ToolContext): Promise<string> {
+  private async readOneFile(
+    parsed: ReadFileArgs,
+    context: ToolContext,
+    charBudget: number
+  ): Promise<string> {
     try {
 
       const absolutePath = path.isAbsolute(parsed.file_path)
@@ -115,29 +129,46 @@ export class ReadTool extends Tool {
         return `Error: File too large (${(stat.size / 1024 / 1024).toFixed(1)}MB). Max 5MB.`
       }
 
-      const buffer = await fs.readFile(absolutePath)
+      const sessionId = context.sessionId
+      let source: ReadSnapshotSource = 'filesystem'
+      let buffer: Buffer
+      let sha: string
+      if (sessionId) {
+        const loaded = await getReadFingerprintStore().getOrLoadSnapshot(
+          sessionId,
+          absolutePath,
+          readStatSignature(stat),
+          async () => {
+            const nextBuffer = await fs.readFile(absolutePath)
+            const nextStat = await fs.stat(absolutePath)
+            return {
+              buffer: nextBuffer,
+              sha256: createHash('sha256').update(nextBuffer).digest('hex'),
+              statSignature: readStatSignature(nextStat)
+            }
+          }
+        )
+        buffer = loaded.snapshot.buffer
+        sha = loaded.snapshot.sha256
+        source = loaded.source
+      } else {
+        buffer = await fs.readFile(absolutePath)
+        sha = createHash('sha256').update(buffer).digest('hex')
+      }
       if (buffer.subarray(0, 512).includes(0)) {
         return 'Cannot read binary file.'
       }
 
-      const sha = createHash('sha256').update(buffer).digest('hex')
-      const sessionId = context.sessionId
-      // 仅对"默认全文件读"做未变去重；显式 offset/limit 的 range 读不去重——
-      // 上下文裁剪后旧 tool_result 可能已不在历史，range 读是模型重新取内容的逃逸口。
-      const isRangeRead = (parsed.offset != null && parsed.offset > 0) || (parsed.limit != null && parsed.limit > 0)
-      if (sessionId && !isRangeRead) {
-        const store = getReadFingerprintStore()
-        if (store.isUnchanged(sessionId, absolutePath, sha)) {
-          return 'Wasted call — file unchanged since your last Read. Refer to that earlier tool_result instead. If that earlier result is no longer in your context (e.g. after context trimming), re-read with offset/limit to fetch the specific range you need.'
-        }
+      const contextScopeId = context.contextScopeId ?? context.runtimeTurn?.contextScopeId ?? 'main'
+      if (sessionId) {
+        getReadFingerprintStore().recordDelivery(sessionId, contextScopeId, absolutePath, sha)
       }
 
       // .ipynb 特化：渲染为 <cell id="..."> 文本块（仍是纯文本，不算图片/PDF 入能力）
       if (absolutePath.toLowerCase().endsWith('.ipynb')) {
         try {
           const nb = parseNotebook(buffer.toString('utf-8'))
-          if (sessionId) getReadFingerprintStore().record(sessionId, absolutePath, sha)
-          return `${renderNotebook(nb)}\n\nSHA256: ${sha}`
+          return `${renderNotebook(nb)}\n\nSource: ${source}\nSHA256: ${sha}`
         } catch (e: any) {
           // 解析失败则按普通文本回退（下方逻辑继续）
         }
@@ -161,22 +192,14 @@ export class ReadTool extends Tool {
       const numbered = selected.map((line, i) => `${offset + i}\t${line}`)
       let text = numbered.join('\n')
 
-      if (text.length > MAX_CHARS_PER_FILE) {
-        text = text.slice(0, MAX_CHARS_PER_FILE) +
-          '\n\n[System Note: Content truncated due to maxCharsPerFile limit. Use offset/limit to paginate.]'
+      if (text.length > charBudget) {
+        text = text.slice(0, charBudget) +
+          '\n\n[System Note: Content truncated due to the shared Read batch budget. Use a targeted offset/limit range to continue.]'
         truncated = true
       }
-      const byteLen = Buffer.byteLength(text, 'utf-8')
-      if (byteLen > MAX_TOTAL_BYTES) {
-        text = Buffer.from(text, 'utf-8').subarray(0, MAX_TOTAL_BYTES).toString('utf-8') +
-          '\n\n[System Note: Content truncated due to maxTotalBytes budget. Use offset/limit to paginate.]'
-        truncated = true
-      }
-
-      if (sessionId) getReadFingerprintStore().record(sessionId, absolutePath, sha)
 
       const note = truncated ? `\n[truncated: ${totalLines} total lines]` : ''
-      return `${text}${note}\n\nSHA256: ${sha}`
+      return `${text}${note}\n\nSource: ${source}\nSHA256: ${sha}`
     } catch (err: any) {
       if (err.code === 'ENOENT') return 'Error: File not found.'
       return `Error: ${err.message}`

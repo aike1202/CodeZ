@@ -19,12 +19,25 @@ describe('ChatRuntimeRegistry', () => {
     })
   })
 
-  it('removes terminal streams exactly once', () => {
+  it('increments revisions and notifies only for real lifecycle changes', () => {
     const registry = new ChatRuntimeRegistry<{ abort(): void }>()
-    registry.register('stream-1', 's1', { abort() {} })
-    registry.unregister('stream-1')
-    registry.unregister('stream-1')
+    const changedSessions: string[] = []
+    const unsubscribe = registry.onChange((sessionId) => changedSessions.push(sessionId))
 
+    registry.register('stream-1', 's1', { abort() {} })
+    expect(registry.getVersion('s1')).toBe(1)
+
+    registry.unregister('stream-1')
     expect(registry.getStatus('s1', []).mainRunnerActive).toBe(false)
+    expect(registry.getVersion('s1')).toBe(2)
+
+    registry.unregister('stream-1')
+    expect(registry.getVersion('s1')).toBe(2)
+    expect(changedSessions).toEqual(['s1', 's1'])
+
+    unsubscribe()
+    registry.touch('s1')
+    expect(registry.getVersion('s1')).toBe(3)
+    expect(changedSessions).toEqual(['s1', 's1'])
   })
 })

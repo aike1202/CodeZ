@@ -1,10 +1,12 @@
+import type { SessionListStatus } from '../../App/hooks/sessionListStatus'
+
 export interface SidebarSession {
   id: string
   summary: string
   relativeTime: string
   isArchived?: boolean
   isDeleted?: boolean
-  isStreaming?: boolean
+  status: SessionListStatus
 }
 
 export interface SidebarProject {

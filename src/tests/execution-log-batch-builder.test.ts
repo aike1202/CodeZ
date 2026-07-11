@@ -70,6 +70,52 @@ describe('execution log parallel batch builder', () => {
     expect(groupParallelToolBatches([legacy, single])).toEqual([legacy, single])
   })
 
+  it('groups consecutive directory browsing records into a compact batch', () => {
+    const first = toolItem('glob-a', 100, {
+      verb: 'Explored',
+      toolName: 'Glob',
+      detail: 'No files matched.'
+    })
+    const second = toolItem('glob-b', 101, {
+      verb: 'Explored',
+      toolName: 'list_files',
+      detail: 'src/App.tsx'
+    })
+    const read = toolItem('read-a', 102, { verb: 'Analyzed', toolName: 'Read' })
+    const third = toolItem('glob-c', 103, { verb: 'Explored', toolName: 'list_dir' })
+
+    const grouped = groupParallelToolBatches([first, second, read, third])
+
+    expect(grouped).toHaveLength(3)
+    expect(grouped[0]).toMatchObject({
+      type: 'parallel-batch',
+      batchKind: 'explore',
+      batchSize: 2
+    })
+    expect((grouped[0] as ParallelToolBatchItem).items).toEqual([first, second])
+    expect(grouped[1]).toBe(read)
+    expect(grouped[2]).toBe(third)
+  })
+
+  it('keeps active and non-directory browsing records separate', () => {
+    const complete = toolItem('glob-complete', 100, { verb: 'Explored', toolName: 'Glob' })
+    const active = toolItem('glob-active', 101, {
+      status: 'running',
+      verb: 'Exploring',
+      toolName: 'Glob'
+    })
+    const unrelated = toolItem('other-explore', 102, {
+      verb: 'Explored',
+      toolName: 'OtherTool'
+    })
+
+    expect(groupParallelToolBatches([complete, active, unrelated])).toEqual([
+      complete,
+      active,
+      unrelated
+    ])
+  })
+
   it('preserves batchIndex ordering', () => {
     const grouped = groupParallelToolBatches([
       toolItem('second', 100, { batchId: 'batch-2', batchIndex: 1, batchSize: 2 }),
@@ -189,6 +235,68 @@ describe('execution log parallel batch builder', () => {
     expect((batch as ParallelToolBatchItem).items[1].target).toContain('#L10-29')
     expect((batch as ParallelToolBatchItem).items[1].status).toBe('error')
     expect((batch as ParallelToolBatchItem).status).toBe('error')
+  })
+
+  it('counts a multi-file Read as one item inside an outer tool batch', () => {
+    const timeline: ExecutionTimelineItem[] = [
+      {
+        id: 'tool_read-outer',
+        type: 'tool',
+        toolCall: {
+          id: 'read-outer',
+          name: 'Read',
+          args: JSON.stringify({
+            files: [
+              { file_path: 'src/a.ts' },
+              { file_path: 'src/b.ts' }
+            ]
+          }),
+          status: 'success',
+          result: '',
+          startedAt: 100,
+          completedAt: 200,
+          sequence: 0,
+          batchId: 'tools-1',
+          batchIndex: 0,
+          batchSize: 2
+        },
+        startedAt: 100,
+        updatedAt: 200,
+        sequence: 0
+      },
+      {
+        id: 'tool_task-get',
+        type: 'tool',
+        toolCall: {
+          id: 'task-get',
+          name: 'TaskGet',
+          args: JSON.stringify({ taskId: 't1' }),
+          status: 'success',
+          result: '{}',
+          startedAt: 101,
+          completedAt: 210,
+          sequence: 1,
+          batchId: 'tools-1',
+          batchIndex: 1,
+          batchSize: 2
+        },
+        startedAt: 101,
+        updatedAt: 210,
+        sequence: 1
+      }
+    ]
+
+    const [batch] = groupParallelToolBatches(
+      buildUnifiedTimeline(timeline, [], [], undefined, false)
+    )
+
+    expect(batch.type).toBe('parallel-batch')
+    expect((batch as ParallelToolBatchItem).batchKind).toBe('tools')
+    expect((batch as ParallelToolBatchItem).batchSize).toBe(2)
+    expect((batch as ParallelToolBatchItem).items.map((item) => item.target)).toEqual([
+      '2 个文件',
+      'TaskGet'
+    ])
   })
 })
 

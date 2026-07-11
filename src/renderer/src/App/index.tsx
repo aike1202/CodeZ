@@ -63,7 +63,13 @@ export default function App(): React.ReactElement {
   useEffect(() => {
     window.api.workspace.getRecentProjects().then((p) => useWorkspaceStore.getState().setRecentProjects(p)).catch(() => {})
     loadProviders()
-    loadSessions()
+    const cleanupRuntimeStatusListener = window.api.chat.onRuntimeStatusChanged(
+      useChatStore.getState().applyRuntimeStatus
+    )
+    void loadSessions().then(() => {
+      const sessionIds = useChatStore.getState().sessions.map((session) => session.id)
+      return useChatStore.getState().refreshRuntimeStatuses(sessionIds)
+    })
     const cleanupPlanStateListener = useChatStore.getState().initPlanStateListener()
 
     if (window.api?.theme) {
@@ -78,9 +84,13 @@ export default function App(): React.ReactElement {
       return () => {
         cleanupTheme()
         cleanupPlanStateListener()
+        cleanupRuntimeStatusListener()
       }
     }
-    return () => cleanupPlanStateListener()
+    return () => {
+      cleanupPlanStateListener()
+      cleanupRuntimeStatusListener()
+    }
   }, [])
 
   useEffect(() => {

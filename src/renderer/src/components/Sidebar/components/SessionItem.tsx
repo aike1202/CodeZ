@@ -1,5 +1,6 @@
 import React from 'react'
-import { IconMessage as Message, IconArchive as Archive, IconUnarchive as Unarchive, IconTrash as Trash, IconCheck as Check, IconClose as Close } from '../../Icons'
+import { IconMessage as Message, IconArchive as Archive, IconUnarchive as Unarchive, IconTrash as Trash, IconCheck as Check, IconClose as Close, IconShieldAsk as ShieldAsk, IconShieldAlert as ShieldAlert } from '../../Icons'
+import { getSessionStatusPresentation } from '../../../App/hooks/sessionListStatus'
 import Button from '../../ui/Button'
 import Flex from '../../ui/Flex'
 import type { SidebarSession } from '../types'
@@ -26,25 +27,30 @@ export default function SessionItem({
   isArchivedOrDeleted = false
 }: SessionItemProps): React.ReactElement {
   const isConfirming = confirmState?.sessionId === session.id
-  const isStreaming = session.isStreaming
+  const presentation = getSessionStatusPresentation(session.status)
 
   return (
     <Flex
       key={session.id}
       align="center"
       gap={2}
-      className={`sidebar-session-item ${isActiveSession ? 'active' : 'inactive'} ${isArchivedOrDeleted ? 'opacity-70' : ''}`}
+      className={`sidebar-session-item ${isActiveSession ? 'active' : 'inactive'}`}
+      data-muted={isArchivedOrDeleted || undefined}
       onClick={(e) => {
         e.stopPropagation()
         onSelectSession(session.id)
       }}
     >
-      <span className="sidebar-session-icon">
-        {isStreaming ? (
-          <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse outline outline-2 outline-blue-500/30" />
-        ) : (
-          <Message />
-        )}
+      <span
+        className={`sidebar-session-icon status-${presentation.className}`}
+        role="status"
+        aria-label={presentation.label}
+        title={presentation.label}
+      >
+        {session.status === 'action-required' && <ShieldAsk />}
+        {session.status === 'running' && <span className="sidebar-session-running-dot" />}
+        {session.status === 'error' && <ShieldAlert />}
+        {session.status === 'idle' && <Message />}
       </span>
       <span className="sidebar-session-summary">{session.summary}</span>
 

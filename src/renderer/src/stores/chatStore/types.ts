@@ -2,6 +2,7 @@ import type { TaskItem } from '../../../../shared/types/task'
 import type { PermissionApprovalResponse, PermissionRequest } from '../../../../shared/types/permission'
 import type { ContextBudgetSnapshot } from '../../../../shared/types/context'
 import type { ImageAttachment, PendingPromptDraft } from '../../../../shared/types/attachment'
+import type { SessionRuntimeStatusChanged } from '../../../../shared/types/subagent'
 
 export type AgentStateType =
   | 'processing'
@@ -96,7 +97,7 @@ export interface SubAgentRecord {
 }
 
 export interface PermissionRequestState extends PermissionRequest {
-  status: 'pending' | 'approved' | 'denied'
+  status: 'pending' | 'approved' | 'denied' | 'interrupted'
   createdAt: number
 }
 
@@ -121,7 +122,7 @@ export interface AskUserQuestionItemState {
 export interface AskUserRequestState {
   id: string
   questions: AskUserQuestionItemState[]
-  status: 'pending' | 'answered'
+  status: 'pending' | 'answered' | 'interrupted'
   answers?: Array<{ question: string; answer: string | string[] }>
   createdAt: number
 }
@@ -132,6 +133,7 @@ export interface ChatMessage {
   content: string
   streaming?: boolean
   interrupted?: boolean
+  executionStatus?: 'completed' | 'error' | 'interrupted'
   reasoningContent?: string
   agentStates?: AgentState[]
   toolCalls?: ToolCallState[]
@@ -187,7 +189,13 @@ export interface ChatState {
   tasks: TaskItem[]
   contextBudgets: Record<string, ContextBudgetSnapshot | undefined>
   compactionStates: Record<string, CompactionUiState | undefined>
+  runtimeStatuses: Record<string, SessionRuntimeStatusChanged | undefined>
+  blockedRuntimeSessionIds: Record<string, true | undefined>
 
+  applyRuntimeStatus: (next: SessionRuntimeStatusChanged) => void
+  refreshRuntimeStatuses: (sessionIds: string[]) => Promise<void>
+  clearRuntimeStatus: (sessionId: string) => void
+  allowRuntimeStatus: (sessionId: string) => void
   loadSessions: () => Promise<void>
   createSession: (projectId: string) => string
   selectSession: (sessionId: string) => Promise<void>
@@ -198,6 +206,10 @@ export interface ChatState {
   startStreamingReply: () => string
   appendStreamChunk: (msgId: string, delta: string, reasoningDelta?: string) => void
   finishStreaming: (msgId: string, txId?: string) => void
+  setMessageExecutionStatus: (
+    msgId: string,
+    status: 'completed' | 'error' | 'interrupted'
+  ) => void
   setStreamCleanup: (sessionId: string, cleanup: (() => void) | null) => void
   setTransactionId: (msgId: string, txId: string) => void
   setDiffEntries: (msgId: string, diffEntries: Array<{ path: string; diff: string }>) => void

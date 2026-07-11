@@ -109,6 +109,21 @@ describe('TaskStore persistence', () => {
     })
   })
 
+  it('persists the research and Plan context bundle for delegation', async () => {
+    const { TaskStore } = await import('../main/services/TaskStore')
+    const store = TaskStore.getInstance()
+    const contextBundle = {
+      knownFacts: ['Sidebar status comes from streamCleanups'],
+      decisions: ['Use one derived session status'],
+      excludedDirections: ['Do not parse error message text'],
+      sourceReferences: ['useAppWorkspace.ts:151-178 @ abc']
+    }
+
+    store.create('s1', [{ subject: 'Implement status projection', contextBundle }])
+
+    expect(sessionRecord.tasks[0]).toMatchObject({ contextBundle })
+  })
+
   it('writes task status updates back to the session', async () => {
     const { TaskStore } = await import('../main/services/TaskStore')
     const store = TaskStore.getInstance()

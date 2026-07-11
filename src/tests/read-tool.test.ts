@@ -69,20 +69,22 @@ describe('ReadTool', () => {
     expect(getReadFingerprintStore().isUnchangedKnown(SESSION, fp)).toBe(true)
   })
 
-  it('同 sha 再读：返回 Wasted call 且不含正文', async () => {
+  it('同 sha 再读：从共享快照回放正文', async () => {
     const tool = new ReadTool()
     await tool.execute(readArgs({ file_path: fp }), { workspaceRoot: root, sessionId: SESSION })
     const again = await tool.execute(readArgs({ file_path: fp }), { workspaceRoot: root, sessionId: SESSION })
-    expect(again).toContain('Wasted call — file unchanged')
-    expect(again).not.toContain('line one')
+    expect(again).not.toContain('Wasted call')
+    expect(again).toContain('line one')
+    expect(again).toContain('Source: shared-cache')
   })
 
-  it('默认读命中指纹后，range 读（offset/limit）应返回正文而非 Wasted call（裁剪后逃逸口）', async () => {
+  it('默认读后，range 读从同一共享快照返回目标正文', async () => {
     const tool = new ReadTool()
     await tool.execute(readArgs({ file_path: fp }), { workspaceRoot: root, sessionId: SESSION })
     const rangeResult = await tool.execute(readArgs({ file_path: fp, offset: 1, limit: 2 }), { workspaceRoot: root, sessionId: SESSION })
     expect(rangeResult).not.toContain('Wasted call')
     expect(rangeResult).toContain('line one')
+    expect(rangeResult).toContain('Source: shared-cache')
   })
 
   it('内容改变后：返回新正文并更新指纹', async () => {
@@ -161,6 +163,22 @@ describe('ReadTool', () => {
     expect(result.indexOf(`path="${second}"`)).toBeLessThan(result.indexOf(`path="${fp}"`))
     expect(result).toContain('second file')
     expect(result).toContain('line one')
+  })
+
+  it('整批读取共享总字符预算', async () => {
+    const files = await Promise.all(Array.from({ length: 6 }, async (_, index) => {
+      const filePath = path.join(root, `large-${index}.txt`)
+      await fs.writeFile(filePath, `${String(index)}-${'x'.repeat(10_000)}`)
+      return { file_path: filePath }
+    }))
+
+    const result = await new ReadTool().execute(readArgs(...files), {
+      workspaceRoot: root,
+      sessionId: SESSION
+    })
+
+    expect(result.length).toBeLessThan(30_000)
+    expect(result).toContain('shared Read batch budget')
   })
 
   it('单个文件失败时仍返回其他文件', async () => {

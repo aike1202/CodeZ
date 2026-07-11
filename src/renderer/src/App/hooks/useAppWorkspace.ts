@@ -2,7 +2,8 @@ import { useCallback } from 'react'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useChatStore } from '../../stores/chatStore'
 import type { WorkspaceInfo } from '@shared/types/workspace'
-import type { SidebarProject } from '../../components/Sidebar'
+import type { SidebarProject, SidebarSession } from '../../components/Sidebar'
+import { deriveSessionListStatus } from './sessionListStatus'
 
 function genId(): string {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -12,7 +13,7 @@ export function useAppWorkspace() {
   const recentProjects = useWorkspaceStore((s: any) => s.recentProjects)
   const workspace = useWorkspaceStore((s: any) => s.workspace)
   const sessions = useChatStore((s: any) => s.sessions)
-  const streamCleanups = useChatStore((s: any) => s.streamCleanups)
+  const runtimeStatuses = useChatStore((s: any) => s.runtimeStatuses)
   const createSession = useChatStore((s: any) => s.createSession)
   const selectSession = useChatStore((s: any) => s.selectSession)
 
@@ -148,34 +149,26 @@ export function useAppWorkspace() {
     [createSession, selectSession, recentProjects, handleOpenRecentProject]
   )
 
-  const sessionsByProject: Record<
-    string,
-    Array<{ id: string; summary: string; relativeTime: string; isArchived?: boolean; isDeleted?: boolean; isStreaming?: boolean }>
-  > = {}
-  for (const s of sessions) {
-    if (!sessionsByProject[s.projectId]) sessionsByProject[s.projectId] = []
-    const isStreaming = !!streamCleanups[s.id]
-    sessionsByProject[s.projectId].push({
-      id: s.id,
-      summary: s.summary,
-      relativeTime: s.relativeTime,
-      isArchived: s.isArchived,
-      isDeleted: s.isDeleted,
-      isStreaming
+  const sessionsByProject: Record<string, SidebarSession[]> = {}
+  for (const session of sessions) {
+    if (!sessionsByProject[session.projectId]) sessionsByProject[session.projectId] = []
+    sessionsByProject[session.projectId].push({
+      id: session.id,
+      summary: session.summary,
+      relativeTime: session.relativeTime,
+      isArchived: session.isArchived,
+      isDeleted: session.isDeleted,
+      status: deriveSessionListStatus({
+        messages: session.messages,
+        runtimeStatus: runtimeStatuses[session.id]
+      })
     })
   }
 
-  const sidebarProjects: SidebarProject[] = recentProjects.map((p: any) => ({
-    id: p.id,
-    name: p.name,
-    sessions: (sessionsByProject[p.id] || []).map((s) => ({
-      id: s.id,
-      summary: s.summary,
-      relativeTime: s.relativeTime,
-      isArchived: s.isArchived,
-      isDeleted: s.isDeleted,
-      isStreaming: s.isStreaming
-    }))
+  const sidebarProjects: SidebarProject[] = recentProjects.map((project: any) => ({
+    id: project.id,
+    name: project.name,
+    sessions: sessionsByProject[project.id] || []
   }))
 
   return {

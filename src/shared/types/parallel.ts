@@ -44,6 +44,10 @@ export interface ExecUnit {
   description: string
   /** 涉及文件路径列表（冲突校验 + shared 档写权限范围） */
   files?: string[]
+  /** 研究与 Plan 阶段传递给 Executor 的上下文胶囊。 */
+  contextBundle?: import('./task').TaskContextBundle
+  acceptanceCriteria?: string[]
+  verificationCommand?: string
 }
 
 export type ParallelExecStatus = 'completed' | 'halted'

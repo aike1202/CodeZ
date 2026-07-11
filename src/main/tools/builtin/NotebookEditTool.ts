@@ -3,7 +3,7 @@ import { Tool, ToolContext } from '../Tool'
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import { createHash } from 'crypto'
-import { getReadFingerprintStore } from '../ReadFingerprintStore'
+import { getReadFingerprintStore, readStatSignature } from '../ReadFingerprintStore'
 import { parseNotebook, writeNotebook, cellIdOf, stringToSource, type NbFormat, type NbCell } from './NotebookUtils'
 
 interface NotebookEditArgs {
@@ -58,13 +58,22 @@ export class NotebookEditTool extends Tool {
         return 'Error: notebook_path must point to a .ipynb file.'
       }
 
-      const sessionId = context.sessionId
-      if (!sessionId || !getReadFingerprintStore().isUnchangedKnown(sessionId, absolutePath)) {
-        return 'Error: You must Read this notebook in this conversation before editing it.'
-      }
-
       const mode = parsed.edit_mode || 'replace'
       const text = await fs.readFile(absolutePath, 'utf-8')
+      const sessionId = context.sessionId
+      const contextScopeId = context.contextScopeId ?? context.runtimeTurn?.contextScopeId ?? 'main'
+      const currentSha = createHash('sha256').update(text).digest('hex')
+      if (
+        !sessionId ||
+        !getReadFingerprintStore().hasDelivery(
+          sessionId,
+          contextScopeId,
+          absolutePath,
+          currentSha
+        )
+      ) {
+        return 'Error: You must Read the current version of this notebook in this agent context before editing it.'
+      }
       const nb = parseNotebook(text)
 
       const idx = parsed.cell_id !== undefined
@@ -102,7 +111,16 @@ export class NotebookEditTool extends Tool {
       await fs.writeFile(absolutePath, updated, 'utf-8')
 
       const newSha = createHash('sha256').update(updated).digest('hex')
-      if (sessionId) getReadFingerprintStore().record(sessionId, absolutePath, newSha)
+      if (sessionId) {
+        const nextStat = await fs.stat(absolutePath)
+        const store = getReadFingerprintStore()
+        store.recordSnapshot(sessionId, absolutePath, {
+          sha256: newSha,
+          buffer: Buffer.from(updated, 'utf-8'),
+          statSignature: readStatSignature(nextStat)
+        })
+        store.recordDelivery(sessionId, contextScopeId, absolutePath, newSha)
+      }
       return `Edited cell in ${absolutePath}. New sha256: ${newSha}`
     } catch (err: any) {
       return `Error: ${err.message}`

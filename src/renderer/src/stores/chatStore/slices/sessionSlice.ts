@@ -33,6 +33,33 @@ const SUBAGENT_INTERRUPTED_CONTINUATION = [
   'Do not ask the user to resend or confirm the task.'
 ].join(' ')
 
+export function interruptPendingRequests(
+  messages: ChatMessage[],
+  runtimeStatus: { sessionId: string; mainRunnerActive: boolean; activeSubAgentIds: string[] }
+): { messages: ChatMessage[]; changed: boolean } {
+  if (runtimeStatus.mainRunnerActive || runtimeStatus.activeSubAgentIds.length > 0) {
+    return { messages, changed: false }
+  }
+
+  let changed = false
+  const nextMessages = messages.map((message) => {
+    const hasPendingPermission = message.permissionRequests?.some((request) => request.status === 'pending')
+    const hasPendingQuestion = message.askUserRequests?.some((request) => request.status === 'pending')
+    if (!hasPendingPermission && !hasPendingQuestion) return message
+
+    changed = true
+    return {
+      ...message,
+      permissionRequests: message.permissionRequests?.map((request) =>
+        request.status === 'pending' ? { ...request, status: 'interrupted' as const } : request),
+      askUserRequests: message.askUserRequests?.map((request) =>
+        request.status === 'pending' ? { ...request, status: 'interrupted' as const } : request)
+    }
+  })
+
+  return { messages: nextMessages, changed }
+}
+
 function healInterruptedSubAgents(messages: any[]): { messages: any[]; changed: boolean; shouldContinue: boolean } {
   let changed = false
   let shouldContinue = false
@@ -165,9 +192,10 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
         const healed = runtimeActive
           ? { messages: sourceMessages, changed: false, shouldContinue: false }
           : healInterruptedSubAgents(sourceMessages)
+        const interruptedRequests = interruptPendingRequests(healed.messages, runtimeStatus)
         const healedSession = {
           ...freshSession,
-          messages: healed.messages
+          messages: interruptedRequests.messages
         }
         set((s) => {
           const sessions = s.sessions.map((sess) =>
@@ -187,7 +215,7 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
             activePlan: null
           }
         })
-        if (healed.changed) {
+        if (healed.changed || interruptedRequests.changed) {
           await window.api.session.save(healedSession)
         }
         if (healed.shouldContinue && seq === _selectSessionSeq && get().activeSessionId === sessionId) {
@@ -347,14 +375,17 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
         messages: s.activeSessionId === sessionId ? [] : s.messages
       }
     })
+    get().clearRuntimeStatus(sessionId)
     try {
       await window.api.session.delete(sessionId)
     } catch (err) {
+      get().allowRuntimeStatus(sessionId)
       console.error('[sessionSlice.deleteSession] Failed:', err)
     }
   },
 
   restoreSession: async (sessionId: string) => {
+    get().allowRuntimeStatus(sessionId)
     set((s) => {
       const newSessions = s.sessions.map((session) =>
         session.id === sessionId ? { ...session, isDeleted: false, deletedAt: undefined } : session

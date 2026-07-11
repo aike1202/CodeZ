@@ -27,6 +27,23 @@ import { SubAgentManager } from '../agent/SubAgentManager'
 const activeRunners = new ChatRuntimeRegistry<AgentRunner>()
 const stoppedBeforeRegistration = new Set<string>()
 
+function buildRuntimeStatus(sessionId: string) {
+  return activeRunners.getStatus(sessionId, SubAgentManager.listActiveForSession(sessionId))
+}
+
+function publishRuntimeStatus(sessionId: string): void {
+  const payload = {
+    version: activeRunners.getVersion(sessionId),
+    status: buildRuntimeStatus(sessionId)
+  }
+  BrowserWindow.getAllWindows().forEach((window) => {
+    window.webContents.send(IPC_CHANNELS.CHAT_RUNTIME_STATUS_CHANGED, payload)
+  })
+}
+
+activeRunners.onChange(publishRuntimeStatus)
+SubAgentManager.onActiveChange((sessionId) => activeRunners.touch(sessionId))
+
 function finishStream(streamId: string): void {
   activeRunners.unregister(streamId)
   stoppedBeforeRegistration.delete(streamId)
@@ -307,7 +324,7 @@ export function registerChatIpc(): void {
   )
 
   ipcMain.handle(IPC_CHANNELS.CHAT_RUNTIME_STATUS, (_event, sessionId: string) => {
-    return activeRunners.getStatus(sessionId, SubAgentManager.listActiveForSession(sessionId))
+    return buildRuntimeStatus(sessionId)
   })
 
   ipcMain.handle(IPC_CHANNELS.CHAT_STREAM_STOP, (_event, streamId: string) => {

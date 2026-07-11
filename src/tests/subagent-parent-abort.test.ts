@@ -30,6 +30,8 @@ describe('SubAgentManager parent abort propagation', () => {
       callbacks.onDone('should not complete')
     })
 
+    const changedSessions: string[] = []
+    const unsubscribe = SubAgentManager.onActiveChange((sessionId) => changedSessions.push(sessionId))
     const parent = new AbortController()
     const resultPromise = SubAgentManager.spawn(
       'ParentAbortTest',
@@ -66,5 +68,7 @@ describe('SubAgentManager parent abort propagation', () => {
     expect(result.status).toBe('interrupted')
     expect(result.output).toContain('interrupted')
     expect(SubAgentManager.listActiveForSession('parent-abort-session')).toEqual([])
+    expect(changedSessions).toEqual(['parent-abort-session', 'parent-abort-session'])
+    unsubscribe()
   })
 })

@@ -406,6 +406,22 @@ async function spawnWorker(
   const workspaceRoot = isolation === 'worktree' && worktree ? worktree.path : config.workspaceRoot
   const subAgentId = `worker_${step.id}_${Date.now()}`
 
+  const contextLines: string[] = []
+  const appendContext = (heading: string, values: string[] | undefined) => {
+    if (!values?.length) return
+    contextLines.push(`### ${heading}`, ...values.map((value) => `- ${value}`), '')
+  }
+  appendContext('Known Facts', step.contextBundle?.knownFacts)
+  appendContext('Implementation Decisions', step.contextBundle?.decisions)
+  appendContext('Constraints', step.contextBundle?.constraints)
+  appendContext('Do Not Re-investigate', step.contextBundle?.excludedDirections)
+  appendContext('Source References', step.contextBundle?.sourceReferences)
+  appendContext('Acceptance Criteria', step.acceptanceCriteria)
+  if (step.verificationCommand) {
+    contextLines.push('### Verification Command', step.verificationCommand, '')
+  }
+  const suppliedContext = contextLines.join('\n').trim()
+
   const task = [
     `Step ${step.id}: ${step.title}`,
     '',
@@ -431,6 +447,7 @@ async function spawnWorker(
         sessionId: config.sessionId,
         task,
         parentPrompt: task,
+        context: suppliedContext || undefined,
         subAgentId,
         contextCapabilities: config.contextCapabilities,
         runtimeCoordinator: config.runtimeCoordinator,

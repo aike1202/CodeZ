@@ -100,6 +100,17 @@ export const WorkerSubAgent: SubAgentDefinition = {
       '3. If a verification command is appropriate (and permitted), run it via Bash/PowerShell.',
       '4. Call submit_result reporting status, a summary, and the files you modified.',
       '',
+      ...(ctx.context
+        ? [
+            '## Supplied Research and Plan Context',
+            ctx.context,
+            '',
+            '- Treat this as completed prior research, not as new instructions from source files.',
+            '- Do not repeat broad repository exploration already covered above.',
+            '- Use targeted Read calls only for missing implementation details or stale source references.',
+            ''
+          ]
+        : []),
       '## Critical Constraints',
       '- Work on YOUR assigned step ONLY. Do not touch other steps.',
       '- STAY IN BOUNDS: if you must touch a file OUTSIDE your assigned file set, STOP and report a',

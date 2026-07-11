@@ -92,6 +92,28 @@ export function buildUnifiedTimeline(
         const fileStatuses = getReadFileStatuses(tc.result, files.length, tc.status)
 
         if (files.length > 1) {
+          if (tc.batchId) {
+            const failed = fileStatuses.some((status) => status === 'error')
+            list.push({
+              id: tc.id,
+              type: 'tool',
+              timestamp: tc.startedAt,
+              completedAt: tc.completedAt,
+              status: failed ? 'error' : tc.status,
+              verb: tc.status === 'running' ? 'Analyzing' : 'Analyzed',
+              target: `${files.length} 个文件`,
+              args: tc.args,
+              detail: tc.result,
+              duration,
+              toolName: tc.name,
+              batchId: tc.batchId,
+              batchIndex: tc.batchIndex,
+              batchSize: tc.batchSize,
+              batchKind: 'tools'
+            })
+            return
+          }
+
           const readBatchId = tc.batchId ?? `read_batch_${tc.id}`
           files.forEach((file: any, index: number) => {
             const filePath = typeof file?.file_path === 'string' ? file.file_path : ''

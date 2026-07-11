@@ -133,4 +133,32 @@ describe('ModelContextBuilder', () => {
     expect(built.messages.find((message) => message.role === 'tool')?.content)
       .toContain('TOOL_OUTPUT_PRUNED')
   })
+
+  it('keeps a current-turn tool result intact for its first model delivery', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codez-builder-fresh-tool-'))
+    dirs.push(root)
+    const ledger = new ModelLedgerStore(root)
+    const runtime = new SessionRuntimeCoordinator(ledger)
+    const turn = await runtime.beginTurn({
+      sessionId: 'fresh-tool', contextScopeId: 'main', text: 'inspect files'
+    })
+    await runtime.recordAssistant(turn, {
+      content: '',
+      toolCalls: [{ id: 'read-1', name: 'Read', arguments: '{}' }]
+    })
+    const fresh = 'F'.repeat(40_000)
+    await runtime.recordToolResult(turn, {
+      callId: 'read-1', name: 'Read', content: fresh, status: 'success'
+    })
+
+    const built = await new ModelContextBuilder(ledger).build({
+      sessionId: 'fresh-tool', contextScopeId: 'main',
+      currentInputMessageId: turn.userMessageId,
+      currentInput: turn.inputText,
+      capabilities: { contextWindowTokens: 200_000, maxOutputTokens: 8_192 },
+      systemPrompt: 'system', toolSchemas: []
+    })
+
+    expect(built.messages.find((message) => message.role === 'tool')?.content).toBe(fresh)
+  })
 })

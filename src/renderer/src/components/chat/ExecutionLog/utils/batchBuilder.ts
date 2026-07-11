@@ -10,19 +10,58 @@ function getBatchStatus(items: UnifiedTimelineItem[]): ParallelToolBatchItem['st
   return 'success'
 }
 
+function isExploreItem(item: UnifiedTimelineItem): boolean {
+  return item.type === 'tool' &&
+    item.verb === 'Explored' &&
+    (item.toolName === 'Glob' || item.toolName === 'list_files' || item.toolName === 'list_dir') &&
+    !item.batchId
+}
+
+function buildExploreBatch(items: UnifiedTimelineItem[]): ParallelToolBatchItem {
+  return {
+    id: `explore_batch_${items[0].id}`,
+    type: 'parallel-batch',
+    batchId: `explore_batch_${items[0].id}`,
+    batchSize: items.length,
+    batchKind: 'explore',
+    timestamp: items[0].timestamp,
+    status: getBatchStatus(items),
+    items
+  }
+}
+
 export function groupParallelToolBatches(
   items: UnifiedTimelineItem[]
 ): ExecutionLogDisplayItem[] {
   const result: ExecutionLogDisplayItem[] = []
   const emittedBatchIds = new Set<string>()
 
-  items.forEach((item) => {
-    if (!item.batchId || !item.batchSize || item.batchSize < 2) {
-      result.push(item)
-      return
+  for (let index = 0; index < items.length;) {
+    const item = items[index]
+
+    if (isExploreItem(item)) {
+      const exploreItems = [item]
+      index += 1
+
+      while (index < items.length && isExploreItem(items[index])) {
+        exploreItems.push(items[index])
+        index += 1
+      }
+
+      result.push(exploreItems.length === 1 ? item : buildExploreBatch(exploreItems))
+      continue
     }
 
-    if (emittedBatchIds.has(item.batchId)) return
+    if (!item.batchId || !item.batchSize || item.batchSize < 2) {
+      result.push(item)
+      index += 1
+      continue
+    }
+
+    if (emittedBatchIds.has(item.batchId)) {
+      index += 1
+      continue
+    }
     emittedBatchIds.add(item.batchId)
 
     const batchItems = items
@@ -42,7 +81,8 @@ export function groupParallelToolBatches(
       status: getBatchStatus(batchItems),
       items: batchItems
     })
-  })
+    index += 1
+  }
 
   return result
 }

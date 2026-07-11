@@ -81,6 +81,28 @@ describe('EditTool', () => {
     expect(tx.backedUp.has(fp)).toBe(true)
   })
 
+  it('不能借用另一个 Agent scope 的 Read 交付', async () => {
+    const fp = path.join(root, 'scoped.txt')
+    await fs.writeFile(fp, 'before')
+    await new ReadTool().execute(JSON.stringify({ files: [{ file_path: fp }] }), {
+      workspaceRoot: root,
+      sessionId: SESSION,
+      contextScopeId: 'subagent:research'
+    })
+
+    const result = await new EditTool().execute(
+      JSON.stringify({ file_path: fp, old_string: 'before', new_string: 'after' }),
+      {
+        workspaceRoot: root,
+        sessionId: SESSION,
+        contextScopeId: 'subagent:executor'
+      }
+    )
+
+    expect(result).toContain('current version')
+    expect(await fs.readFile(fp, 'utf-8')).toBe('before')
+  })
+
   it('replace_all:true 多处全替换', async () => {
     const fp = path.join(root, 'a.txt')
     await fs.writeFile(fp, 'foo foo foo')

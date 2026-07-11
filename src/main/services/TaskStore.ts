@@ -1,6 +1,6 @@
 import { BrowserWindow } from 'electron'
 import { IPC_CHANNELS } from '../../shared/ipc/channels'
-import type { TaskApprovalStatus, TaskItem, TaskRiskLevel, TaskStatus } from '../../shared/types/task'
+import type { TaskApprovalStatus, TaskContextBundle, TaskItem, TaskRiskLevel, TaskStatus } from '../../shared/types/task'
 import type { SessionData } from '../../shared/types/session'
 import { getSessionStore } from '../ipc/session.handlers'
 
@@ -87,6 +87,7 @@ export class TaskStore {
       approvalStatus?: TaskApprovalStatus
       acceptanceCriteria?: string[]
       verificationCommand?: string
+      contextBundle?: TaskContextBundle
     }>
   ): TaskItem[] {
     const existing = this.bySession.get(sessionId) ?? []
@@ -111,6 +112,7 @@ export class TaskStore {
         ...(item.approvalStatus ? { approvalStatus: item.approvalStatus } : {}),
         ...(item.acceptanceCriteria && item.acceptanceCriteria.length > 0 ? { acceptanceCriteria: item.acceptanceCriteria } : {}),
         ...(item.verificationCommand ? { verificationCommand: item.verificationCommand } : {}),
+        ...(item.contextBundle ? { contextBundle: item.contextBundle } : {}),
       })
     }
     this.bySession.set(sessionId, list)
@@ -139,7 +141,8 @@ export class TaskStore {
       'requiresApproval' |
       'approvalStatus' |
       'acceptanceCriteria' |
-      'verificationCommand'
+      'verificationCommand' |
+      'contextBundle'
     >>
   ): TaskItem | null {
     const list = this.bySession.get(sessionId)
@@ -159,6 +162,7 @@ export class TaskStore {
     if (patch.approvalStatus !== undefined) task.approvalStatus = patch.approvalStatus
     if (patch.acceptanceCriteria !== undefined) task.acceptanceCriteria = patch.acceptanceCriteria
     if (patch.verificationCommand !== undefined) task.verificationCommand = patch.verificationCommand
+    if (patch.contextBundle !== undefined) task.contextBundle = patch.contextBundle
 
     this.persist(sessionId)
     this.broadcast(sessionId)

@@ -75,6 +75,7 @@
 }
 
 .parallel-tool-batch-failures,
+.parallel-tool-batch-empty,
 .parallel-tool-batch-time {
   flex-shrink: 0;
   font-size: 11px;
@@ -83,6 +84,10 @@
 
 .parallel-tool-batch-time {
   margin-left: auto;
+  color: var(--text-muted);
+}
+
+.parallel-tool-batch-empty {
   color: var(--text-muted);
 }
 

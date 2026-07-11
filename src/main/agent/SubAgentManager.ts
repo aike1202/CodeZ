@@ -391,6 +391,7 @@ export class SubAgentManager {
   )
   private static aliases = new Map<string, string>([['Worker', 'Executor']])
   private static activeHandles = new Map<string, SubAgentHandle>()
+  private static activeChangeListeners = new Set<(sessionId: string) => void>()
   /** 被禁用的子智能体 type —— 不在此集合中即为启用 */
   private static disabledTypes = new Set<string>()
 
@@ -400,6 +401,17 @@ export class SubAgentManager {
 
   static register(definition: SubAgentDefinition): void {
     this.definitions.set(definition.type, definition)
+  }
+
+  static onActiveChange(listener: (sessionId: string) => void): () => void {
+    this.activeChangeListeners.add(listener)
+    return () => {
+      this.activeChangeListeners.delete(listener)
+    }
+  }
+
+  private static notifyActiveChange(sessionId: string): void {
+    this.activeChangeListeners.forEach((listener) => listener(sessionId))
   }
 
   static getDefinition(type: string): SubAgentDefinition | undefined {
@@ -544,6 +556,7 @@ export class SubAgentManager {
     const abortFromParent = () => handle.cancel()
 
     this.activeHandles.set(handleId, handle)
+    this.notifyActiveChange(ctx.sessionId)
     ctx.parentSignal?.addEventListener('abort', abortFromParent, { once: true })
     if (ctx.parentSignal?.aborted) handle.cancel()
 
@@ -588,7 +601,7 @@ export class SubAgentManager {
       }
     })().catch((error) => {
       ctx.parentSignal?.removeEventListener('abort', abortFromParent)
-      this.activeHandles.delete(handleId)
+      if (this.activeHandles.delete(handleId)) this.notifyActiveChange(ctx.sessionId)
       handle.status = abortController.signal.aborted ? 'interrupted' : 'failed'
       throw error
     })
@@ -934,6 +947,9 @@ export class SubAgentManager {
                   const raw = await toolInstance.execute(args, {
                     workspaceRoot: ctx.workspaceRoot,
                     sessionId: ctx.sessionId,
+                    contextScopeId,
+                    runtimeCoordinator: core.coordinator,
+                    runtimeTurn,
                     abortSignal: abortController.signal
                   })
                   result = JSON.stringify({ ok: true, data: raw })
@@ -1062,7 +1078,7 @@ export class SubAgentManager {
         ).catch(() => undefined)
         runtimeClosed = true
       }
-      this.activeHandles.delete(handleId)
+      if (this.activeHandles.delete(handleId)) this.notifyActiveChange(ctx.sessionId)
     }
   }
 

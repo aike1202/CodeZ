@@ -47,4 +47,18 @@ describe('ToolOutputPruner', () => {
     expect(result.tokensAfter).toBeLessThan(1_000)
     expect(messages[0].content).toBe(huge)
   })
+
+  it('does not prune an explicitly protected unconsumed result', () => {
+    const huge = 'R'.repeat(40_000)
+    const messages = [tool('fresh-read', huge)]
+    const result = new ToolOutputPruner().prune(messages, {
+      targetTokens: 1,
+      protectedTailStart: 0,
+      maxSingleToolTokens: 100,
+      protectedMessageIds: new Set(['fresh-read'])
+    })
+
+    expect(result.messages[0].content).toBe(huge)
+    expect(result.records).toEqual([])
+  })
 })

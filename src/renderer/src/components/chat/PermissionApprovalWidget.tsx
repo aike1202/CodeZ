@@ -8,7 +8,7 @@ import { approvalOptionsForRequest } from './permissionApprovalOptions'
 import './PermissionApprovalWidget.css'
 
 interface RequestState extends PermissionRequest {
-  status: 'pending' | 'approved' | 'denied'
+  status: 'pending' | 'approved' | 'denied' | 'interrupted'
 }
 
 interface PermissionApprovalWidgetProps {

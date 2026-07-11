@@ -148,6 +148,9 @@ export async function handleDelegateTasks(
       title: t.subject,
       description: t.description,
       ...(t.files ? { files: t.files } : {}),
+      ...(t.contextBundle ? { contextBundle: t.contextBundle } : {}),
+      ...(t.acceptanceCriteria ? { acceptanceCriteria: t.acceptanceCriteria } : {}),
+      ...(t.verificationCommand ? { verificationCommand: t.verificationCommand } : {}),
     }))
 
   const completedUnitIds = new Set(
