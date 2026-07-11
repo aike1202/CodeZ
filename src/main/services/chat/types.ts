@@ -6,6 +6,7 @@ import type {
   ThinkingConfig,
   ToolDefinition
 } from '../../../shared/types/provider'
+import type { ResolveImageAttachment } from '../../../shared/types/attachment'
 
 export interface ChatRequestConfig {
   baseUrl: string
@@ -15,6 +16,7 @@ export interface ChatRequestConfig {
   messages: ChatMessage[]
   tools?: ToolDefinition[]
   thinking?: ThinkingConfig
+  resolveImage?: ResolveImageAttachment
 }
 
 export interface StreamCallbacks {

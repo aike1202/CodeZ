@@ -237,6 +237,11 @@ export class AgentRunner {
 
         log.info('[AgentRunner] calling streamChat', { loopCount, model: config.model })
 
+        const imageAttachments = allMessages.flatMap((message) => message.attachments || [])
+        const resolveImage = imageAttachments.length > 0 && config.prepareImages
+          ? await config.prepareImages(imageAttachments)
+          : undefined
+
         // Prompt 调试日志（CODEZ_LOG_PROMPT=1 时写入独立文件）
         logPrompt(`[AgentRunner] loop ${loopCount}`, allMessages.length, allMessages[0]?.content as string)
 
@@ -249,7 +254,8 @@ export class AgentRunner {
               model: config.model,
               messages: allMessages,
               tools: availableTools,
-              thinking: config.thinking
+              thinking: config.thinking,
+              resolveImage
             },
             attemptCallbacks,
             attemptSignal

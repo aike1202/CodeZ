@@ -9,6 +9,7 @@ import type { RuntimeTurnHandle, SessionRuntimeCoordinator } from '../../service
 import type { ModelContextBuilder } from '../../services/context/ModelContextBuilder'
 import type { CompactionService } from '../../services/context/CompactionService'
 import type { ToolBatchMeta } from '../../../shared/types/toolExecution'
+import type { ImageAttachment, ResolveImageAttachment } from '../../../shared/types/attachment'
 
 export interface SubAgentStartMeta {
   type: string
@@ -68,4 +69,5 @@ export interface AgentRunConfig extends Omit<ChatRequestConfig, 'messages'> {
   contextCapabilities?: ModelContextCapabilities
   systemPrompt?: string
   contextInstructions?: string[]
+  prepareImages?: (attachments: ImageAttachment[]) => Promise<ResolveImageAttachment>
 }

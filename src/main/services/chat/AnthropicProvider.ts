@@ -1,5 +1,6 @@
 import { IChatProvider, ChatRequestConfig, StreamCallbacks } from './types'
-import type { AgentStopReason } from '../../../shared/types/provider'
+import type { AgentStopReason, ChatMessage } from '../../../shared/types/provider'
+import type { ResolveImageAttachment } from '../../../shared/types/attachment'
 import log from '../../logger'
 import { logPrompt } from '../PromptLogger'
 import type { ProviderTokenUsage } from '../../../shared/types/provider'
@@ -62,9 +63,67 @@ export function extractAnthropicDelta(delta: any): AnthropicDeltaParts {
   }
 }
 
+export async function buildAnthropicMessages(
+  messages: ChatMessage[],
+  resolveImage?: ResolveImageAttachment
+): Promise<any[]> {
+  const anthropicMessages: any[] = []
+  for (const msg of messages) {
+    if (msg.role === 'system') continue
+    if (msg.role === 'user') {
+      if (!msg.attachments?.length) {
+        anthropicMessages.push({ role: 'user', content: msg.content })
+        continue
+      }
+      if (!resolveImage) throw new Error('Image resolver is unavailable')
+      const images = await Promise.all(msg.attachments.map(resolveImage))
+      anthropicMessages.push({
+        role: 'user',
+        content: [
+          ...(msg.content?.trim() ? [{ type: 'text', text: msg.content }] : []),
+          ...images.map((image) => ({
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: image.mimeType,
+              data: image.dataBase64
+            }
+          }))
+        ]
+      })
+      continue
+    }
+    if (msg.role === 'assistant') {
+      const content: any[] = []
+      if (msg.content) content.push({ type: 'text', text: msg.content })
+      for (const tc of msg.tool_calls || []) {
+        content.push({
+          type: 'tool_use',
+          id: tc.id,
+          name: tc.function.name,
+          input: typeof tc.function.arguments === 'string'
+            ? JSON.parse(tc.function.arguments)
+            : tc.function.arguments
+        })
+      }
+      anthropicMessages.push({ role: 'assistant', content })
+      continue
+    }
+    anthropicMessages.push({
+      role: 'user',
+      content: [{
+        type: 'tool_result',
+        tool_use_id: msg.tool_call_id,
+        content: msg.content
+      }]
+    })
+  }
+  return anthropicMessages
+}
+
 export class AnthropicProvider implements IChatProvider {
   async streamChat(config: ChatRequestConfig, callbacks: StreamCallbacks, signal: AbortSignal): Promise<void> {
-    const { baseUrl, apiKey, model, messages, tools, thinking } = config
+    const { baseUrl, apiKey, model, messages, tools, thinking, resolveImage } = config
     
     // Anthropic API URL
     let url = baseUrl
@@ -73,42 +132,11 @@ export class AnthropicProvider implements IChatProvider {
     }
 
     let fullContent = ''
-    let systemPrompt = ''
-    const anthropicMessages: any[] = []
-
-    // Convert OpenAI messages to Anthropic messages
-    for (const msg of messages) {
-      if (msg.role === 'system') {
-        systemPrompt += msg.content + '\n'
-      } else if (msg.role === 'user') {
-        anthropicMessages.push({ role: 'user', content: msg.content })
-      } else if (msg.role === 'assistant') {
-        const content: any[] = []
-        if (msg.content) {
-          content.push({ type: 'text', text: msg.content })
-        }
-        if (msg.tool_calls && msg.tool_calls.length > 0) {
-          for (const tc of msg.tool_calls) {
-            content.push({
-              type: 'tool_use',
-              id: tc.id,
-              name: tc.function.name,
-              input: typeof tc.function.arguments === 'string' ? JSON.parse(tc.function.arguments) : tc.function.arguments
-            })
-          }
-        }
-        anthropicMessages.push({ role: 'assistant', content })
-      } else if (msg.role === 'tool') {
-        anthropicMessages.push({
-          role: 'user',
-          content: [{
-            type: 'tool_result',
-            tool_use_id: msg.tool_call_id,
-            content: msg.content
-          }]
-        })
-      }
-    }
+    const systemPrompt = messages
+      .filter((message) => message.role === 'system')
+      .map((message) => message.content || '')
+      .join('\n')
+    const anthropicMessages = await buildAnthropicMessages(messages, resolveImage)
 
     const anthropicTools = tools?.map(t => ({
       name: t.function.name,

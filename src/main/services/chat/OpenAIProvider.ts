@@ -4,6 +4,30 @@ import log from '../../logger'
 import { logPrompt } from '../PromptLogger'
 import type { ProviderTokenUsage } from '../../../shared/types/provider'
 import { classifyProviderError } from './errors'
+import type { ChatMessage } from '../../../shared/types/provider'
+import type { ResolveImageAttachment } from '../../../shared/types/attachment'
+
+export async function resolveOpenAIMessages(
+  messages: ChatMessage[],
+  resolveImage?: ResolveImageAttachment
+): Promise<any[]> {
+  return Promise.all(messages.map(async (message) => {
+    if (message.role !== 'user' || !message.attachments?.length) return message
+    if (!resolveImage) throw new Error('Image resolver is unavailable')
+    const images = await Promise.all(message.attachments.map(resolveImage))
+    const { attachments: _attachments, ...rest } = message
+    return {
+      ...rest,
+      content: [
+        ...(message.content?.trim() ? [{ type: 'text', text: message.content }] : []),
+        ...images.map((image) => ({
+          type: 'image_url',
+          image_url: { url: `data:${image.mimeType};base64,${image.dataBase64}` }
+        }))
+      ]
+    }
+  }))
+}
 
 export function extractOpenAIUsage(value: any): ProviderTokenUsage {
   return {
@@ -96,14 +120,15 @@ export function processDeltaWithThinkTags(
 
 export class OpenAIProvider implements IChatProvider {
   async streamChat(config: ChatRequestConfig, callbacks: StreamCallbacks, signal: AbortSignal): Promise<void> {
-    const { baseUrl, apiKey, model, messages, tools, thinking } = config
+    const { baseUrl, apiKey, model, messages, tools, thinking, resolveImage } = config
     const url = `${baseUrl}/chat/completions`
 
     let fullContent = ''
 
+    const requestMessages = await resolveOpenAIMessages(messages, resolveImage)
     const requestPayload = {
       model,
-      messages,
+      messages: requestMessages,
       tools: tools && tools.length > 0 ? tools : undefined,
       stream: true,
       stream_options: { include_usage: true },
@@ -111,8 +136,8 @@ export class OpenAIProvider implements IChatProvider {
     }
 
     log.info(`[OpenAIProvider] Invoking model: ${model}`);
-    log.debug(`[OpenAIProvider] Request Payload:`, JSON.stringify({ ...requestPayload, messages: `[Array of ${messages.length} messages]` }));
-    logPrompt(`[OpenAIProvider] system prompt`, messages.length, typeof messages[0]?.content === 'string' ? messages[0].content : '(none)');
+    log.debug(`[OpenAIProvider] Request Payload:`, JSON.stringify({ ...requestPayload, messages: `[Array of ${requestMessages.length} messages]` }));
+    logPrompt(`[OpenAIProvider] system prompt`, requestMessages.length, typeof requestMessages[0]?.content === 'string' ? requestMessages[0].content : '(none)');
 
     try {
       const response = await fetch(url, {

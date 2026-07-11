@@ -2,7 +2,8 @@ import { IChatProvider, ChatRequestConfig, StreamCallbacks } from './types'
 import { buildThinkingPayload } from './utils'
 import log from '../../logger'
 import { logPrompt } from '../PromptLogger'
-import type { ProviderTokenUsage } from '../../../shared/types/provider'
+import type { ChatMessage, ProviderTokenUsage } from '../../../shared/types/provider'
+import type { ResolveImageAttachment } from '../../../shared/types/attachment'
 import { classifyProviderError } from './errors'
 
 export function extractGeminiUsage(value: any): ProviderTokenUsage {
@@ -14,9 +15,88 @@ export function extractGeminiUsage(value: any): ProviderTokenUsage {
   }
 }
 
+export async function buildGeminiContents(
+  messages: ChatMessage[],
+  resolveImage?: ResolveImageAttachment
+): Promise<{ systemInstructionParts: any[]; contents: any[] }> {
+  const systemInstructionParts: any[] = []
+  const contents: any[] = []
+  let pendingAssistantSummary: string | null = null
+
+  const pushOrMergeContent = (role: 'user' | 'model' | 'function', parts: any[]) => {
+    if (parts.length === 0) return
+    if (contents.length > 0 && contents[contents.length - 1].role === role) {
+      contents[contents.length - 1].parts.push(...parts)
+    } else {
+      contents.push({ role, parts })
+    }
+  }
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]
+    if (msg.role === 'system') {
+      systemInstructionParts.push({ text: msg.content })
+    } else if (msg.role === 'user') {
+      const parts: any[] = msg.content?.trim() ? [{ text: msg.content }] : []
+      if (msg.attachments?.length) {
+        if (!resolveImage) throw new Error('Image resolver is unavailable')
+        const images = await Promise.all(msg.attachments.map(resolveImage))
+        parts.push(...images.map((image) => ({
+          inlineData: { mimeType: image.mimeType, data: image.dataBase64 }
+        })))
+      }
+      pushOrMergeContent('user', parts)
+    } else if (msg.role === 'assistant') {
+      const parts: any[] = []
+      const hasToolCalls = Boolean(msg.tool_calls?.length)
+      if (msg.content) {
+        if (hasToolCalls) pendingAssistantSummary = msg.content
+        else parts.push({ text: msg.content })
+      }
+      if (hasToolCalls) {
+        for (const tc of msg.tool_calls!) {
+          let parsedArgs = {}
+          try {
+            parsedArgs = typeof tc.function.arguments === 'string'
+              ? (tc.function.arguments ? JSON.parse(tc.function.arguments) : {})
+              : (tc.function.arguments || {})
+          } catch {
+            parsedArgs = {}
+          }
+          parts.push({ functionCall: { name: tc.function.name, args: parsedArgs } })
+        }
+      }
+      pushOrMergeContent('model', parts)
+    } else if (msg.role === 'tool') {
+      const parts: any[] = []
+      let j = i
+      while (j < messages.length && messages[j].role === 'tool') {
+        parts.push({
+          functionResponse: {
+            name: messages[j].name,
+            response: { result: messages[j].content }
+          }
+        })
+        j++
+      }
+      contents.push({ role: 'user', parts })
+      if (j < messages.length && messages[j].role === 'user') {
+        contents.push({
+          role: 'model',
+          parts: [{ text: pendingAssistantSummary || 'OK' }]
+        })
+        pendingAssistantSummary = null
+      }
+      i = j - 1
+    }
+  }
+
+  return { systemInstructionParts, contents }
+}
+
 export class GeminiProvider implements IChatProvider {
   async streamChat(config: ChatRequestConfig, callbacks: StreamCallbacks, signal: AbortSignal): Promise<void> {
-    const { baseUrl, apiKey, model, messages, tools, thinking } = config
+    const { baseUrl, apiKey, model, messages, tools, thinking, resolveImage } = config
     let url = baseUrl
     if (!url.includes('/models')) {
       let cleanBase = url
@@ -36,88 +116,7 @@ export class GeminiProvider implements IChatProvider {
 
     let fullContent = ''
 
-    // 构建 Gemini native payload
-    const systemInstructionParts: any[] = []
-    const contents: any[] = []
-    let pendingAssistantSummary: string | null = null
-
-    const pushOrMergeContent = (role: 'user' | 'model' | 'function', parts: any[]) => {
-      if (parts.length === 0) return
-      if (contents.length > 0 && contents[contents.length - 1].role === role) {
-        contents[contents.length - 1].parts.push(...parts)
-      } else {
-        contents.push({ role, parts })
-      }
-    }
-
-    for (let i = 0; i < messages.length; i++) {
-      const msg = messages[i]
-      if (msg.role === 'system') {
-        systemInstructionParts.push({ text: msg.content })
-      } else if (msg.role === 'user') {
-        pushOrMergeContent('user', [{ text: msg.content }])
-      } else if (msg.role === 'assistant') {
-        const parts: any[] = []
-        const hasToolCalls = msg.tool_calls && msg.tool_calls.length > 0
-        if (msg.content) {
-          if (hasToolCalls) {
-            // 当 assistant 同时有文本和工具调用时，将文本延迟到工具结果之后，
-            // 避免 "先声称完成再调工具" 的有毒 in-context learning 模式
-            pendingAssistantSummary = msg.content
-          } else {
-            parts.push({ text: msg.content })
-          }
-        }
-        if (hasToolCalls) {
-          for (const tc of msg.tool_calls!) {
-            let parsedArgs = {}
-            try {
-              parsedArgs = typeof tc.function.arguments === 'string' 
-                ? (tc.function.arguments ? JSON.parse(tc.function.arguments) : {}) 
-                : (tc.function.arguments || {})
-            } catch (e) {
-              parsedArgs = {}
-            }
-            parts.push({
-              functionCall: {
-                name: tc.function.name,
-                args: parsedArgs
-              }
-            })
-          }
-        }
-        pushOrMergeContent('model', parts)
-      } else if (msg.role === 'tool') {
-        const parts: any[] = []
-        let j = i
-        while (j < messages.length && messages[j].role === 'tool') {
-          parts.push({
-            functionResponse: {
-              name: messages[j].name,
-              response: { result: messages[j].content }
-            }
-          })
-          j++
-        }
-        
-        // functionResponse must use 'user' role
-        contents.push({ role: 'user', parts })
-        
-        // If the next message is ALSO a user message (e.g. user typed "继续"),
-        // Gemini strictly forbids mixing functionResponse and text in the same 'user' turn,
-        // and also strictly forbids consecutive 'user' turns.
-        // So we MUST inject a 'model' turn to separate them.
-        // 使用延迟的 assistant 总结文本替代无信息量的 "OK"，
-        // 让模型看到正确的因果顺序：先调工具 → 拿到结果 → 再总结
-        if (j < messages.length && messages[j].role === 'user') {
-          const summaryText = pendingAssistantSummary || 'OK'
-          contents.push({ role: 'model', parts: [{ text: summaryText }] })
-          pendingAssistantSummary = null
-        }
-        
-        i = j - 1
-      }
-    }
+    const { systemInstructionParts, contents } = await buildGeminiContents(messages, resolveImage)
 
     const geminiTools = tools && tools.length > 0 ? [{
       functionDeclarations: tools.map(t => ({
