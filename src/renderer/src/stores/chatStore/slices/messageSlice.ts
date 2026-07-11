@@ -12,6 +12,7 @@ import type {
 } from '../types'
 import type { TaskItem } from '../../../../../shared/types/task'
 import { IPC_CHANNELS } from '../../../../../shared/ipc/channels'
+import type { ImageAttachment } from '../../../../../shared/types/attachment'
 
 function genId(): string {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -42,7 +43,8 @@ export interface MessageSlice {
   pendingPrompt: string | null
   tasks: TaskItem[]
 
-  addUserMessage: (content: string) => ChatMessage
+  addUserMessage: (content: string, attachments?: ImageAttachment[]) => ChatMessage
+  removeMessages: (messageIds: string[]) => void
   addSystemMessage: (content: string) => ChatMessage
   startStreamingReply: () => string
   appendStreamChunk: (msgId: string, delta: string, reasoningDelta?: string) => void
@@ -128,6 +130,19 @@ export function updateMessageInState(
   return result
 }
 
+export function removeMessagesFromState(
+  state: ChatState,
+  messageIds: Set<string>
+): Pick<ChatState, 'messages' | 'sessions'> {
+  const messages = state.messages.filter((message) => !messageIds.has(message.id))
+  return {
+    messages,
+    sessions: state.sessions.map((session) => session.id === state.activeSessionId
+      ? { ...session, messages }
+      : session)
+  }
+}
+
 /** 在指定消息内更新某个 sub-agent record；未找到时返回原状态（no-op） */
 function updateSubAgentInState(
   s: ChatState,
@@ -157,11 +172,12 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
   pendingPrompt: null,
   tasks: [],
 
-  addUserMessage: (content: string) => {
+  addUserMessage: (content: string, attachments?: ImageAttachment[]) => {
     const msg: ChatMessage = {
       id: genId(),
       role: 'user',
-      content
+      content,
+      ...(attachments?.length ? { attachments: attachments.map((item) => ({ ...item })) } : {})
     }
     set((s) => {
       const nextMsgs = [...s.messages, msg]
@@ -173,6 +189,11 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
     })
     get().persistCurrentSession()
     return msg
+  },
+
+  removeMessages: (messageIds: string[]) => {
+    const ids = new Set(messageIds)
+    set((state) => removeMessagesFromState(state, ids))
   },
 
   addSystemMessage: (content: string) => {

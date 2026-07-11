@@ -184,7 +184,8 @@ export interface ChatState {
   createSession: (projectId: string) => string
   selectSession: (sessionId: string) => Promise<void>
   linkPlanToSession: (sessionId: string, planSlug: string | null) => Promise<void>
-  addUserMessage: (content: string) => ChatMessage
+  addUserMessage: (content: string, attachments?: ImageAttachment[]) => ChatMessage
+  removeMessages: (messageIds: string[]) => void
   addSystemMessage: (content: string) => ChatMessage
   startStreamingReply: () => string
   appendStreamChunk: (msgId: string, delta: string, reasoningDelta?: string) => void

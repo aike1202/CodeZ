@@ -11,4 +11,15 @@ describe('renderer chat stream payload', () => {
     expect(input).not.toHaveProperty('messages')
     expect(input).not.toHaveProperty('systemPrompt')
   })
+
+  it('passes attachment references separately from text metadata', () => {
+    const attachment = {
+      id: 'img1', kind: 'image' as const, name: 'photo.jpg', mimeType: 'image/jpeg' as const,
+      width: 800, height: 600, sizeBytes: 4, storageKey: 'attachment:sessions/s1/img1',
+      scope: 'session' as const, sessionId: 's1'
+    }
+    const input = buildChatStreamInput('inspect', [], 'ui-1', false, [attachment])
+    expect(input).toMatchObject({ text: 'inspect', attachments: [attachment] })
+    expect(JSON.stringify(input)).not.toContain('base64')
+  })
 })

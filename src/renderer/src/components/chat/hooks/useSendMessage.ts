@@ -5,12 +5,15 @@ import { useChatStore } from '../../../stores/chatStore'
 import { parseSlashCommand } from '../../../commands/SlashCommandParser'
 import type { SkillDefinition } from '../../../../../shared/types/skill'
 import type { ToolBatchMeta } from '../../../../../shared/types/toolExecution'
+import type { ComposerImageAttachment, ImageAttachment } from '../../../../../shared/types/attachment'
+import { supportsImageInput } from '../../../../../shared/utils/imageCapabilities'
 
 export function buildChatStreamInput(
   message: string,
   dynamicSkills: SkillDefinition[],
   uiMessageId: string,
-  isSystem = false
+  isSystem = false,
+  attachments: ImageAttachment[] = []
 ) {
   const parsed = isSystem ? { isCommand: false, processedMessage: message } : parseSlashCommand(message, dynamicSkills)
   let text = parsed.isCommand ? parsed.processedMessage : message
@@ -24,6 +27,7 @@ export function buildChatStreamInput(
   return {
     text,
     isSystem,
+    ...(attachments.length ? { attachments } : {}),
     commandMetadata: {
       uiMessageId,
       commandName: parsed.isCommand ? parsed.commandName : undefined,
@@ -34,6 +38,10 @@ export function buildChatStreamInput(
 
 function genId(): string {
   return '_' + Math.random().toString(36).substring(2, 9)
+}
+
+export interface SendMessageOptions {
+  visibility?: 'visible' | 'internal'
 }
 
 export function useSendMessage() {
@@ -55,13 +63,21 @@ export function useSendMessage() {
   const startSubAgentToolCall = useChatStore((s) => s.startSubAgentToolCall)
   const finishSubAgentToolCall = useChatStore((s) => s.finishSubAgentToolCall)
   const endSubAgent = useChatStore((s) => s.endSubAgent)
+  const removeMessages = useChatStore((s) => s.removeMessages)
 
   const handleSendMessage = useCallback(
-    async (message: string, modelName: string, isSystem: boolean = false) => {
+    async (
+      message: string,
+      modelName: string,
+      isSystem = false,
+      attachments: ComposerImageAttachment[] = [],
+      options: SendMessageOptions = {}
+    ): Promise<boolean> => {
+      const internal = options.visibility === 'internal'
       const ws = useWorkspaceStore.getState().workspace
       if (!ws) {
         alert('请先选择或打开一个项目工作区才能发送消息！')
-        return
+        return false
       }
 
       let allSkills: any[] = []
@@ -80,7 +96,7 @@ export function useSendMessage() {
       if (clientAction) {
         if (clientAction.type === 'context:compact') {
           const sessionId = useChatStore.getState().activeSessionId
-          if (!sessionId) return
+          if (!sessionId) return false
           useChatStore.getState().setCompactionState(sessionId, { status: 'running', trigger: 'manual' })
           try {
             const response = await (window as any).api.chat.compact(
@@ -95,11 +111,11 @@ export function useSendMessage() {
               status: 'failed', trigger: 'manual', error: error instanceof Error ? error.message : String(error)
             })
           }
-          return
+          return true
         }
         if (clientAction.type === 'plan:show-list') {
           useChatStore.getState().setPlanListModalOpen(true)
-          return
+          return true
         }
         if (clientAction.type === 'plan:load') {
           const slug = clientAction.payload?.slug
@@ -112,25 +128,31 @@ export function useSendMessage() {
               console.error('[useSendMessage] Failed to load plan:', err)
             }
           }
-          return
+          return true
         }
         if (clientAction.type === 'plan:new') {
           // agent 将在收到 slash 命令后自动判断是否发起 Plan 提案
           // Send the description as a normal user message to the AI
           const description = clientAction.payload?.description || message
-          if (!description) return
+          if (!description) return false
           // Use processedMessage from the parse result (the description text)
           message = parseResult.processedMessage || description
         }
         // For other client actions, continue normally (fall through)
         // but only if processedMessage is not empty
-        if (!parseResult.processedMessage) return
+        if (!parseResult.processedMessage) return true
       }
 
       const provState = useProviderStore.getState()
       const activeProv = provState.providers.find((p) => p.id === provState.activeProviderId)
       if (!activeProv) {
-        if (isSystem) {
+        if (attachments.length > 0) {
+          alert('请先配置支持图片输入的模型 Provider。')
+          return false
+        }
+        if (internal) {
+          // Internal recovery creates only the Agent reply, never a prompt message.
+        } else if (isSystem) {
           useChatStore.getState().addSystemMessage(message)
         } else {
           addUserMessage(message)
@@ -155,7 +177,14 @@ export function useSendMessage() {
           }
         }, 15)
         setStreamCleanup(simSid, () => () => clearInterval(interval))
-        return
+        return true
+      }
+
+      const model = modelName || activeProv.models[0]?.name || 'gpt-4o'
+      const modelConfig = activeProv.models.find((item) => item.name === model || item.id === model)
+      if (attachments.length > 0 && !supportsImageInput(modelConfig)) {
+        alert('当前模型未启用图片输入，请切换模型或在模型设置中开启。')
+        return false
       }
 
       let sid = useChatStore.getState().activeSessionId
@@ -168,17 +197,34 @@ export function useSendMessage() {
         }
       }
 
+      let promotedAttachments: ImageAttachment[] = []
+      try {
+        promotedAttachments = attachments.length > 0
+          ? await window.api.attachment.promoteDrafts(sid, attachments)
+          : []
+      } catch (error) {
+        alert(`照片导入失败：${error instanceof Error ? error.message : String(error)}`)
+        return false
+      }
+
       let uiMessageId: string
-      if (isSystem) {
+      if (internal) {
+        uiMessageId = `internal_${genId()}`
+      } else if (isSystem) {
         uiMessageId = useChatStore.getState().addSystemMessage(message).id
       } else {
-        uiMessageId = addUserMessage(message).id
+        uiMessageId = addUserMessage(message, promotedAttachments).id
       }
       await useChatStore.getState().persistSession(sid)
       const agentId = startStreamingReply()
 
-      const model = modelName || activeProv.models[0]?.name || 'gpt-4o'
-      const streamInput = buildChatStreamInput(message, allSkills, uiMessageId, isSystem)
+      const streamInput = buildChatStreamInput(
+        message,
+        allSkills,
+        uiMessageId,
+        isSystem,
+        isSystem ? [] : promotedAttachments
+      )
 
       // 前端兜底 watchdog：90s 无首字节提示（后端 60s watchdog 通常先触发，此为兜底）
       let firstByteTimer: ReturnType<typeof setTimeout> | null = null
@@ -294,7 +340,6 @@ export function useSendMessage() {
           }
         }
       )
-      void streamHandle.started.catch(() => undefined)
 
       firstByteTimer = setTimeout(() => {
         if (!gotFirstByte) {
@@ -304,6 +349,7 @@ export function useSendMessage() {
 
       const wrappedCleanup = () => {
         if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
+        useChatStore.getState().markActiveRunUserAborted(sid)
         streamHandle.stop()
         finishStreaming(agentId)
         useChatStore.getState().persistSession(sid)
@@ -311,6 +357,29 @@ export function useSendMessage() {
       }
 
       setStreamCleanup(sid, wrappedCleanup)
+      try {
+        await streamHandle.started
+      } catch (error) {
+        if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
+        streamHandle.stop()
+        removeMessages([uiMessageId, agentId])
+        const rollbackIds = promotedAttachments
+          .filter((_item, index) => attachments[index]?.scope === 'draft')
+          .map((item) => item.id)
+        await window.api.attachment.rollbackPromotion(sid, rollbackIds).catch(() => undefined)
+        await useChatStore.getState().persistSession(sid)
+        setStreamCleanup(sid, null)
+        alert(`消息发送失败：${error instanceof Error ? error.message : String(error)}`)
+        return false
+      }
+
+      const draftIds = attachments
+        .filter((item): item is Extract<ComposerImageAttachment, { scope: 'draft' }> => item.scope === 'draft')
+        .map((item) => item.draftId)
+      if (draftIds.length > 0) {
+        await window.api.attachment.discardDrafts(draftIds).catch(() => undefined)
+      }
+      return true
     },
     [
       addUserMessage,
@@ -330,7 +399,8 @@ export function useSendMessage() {
       appendSubAgentChunk,
       startSubAgentToolCall,
       finishSubAgentToolCall,
-      endSubAgent
+      endSubAgent,
+      removeMessages
     ]
   )
 

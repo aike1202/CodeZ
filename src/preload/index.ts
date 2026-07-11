@@ -300,7 +300,6 @@ const api = {
             cleanup()
             const error = new Error('IPC 错误: 主进程返回了不匹配的 stream ID')
             rejectStarted(error)
-            callbacks.onError(error.message)
             return
           }
           resolveStarted()
@@ -309,7 +308,6 @@ const api = {
           cleanup()
           const error = err instanceof Error ? err : new Error(String(err))
           rejectStarted(error)
-          callbacks.onError(`IPC 错误: ${error.message}`)
         })
 
       return { stop: cleanup, started }

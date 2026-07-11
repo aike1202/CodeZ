@@ -46,46 +46,36 @@ export function registerChatIpc(): void {
       const hasText = Boolean(request.input?.text?.trim())
       const hasImages = Boolean(request.input?.attachments?.length)
       if (!request.sessionId || (!hasText && !hasImages)) {
-        sender.send(IPC_CHANNELS.CHAT_STREAM_ERROR, streamId, '会话 ID 和本次输入不能为空')
-        return streamId
+        throw new Error('会话 ID 和本次输入不能为空')
       }
       const contextFlags = readContextFeatureFlags()
       if (!contextFlags.authoritativeLedger) {
-        sender.send(
-          IPC_CHANNELS.CHAT_STREAM_ERROR,
-          streamId,
-          '规范化模型账本已通过环境变量禁用；V2 请求不会回退到 Renderer 历史。'
-        )
-        return streamId
+        throw new Error('规范化模型账本已通过环境变量禁用；V2 请求不会回退到 Renderer 历史。')
       }
 
       const providerSvc = getProviderService()
       const config = providerSvc.getConfig(request.providerId)
       if (!config) {
         log.warn('[Chat] reject: provider not found', { streamId, providerId: request.providerId })
-        sender.send(IPC_CHANNELS.CHAT_STREAM_ERROR, streamId, 'Provider 不存在')
-        return streamId
+        throw new Error('Provider 不存在')
       }
 
       const apiKey = providerSvc.getApiKey(request.providerId)
       if (!apiKey) {
         log.warn('[Chat] reject: no api key', { streamId, providerId: request.providerId })
-        sender.send(IPC_CHANNELS.CHAT_STREAM_ERROR, streamId, '无法获取 API Key')
-        return streamId
+        throw new Error('无法获取 API Key')
       }
 
       const workspaceSvc = getWorkspaceService()
       const currentWorkspace = workspaceSvc ? workspaceSvc.getCurrentWorkspace() : null
       if (!currentWorkspace) {
         log.warn('[Chat] reject: no workspace', { streamId })
-        sender.send(IPC_CHANNELS.CHAT_STREAM_ERROR, streamId, '当前未打开任何工作区，无法启动 Agent')
-        return streamId
+        throw new Error('当前未打开任何工作区，无法启动 Agent')
       }
 
       const modelConfig = config.models?.find(m => m.id === request.model || m.name === request.model)
       if (hasImages && modelConfig?.supportsVision !== true) {
-        sender.send(IPC_CHANNELS.CHAT_STREAM_ERROR, streamId, '当前模型未启用图片输入')
-        return streamId
+        throw new Error('当前模型未启用图片输入')
       }
       const contextWindowTokens = modelConfig?.maxContextTokens || 32000
       const contextCapabilities = {
@@ -152,29 +142,19 @@ export function registerChatIpc(): void {
         systemPrompt: sysPrompt
       })
       if (downshift.required) {
-          if (!compactionService) {
-            sender.send(
-              IPC_CHANNELS.CHAT_STREAM_ERROR,
-              streamId,
-              '新模型的输入预算不足，且正式压缩已通过环境变量禁用。'
-            )
-            return streamId
-          }
-          const result = await compactionService.compact({
-            sessionId: request.sessionId,
-            contextScopeId: MAIN_CONTEXT_SCOPE,
-            trigger: 'model_downshift',
-            capabilities: contextCapabilities,
-            systemPrompt: sysPrompt
-          })
-          if (result.status !== 'completed') {
-            sender.send(
-              IPC_CHANNELS.CHAT_STREAM_ERROR,
-              streamId,
-              `切换到 ${request.model} 前无法将历史压缩到新模型预算内：${result.message || result.errorCode}`
-            )
-            return streamId
-          }
+        if (!compactionService) {
+          throw new Error('新模型的输入预算不足，且正式压缩已通过环境变量禁用。')
+        }
+        const result = await compactionService.compact({
+          sessionId: request.sessionId,
+          contextScopeId: MAIN_CONTEXT_SCOPE,
+          trigger: 'model_downshift',
+          capabilities: contextCapabilities,
+          systemPrompt: sysPrompt
+        })
+        if (result.status !== 'completed') {
+          throw new Error(`切换到 ${request.model} 前无法将历史压缩到新模型预算内：${result.message || result.errorCode}`)
+        }
       }
 
       const runtimeTurn = await core.coordinator.beginTurn({
@@ -183,8 +163,8 @@ export function registerChatIpc(): void {
         text: request.input.text,
         providerId: request.providerId,
         model: request.model,
-        commandMetadata: request.input.commandMetadata
-        ,attachments: request.input.attachments
+        commandMetadata: request.input.commandMetadata,
+        attachments: request.input.attachments
       })
 
       // 异步执行 Agent 循环，通过 webContents.send 推送
@@ -207,8 +187,8 @@ export function registerChatIpc(): void {
           compactionService,
           contextCapabilities,
           systemPrompt: sysPrompt,
-          contextInstructions: reminder ? [reminder] : []
-          ,prepareImages: (attachments) => getAttachmentService().prepareSessionImages(
+          contextInstructions: reminder ? [reminder] : [],
+          prepareImages: (attachments) => getAttachmentService().prepareSessionImages(
             request.sessionId,
             attachments,
             getProviderImagePolicy(modelConfig?.apiFormat || config.apiFormat)
