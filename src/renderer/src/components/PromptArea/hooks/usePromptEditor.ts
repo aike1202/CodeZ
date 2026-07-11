@@ -4,10 +4,19 @@ import { useChatStore } from '../../../stores/chatStore'
 import { useProviderStore } from '../../../stores/providerStore'
 import { builtinCommands } from '../../../commands/SlashCommandParser'
 import type { WorkspaceInfo } from '@shared/types/workspace'
+import type { ComposerImageAttachment } from '@shared/types/attachment'
+import { evaluateImageSendState } from '../../chat/imageAttachmentState'
 
 export function usePromptEditor(
-  onSend: (message: string, modelName: string) => void,
-  workspace?: WorkspaceInfo | null
+  onSend: (
+    message: string,
+    modelName: string,
+    attachments: ComposerImageAttachment[]
+  ) => Promise<boolean>,
+  workspace: WorkspaceInfo | null | undefined,
+  attachments: ComposerImageAttachment[],
+  clearAcceptedDrafts: () => void,
+  importingAttachments: boolean
 ) {
   const [text, setText] = useState('')
   const [selectedModelName, setSelectedModelNameState] = useState<string>('')
@@ -33,6 +42,13 @@ export function usePromptEditor(
   const activeProviderId = useProviderStore((s) => s.activeProviderId)
   const activeProvider = providers.find((p) => p.id === activeProviderId)
   const models = activeProvider?.models || []
+  const selectedModel = models.find((model) => model.name === selectedModelName) || models[0]
+  const sendState = evaluateImageSendState({
+    text,
+    attachmentCount: attachments.length,
+    importing: importingAttachments,
+    supportsVision: selectedModel?.supportsVision === true
+  })
 
   const pendingPrompt = useChatStore((s) => s.pendingPrompt)
   const setPendingPrompt = useChatStore((s) => s.setPendingPrompt)
@@ -234,13 +250,21 @@ export function usePromptEditor(
     })
   }
 
-  const handleSend = () => {
-    if (!text.trim()) return
-    let finalContent = text.trim()
-    finalContent = processSkillsInText(finalContent)
-    
-    onSend(finalContent, selectedModelName || models[0]?.name || '')
-    setText('')
+  const handleSend = async (): Promise<boolean> => {
+    if (!sendState.canSend) return false
+    const trimmed = text.trim()
+    const finalContent = trimmed ? processSkillsInText(trimmed) : ''
+    const accepted = await onSend(
+      finalContent,
+      selectedModelName || models[0]?.name || '',
+      attachments
+    )
+    if (accepted) {
+      setText('')
+      setActiveToken(null)
+      clearAcceptedDrafts()
+    }
+    return accepted
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -267,7 +291,7 @@ export function usePromptEditor(
 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      handleSend()
+      void handleSend()
     }
   }
 
@@ -297,6 +321,7 @@ export function usePromptEditor(
     popupItems,
     displayLabel,
     maxContextTokens,
-    dynamicSkills
+    dynamicSkills,
+    sendState
   }
 }

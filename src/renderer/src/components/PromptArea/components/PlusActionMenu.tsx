@@ -3,17 +3,20 @@ import Button from '../../ui/Button'
 import Card from '../../ui/Card'
 import IconPlus from '../../icons/IconPlus'
 import { useChatStore } from '../../../stores/chatStore'
+import { ImagePlus } from 'lucide-react'
 
 interface PlusActionMenuProps {
   isOpen: boolean
   setIsOpen: (open: boolean) => void
   onCloseOthers: () => void
+  onAddPhotos: () => void
 }
 
 export default function PlusActionMenu({
   isOpen,
   setIsOpen,
-  onCloseOthers
+  onCloseOthers,
+  onAddPhotos
 }: PlusActionMenuProps): React.ReactElement {
   return (
     <div className="relative">
@@ -36,6 +39,17 @@ export default function PlusActionMenu({
             className="prompt-dropdown-card"
             style={{ left: 0, bottom: '100%', marginBottom: '8px', minWidth: '180px' }}
           >
+            <button
+              type="button"
+              className="prompt-dropdown-provider prompt-action-menu-item"
+              onClick={() => {
+                setIsOpen(false)
+                onAddPhotos()
+              }}
+            >
+              <ImagePlus size={17} aria-hidden="true" />
+              <span>添加照片</span>
+            </button>
             <div
               className="prompt-dropdown-provider"
               onClick={() => {

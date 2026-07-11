@@ -1,0 +1,84 @@
+.image-attachment-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+}
+
+.image-attachment-tile {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  flex: 0 0 72px;
+}
+
+.image-attachment-grid--readonly .image-attachment-tile {
+  width: 112px;
+  height: 112px;
+  flex-basis: 112px;
+}
+
+.image-attachment-open {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  background: var(--bg-hover);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.image-attachment-open:hover {
+  border-color: var(--primary-color);
+}
+
+.image-attachment-open:focus-visible,
+.image-attachment-remove:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+.image-attachment-open img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.image-attachment-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: #fff;
+  background: rgba(32, 35, 40, 0.92);
+  border: 2px solid var(--bg-panel);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.image-attachment-remove:hover {
+  background: #b42318;
+}
+
+.image-attachment-spinner {
+  animation: image-attachment-spin 0.9s linear infinite;
+}
+
+@keyframes image-attachment-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .image-attachment-spinner { animation: none; }
+}

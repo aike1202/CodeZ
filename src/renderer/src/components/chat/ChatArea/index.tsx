@@ -359,7 +359,8 @@ export default function ChatArea({
       promptArea={
         <div style={{ width: '100%', flexShrink: 0, zIndex: 50 }}>
           <PromptArea
-            onSend={handleSendMessage}
+            onSend={(message, modelName, attachments) =>
+              handleSendMessage(message, modelName, false, attachments)}
             placeholder={activeSessionId ? '随心输入...' : '开始新的对话...'}
             onOpenSettings={() => onOpenSettings('model-config')}
             workspace={workspace}

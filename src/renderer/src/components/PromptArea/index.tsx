@@ -1,4 +1,5 @@
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
+import { ImagePlus } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
 import { useProviderStore } from '../../stores/providerStore'
 import type { ModelConfig, ThinkingEffort } from '@shared/types/provider'
@@ -27,6 +28,9 @@ import ModelSelector from './components/ModelSelector'
 import PlusActionMenu from './components/PlusActionMenu'
 import SlashMentionMenu from './components/SlashMentionMenu'
 import PermissionModeSelector from './components/PermissionModeSelector'
+import { useImageAttachments } from './hooks/useImageAttachments'
+import ImageAttachmentGrid from '../chat/ImageAttachmentGrid'
+import ImagePreviewModal from '../chat/ImagePreviewModal'
 
 const EFFORT_LABELS: Partial<Record<ThinkingEffort, string>> = {
   none: '关闭',
@@ -38,6 +42,12 @@ const EFFORT_LABELS: Partial<Record<ThinkingEffort, string>> = {
   max: '最高'
 }
 
+function containsImageFiles(dataTransfer: DataTransfer): boolean {
+  return Array.from(dataTransfer.items).some(
+    (item) => item.kind === 'file' && item.type.startsWith('image/')
+  ) || Array.from(dataTransfer.files).some((file) => file.type.startsWith('image/'))
+}
+
 export default function PromptArea({
   onSend,
   placeholder,
@@ -46,6 +56,19 @@ export default function PromptArea({
 }: PromptAreaProps): React.ReactElement {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [plusDropdownOpen, setPlusDropdownOpen] = useState(false)
+  const [isImageDragging, setIsImageDragging] = useState(false)
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const dragDepthRef = useRef(0)
+
+  const {
+    attachments,
+    importing,
+    errors,
+    addFiles,
+    removeAttachment,
+    clearAcceptedDrafts
+  } = useImageAttachments()
 
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const streamCleanups = useChatStore((s) => s.streamCleanups)
@@ -69,8 +92,15 @@ export default function PromptArea({
     filteredMentions,
     filteredCommands,
     filteredSkills,
-    popupItems
-  } = usePromptEditor(onSend, workspace)
+    popupItems,
+    sendState
+  } = usePromptEditor(
+    onSend,
+    workspace,
+    attachments,
+    clearAcceptedDrafts,
+    importing
+  )
 
   const activeProviderId = useProviderStore((s) => s.activeProviderId)
   const providers = useProviderStore((s) => s.providers)
@@ -123,6 +153,45 @@ export default function PromptArea({
     setPlusDropdownOpen(false)
   }
 
+  const handlePaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    const imageFiles = Array.from(event.clipboardData.files)
+      .filter((file) => file.type.startsWith('image/'))
+    if (imageFiles.length === 0) return
+    event.preventDefault()
+    void addFiles(imageFiles)
+  }
+
+  const handleDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!containsImageFiles(event.dataTransfer)) return
+    event.preventDefault()
+    dragDepthRef.current += 1
+    setIsImageDragging(true)
+  }
+
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!containsImageFiles(event.dataTransfer)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+
+  const handleDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!isImageDragging) return
+    if (containsImageFiles(event.dataTransfer)) event.preventDefault()
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+    if (dragDepthRef.current === 0) setIsImageDragging(false)
+  }
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    const hasImages = containsImageFiles(event.dataTransfer)
+    dragDepthRef.current = 0
+    setIsImageDragging(false)
+    if (!hasImages) return
+    event.preventDefault()
+    const imageFiles = Array.from(event.dataTransfer.files)
+      .filter((file) => file.type.startsWith('image/'))
+    void addFiles(imageFiles)
+  }
+
   return (
     <div className="prompt-area-container">
       <div className="prompt-area-inner relative">
@@ -137,8 +206,41 @@ export default function PromptArea({
           filteredFiles={filteredMentions}
         />
 
-        <Card variant="default" rounded="lg" className="prompt-card">
+        <Card
+          variant="default"
+          rounded="lg"
+          className={`prompt-card${isImageDragging ? ' is-image-dragging' : ''}`}
+          onPaste={handlePaste}
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          <input
+            ref={fileInputRef}
+            className="prompt-image-input"
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={(event) => {
+              const files = Array.from(event.currentTarget.files || [])
+              event.currentTarget.value = ''
+              void addFiles(files)
+            }}
+          />
           <Stack gap={2}>
+            <ImageAttachmentGrid
+              attachments={attachments}
+              mode="editable"
+              onRemove={(attachment) => { void removeAttachment(attachment.id) }}
+              onOpen={setPreviewIndex}
+            />
+            {importing ? <div className="prompt-image-status">照片正在导入...</div> : null}
+            {errors.length > 0 ? (
+              <div className="prompt-image-errors" role="status">
+                {errors.map((error, index) => <div key={`${index}:${error}`}>{error}</div>)}
+              </div>
+            ) : null}
             <Flex align="start" className="prompt-input-wrapper w-full">
               <div className="prompt-scroll-container" onKeyDownCapture={handleKeyDown}>
                 <CodeMirror
@@ -178,6 +280,7 @@ export default function PromptArea({
                   isOpen={plusDropdownOpen}
                   setIsOpen={setPlusDropdownOpen}
                   onCloseOthers={closeAllDropdowns}
+                  onAddPhotos={() => fileInputRef.current?.click()}
                 />
                 <PermissionModeSelector />
               </Flex>
@@ -249,11 +352,12 @@ export default function PromptArea({
                   </Button>
                 ) : (
                   <Button
-                    variant={text.trim() ? 'dark' : 'secondary'}
+                    variant={sendState.canSend ? 'dark' : 'secondary'}
                     size="none"
-                    onClick={handleSend}
-                    disabled={!text.trim()}
+                    onClick={() => { void handleSend() }}
+                    disabled={!sendState.canSend}
                     className="prompt-send-btn"
+                    title={sendState.reason || '发送消息'}
                   >
                     <IconSend />
                   </Button>
@@ -261,7 +365,20 @@ export default function PromptArea({
               </Flex>
             </Flex>
           </Stack>
+          {isImageDragging ? (
+            <div className="prompt-image-drop-state" aria-hidden="true">
+              <ImagePlus size={22} />
+              <span>松开添加照片</span>
+            </div>
+          ) : null}
         </Card>
+        {previewIndex !== null ? (
+          <ImagePreviewModal
+            attachments={attachments}
+            initialIndex={previewIndex}
+            onClose={() => setPreviewIndex(null)}
+          />
+        ) : null}
       </div>
     </div>
   )

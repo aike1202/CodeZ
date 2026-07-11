@@ -24,6 +24,57 @@
   z-index: 20;
 }
 
+.prompt-card.is-image-dragging {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.12), 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+
+.prompt-image-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.prompt-card .image-attachment-grid {
+  padding: 2px 2px 6px;
+}
+
+.prompt-image-status,
+.prompt-image-errors {
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.prompt-image-status {
+  color: var(--text-muted);
+}
+
+.prompt-image-errors {
+  color: var(--color-error);
+}
+
+.prompt-image-drop-state {
+  position: absolute;
+  inset: 4px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--primary-color);
+  background: color-mix(in srgb, var(--bg-panel) 92%, var(--primary-color));
+  border: 1px dashed var(--primary-color);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
 .prompt-top-toolbar {
   margin: -12px -12px 8px -12px;
   padding: 6px 12px;
@@ -181,6 +232,16 @@
 
 .prompt-plus-btn:hover {
   background-color: var(--bg-hover); /* hover:bg-gray-100 */
+}
+
+.prompt-action-menu-item {
+  width: 100%;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
 }
 
 .prompt-approve-btn {
