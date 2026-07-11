@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { IPC_CHANNELS } from '../../shared/ipc/channels'
 import { SessionStore } from '../services/SessionStore'
+import { deleteSessionWithAttachments, getAttachmentService } from './attachment.handlers'
 
 let sessionStore: SessionStore | null = null
 let loadPromise: Promise<void> | null = null
@@ -40,6 +41,6 @@ export function registerSessionIpc(): void {
   })
 
   ipcMain.handle(IPC_CHANNELS.SESSION_DELETE, async (_event, sessionId: string) => {
-    await svc.delete(sessionId)
+    await deleteSessionWithAttachments(svc, getAttachmentService(), sessionId)
   })
 }

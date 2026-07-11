@@ -20,6 +20,7 @@ import { registerSubAgentIpc, syncDisabledSubAgents } from './ipc/subagent.handl
 import { registerPlanIpc } from './ipc/plan.handlers'
 import { TerminalService } from './services/TerminalService'
 import { getContextCoreServices } from './services/context'
+import { getAttachmentService, registerAttachmentIpc } from './ipc/attachment.handlers'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -83,6 +84,7 @@ app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.codez.desktop')
 
   const sessionStore = await initializeSessionStore()
+  await getAttachmentService().cleanupOrphans(new Set(sessionStore.getAll().map((session) => session.id)))
   const contextCore = getContextCoreServices()
   for (const session of sessionStore.getAll()) {
     if (session.isDeleted || session.runtime?.schemaVersion !== 2) continue
@@ -101,6 +103,7 @@ app.whenReady().then(async () => {
 
   registerWorkspaceIpc()
   registerProviderIpc()
+  registerAttachmentIpc()
   registerSessionIpc()
   registerChatIpc()
   registerTerminalIpc()

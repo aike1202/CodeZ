@@ -17,6 +17,13 @@ export const IPC_CHANNELS = {
   PROVIDER_TEST: 'provider:test',
   PROVIDER_SET_ACTIVE: 'provider:set-active',
 
+  // Managed image attachments
+  ATTACHMENT_IMPORT_DRAFT: 'attachment:import-draft',
+  ATTACHMENT_PROMOTE_DRAFTS: 'attachment:promote-drafts',
+  ATTACHMENT_ROLLBACK_PROMOTION: 'attachment:rollback-promotion',
+  ATTACHMENT_DISCARD_DRAFTS: 'attachment:discard-drafts',
+  ATTACHMENT_READ_PREVIEW: 'attachment:read-preview',
+
   // Chat/Agent (stream)
   CHAT_STREAM_START: 'chat:stream:start',
   CHAT_STREAM_CHUNK: 'chat:stream:chunk',

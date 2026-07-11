@@ -184,7 +184,7 @@ export function useSendMessage() {
       let firstByteTimer: ReturnType<typeof setTimeout> | null = null
       let gotFirstByte = false
 
-      const cleanup = (window as any).api.chat.stream(
+      const streamHandle = (window as any).api.chat.stream(
         activeProv.id,
         model,
         sid,
@@ -294,6 +294,7 @@ export function useSendMessage() {
           }
         }
       )
+      void streamHandle.started.catch(() => undefined)
 
       firstByteTimer = setTimeout(() => {
         if (!gotFirstByte) {
@@ -303,7 +304,7 @@ export function useSendMessage() {
 
       const wrappedCleanup = () => {
         if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
-        cleanup()
+        streamHandle.stop()
         finishStreaming(agentId)
         useChatStore.getState().persistSession(sid)
         setStreamCleanup(sid, null)

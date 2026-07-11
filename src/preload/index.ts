@@ -5,6 +5,17 @@ import type { ProviderFormData, ProviderInfo, ConnectionTestResult } from '../sh
 import type { SessionData } from '../shared/types/session'
 import type { StreamRequestV2 } from '../shared/types/context'
 import type { ToolBatchMeta } from '../shared/types/toolExecution'
+import type {
+  AttachmentPreviewBytes,
+  ComposerImageAttachment,
+  DraftImageAttachment,
+  ImageAttachment
+} from '../shared/types/attachment'
+
+export interface ChatStreamHandle {
+  stop: () => void
+  started: Promise<void>
+}
 
 const api = {
   workspace: {
@@ -71,6 +82,33 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.PROVIDER_SET_ACTIVE, id)
   },
 
+  attachment: {
+    importDraft: (input: {
+      name: string
+      declaredMimeType: string
+      bytes: Uint8Array
+    }): Promise<DraftImageAttachment> =>
+      ipcRenderer.invoke(IPC_CHANNELS.ATTACHMENT_IMPORT_DRAFT, input),
+
+    promoteDrafts: (
+      sessionId: string,
+      attachments: ComposerImageAttachment[]
+    ): Promise<ImageAttachment[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.ATTACHMENT_PROMOTE_DRAFTS, sessionId, attachments),
+
+    rollbackPromotion: (sessionId: string, attachmentIds: string[]): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.ATTACHMENT_ROLLBACK_PROMOTION, sessionId, attachmentIds),
+
+    discardDrafts: (draftIds: string[]): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.ATTACHMENT_DISCARD_DRAFTS, draftIds),
+
+    readPreview: (
+      attachment: ComposerImageAttachment,
+      variant: 'thumbnail' | 'original'
+    ): Promise<AttachmentPreviewBytes> =>
+      ipcRenderer.invoke(IPC_CHANNELS.ATTACHMENT_READ_PREVIEW, attachment, variant)
+  },
+
   chat: {
     /**
      * 发起流式聊天请求，并接收 tool call 日志。
@@ -104,10 +142,16 @@ const api = {
         onCompactionCompleted?: (payload: any) => void
         onCompactionFailed?: (payload: any) => void
       }
-    ): (() => void) => {
+    ): ChatStreamHandle => {
       const requestedStreamId = `stream_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
       let activeStreamId: string | null = requestedStreamId
       let cleanedUp = false
+      let resolveStarted!: () => void
+      let rejectStarted!: (error: Error) => void
+      const started = new Promise<void>((resolve, reject) => {
+        resolveStarted = resolve
+        rejectStarted = reject
+      })
 
       // 注册监听
       const chunkHandler = (_event: unknown, streamId: string, delta: string, reasoningDelta?: string) => {
@@ -250,15 +294,21 @@ const api = {
           if (cleanedUp) return
           if (streamId !== requestedStreamId) {
             cleanup()
-            callbacks.onError('IPC 错误: 主进程返回了不匹配的 stream ID')
+            const error = new Error('IPC 错误: 主进程返回了不匹配的 stream ID')
+            rejectStarted(error)
+            callbacks.onError(error.message)
+            return
           }
+          resolveStarted()
         })
         .catch((err) => {
           cleanup()
-          callbacks.onError(`IPC 错误: ${err}`)
+          const error = err instanceof Error ? err : new Error(String(err))
+          rejectStarted(error)
+          callbacks.onError(`IPC 错误: ${error.message}`)
         })
 
-      return cleanup
+      return { stop: cleanup, started }
     },
 
     compact: (sessionId: string, instructions?: string): Promise<any> =>

@@ -32,6 +32,23 @@ declare global {
         testConnection: (id: string) => Promise<{ success: boolean; message: string; models?: string[] }>
         setActive: (id: string) => Promise<void>
       }
+      attachment: {
+        importDraft: (input: {
+          name: string
+          declaredMimeType: string
+          bytes: Uint8Array
+        }) => Promise<import('@shared/types/attachment').DraftImageAttachment>
+        promoteDrafts: (
+          sessionId: string,
+          attachments: import('@shared/types/attachment').ComposerImageAttachment[]
+        ) => Promise<import('@shared/types/attachment').ImageAttachment[]>
+        rollbackPromotion: (sessionId: string, attachmentIds: string[]) => Promise<void>
+        discardDrafts: (draftIds: string[]) => Promise<void>
+        readPreview: (
+          attachment: import('@shared/types/attachment').ComposerImageAttachment,
+          variant: 'thumbnail' | 'original'
+        ) => Promise<import('@shared/types/attachment').AttachmentPreviewBytes>
+      }
       chat: {
         stream: (
           providerId: string,
@@ -57,7 +74,10 @@ declare global {
             onCompactionCompleted?: (payload: any) => void
             onCompactionFailed?: (payload: any) => void
           }
-        ) => () => void
+        ) => {
+          stop: () => void
+          started: Promise<void>
+        }
         compact: (sessionId: string, instructions?: string) => Promise<any>
         acceptFile: (txId: string, filePath: string) => Promise<boolean>
         rejectFile: (txId: string, filePath: string) => Promise<boolean>
