@@ -74,7 +74,12 @@ export class ReadTool extends Tool {
   async execute(args: string, context: ToolContext): Promise<string> {
     try {
       const parsed = JSON.parse(args) as ReadArgs
-      if (!Array.isArray(parsed.files)) return 'Error: files is required.'
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !Array.isArray(parsed.files)) {
+        return 'Error: files is required.'
+      }
+      if (Object.keys(parsed).some((key) => key !== 'files')) {
+        return 'Error: Read only accepts the files parameter.'
+      }
       if (parsed.files.length < 1 || parsed.files.length > MAX_FILES_PER_READ) {
         return `Error: files must contain between 1 and ${MAX_FILES_PER_READ} items.`
       }

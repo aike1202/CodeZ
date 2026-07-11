@@ -27,6 +27,14 @@ describe('ReadTool', () => {
     getReadFingerprintStore().clear(SESSION)
   })
 
+  it('schema 只暴露必填 files 数组', () => {
+    const schema = new ReadTool().parameters_schema as any
+    expect(schema.required).toEqual(['files'])
+    expect(schema.properties.file_path).toBeUndefined()
+    expect(schema.properties.files.minItems).toBe(1)
+    expect(schema.properties.files.maxItems).toBe(8)
+  })
+
   it('首次读：返回带行号+SHA 的正文并写入指纹', async () => {
     const tool = new ReadTool()
     const result = await tool.execute(readArgs({ file_path: fp }), {
@@ -94,6 +102,15 @@ describe('ReadTool', () => {
     const tool = new ReadTool()
     const result = await tool.execute(JSON.stringify({ file_path: fp }), { workspaceRoot: root, sessionId: SESSION })
     expect(result).toContain('Error: files is required')
+  })
+
+  it('即使提供 files 也拒绝额外的旧顶层参数', async () => {
+    const tool = new ReadTool()
+    const result = await tool.execute(
+      JSON.stringify({ files: [{ file_path: fp }], file_path: fp }),
+      { workspaceRoot: root, sessionId: SESSION }
+    )
+    expect(result).toContain('Error: Read only accepts the files parameter')
   })
 
   it('拒绝空 files 数组', async () => {
