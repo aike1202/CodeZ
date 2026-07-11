@@ -12,6 +12,9 @@ async function setupWorkspace(): Promise<string> {
   return root
 }
 
+const readArgs = (...files: Array<{ file_path: string; offset?: number; limit?: number }>): string =>
+  JSON.stringify({ files })
+
 describe('ReadTool', () => {
   let root: string
   let fp: string
@@ -26,7 +29,7 @@ describe('ReadTool', () => {
 
   it('首次读：返回带行号+SHA 的正文并写入指纹', async () => {
     const tool = new ReadTool()
-    const result = await tool.execute(JSON.stringify({ file_path: fp }), {
+    const result = await tool.execute(readArgs({ file_path: fp }), {
       workspaceRoot: root,
       sessionId: SESSION
     })
@@ -38,25 +41,25 @@ describe('ReadTool', () => {
 
   it('同 sha 再读：返回 Wasted call 且不含正文', async () => {
     const tool = new ReadTool()
-    await tool.execute(JSON.stringify({ file_path: fp }), { workspaceRoot: root, sessionId: SESSION })
-    const again = await tool.execute(JSON.stringify({ file_path: fp }), { workspaceRoot: root, sessionId: SESSION })
+    await tool.execute(readArgs({ file_path: fp }), { workspaceRoot: root, sessionId: SESSION })
+    const again = await tool.execute(readArgs({ file_path: fp }), { workspaceRoot: root, sessionId: SESSION })
     expect(again).toContain('Wasted call — file unchanged')
     expect(again).not.toContain('line one')
   })
 
   it('默认读命中指纹后，range 读（offset/limit）应返回正文而非 Wasted call（裁剪后逃逸口）', async () => {
     const tool = new ReadTool()
-    await tool.execute(JSON.stringify({ file_path: fp }), { workspaceRoot: root, sessionId: SESSION })
-    const rangeResult = await tool.execute(JSON.stringify({ file_path: fp, offset: 1, limit: 2 }), { workspaceRoot: root, sessionId: SESSION })
+    await tool.execute(readArgs({ file_path: fp }), { workspaceRoot: root, sessionId: SESSION })
+    const rangeResult = await tool.execute(readArgs({ file_path: fp, offset: 1, limit: 2 }), { workspaceRoot: root, sessionId: SESSION })
     expect(rangeResult).not.toContain('Wasted call')
     expect(rangeResult).toContain('line one')
   })
 
   it('内容改变后：返回新正文并更新指纹', async () => {
     const tool = new ReadTool()
-    await tool.execute(JSON.stringify({ file_path: fp }), { workspaceRoot: root, sessionId: SESSION })
+    await tool.execute(readArgs({ file_path: fp }), { workspaceRoot: root, sessionId: SESSION })
     await fs.writeFile(fp, 'changed content\n')
-    const result = await tool.execute(JSON.stringify({ file_path: fp }), { workspaceRoot: root, sessionId: SESSION })
+    const result = await tool.execute(readArgs({ file_path: fp }), { workspaceRoot: root, sessionId: SESSION })
     expect(result).toContain('changed content')
     expect(result).not.toContain('Wasted call')
   })
@@ -65,7 +68,7 @@ describe('ReadTool', () => {
     const bin = path.join(root, 'b.bin')
     await fs.writeFile(bin, Buffer.from([0x00, 0x01, 0x02, 0x00]))
     const tool = new ReadTool()
-    const result = await tool.execute(JSON.stringify({ file_path: bin }), { workspaceRoot: root, sessionId: SESSION })
+    const result = await tool.execute(readArgs({ file_path: bin }), { workspaceRoot: root, sessionId: SESSION })
     expect(result).toContain('Cannot read binary file.')
   })
 
@@ -74,22 +77,69 @@ describe('ReadTool', () => {
     await fs.writeFile(outside, 'x')
     try {
       const tool = new ReadTool()
-      const result = await tool.execute(JSON.stringify({ file_path: outside }), { workspaceRoot: root, sessionId: SESSION })
-      expect(result.startsWith('Error:')).toBe(true)
+      const result = await tool.execute(readArgs({ file_path: outside }), { workspaceRoot: root, sessionId: SESSION })
+      expect(result).toContain('Error: Access denied. Cannot read file outside of workspace.')
     } finally {
       await fs.rm(outside, { force: true })
     }
   })
 
-  it('缺 file_path：返错', async () => {
+  it('缺 files：返错', async () => {
     const tool = new ReadTool()
     const result = await tool.execute(JSON.stringify({}), { workspaceRoot: root, sessionId: SESSION })
     expect(result.startsWith('Error:')).toBe(true)
   })
 
+  it('拒绝旧的顶层 file_path 参数', async () => {
+    const tool = new ReadTool()
+    const result = await tool.execute(JSON.stringify({ file_path: fp }), { workspaceRoot: root, sessionId: SESSION })
+    expect(result).toContain('Error: files is required')
+  })
+
+  it('拒绝空 files 数组', async () => {
+    const tool = new ReadTool()
+    const result = await tool.execute(JSON.stringify({ files: [] }), { workspaceRoot: root, sessionId: SESSION })
+    expect(result).toContain('Error: files must contain between 1 and 8 items')
+  })
+
+  it('拒绝超过八个文件', async () => {
+    const tool = new ReadTool()
+    const files = Array.from({ length: 9 }, (_, index) => ({ file_path: `file-${index}.txt` }))
+    const result = await tool.execute(JSON.stringify({ files }), { workspaceRoot: root, sessionId: SESSION })
+    expect(result).toContain('Error: files must contain between 1 and 8 items')
+  })
+
+  it('批量读取多个文件并保持输入顺序', async () => {
+    const second = path.join(root, 'b.txt')
+    await fs.writeFile(second, 'second file\n')
+    const tool = new ReadTool()
+
+    const result = await tool.execute(
+      readArgs({ file_path: second }, { file_path: fp }),
+      { workspaceRoot: root, sessionId: SESSION }
+    )
+
+    expect(result.indexOf(`path="${second}"`)).toBeLessThan(result.indexOf(`path="${fp}"`))
+    expect(result).toContain('second file')
+    expect(result).toContain('line one')
+  })
+
+  it('单个文件失败时仍返回其他文件', async () => {
+    const missing = path.join(root, 'missing.txt')
+    const tool = new ReadTool()
+
+    const result = await tool.execute(
+      readArgs({ file_path: missing }, { file_path: fp }),
+      { workspaceRoot: root, sessionId: SESSION }
+    )
+
+    expect(result).toContain('Error: File not found.')
+    expect(result).toContain('line one')
+  })
+
   it('offset/limit 切片：只返回指定行', async () => {
     const tool = new ReadTool()
-    const result = await tool.execute(JSON.stringify({ file_path: fp, offset: 2, limit: 1 }), { workspaceRoot: root, sessionId: SESSION })
+    const result = await tool.execute(readArgs({ file_path: fp, offset: 2, limit: 1 }), { workspaceRoot: root, sessionId: SESSION })
     expect(result).toContain('2\tline two')
     expect(result).not.toContain('line one')
     expect(result).not.toContain('line three')

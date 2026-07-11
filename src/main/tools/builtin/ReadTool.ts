@@ -6,17 +6,30 @@ import { createHash } from 'crypto'
 import { getReadFingerprintStore } from '../ReadFingerprintStore'
 import { parseNotebook, renderNotebook } from './NotebookUtils'
 
-interface ReadArgs {
-  file_path?: string
+interface ReadFileArgs {
+  file_path: string
   offset?: number
   limit?: number
   pages?: string
+}
+
+interface ReadArgs {
+  files?: ReadFileArgs[]
 }
 
 const MAX_TOTAL_LINES = 1200
 const MAX_TOTAL_BYTES = 120000
 const MAX_CHARS_PER_FILE = 40000
 const MAX_FILE_BYTES = 5 * 1024 * 1024
+const MAX_FILES_PER_READ = 8
+
+function escapeAttribute(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
 
 export class ReadTool extends Tool {
   get name() {
@@ -24,30 +37,63 @@ export class ReadTool extends Tool {
   }
 
   get summary() {
-    return 'Read a file from the local filesystem.'
+    return 'Read up to eight local files in parallel.'
   }
 
   get description() {
-    return 'Reads a file from the local filesystem. file_path is absolute (or relative to workspace). Returns content in cat -n format (line numbers starting at 1). When you already know which part you need, use offset/limit to read only that part — range reads also bypass the unchanged-file dedup, so they are the way to re-fetch content after context trimming. Do NOT re-read a file you just edited or one whose content has not changed — a default full-file Read of an unchanged file returns "Wasted call" and no content. Binary files return "Cannot read binary file." Images and PDFs are not supported (the pages parameter is reserved and ignored). Jupyter notebooks (.ipynb) are supported and rendered as <cell id="..."> blocks with outputs. Reading a directory, a missing file, or an empty file returns an error.'
+    return 'Reads 1 to 8 files from the local filesystem in parallel. Pass every request through the required files array, including single-file reads. Each file_path may be absolute or workspace-relative and may have its own offset/limit range. Results are returned in input order as <file path="..."> blocks with cat -n line numbers and SHA256. Range reads bypass unchanged-file dedup and are the way to re-fetch content after context trimming. Do NOT re-read unchanged files without a range. One file error does not prevent other files from returning. Binary files are not readable. Images and PDFs are not supported (pages is reserved and ignored). Jupyter notebooks render as <cell id="..."> blocks.'
   }
 
   get parameters_schema() {
     return {
       type: 'object',
       properties: {
-        file_path: { type: 'string', description: 'Absolute (or workspace-relative) path of the file to read.' },
-        offset: { type: 'number', description: '1-indexed line to start reading from. Default 1.' },
-        limit: { type: 'number', description: 'Maximum number of lines to return. Default up to budget.' },
-        pages: { type: 'string', description: 'Reserved for PDF pages; not implemented this period (ignored).' }
+        files: {
+          type: 'array',
+          description: 'Files to read concurrently. Use a one-item array for a single file.',
+          minItems: 1,
+          maxItems: MAX_FILES_PER_READ,
+          items: {
+            type: 'object',
+            properties: {
+              file_path: { type: 'string', description: 'Absolute or workspace-relative file path.' },
+              offset: { type: 'number', description: '1-indexed line to start reading from. Default 1.' },
+              limit: { type: 'number', description: 'Maximum number of lines to return. Default up to the existing per-file budget.' },
+              pages: { type: 'string', description: 'Reserved for PDF pages; currently ignored.' }
+            },
+            required: ['file_path'],
+            additionalProperties: false
+          }
+        }
       },
-      required: ['file_path']
+      required: ['files'],
+      additionalProperties: false
     }
   }
 
   async execute(args: string, context: ToolContext): Promise<string> {
     try {
       const parsed = JSON.parse(args) as ReadArgs
-      if (!parsed.file_path) return 'Error: file_path is required.'
+      if (!Array.isArray(parsed.files)) return 'Error: files is required.'
+      if (parsed.files.length < 1 || parsed.files.length > MAX_FILES_PER_READ) {
+        return `Error: files must contain between 1 and ${MAX_FILES_PER_READ} items.`
+      }
+      const invalidIndex = parsed.files.findIndex((file) => !file || typeof file.file_path !== 'string' || !file.file_path)
+      if (invalidIndex >= 0) return `Error: files[${invalidIndex}].file_path is required.`
+
+      const results = await Promise.all(parsed.files.map((file) => this.readOneFile(file, context)))
+      return results
+        .map((result, index) =>
+          `<file path="${escapeAttribute(parsed.files![index].file_path)}">\n${result}\n</file>`
+        )
+        .join('\n\n')
+    } catch (err: any) {
+      return `Error: ${err.message}`
+    }
+  }
+
+  private async readOneFile(parsed: ReadFileArgs, context: ToolContext): Promise<string> {
+    try {
 
       const absolutePath = path.isAbsolute(parsed.file_path)
         ? parsed.file_path

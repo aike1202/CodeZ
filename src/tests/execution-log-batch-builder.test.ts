@@ -4,9 +4,11 @@ import type {
   UnifiedTimelineItem
 } from '../renderer/src/components/chat/ExecutionLog/utils/types'
 import {
+  buildUnifiedTimeline,
   getParallelBatchDuration,
   groupParallelToolBatches
-} from '../renderer/src/components/chat/ExecutionLog/utils/batchBuilder'
+} from '../renderer/src/components/chat/ExecutionLog/utils'
+import type { ExecutionTimelineItem } from '../renderer/src/stores/chatStore'
 
 const toolItem = (
   id: string,
@@ -129,6 +131,62 @@ describe('execution log parallel batch builder', () => {
       })
     ])
 
+    expect((batch as ParallelToolBatchItem).status).toBe('error')
+  })
+
+  it('uses the visible child count for an expanded batch', () => {
+    const [batch] = groupParallelToolBatches([
+      toolItem('one', 100, { batchId: 'batch-count', batchIndex: 0, batchSize: 2 }),
+      toolItem('two', 101, { batchId: 'batch-count', batchIndex: 0, batchSize: 2 }),
+      toolItem('three', 102, { batchId: 'batch-count', batchIndex: 1, batchSize: 2 })
+    ])
+
+    expect((batch as ParallelToolBatchItem).batchSize).toBe(3)
+  })
+
+  it('expands a multi-file Read into a read batch', () => {
+    const timeline: ExecutionTimelineItem[] = [{
+      id: 'tool_read-1',
+      type: 'tool',
+      toolCall: {
+        id: 'read-1',
+        name: 'Read',
+        args: JSON.stringify({
+          files: [
+            { file_path: 'src/App.tsx' },
+            { file_path: 'src/db.ts', offset: 10, limit: 20 }
+          ]
+        }),
+        status: 'success',
+        result: [
+          '<file path="src/App.tsx">',
+          '1\tcontent',
+          '</file>',
+          '',
+          '<file path="src/db.ts">',
+          'Error: File not found.',
+          '</file>'
+        ].join('\n'),
+        startedAt: 100,
+        completedAt: 250,
+        sequence: 0
+      },
+      startedAt: 100,
+      updatedAt: 250,
+      sequence: 0
+    }]
+
+    const unified = buildUnifiedTimeline(timeline, [], [], undefined, false)
+    const [batch] = groupParallelToolBatches(unified)
+
+    expect(batch.type).toBe('parallel-batch')
+    expect((batch as ParallelToolBatchItem).batchKind).toBe('read')
+    expect((batch as ParallelToolBatchItem).items.map((item) => item.realPath)).toEqual([
+      'src/App.tsx',
+      'src/db.ts'
+    ])
+    expect((batch as ParallelToolBatchItem).items[1].target).toContain('#L10-29')
+    expect((batch as ParallelToolBatchItem).items[1].status).toBe('error')
     expect((batch as ParallelToolBatchItem).status).toBe('error')
   })
 })

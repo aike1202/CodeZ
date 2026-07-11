@@ -8,7 +8,7 @@ const WS = path.resolve('/tmp/codez-ws')
 describe('checkSubAgentToolPermission', () => {
   describe('no scope (read-only subagent)', () => {
     it('allows read-only tools', () => {
-      expect(checkSubAgentToolPermission('Read', { file_path: 'a.ts' }, WS, undefined)).toBeNull()
+      expect(checkSubAgentToolPermission('Read', { files: [{ file_path: 'a.ts' }] }, WS, undefined)).toBeNull()
       expect(checkSubAgentToolPermission('Grep', {}, WS, undefined)).toBeNull()
     })
     it('denies write and shell tools', () => {

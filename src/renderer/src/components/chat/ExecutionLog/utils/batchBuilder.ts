@@ -36,7 +36,8 @@ export function groupParallelToolBatches(
       id: item.batchId,
       type: 'parallel-batch',
       batchId: item.batchId,
-      batchSize: item.batchSize,
+      batchSize: batchItems.length,
+      batchKind: item.batchKind ?? 'tools',
       timestamp: Math.min(...batchItems.map((candidate) => candidate.timestamp)),
       status: getBatchStatus(batchItems),
       items: batchItems

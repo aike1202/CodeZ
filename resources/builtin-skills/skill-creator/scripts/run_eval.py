@@ -163,8 +163,12 @@ def run_single_query(
                             tool_input = content_item.get("input", {})
                             if tool_name == "Skill" and clean_name in tool_input.get("skill", ""):
                                 triggered = True
-                            elif tool_name == "Read" and clean_name in tool_input.get("file_path", ""):
-                                triggered = True
+                            elif tool_name == "Read":
+                                triggered = any(
+                                    isinstance(file_input, dict)
+                                    and clean_name in file_input.get("file_path", "")
+                                    for file_input in tool_input.get("files", [])
+                                )
                             return triggered
 
                     elif event.get("type") == "result":

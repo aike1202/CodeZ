@@ -21,6 +21,7 @@ export interface UnifiedTimelineItem {
   batchId?: string
   batchIndex?: number
   batchSize?: number
+  batchKind?: 'tools' | 'read'
   status: 'running' | 'success' | 'error'
   verb:
     | 'Thought'
@@ -67,6 +68,7 @@ export interface ParallelToolBatchItem {
   type: 'parallel-batch'
   batchId: string
   batchSize: number
+  batchKind: 'tools' | 'read'
   timestamp: number
   status: 'running' | 'success' | 'error'
   items: UnifiedTimelineItem[]

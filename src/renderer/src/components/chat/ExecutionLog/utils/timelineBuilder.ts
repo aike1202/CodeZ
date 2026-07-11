@@ -4,6 +4,22 @@ import { computeEditStats } from '../../../../utils/editDiffUtils'
 import type { CommandItem, EditItemWithStatus, UnifiedTimelineItem } from './types'
 import { getToolTarget, getToolNoun, formatDuration, formatReasoningDuration } from './itemParsers'
 
+function getReadFileStatuses(
+  result: string | undefined,
+  count: number,
+  fallback: UnifiedTimelineItem['status']
+): UnifiedTimelineItem['status'][] {
+  if (!result || fallback === 'running') return Array(count).fill(fallback)
+
+  const blocks = Array.from(result.matchAll(/<file path="[^"]*">\r?\n([\s\S]*?)\r?\n<\/file>/g))
+  return Array.from({ length: count }, (_, index) => {
+    const content = blocks[index]?.[1] || ''
+    return content.startsWith('Error:') || content.startsWith('Cannot read binary file.')
+      ? 'error'
+      : fallback
+  })
+}
+
 export function buildFallbackTimeline(
   timeline: ExecutionTimelineItem[] | undefined,
   reasoning?: string
@@ -65,26 +81,66 @@ export function buildUnifiedTimeline(
         completedAt: tc.completedAt,
         batchId: tc.batchId,
         batchIndex: tc.batchIndex,
-        batchSize: tc.batchSize
+        batchSize: tc.batchSize,
+        batchKind: tc.batchId ? 'tools' as const : undefined
       }
 
       if (tc.name === 'Read') {
         const argsObj = parseArgs(tc.args)
-        const fp = argsObj.file_path || ''
-        const offset = argsObj.offset
-        const limit = argsObj.limit
-        let targetText = fp || '文件'
-        if (typeof offset === 'number')
+        const files = Array.isArray(argsObj.files) ? argsObj.files : []
+        const fileStatuses = getReadFileStatuses(tc.result, files.length, tc.status)
+
+        if (files.length > 1) {
+          const readBatchId = tc.batchId ?? `read_batch_${tc.id}`
+          files.forEach((file: any, index: number) => {
+            const filePath = typeof file?.file_path === 'string' ? file.file_path : ''
+            const offset = file?.offset
+            const limit = file?.limit
+            let targetText = filePath || '文件'
+            if (typeof offset === 'number') {
+              targetText += ` #L${offset}${typeof limit === 'number' ? `-${offset + limit - 1}` : '-'}`
+            }
+
+            list.push({
+              id: `${tc.id}_${index}`,
+              type: 'tool',
+              timestamp: tc.startedAt,
+              completedAt: tc.completedAt,
+              status: fileStatuses[index] ?? tc.status,
+              verb: tc.status === 'running' ? 'Analyzing' : 'Analyzed',
+              target: targetText,
+              realPath: filePath,
+              fileName: filePath ? filePath.split(/[/\\]/).pop() : undefined,
+              args: tc.args,
+              detail: index === 0 ? tc.result : undefined,
+              duration,
+              toolName: tc.name,
+              batchId: readBatchId,
+              batchIndex: tc.batchId ? tc.batchIndex : index,
+              batchSize: tc.batchId ? tc.batchSize : files.length,
+              batchKind: tc.batchId ? 'tools' : 'read'
+            })
+          })
+          return
+        }
+
+        const file = files[0]
+        const filePath = typeof file?.file_path === 'string' ? file.file_path : ''
+        const offset = file?.offset
+        const limit = file?.limit
+        let targetText = filePath || '文件'
+        if (typeof offset === 'number') {
           targetText += ` #L${offset}${typeof limit === 'number' ? `-${offset + limit - 1}` : '-'}`
+        }
         list.push({
           id: tc.id,
           type: 'tool',
           timestamp: tc.startedAt,
-          status: tc.status,
+          status: fileStatuses[0] ?? tc.status,
           verb: tc.status === 'running' ? 'Analyzing' : 'Analyzed',
           target: targetText,
-          realPath: fp,
-          fileName: fp ? fp.split(/[/\\]/).pop() : undefined,
+          realPath: filePath,
+          fileName: filePath ? filePath.split(/[/\\]/).pop() : undefined,
           args: tc.args,
           detail: tc.result,
           duration,

@@ -25,7 +25,7 @@ async function setup(): Promise<string> {
   return root
 }
 async function readFirst(fp: string) {
-  await new ReadTool().execute(JSON.stringify({ file_path: fp }), { workspaceRoot: root, sessionId: SESSION })
+  await new ReadTool().execute(JSON.stringify({ files: [{ file_path: fp }] }), { workspaceRoot: root, sessionId: SESSION })
 }
 
 describe('WriteTool', () => {

@@ -866,8 +866,15 @@ export class SubAgentManager {
                   result = JSON.stringify({ ok: true, data: raw })
 
                   // 追踪读取的文件
-                  if (name === 'Read' || name === 'list_files') {
-                    try { const p = JSON.parse(args); if (p.file_path) filesExamined.add(p.file_path) } catch {}
+                  if (name === 'Read') {
+                    try {
+                      const parsed = JSON.parse(args)
+                      for (const file of parsed.files || []) {
+                        if (file?.file_path) filesExamined.add(file.file_path)
+                      }
+                    } catch {}
+                  } else if (name === 'list_files') {
+                    try { const parsed = JSON.parse(args); if (parsed.file_path) filesExamined.add(parsed.file_path) } catch {}
                   }
                 } catch (err: any) {
                   result = JSON.stringify({ ok: false, error: { code: 'EXECUTION_ERROR', message: err.message } })

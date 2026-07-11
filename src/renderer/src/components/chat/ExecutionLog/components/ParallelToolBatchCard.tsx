@@ -52,9 +52,13 @@ export function ParallelToolBatchCard({
 
   const failedCount = batch.items.filter((item) => item.status === 'error').length
   const duration = getParallelBatchDuration(batch, now)
-  const title = batch.status === 'running'
-    ? `正在并行执行 ${batch.batchSize} 项`
-    : `并行执行 ${batch.batchSize} 项`
+  const title = batch.batchKind === 'read'
+    ? batch.status === 'running'
+      ? `正在并行读取 ${batch.batchSize} 个文件`
+      : `并行读取 ${batch.batchSize} 个文件`
+    : batch.status === 'running'
+      ? `正在并行执行 ${batch.batchSize} 项`
+      : `并行执行 ${batch.batchSize} 项`
 
   const statusIcon = batch.status === 'running'
     ? <Loader2 size={14} className="parallel-tool-batch-icon parallel-tool-batch-icon--running" />

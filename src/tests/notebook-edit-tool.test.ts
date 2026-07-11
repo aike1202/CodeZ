@@ -25,7 +25,7 @@ async function setup(): Promise<string> {
   return root
 }
 async function readFirst(fp: string) {
-  await new ReadTool().execute(JSON.stringify({ file_path: fp }), { workspaceRoot: root, sessionId: SESSION })
+  await new ReadTool().execute(JSON.stringify({ files: [{ file_path: fp }] }), { workspaceRoot: root, sessionId: SESSION })
 }
 
 describe('NotebookEditTool', () => {
@@ -38,7 +38,7 @@ describe('NotebookEditTool', () => {
   it('Read .ipynb 渲染 <cell id>', async () => {
     const fp = path.join(root, 'n.ipynb')
     await fs.writeFile(fp, minimalNb())
-    const r = await new ReadTool().execute(JSON.stringify({ file_path: fp }), { workspaceRoot: root, sessionId: SESSION })
+    const r = await new ReadTool().execute(JSON.stringify({ files: [{ file_path: fp }] }), { workspaceRoot: root, sessionId: SESSION })
     expect(r).toContain('<cell id="cell-0"')
     expect(r).toContain('print(1)')
   })
