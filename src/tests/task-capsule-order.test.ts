@@ -9,20 +9,27 @@ const task = (id: string, status: TaskItem['status']): TaskItem => ({
   description: id
 })
 
-describe('TaskCapsule display order', () => {
-  it('keeps tasks in their original list order regardless of status', () => {
+describe('TaskCapsule active task projection', () => {
+  it('keeps only pending and in-progress tasks in original list order', () => {
     const tasks = [
       task('completed-first', 'completed'),
       task('pending-second', 'pending'),
       task('running-third', 'in_progress'),
-      task('cancelled-fourth', 'cancelled')
+      task('cancelled-fourth', 'cancelled'),
+      task('pending-fifth', 'pending')
     ]
 
     expect(getTaskDisplayTasks(tasks).map((item) => item.id)).toEqual([
-      'completed-first',
       'pending-second',
       'running-third',
-      'cancelled-fourth'
+      'pending-fifth'
     ])
+  })
+
+  it('returns an empty projection when every task is terminal', () => {
+    expect(getTaskDisplayTasks([
+      task('done', 'completed'),
+      task('stopped', 'cancelled')
+    ])).toEqual([])
   })
 })

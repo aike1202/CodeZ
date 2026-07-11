@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useChatStore } from '../../stores/chatStore'
-import { CheckCircle2, CircleDashed, Loader2, ListTodo, XCircle, ChevronDown, ChevronUp } from 'lucide-react'
+import { CircleDashed, Loader2, ListTodo, ChevronDown, ChevronUp } from 'lucide-react'
 import type { TaskItem, TaskStatus } from '../../../../shared/types/task'
 import { getTaskDisplayTasks } from './TaskCapsule.order'
 import './TaskCapsule.css'
@@ -20,49 +20,36 @@ export const TaskCapsule: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  if (!tasks || tasks.length === 0) {
+  const displayTasks = getTaskDisplayTasks(tasks || [])
+
+  if (displayTasks.length === 0) {
     return null
   }
 
-  const total = tasks.length
-  const completed = tasks.filter((t) => t.status === 'completed').length
-  const inProgress = tasks.find((t) => t.status === 'in_progress')
-  const allDone = completed === total
-
-  const displayTasks = getTaskDisplayTasks(tasks)
+  const total = displayTasks.length
+  const inProgress = displayTasks.find((t) => t.status === 'in_progress')
 
   // 从 tasks 里取第一个 TaskGroup 元数据作为清单头，兼容旧 title/subtitle
-  const listTitle = tasks.find(t => t.groupTitle)?.groupTitle || tasks.find(t => t.title)?.title
-  const listSubtitle = tasks.find(t => t.groupSubtitle)?.groupSubtitle || tasks.find(t => t.subtitle)?.subtitle
-  const groupRisk = tasks.find(t => t.riskLevel)?.riskLevel
-  const approvalStatus = tasks.find(t => t.approvalStatus)?.approvalStatus
-  const requiresApproval = tasks.some(t => t.requiresApproval)
+  const listTitle = displayTasks.find(t => t.groupTitle)?.groupTitle || displayTasks.find(t => t.title)?.title
+  const listSubtitle = displayTasks.find(t => t.groupSubtitle)?.groupSubtitle || displayTasks.find(t => t.subtitle)?.subtitle
+  const groupRisk = displayTasks.find(t => t.riskLevel)?.riskLevel
+  const approvalStatus = displayTasks.find(t => t.approvalStatus)?.approvalStatus
+  const requiresApproval = displayTasks.some(t => t.requiresApproval)
 
   const getStatusIcon = (status: TaskStatus) => {
-    switch (status) {
-      case 'completed':
-        return <CheckCircle2 className="step-icon completed" size={14} />
-      case 'in_progress':
-        return <Loader2 className="step-icon in-progress spin" size={14} />
-      case 'cancelled':
-        return <XCircle className="step-icon cancelled" size={14} />
-      default:
-        return <CircleDashed className="step-icon pending" size={14} />
-    }
+    return status === 'in_progress'
+      ? <Loader2 className="step-icon in-progress spin" size={14} />
+      : <CircleDashed className="step-icon pending" size={14} />
   }
 
   const headText = (task: TaskItem) => task.activeForm || task.subject
 
   return (
     <div className={`plan-capsule-wrapper task-capsule-wrapper ${expanded ? 'expanded' : ''}`} ref={capsuleRef}>
-      <div className={`plan-capsule ${allDone ? '' : 'executing'}`} onClick={() => setExpanded(!expanded)}>
-        {allDone ? (
-          <CheckCircle2 className="plan-capsule-icon success" size={14} />
-        ) : (
-          <ListTodo className="plan-capsule-icon" size={14} />
-        )}
+      <div className="plan-capsule executing" onClick={() => setExpanded(!expanded)}>
+        <ListTodo className="plan-capsule-icon" size={14} />
         <span className="plan-capsule-text">
-          {inProgress ? headText(inProgress) : `Tasks ${completed}/${total}`}
+          {inProgress ? headText(inProgress) : `Tasks ${total}`}
         </span>
         {expanded ? <ChevronUp size={14} className="chevron" /> : <ChevronDown size={14} className="chevron" />}
       </div>
@@ -82,7 +69,7 @@ export const TaskCapsule: React.FC = () => {
               ) : null}
             </div>
             <span className="plan-progress">
-              {total > 0 ? Math.round((completed / total) * 100) : 0}%
+              剩余 {total}
             </span>
           </div>
           <div className="plan-capsule-body">
