@@ -46,3 +46,9 @@ export interface SubAgentDetail extends SubAgentInfo {
   systemPrompt: string
 }
 
+/** 主进程对指定会话当前执行状态的权威快照。 */
+export interface SessionRuntimeStatus {
+  sessionId: string
+  mainRunnerActive: boolean
+  activeSubAgentIds: string[]
+}

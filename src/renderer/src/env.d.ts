@@ -50,6 +50,9 @@ declare global {
         ) => Promise<import('@shared/types/attachment').AttachmentPreviewBytes>
       }
       chat: {
+        getRuntimeStatus: (
+          sessionId: string
+        ) => Promise<import('@shared/types/subagent').SessionRuntimeStatus>
         stream: (
           providerId: string,
           model: string,

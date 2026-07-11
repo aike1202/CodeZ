@@ -19,7 +19,13 @@ import {
 } from '../services/context'
 
 import type { AgentRunner } from '../agent/AgentRunner'
-const activeRunners = new Map<string, AgentRunner>()
+import { ChatRuntimeRegistry } from '../services/ChatRuntimeRegistry'
+
+const activeRunners = new ChatRuntimeRegistry<AgentRunner>()
+
+function finishStream(streamId: string): void {
+  activeRunners.unregister(streamId)
+}
 
 export function registerChatIpc(): void {
   ipcMain.handle(
@@ -173,7 +179,7 @@ export function registerChatIpc(): void {
 
       // 异步执行 Agent 循环，通过 webContents.send 推送
       log.info('[Chat] runner start', { streamId, model: request.model, contextWindowTokens })
-      activeRunners.set(streamId, runner)
+      activeRunners.register(streamId, request.sessionId, runner)
 
       runner.run(
         {
@@ -200,12 +206,12 @@ export function registerChatIpc(): void {
           onDone: (fullContent, stopReason, txId) => {
             log.info('[Chat] done', { streamId, stopReason, contentLen: fullContent?.length ?? 0 })
             sender.send(IPC_CHANNELS.CHAT_STREAM_END, streamId, fullContent, stopReason, txId)
-            activeRunners.delete(streamId)
+            finishStream(streamId)
           },
           onError: (error) => {
             log.error('[Chat] error', { streamId, error })
             sender.send(IPC_CHANNELS.CHAT_STREAM_ERROR, streamId, error)
-            activeRunners.delete(streamId)
+            finishStream(streamId)
           },
           onContextBudget: (snapshot) => {
             sender.send(IPC_CHANNELS.CHAT_CONTEXT_BUDGET_UPDATED, streamId, request.sessionId, snapshot)
@@ -280,18 +286,22 @@ export function registerChatIpc(): void {
       ).catch((error) => {
         log.error('[Chat] runner crashed', { streamId, error: error instanceof Error ? error.message : String(error) })
         sender.send(IPC_CHANNELS.CHAT_STREAM_ERROR, streamId, `未知错误: ${error}`)
-        activeRunners.delete(streamId)
+        finishStream(streamId)
       })
 
       return streamId
     }
   )
 
+  ipcMain.handle(IPC_CHANNELS.CHAT_RUNTIME_STATUS, (_event, sessionId: string) => {
+    return activeRunners.getStatus(sessionId, [])
+  })
+
   ipcMain.handle(IPC_CHANNELS.CHAT_STREAM_STOP, (_event, streamId: string) => {
-    const runner = activeRunners.get(streamId)
+    const runner = activeRunners.getRunner(streamId)
     if (runner) {
       runner.abort()
-      activeRunners.delete(streamId)
+      finishStream(streamId)
     }
   })
 

@@ -5,6 +5,7 @@ import type { ProviderFormData, ProviderInfo, ConnectionTestResult } from '../sh
 import type { SessionData } from '../shared/types/session'
 import type { StreamRequestV2 } from '../shared/types/context'
 import type { ToolBatchMeta } from '../shared/types/toolExecution'
+import type { SessionRuntimeStatus } from '../shared/types/subagent'
 import type {
   AttachmentPreviewBytes,
   ComposerImageAttachment,
@@ -110,6 +111,9 @@ const api = {
   },
 
   chat: {
+    getRuntimeStatus: (sessionId: string): Promise<SessionRuntimeStatus> =>
+      ipcRenderer.invoke(IPC_CHANNELS.CHAT_RUNTIME_STATUS, sessionId),
+
     /**
      * 发起流式聊天请求，并接收 tool call 日志。
      */
