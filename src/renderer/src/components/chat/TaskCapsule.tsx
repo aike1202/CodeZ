@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useRef, useEffect } from 'react'
 import { useChatStore } from '../../stores/chatStore'
 import { CircleDashed, Loader2, ListTodo, ChevronDown, ChevronUp } from 'lucide-react'
 import type { TaskItem, TaskStatus } from '../../../../shared/types/task'
@@ -7,18 +7,20 @@ import './TaskCapsule.css'
 
 export const TaskCapsule: React.FC = () => {
   const tasks = useChatStore((s) => s.tasks)
-  const [expanded, setExpanded] = useState(false)
+  const expandedCapsule = useChatStore((s) => s.expandedCapsule)
+  const setExpandedCapsule = useChatStore((s) => s.setExpandedCapsule)
+  const expanded = expandedCapsule === 'task'
   const capsuleRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (capsuleRef.current && !capsuleRef.current.contains(event.target as Node)) {
-        setExpanded(false)
+      if (expanded && capsuleRef.current && !capsuleRef.current.contains(event.target as Node)) {
+        setExpandedCapsule(null)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
+  }, [expanded, setExpandedCapsule])
 
   const displayTasks = getTaskDisplayTasks(tasks || [])
 
@@ -46,7 +48,10 @@ export const TaskCapsule: React.FC = () => {
 
   return (
     <div className={`plan-capsule-wrapper task-capsule-wrapper ${expanded ? 'expanded' : ''}`} ref={capsuleRef}>
-      <div className="plan-capsule executing" onClick={() => setExpanded(!expanded)}>
+      <div
+        className="plan-capsule executing"
+        onClick={() => setExpandedCapsule(expanded ? null : 'task')}
+      >
         <ListTodo className="plan-capsule-icon" size={14} />
         <span className="plan-capsule-text">
           {inProgress ? headText(inProgress) : `Tasks ${total}`}

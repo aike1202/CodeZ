@@ -594,3 +594,23 @@ git commit -m "Show terminal Task details in execution logs"
 - [ ] Mark one Task cancelled and verify it leaves the capsule while `取消任务：<subject>` remains expandable in the execution log.
 - [ ] Expand both terminal logs and verify description, files, acceptance criteria, verification command, and final status are shown when supplied.
 - [ ] Confirm completed/cancelled Tasks remain in persisted `SessionData.tasks` and are not recreated in the capsule after restart.
+
+---
+
+## Review Hardening
+
+Code review identified existing paths that the original three tasks did not
+exercise. The implementation must also include these checks:
+
+- [ ] Bind `TaskCapsule` expansion to `chatStore.expandedCapsule`; verify the
+  rendered popover follows the session-scoped store value.
+- [ ] Recheck `_selectSessionSeq` after a rejected disk lookup and before the
+  memory fallback; cover a deferred rejection invalidated by `createSession`.
+- [ ] Validate persisted Task detail fields before rendering arrays or strings
+  so malformed legacy results cannot throw.
+- [ ] Include full snapshots of Tasks completed by `DelegateTasks` in that
+  persisted tool result and derive one TaskUpdate display item per snapshot.
+- [ ] Exclude previously completed Tasks skipped during delegated retries from
+  newly derived terminal logs.
+- [ ] Render a complete terminal snapshot through `ExecutionLogDetail` in a
+  component-level test.

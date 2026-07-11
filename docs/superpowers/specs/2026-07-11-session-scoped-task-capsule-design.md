@@ -95,6 +95,14 @@ Older persisted `TaskUpdate` results may contain only the reduced snapshot.
 They continue to render their summary and fall back to the existing raw tool
 detail without migration.
 
+`DelegateTasks` is an automatic terminal transition path: completed Worker
+Tasks are written through `TaskStore.setStatuses` rather than a model-issued
+`TaskUpdate` call. Its persisted tool result therefore includes full snapshots
+for Tasks completed by that invocation. The timeline derives one
+`toolName: 'TaskUpdate'` terminal display item per snapshot, reusing the same
+summary and detail renderer. Previously completed Tasks skipped by a retry are
+not included again.
+
 ## Data Flow
 
 1. The Agent calls `TaskUpdate` with `completed` or `cancelled`.
@@ -107,6 +115,9 @@ detail without migration.
 7. The existing tool timeline records that result in the current agent
    message and persists it with the session.
 8. The execution log renders the terminal summary and structured detail.
+
+For delegated execution, steps 6-8 use the persisted `DelegateTasks` result as
+the snapshot carrier and derive the same TaskUpdate display entries.
 
 ## Error and Compatibility Handling
 
@@ -133,6 +144,10 @@ Add focused regression coverage for:
 7. Completed and cancelled timeline entries retain their expected summary and
    expose structured terminal Task detail.
 8. Legacy reduced `TaskUpdate` results still render without errors.
+9. A delegated completion produces one expandable TaskUpdate display entry
+   per Task completed by that invocation, without duplicating skipped Tasks.
+10. Session-scoped expansion controls the rendered Task popover, including
+    stale selection rejection paths.
 
 Run the targeted Task/session and execution-log tests, then run TypeScript
 type-checking and the full test suite if the targeted checks pass.

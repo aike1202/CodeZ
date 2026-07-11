@@ -125,6 +125,47 @@ describe('chat store task session restore', () => {
     expect(state.sessions.find((session) => session.id === newSessionId)?.tasks).toEqual([])
   })
 
+  it('createSession remains active when an older selection rejects after creation', async () => {
+    const { useChatStore } = await import('../renderer/src/stores/chatStore')
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    let rejectSelection: ((error: Error) => void) | undefined
+    ;(window as any).api.session.get.mockReturnValue(new Promise((_resolve, reject) => {
+      rejectSelection = reject
+    }))
+
+    useChatStore.setState({
+      sessions: [
+        {
+          id: 'old',
+          projectId: 'p1',
+          summary: 'Old session',
+          relativeTime: 'now',
+          messages: [],
+          tasks: unfinishedTasks
+        } as any
+      ],
+      activeSessionId: 'old',
+      messages: [],
+      tasks: unfinishedTasks,
+      expandedCapsule: 'task'
+    })
+
+    const pendingSelection = useChatStore.getState().selectSession('old')
+    const newSessionId = useChatStore.getState().createSession('p1')
+    rejectSelection?.(new Error('selection failed'))
+    await pendingSelection
+
+    const state = useChatStore.getState()
+    expect(state.activeSessionId).toBe(newSessionId)
+    expect(state.tasks).toEqual([])
+    expect(state.expandedCapsule).toBeNull()
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[sessionSlice.selectSession] Failed to load from disk:',
+      expect.any(Error)
+    )
+    errorSpy.mockRestore()
+  })
+
   it('selectSession closes an inherited task capsule when the target has no active tasks', async () => {
     const { useChatStore } = await import('../renderer/src/stores/chatStore')
     const terminalTasks: TaskItem[] = [

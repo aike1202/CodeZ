@@ -3,6 +3,7 @@ import { parseArgs } from '../../../../utils/parseArgs'
 import { computeEditStats } from '../../../../utils/editDiffUtils'
 import type { CommandItem, EditItemWithStatus, UnifiedTimelineItem } from './types'
 import { getToolTarget, getToolNoun, formatDuration, formatReasoningDuration } from './itemParsers'
+import { parseTaskUpdateDetail } from '../../ExecutionLogDetail/taskUpdateDetail'
 
 function getReadFileStatuses(
   result: string | undefined,
@@ -430,6 +431,45 @@ export function buildUnifiedTimeline(
           toolName: tc.name,
           ...toolTimelineMeta
         })
+
+        if (tc.name === 'DelegateTasks' && tc.status === 'success') {
+          try {
+            const result = JSON.parse(tc.result || '{}')
+            const terminalTasks = Array.isArray(result?.data?.terminalTasks)
+              ? result.data.terminalTasks
+              : []
+
+            terminalTasks.forEach((rawTask: unknown, index: number) => {
+              const detail = JSON.stringify({
+                ok: true,
+                data: {
+                  task: rawTask,
+                  summary: result.data.status
+                }
+              })
+              const task = parseTaskUpdateDetail(detail)?.task
+              const isTerminal = task?.status === 'completed' || task?.status === 'cancelled'
+              if (!isTerminal || !task.id || !task.subject) return
+
+              list.push({
+                id: `${tc.id}_task_${task.id}`,
+                type: 'tool',
+                timestamp: (tc.completedAt ?? tc.startedAt) + index + 1,
+                completedAt: tc.completedAt,
+                status: 'success',
+                verb: 'Executed',
+                target: task.status === 'completed'
+                  ? `完成任务：${task.subject}`
+                  : `取消任务：${task.subject}`,
+                args: JSON.stringify({ taskId: task.id, status: task.status }),
+                detail,
+                toolName: 'TaskUpdate'
+              })
+            })
+          } catch {
+            // Keep the DelegateTasks row even when a legacy result cannot be expanded.
+          }
+        }
       }
     }
   })

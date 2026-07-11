@@ -233,6 +233,58 @@ describe('TaskUpdate execution log', () => {
     expect(item).toMatchObject({ toolName: 'TaskUpdate', target, status: 'success' })
   })
 
+  it('derives one TaskUpdate terminal log per completed delegated task', () => {
+    const timeline: ExecutionTimelineItem[] = [{
+      id: 'tool_delegate',
+      type: 'tool',
+      toolCall: {
+        id: 'delegate',
+        name: 'DelegateTasks',
+        args: JSON.stringify({ waves: [{ index: 0, taskIds: ['t1'] }] }),
+        status: 'success',
+        result: JSON.stringify({
+          ok: true,
+          data: {
+            source: 'task:s1',
+            status: 'completed',
+            waves: [],
+            terminalTasks: [{
+              id: 't1',
+              subject: 'Delegated task',
+              description: 'Completed by a Worker',
+              status: 'completed',
+              files: ['src/delegated.ts'],
+              acceptanceCriteria: ['Worker result is retained'],
+              verificationCommand: 'npm test'
+            }]
+          }
+        }),
+        startedAt: 100,
+        completedAt: 200,
+        sequence: 0
+      },
+      startedAt: 100,
+      updatedAt: 200,
+      sequence: 0
+    }]
+
+    const items = buildUnifiedTimeline(timeline, [], [], undefined, false)
+    const terminalItem = items.find((item) => item.id === 'delegate_task_t1')
+
+    expect(terminalItem).toMatchObject({
+      toolName: 'TaskUpdate',
+      target: '完成任务：Delegated task',
+      status: 'success'
+    })
+    expect(parseTaskUpdateDetail(terminalItem?.detail)).toMatchObject({
+      task: {
+        id: 't1',
+        description: 'Completed by a Worker',
+        files: ['src/delegated.ts']
+      }
+    })
+  })
+
   it('parses complete TaskUpdate detail and tolerates legacy reduced snapshots', () => {
     const [fullItem] = buildUnifiedTimeline(taskUpdateTimeline('completed'), [], [], undefined, false)
     expect(parseTaskUpdateDetail(fullItem.detail)).toMatchObject({
@@ -248,5 +300,27 @@ describe('TaskUpdate execution log', () => {
       ok: true,
       data: { task: { id: 't1', subject: 'Legacy', status: 'completed' } }
     }))).toMatchObject({ task: { subject: 'Legacy', status: 'completed' } })
+  })
+
+  it('drops malformed optional Task fields before structured rendering', () => {
+    const parsed = parseTaskUpdateDetail(JSON.stringify({
+      ok: true,
+      data: {
+        task: {
+          id: 't1',
+          subject: 'Legacy',
+          status: 'unknown',
+          files: 'src/task.ts',
+          acceptanceCriteria: [1, 2],
+          verificationCommand: false
+        }
+      }
+    }))
+
+    expect(parsed?.task).toMatchObject({ id: 't1', subject: 'Legacy' })
+    expect(parsed?.task.status).toBeUndefined()
+    expect(parsed?.task.files).toBeUndefined()
+    expect(parsed?.task.acceptanceCriteria).toBeUndefined()
+    expect(parsed?.task.verificationCommand).toBeUndefined()
   })
 })

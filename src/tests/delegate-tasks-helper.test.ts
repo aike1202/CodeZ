@@ -4,11 +4,13 @@ import os from 'os'
 import path from 'path'
 import { describe, expect, it } from 'vitest'
 import {
+  collectDelegatedTerminalTasks,
   compactIndependentSingletonWaves,
   validateSharedDelegationReadiness,
   resolveDelegateIsolation,
 } from '../main/agent/AgentRunner/delegateTasksHelper'
 import type { ExecUnit, ExecutionWave } from '../shared/types/parallel'
+import type { TaskItem } from '../shared/types/task'
 
 describe('resolveDelegateIsolation', () => {
   function initGitRepo(): string {
@@ -111,5 +113,32 @@ describe('validateSharedDelegationReadiness', () => {
     ]
 
     expect(validateSharedDelegationReadiness(units)).toBeNull()
+  })
+})
+
+describe('collectDelegatedTerminalTasks', () => {
+  const tasks: TaskItem[] = [
+    { id: 't1', subject: 'Completed now', description: 'detail', status: 'completed' },
+    { id: 't2', subject: 'Failed now', description: '', status: 'pending' },
+    { id: 't3', subject: 'Completed earlier', description: '', status: 'completed' }
+  ]
+
+  it('returns full snapshots only for tasks completed in this report', () => {
+    const terminalTasks = collectDelegatedTerminalTasks({
+      source: 'task:s1',
+      status: 'halted',
+      waves: [{
+        waveIndex: 0,
+        results: [
+          { stepId: 't1', status: 'completed', summary: 'done', filesModified: [] },
+          { stepId: 't2', status: 'failed', summary: '', filesModified: [], error: 'failed' }
+        ]
+      }],
+      haltedAt: { waveIndex: 0, failedStepIds: ['t2'] }
+    }, tasks)
+
+    expect(terminalTasks).toEqual([
+      expect.objectContaining({ id: 't1', subject: 'Completed now', status: 'completed' })
+    ])
   })
 })

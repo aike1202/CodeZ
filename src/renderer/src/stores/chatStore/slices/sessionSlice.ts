@@ -164,6 +164,8 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
       console.error('[sessionSlice.selectSession] Failed to load from disk:', err)
     }
 
+    if (seq !== _selectSessionSeq) return
+
     // Fallback: 从内存中查找
     const session = get().sessions.find((s) => s.id === sessionId)
     if (session) {

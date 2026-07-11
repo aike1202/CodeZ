@@ -2,8 +2,8 @@ import { orchestrateParallelExecution } from './parallelOrchestrator'
 import { TaskStore } from '../../services/TaskStore'
 import { WorktreeService } from '../../services/WorktreeService'
 import type { AgentRunConfig, AgentRunnerCallbacks } from './types'
-import type { ExecUnit, ExecutionGroupingResult, ExecutionWave } from '../../../shared/types/parallel'
-import type { TaskStatus } from '../../../shared/types/task'
+import type { ExecUnit, ExecutionGroupingResult, ExecutionWave, ParallelExecutionReport } from '../../../shared/types/parallel'
+import type { TaskItem, TaskStatus } from '../../../shared/types/task'
 
 export function resolveDelegateIsolation(
   requestedIsolation: unknown,
@@ -66,6 +66,21 @@ export function compactIndependentSingletonWaves(
   }
 
   return compacted
+}
+
+export function collectDelegatedTerminalTasks(
+  report: ParallelExecutionReport,
+  tasks: TaskItem[]
+): TaskItem[] {
+  const completedIds = new Set(
+    report.waves.flatMap((wave) => wave.results)
+      .filter((result) => result.status === 'completed')
+      .map((result) => result.stepId)
+  )
+
+  return tasks
+    .filter((task) => completedIds.has(task.id) && (task.status === 'completed' || task.status === 'cancelled'))
+    .map((task) => ({ ...task }))
 }
 
 /**
@@ -257,7 +272,14 @@ export async function handleDelegateTasks(
       callbacks
     )
 
-    const resultMsg = JSON.stringify({ ok: true, data: report })
+    const terminalTasks = collectDelegatedTerminalTasks(report, store.list(sessionId))
+    const resultMsg = JSON.stringify({
+      ok: true,
+      data: {
+        ...report,
+        terminalTasks
+      }
+    })
     callbacks.onToolEnd?.(toolCallId, resultMsg)
     return { role: 'tool' as const, tool_call_id: toolCallId, name, content: resultMsg }
   } catch (err: any) {
