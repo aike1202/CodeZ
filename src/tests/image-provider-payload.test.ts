@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { resolveOpenAIMessages } from '../main/services/chat/OpenAIProvider'
 import { buildAnthropicMessages } from '../main/services/chat/AnthropicProvider'
 import { buildGeminiContents } from '../main/services/chat/GeminiProvider'
+import type { ImageAttachment } from '../shared/types/attachment'
 
 const attachment = {
   id: 'img1', kind: 'image' as const, name: 'photo.jpg', mimeType: 'image/jpeg' as const,
@@ -24,7 +25,7 @@ describe('multimodal provider payloads', () => {
   it('preserves multiple-image order and omits empty OpenAI text blocks', async () => {
     const first = { ...attachment, id: 'first' }
     const second = { ...attachment, id: 'second' }
-    const resolveOrdered = async (item: typeof attachment) => ({
+    const resolveOrdered = async (item: ImageAttachment) => ({
       mimeType: 'image/jpeg' as const,
       dataBase64: item.id === 'first' ? 'FIRST' : 'SECOND'
     })

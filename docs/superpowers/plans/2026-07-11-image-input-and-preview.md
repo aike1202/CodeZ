@@ -1,6 +1,6 @@
 # Image Input and Preview Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Add durable photo attachments that appear inside the composer and chat history, open in a reusable preview, and are sent as real visual input through OpenAI, Anthropic, and Gemini protocols.
 
@@ -79,7 +79,7 @@
 - Produces: `ImageAttachment`, `DraftImageAttachment`, `ComposerImageAttachment`, `ResolvedImageAttachment`, `ResolveImageAttachment`, `ProviderImagePolicy`, `supportsImageInput(model)`, and `getProviderImagePolicy(apiFormat)`.
 - Consumers: Tasks 2-8 use these exact shared contracts.
 
-- [ ] **Step 1: Write the failing capability test**
+- [x] **Step 1: Write the failing capability test**
 
 ```ts
 // src/tests/image-capabilities.test.ts
@@ -110,13 +110,13 @@ describe('image capabilities', () => {
 })
 ```
 
-- [ ] **Step 2: Run the focused test and verify the missing module failure**
+- [x] **Step 2: Run the focused test and verify the missing module failure**
 
 Run: `npm test -- src/tests/image-capabilities.test.ts`
 
 Expected: FAIL because `shared/utils/imageCapabilities` does not exist.
 
-- [ ] **Step 3: Add the shared contracts and capability lookup**
+- [x] **Step 3: Add the shared contracts and capability lookup**
 
 ```ts
 // src/shared/types/attachment.ts
@@ -234,7 +234,7 @@ In `SettingsPanel.tsx`, add `supportsVision?: boolean` to `ModelFormData`, teach
 
 Use a quiet inline row in `SettingsPanel.css`; do not add a nested card.
 
-- [ ] **Step 4: Run focused tests and type checking**
+- [x] **Step 4: Run focused tests and type checking**
 
 Run: `npm test -- src/tests/image-capabilities.test.ts`
 
@@ -242,7 +242,7 @@ Run: `npm run typecheck`
 
 Expected: capability tests PASS and type checking PASS after all newly required optional fields compile.
 
-- [ ] **Step 5: Commit the shared contract**
+- [x] **Step 5: Commit the shared contract**
 
 ```powershell
 git add src/shared/types/attachment.ts src/shared/utils/imageCapabilities.ts src/shared/types/provider.ts src/shared/types/context.ts src/shared/types/session.ts src/shared/types/index.ts src/renderer/src/stores/chatStore/types.ts src/renderer/src/components/SettingsPanel.tsx src/renderer/src/components/SettingsPanel.css src/tests/image-capabilities.test.ts
@@ -262,7 +262,7 @@ git commit -m "Add image attachment contracts and model capability"
 - Consumes: Task 1 attachment and policy types.
 - Produces: `AttachmentService.importDraft`, `promoteDrafts`, `rollbackPromotion`, `discardDrafts`, `readPreview`, `prepareSessionImages`, `deleteSession`, and `cleanupOrphans`.
 
-- [ ] **Step 1: Write failing service tests with an injected codec**
+- [x] **Step 1: Write failing service tests with an injected codec**
 
 ```ts
 // src/tests/attachment-service.test.ts
@@ -334,13 +334,13 @@ describe('AttachmentService', () => {
 })
 ```
 
-- [ ] **Step 2: Run the test and verify the missing service failure**
+- [x] **Step 2: Run the test and verify the missing service failure**
 
 Run: `npm test -- src/tests/attachment-service.test.ts`
 
 Expected: FAIL because `AttachmentService` does not exist.
 
-- [ ] **Step 3: Implement the codec boundary and service**
+- [x] **Step 3: Implement the codec boundary and service**
 
 Define this testable codec contract in `AttachmentService.ts`:
 
@@ -387,13 +387,13 @@ async prepareSessionImages(
 
 It must reject a mismatched scope/session, enforce optional count/per-image limits and total bytes across the full request, optimize oversized images through the codec, and return a resolver backed by an in-memory map keyed by attachment ID. Count duplicate references as separate payload occurrences even when byte reads are deduplicated. Estimate Base64 contribution with `Math.ceil(sizeBytes / 3) * 4`; when the total exceeds `maxTotalBytes`, assign a proportional per-occurrence byte target, optimize offending images, recalculate, and throw `IMAGE_REQUEST_TOO_LARGE` only if the optimized set still cannot fit. The resolver returns `{ mimeType, dataBase64 }`; Base64 is never written. `cleanupOrphans(liveSessionIds, now = Date.now())` also removes draft directories whose metadata is older than 24 hours.
 
-- [ ] **Step 4: Run service tests**
+- [x] **Step 4: Run service tests**
 
 Run: `npm test -- src/tests/attachment-service.test.ts`
 
 Expected: all AttachmentService tests PASS.
 
-- [ ] **Step 5: Commit the attachment core**
+- [x] **Step 5: Commit the attachment core**
 
 ```powershell
 git add src/main/services/attachment/NativeImageCodec.ts src/main/services/AttachmentService.ts src/tests/attachment-service.test.ts
@@ -417,7 +417,7 @@ git commit -m "Add managed image attachment storage"
 - Consumes: `AttachmentService` from Task 2.
 - Produces: `window.api.attachment.*` and `ChatStreamHandle { stop, started }` for Task 6.
 
-- [ ] **Step 1: Write the failing session lifecycle test**
+- [x] **Step 1: Write the failing session lifecycle test**
 
 ```ts
 // src/tests/image-session-lifecycle.test.ts
@@ -443,13 +443,13 @@ describe('image session lifecycle', () => {
 })
 ```
 
-- [ ] **Step 2: Run the test and verify the missing helper failure**
+- [x] **Step 2: Run the test and verify the missing helper failure**
 
 Run: `npm test -- src/tests/image-session-lifecycle.test.ts`
 
 Expected: FAIL because `attachment.handlers` does not exist.
 
-- [ ] **Step 3: Register attachment IPC and preload methods**
+- [x] **Step 3: Register attachment IPC and preload methods**
 
 Add channels for import, promote, rollback, discard, and preview. Expose these exact methods:
 
@@ -486,7 +486,7 @@ export interface ChatStreamHandle {
 
 Resolve `started` only after `CHAT_STREAM_START` returns the requested stream ID. Reject it on IPC failure or mismatched ID. Preserve current cleanup behavior behind `stop`.
 
-- [ ] **Step 4: Wire startup orphan cleanup and permanent session deletion**
+- [x] **Step 4: Wire startup orphan cleanup and permanent session deletion**
 
 Export `getAttachmentService()` from the handler. After `initializeSessionStore()` in `main/index.ts`, run:
 
@@ -509,7 +509,7 @@ export async function deleteSessionWithAttachments(
 }
 ```
 
-- [ ] **Step 5: Run lifecycle, session, and type checks**
+- [x] **Step 5: Run lifecycle, session, and type checks**
 
 Run: `npm test -- src/tests/image-session-lifecycle.test.ts src/tests/session-store-runtime.test.ts`
 
@@ -517,7 +517,7 @@ Run: `npm run typecheck`
 
 Expected: focused tests PASS and preload/Main/Renderer types agree.
 
-- [ ] **Step 6: Commit IPC and lifecycle wiring**
+- [x] **Step 6: Commit IPC and lifecycle wiring**
 
 ```powershell
 git add src/main/ipc/attachment.handlers.ts src/shared/ipc/channels.ts src/preload/index.ts src/renderer/src/env.d.ts src/main/index.ts src/main/ipc/session.handlers.ts src/tests/image-session-lifecycle.test.ts
@@ -541,7 +541,7 @@ git commit -m "Wire image attachment IPC and lifecycle"
 - Consumes: `ImageAttachment` from Task 1.
 - Produces: ledger messages and Provider `ChatMessage.attachments` used by Task 5.
 
-- [ ] **Step 1: Add failing ledger and adapter tests**
+- [x] **Step 1: Add failing ledger and adapter tests**
 
 Add to `session-runtime-coordinator.test.ts`:
 
@@ -580,7 +580,7 @@ it('preserves user attachment references without changing tool messages', () => 
 })
 ```
 
-- [ ] **Step 2: Add the failing image budget test**
+- [x] **Step 2: Add the failing image budget test**
 
 ```ts
 it('includes conservative image tokens in current input and history', () => {
@@ -594,13 +594,13 @@ it('includes conservative image tokens in current input and history', () => {
 })
 ```
 
-- [ ] **Step 3: Run focused tests and verify failures**
+- [x] **Step 3: Run focused tests and verify failures**
 
 Run: `npm test -- src/tests/session-runtime-coordinator.test.ts src/tests/provider-message-adapter.test.ts src/tests/context-budget-service.test.ts`
 
 Expected: FAIL because turn input rejects empty text, attachments are not adapted, and image token APIs do not exist.
 
-- [ ] **Step 4: Thread attachments through runtime and context**
+- [x] **Step 4: Thread attachments through runtime and context**
 
 Add `attachments?: ImageAttachment[]` to `BeginTurnInput` and `RuntimeTurnHandle`. Change the guard to:
 
@@ -625,13 +625,13 @@ estimateImageTokens(image: Pick<ImageAttachment, 'width' | 'height'>): number {
 
 Pass `current.attachments` from `ModelContextBuilder` into assertion and measurement. Do not copy Base64 into any context type.
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run: `npm test -- src/tests/session-runtime-coordinator.test.ts src/tests/provider-message-adapter.test.ts src/tests/context-budget-service.test.ts`
 
 Expected: all focused tests PASS.
 
-- [ ] **Step 6: Commit ledger support**
+- [x] **Step 6: Commit ledger support**
 
 ```powershell
 git add src/main/services/context/SessionRuntimeCoordinator.ts src/main/services/context/ContextBudgetService.ts src/main/services/context/ModelContextBuilder.ts src/main/services/chat/ProviderMessageAdapter.ts src/tests/session-runtime-coordinator.test.ts src/tests/context-budget-service.test.ts src/tests/provider-message-adapter.test.ts
@@ -656,7 +656,7 @@ git commit -m "Persist image attachments in model context"
 - Consumes: `ChatMessage.attachments`, `ResolveImageAttachment`, and the request-level image preparation callback.
 - Produces: `resolveOpenAIMessages`, `buildAnthropicMessages`, and `buildGeminiContents`, each exported for deterministic tests.
 
-- [ ] **Step 1: Write failing Provider payload tests**
+- [x] **Step 1: Write failing Provider payload tests**
 
 ```ts
 // src/tests/image-provider-payload.test.ts
@@ -709,13 +709,13 @@ describe('multimodal provider payloads', () => {
 })
 ```
 
-- [ ] **Step 2: Run the Provider test and verify missing exports**
+- [x] **Step 2: Run the Provider test and verify missing exports**
 
 Run: `npm test -- src/tests/image-provider-payload.test.ts`
 
 Expected: FAIL because the three payload builder exports do not exist.
 
-- [ ] **Step 3: Add resolver plumbing without changing persisted content**
+- [x] **Step 3: Add resolver plumbing without changing persisted content**
 
 Keep the existing `ChatMessage.content` string and Task 1 `attachments` field, and add `resolveImage?: ResolveImageAttachment` to `ChatRequestConfig`. Add this callback to `AgentRunConfig`:
 
@@ -753,13 +753,13 @@ export async function resolveOpenAIMessages(
 
 Extract current Anthropic and Gemini message conversion loops into the exported async builders. Add image blocks only for user messages, omit empty text blocks, and keep all existing tool/function separation behavior byte-for-byte otherwise. Ensure Provider debug logs continue to print only message/content counts.
 
-- [ ] **Step 4: Run Provider and existing chat tests**
+- [x] **Step 4: Run Provider and existing chat tests**
 
 Run: `npm test -- src/tests/image-provider-payload.test.ts src/tests/chat-service.test.ts src/tests/chat-provider-usage.test.ts src/tests/provider-message-adapter.test.ts`
 
 Expected: multimodal and existing protocol tests PASS.
 
-- [ ] **Step 5: Commit Provider support**
+- [x] **Step 5: Commit Provider support**
 
 ```powershell
 git add src/shared/types/provider.ts src/main/services/chat/types.ts src/main/agent/AgentRunner/types.ts src/main/agent/AgentRunner/index.ts src/main/services/chat/OpenAIProvider.ts src/main/services/chat/AnthropicProvider.ts src/main/services/chat/GeminiProvider.ts src/tests/image-provider-payload.test.ts
@@ -782,7 +782,7 @@ git commit -m "Send images through multimodal provider payloads"
 - Consumes: attachment IPC, `ChatStreamHandle.started`, vision capability, ledger attachment input, and Provider resolver.
 - Produces: `handleSendMessage(...): Promise<boolean>` and attachment-aware user message state.
 
-- [ ] **Step 1: Extend the failing renderer payload test**
+- [x] **Step 1: Extend the failing renderer payload test**
 
 ```ts
 it('passes attachment references separately from text metadata', () => {
@@ -822,13 +822,13 @@ describe('image message state', () => {
 })
 ```
 
-- [ ] **Step 2: Run the focused tests and verify signature failures**
+- [x] **Step 2: Run the focused tests and verify signature failures**
 
 Run: `npm test -- src/tests/send-message-payload.test.ts src/tests/image-message-state.test.ts`
 
 Expected: FAIL because stream input and message actions do not accept attachments.
 
-- [ ] **Step 3: Add attachment-aware message state and rollback**
+- [x] **Step 3: Add attachment-aware message state and rollback**
 
 Use these exact store signatures:
 
@@ -854,7 +854,7 @@ export function removeMessagesFromState(
 }
 ```
 
-- [ ] **Step 4: Promote drafts and validate the selected model before sending**
+- [x] **Step 4: Promote drafts and validate the selected model before sending**
 
 Extend `buildChatStreamInput` with an attachment argument. In `handleSendMessage`:
 
@@ -905,7 +905,7 @@ if (!request.sessionId || (!hasText && !hasImages)) {
 
 Store `handle.stop` through the existing `setStreamCleanup` action; do not store the whole stream handle in Zustand.
 
-- [ ] **Step 5: Run send, runtime, and type checks**
+- [x] **Step 5: Run send, runtime, and type checks**
 
 Run: `npm test -- src/tests/send-message-payload.test.ts src/tests/image-message-state.test.ts src/tests/session-runtime-coordinator.test.ts src/tests/provider-message-adapter.test.ts`
 
@@ -913,7 +913,7 @@ Run: `npm run typecheck`
 
 Expected: focused tests and type checking PASS.
 
-- [ ] **Step 6: Commit the reliable send flow**
+- [x] **Step 6: Commit the reliable send flow**
 
 ```powershell
 git add src/main/ipc/chat.handlers.ts src/renderer/src/components/chat/hooks/useSendMessage.ts src/renderer/src/stores/chatStore/types.ts src/renderer/src/stores/chatStore/slices/messageSlice.ts src/tests/send-message-payload.test.ts src/tests/image-message-state.test.ts
@@ -943,7 +943,7 @@ git commit -m "Send managed image attachments with chat messages"
 - Consumes: attachment preload API and `handleSendMessage(): Promise<boolean>`.
 - Produces: reusable image grid/preview components also used by Task 8.
 
-- [ ] **Step 1: Write failing pure UI state tests**
+- [x] **Step 1: Write failing pure UI state tests**
 
 ```ts
 // src/tests/image-composer-state.test.ts
@@ -967,13 +967,13 @@ describe('image composer state', () => {
 })
 ```
 
-- [ ] **Step 2: Run the test and verify missing helper failure**
+- [x] **Step 2: Run the test and verify missing helper failure**
 
 Run: `npm test -- src/tests/image-composer-state.test.ts`
 
 Expected: FAIL because `imageAttachmentState.ts` does not exist.
 
-- [ ] **Step 3: Implement ordered imports and preview byte cleanup**
+- [x] **Step 3: Implement ordered imports and preview byte cleanup**
 
 `useImageAttachments` owns:
 
@@ -1041,7 +1041,7 @@ interface ImagePreviewModalProps {
 
 The grid lazily calls `readPreview(attachment, 'thumbnail')`, creates a Blob URL, and revokes it on replacement/unmount. The modal requests `'original'`, supports Escape, backdrop close, and previous/next buttons using existing icons.
 
-- [ ] **Step 4: Integrate the three input methods and send state**
+- [x] **Step 4: Integrate the three input methods and send state**
 
 Add a hidden `<input type="file" accept="image/*" multiple>` owned by `PromptArea`; `PlusActionMenu` receives `onAddPhotos` and invokes it from a new image-icon command.
 
@@ -1063,7 +1063,7 @@ Set `PromptAreaProps.onSend` to `(message: string, modelName: string, attachment
 
 Use `ImagePlus`, `X`, `ChevronLeft`, and `ChevronRight` from `lucide-react` for the new controls, with `title`/`aria-label` on icon-only buttons.
 
-- [ ] **Step 5: Run state tests, type checking, and build**
+- [x] **Step 5: Run state tests, type checking, and build**
 
 Run: `npm test -- src/tests/image-composer-state.test.ts src/tests/send-message-payload.test.ts`
 
@@ -1073,7 +1073,7 @@ Run: `npm run build`
 
 Expected: tests PASS, type checking PASS, and Electron/Vite build succeeds.
 
-- [ ] **Step 6: Commit composer UI**
+- [x] **Step 6: Commit composer UI**
 
 ```powershell
 git add src/renderer/src/components/PromptArea/hooks/useImageAttachments.ts src/renderer/src/components/chat/imageAttachmentState.ts src/renderer/src/components/chat/ImageAttachmentGrid.tsx src/renderer/src/components/chat/ImageAttachmentGrid.css src/renderer/src/components/chat/ImagePreviewModal.tsx src/renderer/src/components/chat/ImagePreviewModal.css src/renderer/src/components/PromptArea/index.tsx src/renderer/src/components/PromptArea/types.ts src/renderer/src/components/PromptArea/hooks/usePromptEditor.ts src/renderer/src/components/PromptArea/components/PlusActionMenu.tsx src/renderer/src/components/PromptArea/PromptArea.css src/renderer/src/components/chat/ChatArea/index.tsx src/tests/image-composer-state.test.ts
@@ -1099,7 +1099,7 @@ git commit -m "Add image attachments to the prompt composer"
 - Consumes: read-only `ImageAttachmentGrid`, `ImagePreviewModal`, and `PendingPromptDraft`.
 - Produces: durable log display and attachment-aware revert behavior.
 
-- [ ] **Step 1: Add failing restore and revert tests**
+- [x] **Step 1: Add failing restore and revert tests**
 
 Add this persistence case to `session-store-runtime.test.ts`:
 
@@ -1163,13 +1163,13 @@ it('revert restores text and images as one pending composer draft', async () => 
 
 The assertions keep the attachment reference in `pendingPrompt` while removing the reverted message from both projections.
 
-- [ ] **Step 2: Run restore tests and verify the pending prompt mismatch**
+- [x] **Step 2: Run restore tests and verify the pending prompt mismatch**
 
 Run: `npm test -- src/tests/task-session-restore.test.ts src/tests/session-store-runtime.test.ts`
 
 Expected: FAIL because revert still stores only a string and session typing drops attachments.
 
-- [ ] **Step 3: Render photos in user-message logs**
+- [x] **Step 3: Render photos in user-message logs**
 
 In `ChatMessageList`, render this inside `.user-message-bubble`:
 
@@ -1188,7 +1188,7 @@ In `ChatMessageList`, render this inside `.user-message-bubble`:
 
 Mount one `ImagePreviewModal` at list level. Do not create one modal per message. Keep the existing restore button position and message width stable. Add only the minimum bubble width/grid CSS needed; do not nest decorative cards.
 
-- [ ] **Step 4: Restore attachments into the composer on revert and session reload**
+- [x] **Step 4: Restore attachments into the composer on revert and session reload**
 
 Change store contracts to `pendingPrompt: PendingPromptDraft | null` and `setPendingPrompt: (prompt: PendingPromptDraft | null) => void`. Change `revertToMessage` to set `{ text: targetMessage.content || '', attachments: targetMessage.attachments || [] }`. In `sessionSlice`, wrap every healed interrupted-subagent string as `{ text: healed.prompt, attachments: [] }` before assigning it.
 
@@ -1205,7 +1205,7 @@ const normalizeMessage = (message: ChatMessage): ChatMessage => ({
 
 Do not read thumbnails during store hydration; image components load them lazily.
 
-- [ ] **Step 5: Run restore tests, type checking, and build**
+- [x] **Step 5: Run restore tests, type checking, and build**
 
 Run: `npm test -- src/tests/task-session-restore.test.ts src/tests/session-store-runtime.test.ts src/tests/image-composer-state.test.ts`
 
@@ -1215,7 +1215,7 @@ Run: `npm run build`
 
 Expected: restore/revert tests PASS, legacy sessions compile, and build succeeds.
 
-- [ ] **Step 6: Commit history and revert support**
+- [x] **Step 6: Commit history and revert support**
 
 ```powershell
 git add src/renderer/src/components/chat/ChatArea/components/ChatMessageList.tsx src/renderer/src/App.css src/renderer/src/stores/chatStore/types.ts src/renderer/src/stores/chatStore/slices/messageSlice.ts src/renderer/src/stores/chatStore/slices/sessionSlice.ts src/renderer/src/components/PromptArea/index.tsx src/renderer/src/components/PromptArea/hooks/usePromptEditor.ts src/tests/task-session-restore.test.ts src/tests/session-store-runtime.test.ts
@@ -1236,7 +1236,7 @@ git commit -m "Show image attachments in chat history"
 - Consumes: completed Tasks 1-8.
 - Produces: verified release-ready behavior; no new production abstraction.
 
-- [ ] **Step 1: Add explicit redaction and containment regressions**
+- [x] **Step 1: Add explicit redaction and containment regressions**
 
 Add tests that:
 
@@ -1284,13 +1284,13 @@ it('preserves multiple-image order and omits empty text blocks', async () => {
 })
 ```
 
-- [ ] **Step 2: Run the complete test suite**
+- [x] **Step 2: Run the complete test suite**
 
 Run: `npm test`
 
 Expected: every Vitest test PASS with no unhandled rejection or open-handle warning.
 
-- [ ] **Step 3: Run static and production build verification**
+- [x] **Step 3: Run static and production build verification**
 
 Run: `npm run typecheck`
 
@@ -1314,7 +1314,7 @@ Verify in the actual Electron window:
 8. Move the session to “最近删除”, restore it, and confirm images remain. Permanently delete it and confirm other sessions remain intact.
 9. Inspect application and prompt logs for attachment IDs only; confirm there are no Base64 bodies or absolute attachment paths.
 
-- [ ] **Step 5: Stop the dev process and commit final regressions**
+- [x] **Step 5: Stop the dev process and commit final regressions**
 
 Stop the Electron dev process cleanly with Ctrl+C, then run:
 
