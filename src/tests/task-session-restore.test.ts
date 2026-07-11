@@ -7,6 +7,21 @@ vi.mock('../renderer/src/stores/workspaceStore', () => ({
   }
 }))
 
+function imageAttachmentFixture() {
+  return {
+    id: 'img1',
+    kind: 'image' as const,
+    name: 'photo.jpg',
+    mimeType: 'image/jpeg' as const,
+    width: 800,
+    height: 600,
+    sizeBytes: 123,
+    storageKey: 'attachment:sessions/s1/img1',
+    scope: 'session' as const,
+    sessionId: 's1'
+  }
+}
+
 describe('chat store task session restore', () => {
   const unfinishedTasks: TaskItem[] = [
     { id: 't1', subject: 'Continue persistence work', description: '', status: 'in_progress' },
@@ -217,5 +232,38 @@ describe('chat store task session restore', () => {
     useChatStore.getState().setTasks(unfinishedTasks)
 
     expect(useChatStore.getState().sessions[0].tasks).toEqual(unfinishedTasks)
+  })
+
+  it('revert restores text and images as one pending composer draft', async () => {
+    const { useChatStore } = await import('../renderer/src/stores/chatStore')
+    const attachment = imageAttachmentFixture()
+    const message = {
+      id: 'u1',
+      role: 'user' as const,
+      content: 'inspect',
+      attachments: [attachment]
+    }
+    const session = {
+      id: 's1',
+      projectId: 'p1',
+      summary: 'x',
+      relativeTime: 'now',
+      messages: [message]
+    }
+    useChatStore.setState({
+      sessions: [session],
+      activeSessionId: 's1',
+      messages: [message],
+      pendingPrompt: null
+    } as any)
+
+    await useChatStore.getState().revertToMessage('u1')
+
+    expect(useChatStore.getState().pendingPrompt).toEqual({
+      text: 'inspect',
+      attachments: [attachment]
+    })
+    expect(useChatStore.getState().messages).toEqual([])
+    expect(useChatStore.getState().sessions[0].messages).toEqual([])
   })
 })

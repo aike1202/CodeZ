@@ -1,5 +1,5 @@
 import type { StateCreator } from 'zustand'
-import type { ChatState, ChatSession } from '../types'
+import type { ChatMessage, ChatState, ChatSession } from '../types'
 import { useWorkspaceStore } from '../../workspaceStore'
 
 function genId(): string {
@@ -11,6 +11,20 @@ let _selectSessionSeq = 0
 
 function hasUnfinishedTasks(tasks: Array<{ status: string }> | undefined): boolean {
   return Boolean(tasks?.some((task) => task.status === 'pending' || task.status === 'in_progress'))
+}
+
+const normalizeMessage = (message: ChatMessage): ChatMessage => ({
+  ...message,
+  attachments: Array.isArray(message.attachments)
+    ? message.attachments.map((attachment) => ({ ...attachment }))
+    : undefined
+})
+
+function normalizeSession(session: ChatSession): ChatSession {
+  return {
+    ...session,
+    messages: Array.isArray(session.messages) ? session.messages.map(normalizeMessage) : []
+  }
 }
 
 function buildInterruptedSubAgentPrompt(subAgent: any): string {
@@ -78,10 +92,13 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
       const sessions = await window.api.session.list()
       if (Array.isArray(sessions) && sessions.length > 0) {
         // 愈合崩溃残留：将 streaming:true 的消息标记为 interrupted
-        const healedSessions = sessions.map((session) => ({
-          ...session,
-          messages: healInterruptedSubAgents(session.messages).messages
-        }))
+        const healedSessions = sessions.map((session) => {
+          const normalized = normalizeSession(session)
+          return {
+            ...normalized,
+            messages: healInterruptedSubAgents(normalized.messages).messages
+          }
+        })
         set({ sessions: healedSessions })
       }
     } catch (err) {
@@ -119,9 +136,10 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
       // 防止竞态：IPC 返回时用户可能已切换到其他会话
       if (seq !== _selectSessionSeq) return
       if (freshSession) {
-        const healed = healInterruptedSubAgents(freshSession.messages)
+        const normalizedSession = normalizeSession(freshSession)
+        const healed = healInterruptedSubAgents(normalizedSession.messages)
         const healedSession = {
-          ...freshSession,
+          ...normalizedSession,
           messages: healed.messages
         }
         set((s) => {
@@ -138,7 +156,7 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
               : s.expandedCapsule === 'task'
                 ? null
                 : s.expandedCapsule,
-            pendingPrompt: healed.prompt || s.pendingPrompt,
+            pendingPrompt: healed.prompt ? { text: healed.prompt, attachments: [] } : s.pendingPrompt,
             activePlan: null
           }
         })
@@ -169,7 +187,8 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     // Fallback: 从内存中查找
     const session = get().sessions.find((s) => s.id === sessionId)
     if (session) {
-      const healed = healInterruptedSubAgents(session.messages)
+      const normalizedSession = normalizeSession(session)
+      const healed = healInterruptedSubAgents(normalizedSession.messages)
       set((s) => ({
         activeSessionId: sessionId,
         messages: healed.messages,
@@ -179,7 +198,7 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
           : s.expandedCapsule === 'task'
             ? null
             : s.expandedCapsule,
-        pendingPrompt: healed.prompt || s.pendingPrompt,
+        pendingPrompt: healed.prompt ? { text: healed.prompt, attachments: [] } : s.pendingPrompt,
         activePlan: null
       }))
       if (session.linkedPlanSlug) {

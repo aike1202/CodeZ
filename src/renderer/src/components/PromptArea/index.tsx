@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { ImagePlus } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
 import { useProviderStore } from '../../stores/providerStore'
@@ -67,10 +67,13 @@ export default function PromptArea({
     errors,
     addFiles,
     removeAttachment,
+    replaceAttachments,
     clearAcceptedDrafts
   } = useImageAttachments()
 
   const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const pendingPrompt = useChatStore((s) => s.pendingPrompt)
+  const setPendingPrompt = useChatStore((s) => s.setPendingPrompt)
   const streamCleanups = useChatStore((s) => s.streamCleanups)
   const isStreaming = activeSessionId ? !!streamCleanups[activeSessionId] : false
   const stopStream = activeSessionId ? streamCleanups[activeSessionId] ?? null : null
@@ -79,6 +82,7 @@ export default function PromptArea({
 
   const {
     text,
+    setText,
     viewRef,
     selectedModelName,
     setSelectedModelName,
@@ -101,6 +105,24 @@ export default function PromptArea({
     clearAcceptedDrafts,
     importing
   )
+
+  useEffect(() => {
+    if (!pendingPrompt) return
+    setText(pendingPrompt.text)
+    replaceAttachments(pendingPrompt.attachments)
+
+    const timer = window.setTimeout(() => {
+      viewRef.current?.focus()
+      viewRef.current?.dispatch({
+        selection: {
+          anchor: pendingPrompt.text.length,
+          head: pendingPrompt.text.length
+        }
+      })
+      setPendingPrompt(null)
+    }, 50)
+    return () => window.clearTimeout(timer)
+  }, [pendingPrompt, replaceAttachments, setPendingPrompt, setText, viewRef])
 
   const activeProviderId = useProviderStore((s) => s.activeProviderId)
   const providers = useProviderStore((s) => s.providers)

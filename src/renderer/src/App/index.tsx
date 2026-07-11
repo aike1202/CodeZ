@@ -107,7 +107,10 @@ export default function App(): React.ReactElement {
     }
 
     // 预填提示词（技能用胶囊格式 [$name](path)，与从菜单选技能时一致）
-    setPendingPrompt(`[$${triggerName}](${triggerName}) ${promptSuffix}`)
+    setPendingPrompt({
+      text: `[$${triggerName}](${triggerName}) ${promptSuffix}`,
+      attachments: []
+    })
 
     if (ws) {
       createSession(ws.id)

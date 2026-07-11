@@ -118,6 +118,14 @@
   scrollbar-width: thin;
 }
 
+.user-message-bubble--with-images {
+  min-width: 144px;
+}
+
+.user-message-bubble--with-images .image-attachment-grid + * {
+  margin-top: 8px;
+}
+
 .user-message-bubble::-webkit-scrollbar {
   width: 6px;
 }

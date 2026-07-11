@@ -50,24 +50,6 @@ export function usePromptEditor(
     supportsVision: selectedModel?.supportsVision === true
   })
 
-  const pendingPrompt = useChatStore((s) => s.pendingPrompt)
-  const setPendingPrompt = useChatStore((s) => s.setPendingPrompt)
-
-  useEffect(() => {
-    if (pendingPrompt) {
-      setText(pendingPrompt)
-      setPendingPrompt(null)
-      setTimeout(() => {
-        if (viewRef.current) {
-          viewRef.current.focus()
-          viewRef.current.dispatch({
-            selection: { anchor: pendingPrompt.length, head: pendingPrompt.length }
-          })
-        }
-      }, 50)
-    }
-  }, [pendingPrompt, setPendingPrompt])
-
   useEffect(() => {
     if (!activeSessionId) return
     const sessionProviderId = localStorage.getItem(`codez:session:${activeSessionId}:activeProviderId`)

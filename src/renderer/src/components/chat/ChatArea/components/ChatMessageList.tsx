@@ -8,6 +8,9 @@ import type { ChatMessage } from '../../../../stores/chatStore'
 import { useChatStore } from '../../../../stores/chatStore'
 import IconRestore from '../../../icons/IconRestore'
 import RevertPreviewModal from '../../../modals/RevertPreviewModal'
+import ImageAttachmentGrid from '../../ImageAttachmentGrid'
+import ImagePreviewModal from '../../ImagePreviewModal'
+import type { ImageAttachment } from '@shared/types/attachment'
 
 interface ChatMessageListProps {
   messages: ChatMessage[]
@@ -31,6 +34,10 @@ export function ChatMessageList({
   handleDiffClick
 }: ChatMessageListProps): React.ReactElement {
   const [previewData, setPreviewData] = React.useState<{ msgId: string, toDelete: string[], toRestore: string[], unknownStatus?: boolean } | null>(null)
+  const [imagePreview, setImagePreview] = React.useState<{
+    attachments: ImageAttachment[]
+    index: number
+  } | null>(null)
 
   return (
     <Stack gap={6} className="app-message-list">
@@ -46,10 +53,19 @@ export function ChatMessageList({
             </div>
           )
         }
+        const messageAttachments = msg.attachments || []
+        const hasText = Boolean(msg.content.trim())
         return msg.role === 'user' ? (
           <Flex key={msg.id} justify="end" className="w-full group animate-message-in" style={{ position: 'relative' }}>
-            <div className="user-message-bubble">
-              <MessageBody content={msg.content} onFileClick={handleFileClick} />
+            <div className={`user-message-bubble${messageAttachments.length ? ' user-message-bubble--with-images' : ''}`}>
+              {messageAttachments.length > 0 ? (
+                <ImageAttachmentGrid
+                  attachments={messageAttachments}
+                  mode="readonly"
+                  onOpen={(index) => setImagePreview({ attachments: messageAttachments, index })}
+                />
+              ) : null}
+              {hasText ? <MessageBody content={msg.content} onFileClick={handleFileClick} /> : null}
             </div>
             <div className="revert-btn-container">
               <button 
@@ -82,6 +98,14 @@ export function ChatMessageList({
           </Flex>
         )
       })}
+
+      {imagePreview ? (
+        <ImagePreviewModal
+          attachments={imagePreview.attachments}
+          initialIndex={imagePreview.index}
+          onClose={() => setImagePreview(null)}
+        />
+      ) : null}
       
       {previewData && (
         <RevertPreviewModal

@@ -1,7 +1,7 @@
 import type { TaskItem } from '../../../../shared/types/task'
 import type { PermissionApprovalResponse, PermissionRequest } from '../../../../shared/types/permission'
 import type { ContextBudgetSnapshot } from '../../../../shared/types/context'
-import type { ImageAttachment } from '../../../../shared/types/attachment'
+import type { ImageAttachment, PendingPromptDraft } from '../../../../shared/types/attachment'
 
 export type AgentStateType =
   | 'processing'
@@ -175,7 +175,7 @@ export interface ChatState {
   activePlan: any | null
   planReview: { plan: any; status: string } | null
   activePlanStreamId: string | null
-  pendingPrompt: string | null
+  pendingPrompt: PendingPromptDraft | null
   tasks: TaskItem[]
   contextBudgets: Record<string, ContextBudgetSnapshot | undefined>
   compactionStates: Record<string, CompactionUiState | undefined>
@@ -247,6 +247,6 @@ export interface ChatState {
   setActivePlanStreamId: (streamId: string | null) => void
   setContextBudget: (sessionId: string, snapshot: ContextBudgetSnapshot) => void
   setCompactionState: (sessionId: string, state: CompactionUiState) => void
-  setPendingPrompt: (prompt: string | null) => void
+  setPendingPrompt: (prompt: PendingPromptDraft | null) => void
   setTasks: (tasks: TaskItem[]) => void
 }

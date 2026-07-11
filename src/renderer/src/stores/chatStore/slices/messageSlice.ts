@@ -12,7 +12,7 @@ import type {
 } from '../types'
 import type { TaskItem } from '../../../../../shared/types/task'
 import { IPC_CHANNELS } from '../../../../../shared/ipc/channels'
-import type { ImageAttachment } from '../../../../../shared/types/attachment'
+import type { ImageAttachment, PendingPromptDraft } from '../../../../../shared/types/attachment'
 
 function genId(): string {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -40,7 +40,7 @@ export interface MessageSlice {
   activePlan: any | null
   planReview: { plan: any; status: string } | null
   activePlanStreamId: string | null
-  pendingPrompt: string | null
+  pendingPrompt: PendingPromptDraft | null
   tasks: TaskItem[]
 
   addUserMessage: (content: string, attachments?: ImageAttachment[]) => ChatMessage
@@ -86,7 +86,7 @@ export interface MessageSlice {
   setActivePlan: (plan: any | null) => void
   setPlanReview: (review: { plan: any; status: string } | null) => void
   setActivePlanStreamId: (streamId: string | null) => void
-  setPendingPrompt: (prompt: string | null) => void
+  setPendingPrompt: (prompt: PendingPromptDraft | null) => void
   setTasks: (tasks: TaskItem[]) => void
   revertToMessage: (msgId: string) => Promise<void>
   previewRevertMessage: (msgId: string) => Promise<{ toDelete: string[], toRestore: string[] } | null>
@@ -792,9 +792,6 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       }
     }
 
-    // Set pending prompt
-    set({ pendingPrompt: targetMessage.content || '' })
-
     // Slice messages to remove this message and everything after
     const newMessages = activeSession.messages.slice(0, msgIndex)
     
@@ -804,7 +801,11 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       )
       return { 
         messages: newMessages, 
-        sessions: nextSessions 
+        sessions: nextSessions,
+        pendingPrompt: {
+          text: targetMessage.content || '',
+          attachments: targetMessage.attachments?.map((attachment) => ({ ...attachment })) || []
+        }
       }
     })
     

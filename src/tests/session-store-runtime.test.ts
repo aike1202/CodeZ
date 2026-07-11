@@ -6,12 +6,49 @@ import { SessionStore } from '../main/services/SessionStore'
 
 let root = ''
 
+function imageAttachmentFixture() {
+  return {
+    id: 'img1',
+    kind: 'image' as const,
+    name: 'photo.jpg',
+    mimeType: 'image/jpeg' as const,
+    width: 800,
+    height: 600,
+    sizeBytes: 123,
+    storageKey: 'attachment:sessions/s1/img1',
+    scope: 'session' as const,
+    sessionId: 's1'
+  }
+}
+
 afterEach(async () => {
   if (root) await rm(root, { recursive: true, force: true })
   root = ''
 })
 
 describe('SessionStore runtime schema', () => {
+  it('round-trips image metadata while legacy messages remain valid', async () => {
+    root = await mkdtemp(path.join(os.tmpdir(), 'codez-session-'))
+    const file = path.join(root, 'sessions.json')
+    const store = new SessionStore(file)
+    const attachment = imageAttachmentFixture()
+    await store.save({
+      id: 's1',
+      projectId: 'p1',
+      summary: 'x',
+      relativeTime: 'now',
+      messages: [
+        { id: 'u1', role: 'user', content: 'inspect', attachments: [attachment] },
+        { id: 'a1', role: 'agent', content: 'legacy-compatible' }
+      ]
+    })
+
+    const reloaded = new SessionStore(file)
+    await reloaded.load()
+    expect(reloaded.get('s1')?.messages[0].attachments).toEqual([attachment])
+    expect(reloaded.get('s1')?.messages[1]).not.toHaveProperty('attachments')
+  })
+
   it('updates a runtime reference without changing UI messages', async () => {
     root = await mkdtemp(path.join(os.tmpdir(), 'codez-session-'))
     const file = path.join(root, 'sessions.json')
