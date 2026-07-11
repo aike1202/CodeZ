@@ -9,6 +9,20 @@ const normalized = (value: Partial<NormalizedModelMessage>): NormalizedModelMess
 })
 
 describe('ProviderMessageAdapter', () => {
+  it('preserves user attachment references without changing content', () => {
+    const attachment = {
+      id: 'img1', kind: 'image' as const, name: 'photo.jpg', mimeType: 'image/jpeg' as const,
+      width: 800, height: 600, sizeBytes: 123, storageKey: 'attachment:sessions/s1/img1',
+      scope: 'session' as const, sessionId: 's1'
+    }
+    const items: ModelContextItem[] = [
+      { kind: 'user', message: normalized({ role: 'user', content: 'inspect', attachments: [attachment] }) }
+    ]
+    expect(ProviderMessageAdapter.toChatMessages(items)).toEqual([
+      { role: 'user', content: 'inspect', attachments: [attachment] }
+    ])
+  })
+
   it('preserves assistant tool calls followed by matching tool results', () => {
     const items: ModelContextItem[] = [
       { kind: 'system', message: { role: 'system', content: 'system' } },

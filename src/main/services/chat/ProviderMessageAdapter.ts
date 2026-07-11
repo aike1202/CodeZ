@@ -22,7 +22,13 @@ function normalizedToChatMessage(message: NormalizedModelMessage): ChatMessage {
       name: message.name
     }
   }
-  return { role: 'user', content: message.content }
+  return {
+    role: 'user',
+    content: message.content,
+    ...(message.attachments?.length
+      ? { attachments: message.attachments.map((attachment) => ({ ...attachment })) }
+      : {})
+  }
 }
 
 export class ProviderMessageAdapter {

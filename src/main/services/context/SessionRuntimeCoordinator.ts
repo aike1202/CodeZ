@@ -6,6 +6,7 @@ import type {
   VersionedResumeState
 } from '../../../shared/types'
 import type { AgentStopReason, ProviderTokenUsage } from '../../../shared/types/provider'
+import type { ImageAttachment } from '../../../shared/types/attachment'
 import { ModelLedgerStore } from './ModelLedgerStore'
 import { ModelHistoryNormalizer } from './ModelHistoryNormalizer'
 
@@ -16,6 +17,7 @@ export interface BeginTurnInput {
   providerId?: string
   model?: string
   commandMetadata?: unknown
+  attachments?: ImageAttachment[]
 }
 
 export interface RuntimeTurnHandle {
@@ -24,6 +26,7 @@ export interface RuntimeTurnHandle {
   turnId: string
   userMessageId: string
   inputText: string
+  attachments?: ImageAttachment[]
 }
 
 interface ActiveTurn extends RuntimeTurnHandle {
@@ -60,7 +63,7 @@ export class SessionRuntimeCoordinator {
   constructor(readonly ledger: ModelLedgerStore) {}
 
   async beginTurn(input: BeginTurnInput): Promise<RuntimeTurnHandle> {
-    if (!input.text.trim()) throw new Error('Turn input is empty')
+    if (!input.text.trim() && !input.attachments?.length) throw new Error('Turn input is empty')
     const key = this.scopeKey(input.sessionId, input.contextScopeId)
     if (this.activeTurns.has(key)) throw new Error(`${key} already has an active turn`)
 
@@ -71,7 +74,8 @@ export class SessionRuntimeCoordinator {
       role: 'user',
       content: input.text,
       status: 'complete',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      attachments: input.attachments?.map((attachment) => ({ ...attachment }))
     }
     await this.ledger.append(input.sessionId, input.contextScopeId, 'user_message', {
       message,
@@ -86,6 +90,7 @@ export class SessionRuntimeCoordinator {
       turnId,
       userMessageId: message.id,
       inputText: input.text,
+      attachments: input.attachments?.map((attachment) => ({ ...attachment })),
       pendingCalls: new Map(),
       closed: false
     }
@@ -253,6 +258,13 @@ export class SessionRuntimeCoordinator {
 
   private publicHandle(turn: ActiveTurn): RuntimeTurnHandle {
     const { sessionId, contextScopeId, turnId, userMessageId, inputText } = turn
-    return { sessionId, contextScopeId, turnId, userMessageId, inputText }
+    return {
+      sessionId,
+      contextScopeId,
+      turnId,
+      userMessageId,
+      inputText,
+      attachments: turn.attachments?.map((attachment) => ({ ...attachment }))
+    }
   }
 }

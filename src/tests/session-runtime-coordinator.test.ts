@@ -18,6 +18,21 @@ async function fixture() {
 }
 
 describe('SessionRuntimeCoordinator', () => {
+  it('allows an image-only turn and persists attachment metadata', async () => {
+    const { ledger, runtime } = await fixture()
+    const attachment = {
+      id: 'img1', kind: 'image' as const, name: 'photo.jpg', mimeType: 'image/jpeg' as const,
+      width: 800, height: 600, sizeBytes: 123, storageKey: 'attachment:sessions/s1/img1',
+      scope: 'session' as const, sessionId: 's1'
+    }
+    const turn = await runtime.beginTurn({
+      sessionId: 's1', contextScopeId: 'main', text: '', attachments: [attachment]
+    })
+    const message = (await ledger.load('s1')).scopes.main.activeMessages[0]
+    expect(message.attachments).toEqual([attachment])
+    await runtime.completeTurn(turn, { stopReason: 'stop' })
+  })
+
   it('persists user, assistant, tool, and completion in protocol order', async () => {
     const { ledger, runtime } = await fixture()
     const turn = await runtime.beginTurn({

@@ -50,6 +50,20 @@ describe('ContextBudgetService', () => {
     expect(snapshot.historyVersion).toBe(3)
   })
 
+  it('includes conservative image tokens in current input and history', () => {
+    const image = { width: 1024, height: 1024 }
+    expect(service.estimateImageTokens(image)).toBeGreaterThan(0)
+    const snapshot = service.measureRequest({
+      capabilities: { contextWindowTokens: 20_000 },
+      systemPrompt: '',
+      recentHistory: [],
+      currentInput: '',
+      currentAttachments: [image],
+      historyVersion: 1
+    })
+    expect(snapshot.currentInputTokens).toBe(service.estimateImageTokens(image))
+  })
+
   it('replaces the estimate with provider-reported input usage', () => {
     const estimated = service.measureRequest({
       capabilities: {

@@ -6,6 +6,7 @@ import type {
   ContextBudgetSnapshot,
   ContextPressureLevel
 } from '../../../shared/types/context'
+import type { ImageAttachment } from '../../../shared/types/attachment'
 
 const CJK_REGEX = /[\u3400-\u9fff\u3000-\u303f\uff00-\uffef]/g
 
@@ -33,6 +34,7 @@ export interface MeasureRequestInput {
   recentHistory?: unknown[]
   rawHistoryTokens?: number
   currentInput: string
+  currentAttachments?: Array<Pick<ImageAttachment, 'width' | 'height'>>
   historyVersion: number
   providerUsage?: ProviderTokenUsage
   reasoningBudgetTokens?: number
@@ -47,7 +49,17 @@ export class ContextBudgetService {
   }
 
   estimateValueTokens(value: unknown): number {
-    return this.estimateStringTokens(serialize(value))
+    const attachments = value && typeof value === 'object' && Array.isArray((value as any).attachments)
+      ? (value as any).attachments as Array<Pick<ImageAttachment, 'width' | 'height'>>
+      : []
+    return this.estimateStringTokens(serialize(value)) + attachments.reduce(
+      (total, image) => total + this.estimateImageTokens(image), 0
+    )
+  }
+
+  estimateImageTokens(image: Pick<ImageAttachment, 'width' | 'height'>): number {
+    const tiles = Math.max(1, Math.ceil(image.width / 512) * Math.ceil(image.height / 512))
+    return 85 + tiles * 170
   }
 
   resolveLimits(
@@ -110,7 +122,10 @@ export class ContextBudgetService {
     const recentHistoryTokens = (input.recentHistory || []).reduce<number>(
       (total, message) => total + this.estimateValueTokens(message), 0
     )
-    const currentInputTokens = this.estimateStringTokens(input.currentInput)
+    const currentInputTokens = this.estimateStringTokens(input.currentInput) +
+      (input.currentAttachments || []).reduce(
+        (total, image) => total + this.estimateImageTokens(image), 0
+      )
     let protocolTokens = 4 * ((input.recentHistory?.length || 0) + 1)
     let totalInputTokens = systemPromptTokens + toolSchemaTokens + instructionTokens +
       protocolTokens + summaryTokens + recentHistoryTokens + currentInputTokens
@@ -163,8 +178,14 @@ export class ContextBudgetService {
     }
   }
 
-  assertCurrentInputFits(currentInput: string, capabilities: ModelContextCapabilities): void {
-    const tokens = this.estimateStringTokens(currentInput)
+  assertCurrentInputFits(
+    currentInput: string,
+    capabilities: ModelContextCapabilities,
+    attachments: Array<Pick<ImageAttachment, 'width' | 'height'>> = []
+  ): void {
+    const tokens = this.estimateStringTokens(currentInput) + attachments.reduce(
+      (total, image) => total + this.estimateImageTokens(image), 0
+    )
     const { hardInputLimit } = this.resolveLimits(capabilities)
     if (tokens > hardInputLimit) {
       throw Object.assign(new Error('Current input exceeds the model input limit'), {

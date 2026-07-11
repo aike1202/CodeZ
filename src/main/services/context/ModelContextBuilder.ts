@@ -50,13 +50,17 @@ export class ModelContextBuilder {
   ) {}
 
   async build(request: BuildModelContextRequest): Promise<BuiltModelContext> {
-    this.budgetService.assertCurrentInputFits(request.currentInput, request.capabilities)
     const state = await this.ledger.load(request.sessionId)
     const scope = state.scopes[request.contextScopeId]
     if (!scope) throw new Error(`Context scope not found: ${request.contextScopeId}`)
 
     const current = scope.activeMessages.find((message) => message.id === request.currentInputMessageId)
     if (!current || current.role !== 'user') throw new Error('Current input is not durably recorded')
+    this.budgetService.assertCurrentInputFits(
+      request.currentInput,
+      request.capabilities,
+      current.attachments
+    )
     let activeMessages = scope.activeMessages
     let recentHistory = activeMessages.filter((message) => message.id !== current.id)
     const rawHistoryTokens = recentHistory.reduce(
@@ -69,7 +73,7 @@ export class ModelContextBuilder {
       : ''
 
     let budget = this.measure(
-      request, recentHistory, summary, resume, scope.historyVersion, rawHistoryTokens
+      request, recentHistory, summary, resume, scope.historyVersion, rawHistoryTokens, current.attachments
     )
     const maxSingleToolTokens = Math.min(
       8_000,
@@ -84,7 +88,7 @@ export class ModelContextBuilder {
       activeMessages = emergencyPrune.messages
       recentHistory = activeMessages.filter((message) => message.id !== current.id)
       budget = this.measure(
-        request, recentHistory, summary, resume, scope.historyVersion, rawHistoryTokens
+        request, recentHistory, summary, resume, scope.historyVersion, rawHistoryTokens, current.attachments
       )
     }
     if (budget.pressureLevel === 'prune' || budget.pressureLevel === 'compact' || budget.pressureLevel === 'overflow') {
@@ -103,7 +107,7 @@ export class ModelContextBuilder {
       }).messages
       recentHistory = activeMessages.filter((message) => message.id !== current.id)
       budget = this.measure(
-        request, recentHistory, summary, resume, scope.historyVersion, rawHistoryTokens
+        request, recentHistory, summary, resume, scope.historyVersion, rawHistoryTokens, current.attachments
       )
     }
 
@@ -154,7 +158,8 @@ export class ModelContextBuilder {
     summary: string,
     resume: string,
     historyVersion: number,
-    rawHistoryTokens: number
+    rawHistoryTokens: number,
+    currentAttachments: NormalizedModelMessage['attachments']
   ): ContextBudgetSnapshot {
     return this.budgetService.measureRequest({
       capabilities: request.capabilities,
@@ -165,6 +170,7 @@ export class ModelContextBuilder {
       recentHistory,
       rawHistoryTokens,
       currentInput: request.currentInput,
+      currentAttachments,
       historyVersion,
       providerUsage: request.providerUsage,
       reasoningBudgetTokens: request.reasoningBudgetTokens,
