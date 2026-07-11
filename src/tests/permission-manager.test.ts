@@ -15,6 +15,41 @@ describe('PermissionManager', () => {
     expect((await manager.evaluateToolCall('Edit', { file_path: path.join(workspaceRoot, 'a.ts') }, context('auto'))).action).toBe('allow')
   })
 
+  it('recognizes a restricted subagent launch as read-only orchestration', async () => {
+    const decision = await manager.evaluateToolCall(
+      'SubAgentRunner',
+      { subagent_type: 'Research', prompt: 'inspect permissions' },
+      context('auto')
+    )
+
+    expect(decision).toMatchObject({
+      action: 'allow',
+      permission: 'read',
+      ruleId: 'tool.subagent.restricted',
+      normalizedPattern: 'SubAgentRunner:Research'
+    })
+  })
+
+  it.each([
+    ['DelegateTasks', 'tool.delegation.execute'],
+    ['PushNotification', 'tool.notification.send']
+  ] as const)('recognizes %s as a known external effect', async (toolName, ruleId) => {
+    const decision = await manager.evaluateToolCall(toolName, {}, context('auto'))
+
+    expect(decision).toMatchObject({
+      action: 'ask',
+      permission: 'external_effect',
+      ruleId
+    })
+    expect(decision.ruleId).not.toBe('unknown.tool')
+  })
+
+  it('keeps genuinely unregistered tools in the unknown fallback', async () => {
+    const decision = await manager.evaluateToolCall('NotRegisteredTool', {}, context('auto'))
+
+    expect(decision).toMatchObject({ permission: 'unknown', ruleId: 'unknown.tool' })
+  })
+
   it('asks for network commands only in auto mode', async () => {
     expect((await manager.evaluateToolCall('Bash', { command: 'npm install react' }, context('auto'))).action).toBe('ask')
     expect((await manager.evaluateToolCall('Bash', { command: 'npm install react' }, context('full-access'))).action).toBe('allow')

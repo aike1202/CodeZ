@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import * as path from 'path'
 import { SystemPromptService } from '../main/services/SystemPromptService'
+import { ToolPolicyModule } from '../main/services/prompts/execution/ToolPolicy'
+import { InvestigationModule } from '../main/services/prompts/execution/Investigation'
 
 // Mock all dependencies
 vi.mock('../main/services/GitContextService', () => ({
@@ -123,9 +125,28 @@ describe('SystemPromptService', () => {
       expect(prompt).toContain('Read one or more known files or ranges')
       expect(prompt).toContain('merge adjacent or overlapping ranges')
       expect(prompt).toContain('only when the next target depends on the current result')
-      expect(prompt).toContain('only when the file changed or context trimming removed')
+      expect(prompt).toContain('After a file changes, re-read it without an arbitrary range')
       expect(prompt).toContain('Plan reads, batch known targets, then edit')
       expect(prompt).not.toContain('Read twice, edit once')
+    })
+
+    it('should omit arbitrary ranges on initial reads', async () => {
+      const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
+      expect(prompt).toContain('For an initial read without an evidence-based relevant range, omit offset and limit')
+      expect(prompt).toContain('A known relevant range is permitted even on the first read')
+      expect(prompt).toContain('Do not probe arbitrary first 50 or 100 lines')
+      expect(prompt).toContain('marked truncated or reached its documented content-budget boundary')
+      expect(prompt).toContain('context trimming removed the earlier content')
+
+      const moduleTexts = await Promise.all([
+        ToolPolicyModule.build(mockCtx),
+        InvestigationModule.build(mockCtx),
+      ])
+      for (const text of moduleTexts) {
+        expect(text).toContain('For an initial read without an evidence-based relevant range')
+        expect(text).toContain('A known relevant range is permitted even on the first read')
+        expect(text).toContain('marked truncated or reached its documented content-budget boundary')
+      }
     })
 
     it('should contain memory description', async () => {

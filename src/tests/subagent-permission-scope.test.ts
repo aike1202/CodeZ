@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import * as path from 'path'
-import { checkSubAgentToolPermission } from '../main/agent/SubAgentManager'
+import { authorizeSubAgentToolCall, checkSubAgentToolPermission } from '../main/agent/SubAgentManager'
 import type { SubAgentPermissionScope } from '../main/agent/SubAgentManager'
 
 const WS = path.resolve('/tmp/codez-ws')
@@ -35,6 +35,38 @@ describe('checkSubAgentToolPermission', () => {
     it('delegates allowed shell commands to the runtime permission policy', () => {
       expect(checkSubAgentToolPermission('Bash', { command: 'npm test' }, WS, scope)).toBeNull()
       expect(checkSubAgentToolPermission('PowerShell', { command: 'npm run tauri dev' }, WS, scope)).toBeNull()
+    })
+
+    it('allows ordinary shell commands after runtime permission evaluation', async () => {
+      await expect(authorizeSubAgentToolCall(
+        'Bash',
+        { command: 'git status' },
+        WS,
+        'session-a',
+        scope
+      )).resolves.toBeNull()
+    })
+
+    it('routes Hardline shell commands through the parent approval handler', async () => {
+      const approve = vi.fn().mockResolvedValue(false)
+      const denial = await authorizeSubAgentToolCall(
+        'Bash',
+        { command: 'sudo rm -rf /var/lib/example' },
+        WS,
+        'session-a',
+        scope,
+        approve,
+        'subagent-a'
+      )
+
+      expect(denial).toContain('User denied permission')
+      expect(approve).toHaveBeenCalledOnce()
+      expect(approve.mock.calls[0][0]).toMatchObject({
+        toolName: 'Bash',
+        hardline: true,
+        agentId: 'subagent-a',
+        allowedScopes: ['once']
+      })
     })
   })
 

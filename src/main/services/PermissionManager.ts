@@ -22,6 +22,7 @@ import { getPermissionAuditLog } from './permission/PermissionAuditLog'
 import { getPermissionRuleStore } from './permission/PermissionRuleStore'
 import { ShellAnalysisService } from './permission/ShellAnalysisService'
 import type { SmartApprovalClient } from './permission/SmartApprovalService'
+import { getWorkspacePermissionStore } from './permission/workspacePermissionStore'
 import { classifyKnownCommand, type CommandAssessment } from './permission/commandPolicies'
 import type { PermissionShellKind } from './permission/operationTypes'
 
@@ -39,9 +40,21 @@ export interface PermissionEvaluationContext {
   smartApprovalClient?: SmartApprovalClient | null
 }
 
+export type PermissionRequestHandler = (request: PermissionRequest) => Promise<boolean | PermissionApprovalResponse>
+
+export interface PermissionToolAuthorization {
+  allowed: boolean
+  requestId: string
+  error?: string
+}
+
 const READ_ONLY_TOOLS = new Set(['Read', 'list_files', 'Glob', 'Grep', 'Skill', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet', 'update_resume_state', 'AskUserQuestion'])
 const WRITE_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
 const WEB_TOOLS = new Set(['WebSearch', 'WebFetch'])
+const EXTERNAL_EFFECT_TOOLS = new Map<string, { reason: string; ruleId: string; riskLevel: PermissionRiskLevel }>([
+  ['DelegateTasks', { reason: '并行执行计划步骤', ruleId: 'tool.delegation.execute', riskLevel: 2 }],
+  ['PushNotification', { reason: '发送系统通知', ruleId: 'tool.notification.send', riskLevel: 1 }]
+])
 
 function commandFromArgs(args: any): string {
   return args?.command ?? args?.commandLine ?? args?.CommandLine ?? ''
@@ -108,9 +121,33 @@ export class PermissionManager {
     if (READ_ONLY_TOOLS.has(toolName)) {
       return this.evaluateCapability('read', toolName, '工作区只读工具', `tool.read.${toolName}`, 0, context)
     }
+    if (toolName === 'SubAgentRunner') {
+      const subagentType = typeof (args as any)?.subagent_type === 'string'
+        ? (args as any).subagent_type.trim() || 'unknown'
+        : 'unknown'
+      return this.evaluateCapability(
+        'read',
+        `SubAgentRunner:${subagentType}`,
+        '启动受限子代理',
+        'tool.subagent.restricted',
+        1,
+        context
+      )
+    }
     if (WRITE_TOOLS.has(toolName)) return this.evaluateWrite(toolName, args, context)
     if (WEB_TOOLS.has(toolName)) {
       return this.evaluateCapability('network', toolName, '访问外部网络', `tool.network.${toolName}`, 2, context)
+    }
+    const externalEffect = EXTERNAL_EFFECT_TOOLS.get(toolName)
+    if (externalEffect) {
+      return this.evaluateCapability(
+        'external_effect',
+        toolName,
+        externalEffect.reason,
+        externalEffect.ruleId,
+        externalEffect.riskLevel,
+        context
+      )
     }
     if (toolName === 'rollback_last_edit') {
       return this.evaluateCapability('rollback', toolName, '回滚工作区修改', 'tool.rollback', 3, context)
@@ -347,5 +384,75 @@ export class PermissionManager {
       decision,
       approvalResponse
     })
+  }
+}
+
+export async function authorizePermissionToolCall(
+  toolName: string,
+  parsedArgs: unknown,
+  workspaceRoot: string,
+  onPermissionRequest?: PermissionRequestHandler,
+  smartApprovalClient?: SmartApprovalClient | null,
+  sessionId?: string,
+  agentId?: string
+): Promise<PermissionToolAuthorization> {
+  const permissionManager = PermissionManager.getInstance()
+  const context: PermissionEvaluationContext = {
+    workspaceRoot,
+    cwd: workspaceRoot,
+    platform: process.platform,
+    shellKind: toolName === 'PowerShell' ? 'powershell' : toolName === 'Bash' ? 'bash' : undefined,
+    mode: await getWorkspacePermissionStore().getMode(workspaceRoot),
+    smartApprovalClient,
+    sessionId,
+    agentId
+  }
+  const decision = await permissionManager.evaluateToolCall(toolName, parsedArgs, context)
+  await permissionManager.audit(toolName, decision, context)
+  const request = permissionManager.createPermissionRequest(toolName, parsedArgs, context, decision)
+
+  if (decision.action === 'allow') {
+    return await permissionManager.revalidate(decision)
+      ? { allowed: true, requestId: request.id }
+      : { allowed: false, requestId: request.id, error: 'Error: Permission inputs changed before execution.' }
+  }
+  if (decision.action === 'deny') {
+    return {
+      allowed: false,
+      requestId: request.id,
+      error: 'Error: Tool execution denied by security policy.'
+    }
+  }
+  if (!onPermissionRequest) {
+    return {
+      allowed: false,
+      requestId: request.id,
+      error: 'Error: Tool execution denied. No approval handler registered.'
+    }
+  }
+
+  try {
+    const rawResponse = await onPermissionRequest(request)
+    const response: PermissionApprovalResponse = typeof rawResponse === 'boolean'
+      ? { approved: rawResponse, scope: 'once' }
+      : rawResponse
+    const valid = response.approved && await permissionManager.revalidate(decision)
+    if (valid) await permissionManager.rememberApproval(request, response, context)
+    await permissionManager.audit(toolName, decision, context, response)
+    return valid
+      ? { allowed: true, requestId: request.id }
+      : {
+          allowed: false,
+          requestId: request.id,
+          error: response.approved
+            ? 'Error: Permission inputs changed before execution.'
+            : 'Error: User denied permission for this operation.'
+        }
+  } catch (error: any) {
+    return {
+      allowed: false,
+      requestId: request.id,
+      error: `Error: Permission approval failed: ${error?.message || String(error)}`
+    }
   }
 }

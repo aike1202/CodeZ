@@ -32,7 +32,17 @@ describe('AgentRunner tool result helpers', () => {
     expect(fatalError.suggestion).toBeUndefined()
   })
 
-  it.each(['SubAgentRunner', 'DelegateTasks'])(
+  it('受限 SubAgentRunner 不需要审批处理器', async () => {
+    const result = await authorizeToolCall(
+      'SubAgentRunner',
+      { subagent_type: 'Research', prompt: 'inspect permissions' },
+      '/tmp/codez-workspace'
+    )
+
+    expect(result.allowed).toBe(true)
+  })
+
+  it.each(['DelegateTasks'])(
     '特殊工具 %s 没有审批处理器时 fail-closed',
     async (toolName) => {
       const result = await authorizeToolCall(toolName, {}, '/tmp/codez-workspace')
@@ -42,7 +52,7 @@ describe('AgentRunner tool result helpers', () => {
     }
   )
 
-  it.each(['SubAgentRunner', 'DelegateTasks'])(
+  it.each(['DelegateTasks'])(
     '特殊工具 %s 仅在用户明确批准后放行',
     async (toolName) => {
       const approve = vi.fn().mockResolvedValue(true)
@@ -50,9 +60,27 @@ describe('AgentRunner tool result helpers', () => {
 
       expect(result.allowed).toBe(true)
       expect(approve).toHaveBeenCalledOnce()
-      expect(approve.mock.calls[0][0]).toMatchObject({ toolName, args: { task: 'test' } })
+      expect(approve.mock.calls[0][0]).toMatchObject({
+        toolName,
+        args: { task: 'test' },
+        permission: 'external_effect',
+        ruleId: 'tool.delegation.execute'
+      })
     }
   )
+
+  it('受限 SubAgentRunner 不触发审批回调', async () => {
+    const approve = vi.fn().mockResolvedValue(true)
+    const result = await authorizeToolCall(
+      'SubAgentRunner',
+      { subagent_type: 'Research', prompt: 'inspect permissions' },
+      '/tmp/codez-workspace',
+      approve
+    )
+
+    expect(result.allowed).toBe(true)
+    expect(approve).not.toHaveBeenCalled()
+  })
 
   it('passes the active session id into permission requests', async () => {
     const approve = vi.fn().mockResolvedValue(true)

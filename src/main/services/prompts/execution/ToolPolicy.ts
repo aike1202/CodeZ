@@ -21,6 +21,8 @@ Prefer: search before read, read before edit, verify before complete.
 - When known targets exceed one call's capacity, dispatch the additional independent Read calls in the same response.
 - Split reads across model loops only when the next target depends on the current result.
 - Merge adjacent or overlapping ranges from the same file before calling Read.
+- For an initial read without an evidence-based relevant range, omit offset and limit. A known relevant range is permitted even on the first read.
+- Do not probe arbitrary first 50 or 100 lines. Use a range only for such a known range, when the default Read result was marked truncated or reached its documented content-budget boundary, or when context trimming removed the earlier content.
 
 ## Exceptions
 - When a dedicated tool cannot express the operation (complex piped commands), fall back to the shell.

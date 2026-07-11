@@ -193,6 +193,110 @@
         "fromCache": false,
         "updatedAt": "2026-07-10T16:41:40.227Z"
       }
+    },
+    "C:\\Users\\CodexSandboxOffline\\.codex\\.sandbox\\cwd\\bf6f746d9b46fb06": {
+      "rootPath": "C:\\Users\\CodexSandboxOffline\\.codex\\.sandbox\\cwd\\bf6f746d9b46fb06",
+      "packageJsonHash": "fd8559b6ef28aedc63da078117ae3a9f486a12a16b6de6b69eab2189c90194f7",
+      "lockfileHash": "4b71e74da10f21890a63e50fb39e8edb6148237f53eb1ce810e702ea88cde489",
+      "options": {
+        "dirPaths": [
+          "src/main",
+          "src/shared"
+        ],
+        "maxDepth": 1
+      },
+      "snapshot": {
+        "rootName": "bf6f746d9b46fb06",
+        "rootPath": "C:\\Users\\CodexSandboxOffline\\.codex\\.sandbox\\cwd\\bf6f746d9b46fb06",
+        "projectType": "electron-react",
+        "packageManager": "npm",
+        "scripts": {
+          "dev": "electron-vite dev",
+          "typecheck": "tsc --noEmit",
+          "test": "vitest run",
+          "build": "electron-vite build",
+          "package": "npm run build && electron-builder build --win --publish never"
+        },
+        "dependencies": {
+          "@codemirror/lang-markdown": "^6.5.0",
+          "@codemirror/language-data": "^6.5.2",
+          "@electron-toolkit/preload": "^3.0.1",
+          "@electron-toolkit/utils": "^3.0.0",
+          "@react-symbols/icons": "^1.4.1",
+          "@uiw/codemirror-theme-vscode": "^4.25.10",
+          "@uiw/react-codemirror": "^4.25.10",
+          "@vscode/ripgrep": "^1.18.0",
+          "@xterm/addon-fit": "^0.11.0",
+          "@xterm/xterm": "^6.0.0",
+          "electron-log": "^5.4.4",
+          "fast-glob": "^3.3.3",
+          "gray-matter": "^4.0.3",
+          "highlight.js": "^11.11.1",
+          "lodash": "^4.18.1",
+          "lucide-react": "^1.23.0",
+          "node-pty": "^1.1.0",
+          "prismjs": "^1.30.0",
+          "react": "^18.3.1",
+          "react-dom": "^18.3.1",
+          "react-markdown": "^10.1.0",
+          "remark-gfm": "^4.0.1",
+          "tree-sitter-bash": "^0.25.0",
+          "tree-sitter-powershell": "^0.25.10",
+          "web-tree-sitter": "^0.25.10",
+          "zustand": "^5.0.14"
+        },
+        "devDependencies": {
+          "@google/generative-ai": "^0.24.1",
+          "@types/lodash": "^4.17.24",
+          "@types/node": "^20.14.0",
+          "@types/prismjs": "^1.26.6",
+          "@types/react": "^18.3.3",
+          "@types/react-dom": "^18.3.0",
+          "@vitejs/plugin-react": "^4.3.1",
+          "electron": "^31.0.0",
+          "electron-builder": "^26.15.3",
+          "electron-vite": "^2.3.0",
+          "typescript": "^5.5.0",
+          "vite": "^5.3.0",
+          "vitest": "^1.6.0"
+        },
+        "configFiles": [
+          "package.json",
+          "README.md",
+          "electron.vite.config.ts",
+          "tsconfig.json",
+          "vitest.config.ts"
+        ],
+        "entrypoints": [
+          "out/main/index.js",
+          "src/main/index.ts",
+          "src/preload/index.ts",
+          "src/renderer/src/main.tsx",
+          "src/shared/ipc/channels.ts"
+        ],
+        "recommendedFiles": [
+          "package.json",
+          "README.md",
+          "electron.vite.config.ts",
+          "tsconfig.json",
+          "vitest.config.ts",
+          "out/main/index.js",
+          "src/main/index.ts",
+          "src/preload/index.ts",
+          "src/renderer/src/main.tsx",
+          "src/shared/ipc/channels.ts",
+          "src/main/services/ChatService.ts",
+          "src/main/services/ProviderService.ts",
+          "src/main/services/WorkspaceService.ts",
+          "src/main/tools/ToolManager.ts",
+          "src/renderer/src/stores/providerStore.ts",
+          "src/shared/types/provider.ts"
+        ],
+        "tree": "=== Directory: src/main ===\nsrc/main\n[DIR] agent\n[DIR] ipc\n[DIR] services\n[DIR] todo\n[DIR] tools\n[FILE] index.ts\n[FILE] logger.ts\n\n=== Directory: src/shared ===\nsrc/shared\n[DIR] constants\n[DIR] ipc\n[DIR] types\n[DIR] utils",
+        "docsTree": "[Documentation Files]\n.agents/AGENTS.md\n.claude/plans/no-reply-diagnosis.md\nAGENTS.md\nClaudeCodelogs/ClaudeCode-Tools-Analysis.md\nCONTEXT_DISTILLER_SCOUT_PLAN.md\ndocs/api_protocols/Anthropic_Messages.md\ndocs/api_protocols/Gemini_streamGenerateContent.md\ndocs/api_protocols/OpenAI_Chat_Completions.md\ndocs/context-management-optimization-research-handoff.md\ndocs/project_analysis.md\ndocs/superpowers/plans/2026-06-29-context-rules.md\ndocs/superpowers/plans/2026-06-29-general-settings.md\ndocs/superpowers/plans/2026-06-29-markdown-editor-refactor-plan.md\ndocs/superpowers/plans/2026-06-30-claude-tool-alignment.md\ndocs/superpowers/plans/2026-06-30-interleaved-chat.md\ndocs/superpowers/plans/2026-06-30-react-markdown-migration.md\ndocs/superpowers/plans/2026-07-01-plan-mode.md\ndocs/superpowers/plans/2026-07-01-system-prompt-alignment-plan.md\ndocs/superpowers/plans/2026-07-01-task-management-plan.md\ndocs/superpowers/plans/2026-07-02-component-architecture-plan.md\ndocs/superpowers/plans/2026-07-02-main-services-refactoring-plan.md\ndocs/superpowers/plans/2026-07-02-permission-levels-plan.md\ndocs/superpowers/plans/2026-07-02-state-and-utils-refactoring-plan.md\ndocs/superpowers/plans/2026-07-02-ui-components-refactoring-plan.md\ndocs/superpowers/plans/2026-07-03-chat-autoscroll-vs-user-action.md\ndocs/superpowers/plans/2026-07-03-system-prompt-optimization.md\ndocs/superpowers/plans/2026-07-05-builtin-skills-and-creation-flow.md\ndocs/superpowers/plans/2026-07-05-chat-auto-scroll.md\ndocs/superpowers/plans/2026-07-06-anthropic-provider-compatibility.md\ndocs/superpowers/plans/2026-07-07-task-capsule-theme-colors.md\ndocs/superpowers/plans/2026-07-10-context-management-optimization.md\ndocs/superpowers/plans/2026-07-10-cross-platform-permission-policy.md\ndocs/superpowers/plans/2026-07-10-model-reasoning-capabilities.md\ndocs/superpowers/plans/2026-07-10-task-group-reset.md\ndocs/superpowers/plans/2026-07-11-context-token-stability-fix.md\ndocs/superpowers/plans/2026-07-11-package-manager-version-permission.md\ndocs/superpowers/plans/2026-07-11-parallel-tool-batch-log.md\ndocs/superpowers/plans/2026-07-11-pattern-permission-hardline.md\ndocs/superpowers/plans/2026-07-11-read-batching-policy.md\ndocs/superpowers/plans/2026-07-11-read-files-batch.md\ndocs/superpowers/plans/2026-07-11-read-initial-range-policy.md\ndocs/superpowers/plans/2026-07-11-research-subagent-handoff.md\ndocs/superpowers/plans/2026-07-11-session-scoped-task-capsule.md\ndocs/superpowers/plans/2026-07-11-skill-invocation-detail-polish.md\ndocs/superpowers/plans/claude-tool-alignment/HANDOFF.md\ndocs/superpowers/plans/claude-tool-alignment/task-01-read-fingerprint-store.md\ndocs/superpowers/plans/claude-tool-alignment/task-02-read-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-03-edit-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-04-write-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-05-glob-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-06-grep-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-07-notebook-edit-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-08-spawn-runner.md\ndocs/superpowers/plans/claude-tool-alignment/task-09-bash-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-10-powershell-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-11-push-provider.md\ndocs/superpowers/plans/claude-tool-alignment/task-12-push-notification-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-13-skill-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-14-askuserquestion-ipc-tool-widget.md\ndocs/superpowers/plans/claude-tool-alignment/task-15-permission-manager-cleanup.md\ndocs/superpowers/plans/claude-tool-alignment/task-16-register-delete-old-tools.md\ndocs/superpowers/plans/claude-tool-alignment/task-17-renderer-tool-name-wiring.md\ndocs/superpowers/plans/claude-tool-alignment/task-18-regression-and-final-acceptance.md\ndocs/superpowers/specs/2026-06-29-general-settings-design.md\ndocs/superpowers/specs/2026-06-29-markdown-editor-refactor-design.md\ndocs/superpowers/specs/2026-06-29-rules-ui-design.md\ndocs/superpowers/specs/2026-06-30-chat-area-optimization-design.md\ndocs/superpowers/specs/2026-06-30-claude-tool-alignment-design.md\ndocs/superpowers/specs/2026-06-30-context-manager-truncation-design.md\ndocs/superpowers/specs/2026-06-30-interleaved-chat-design.md\ndocs/superpowers/specs/2026-06-30-react-markdown-migration-design.md\ndocs/superpowers/specs/2026-07-01-plan-mode-design.md\ndocs/superpowers/specs/2026-07-01-scheduler-system-design.md\ndocs/superpowers/specs/2026-07-01-system-prompt-alignment-design.md\ndocs/superpowers/specs/2026-07-01-task-management-design.md\ndocs/superpowers/specs/2026-07-01-worktree-service-design.md\ndocs/superpowers/specs/2026-07-02-component-architecture-design.md\ndocs/superpowers/specs/2026-07-02-main-services-refactoring-design.md\ndocs/superpowers/specs/2026-07-02-permission-levels-design.md\ndocs/superpowers/specs/2026-07-02-permission-system-redesign-design.md\ndocs/superpowers/specs/2026-07-02-plan-capsule-redesign-design.md\ndocs/superpowers/specs/2026-07-02-plan-subagent-refactor-design.md\ndocs/superpowers/specs/2026-07-02-session-scoped-plans-design.md\ndocs/superpowers/specs/2026-07-02-state-and-utils-refactoring-design.md\ndocs/superpowers/specs/2026-07-02-system-prompt-association-design.md\ndocs/superpowers/specs/2026-07-02-ui-components-refactoring-design.md\ndocs/superpowers/specs/2026-07-03-chat-autoscroll-vs-user-action-design.md\ndocs/superpowers/specs/2026-07-03-system-prompt-optimization-design.md\ndocs/superpowers/specs/2026-07-05-builtin-skills-and-creation-flow-design.md\ndocs/superpowers/specs/2026-07-05-chat-auto-scroll-design.md\ndocs/superpowers/specs/2026-07-05-parallel-plan-execution-design.md\ndocs/superpowers/specs/2026-07-05-subagent-io-design.md\ndocs/superpowers/specs/2026-07-05-todo-plan-layering-design.md\ndocs/superpowers/specs/2026-07-05-websearch-design.md\ndocs/superpowers/specs/2026-07-06-anthropic-provider-compatibility-design.md\ndocs/superpowers/specs/2026-07-06-prompt-architecture-v2-design.md\ndocs/superpowers/specs/2026-07-07-task-capsule-theme-colors-design.md\ndocs/superpowers/specs/2026-07-10-context-management-optimization-design.md\ndocs/superpowers/specs/2026-07-10-cross-platform-permission-policy-design.md\ndocs/superpowers/specs/2026-07-11-agent-unbounded-task-continuation-design.md\n[TRUNCATED] docs tree limit reached",
+        "fromCache": false,
+        "updatedAt": "2026-07-11T12:20:48.716Z"
+      }
     }
   }
 }

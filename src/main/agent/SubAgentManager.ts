@@ -28,6 +28,7 @@ import type { ModelContextBuilder } from '../services/context/ModelContextBuilde
 import type { SessionRuntimeCoordinator, RuntimeTurnHandle } from '../services/context/SessionRuntimeCoordinator'
 import { getContextCoreServices } from '../services/context/ContextRuntimeServices'
 import { ModelContextBuilder as CanonicalModelContextBuilder } from '../services/context/ModelContextBuilder'
+import { authorizePermissionToolCall } from '../services/PermissionManager'
 
 // ─── 子 Agent 写权限范围（并行 Worker 用） ──────────────────
 
@@ -35,8 +36,8 @@ import { ModelContextBuilder as CanonicalModelContextBuilder } from '../services
  * 可写子 Agent 的非交互式权限范围。
  *
  * 只在需要写代码的 Worker 上传入；不传时保持现有行为（只读子 Agent 无 gap）。
- * spawn 在执行每个工具前用此范围做非交互式校验：命中放行，越界/危险直接拒绝
- * （返回 error 给子 Agent，不弹窗）。
+ * spawn 在执行每个工具前先用此范围做边界校验，再交给统一运行时权限策略。
+ * 越界直接拒绝；网络、敏感写入和 Hardline 等操作按主会话策略处理。
  */
 export interface SubAgentPermissionScope {
   /**
@@ -44,7 +45,7 @@ export interface SubAgentPermissionScope {
    * 仅当 allowAllWritesInWorkspace 为 false 时生效。
    */
   allowedWriteFiles?: string[]
-  /** 预留的 Shell 权限开关；新权限策略接入前不执行 Shell。 */
+  /** 是否允许 Worker 请求 Shell 工具；获准后仍需通过统一运行时权限策略。 */
   allowBash?: boolean
   /**
    * worktree 档：物理隔离已兜底，放宽到 workspaceRoot 内任意文件可写。
@@ -275,6 +276,32 @@ export function checkSubAgentToolPermission(
 
   // 只读工具及其余（AskUserQuestion 等）放行
   return null
+}
+
+export async function authorizeSubAgentToolCall(
+  toolName: string,
+  parsedArgs: unknown,
+  workspaceRoot: string,
+  sessionId: string,
+  scope: SubAgentPermissionScope | undefined,
+  onPermissionRequest?: AgentRunnerCallbacks['onPermissionRequest'],
+  agentId?: string
+): Promise<string | null> {
+  const scopeDenial = checkSubAgentToolPermission(toolName, parsedArgs, workspaceRoot, scope)
+  if (scopeDenial) return scopeDenial
+
+  const authorization = await authorizePermissionToolCall(
+    toolName,
+    parsedArgs,
+    workspaceRoot,
+    onPermissionRequest,
+    null,
+    sessionId,
+    agentId
+  )
+  return authorization.allowed
+    ? null
+    : authorization.error || 'Tool execution denied by runtime permission policy.'
 }
 
 function resolveMaxLoops(def: SubAgentDefinition, ctx: SubAgentContext): number {
@@ -849,10 +876,18 @@ export class SubAgentManager {
               if (!toolInstance) {
                 result = JSON.stringify({ ok: false, error: { code: 'NOT_FOUND', message: `Tool '${name}' not found` } })
               } else {
-                // 非交互式权限校验（可写 Worker 用 permissionScope；只读子 Agent 传 undefined）
+                // 先校验子代理 scope，再进入与主 Agent 相同的运行时权限策略。
                 let parsedArgs: any = {}
                 try { parsedArgs = JSON.parse(args) } catch {}
-                const denyReason = checkSubAgentToolPermission(name, parsedArgs, ctx.workspaceRoot, ctx.permissionScope)
+                const denyReason = await authorizeSubAgentToolCall(
+                  name,
+                  parsedArgs,
+                  ctx.workspaceRoot,
+                  ctx.sessionId,
+                  ctx.permissionScope,
+                  callbacks.onPermissionRequest,
+                  subAgentId
+                )
                 if (denyReason) {
                   result = JSON.stringify({ ok: false, error: { code: 'PERMISSION_DENIED', message: denyReason } })
                   await core.coordinator.recordToolResult(runtimeTurn, {

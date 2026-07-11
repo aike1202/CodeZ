@@ -42,7 +42,19 @@ describe('ReadTool', () => {
     expect(description).toContain('additional independent Read calls in the same response')
     expect(description).toContain('merge adjacent or overlapping ranges')
     expect(description).toContain('or when the next target depends on the current result')
-    expect(description).toContain('only after the file changed or context trimming removed')
+    expect(description).toContain('After a file changes, re-read it without an arbitrary range')
+  })
+
+  it('描述要求首次读取省略任意行范围', () => {
+    const description = new ReadTool().description
+    expect(description).toContain('For an initial read without an evidence-based relevant range, omit offset and limit')
+    expect(description).toContain('A known relevant range is permitted even on the first read')
+    expect(description).toContain('Do not probe arbitrary first 50 or 100 lines')
+    expect(description).toContain('marked truncated or reached its documented content-budget boundary')
+    expect(description).toContain('A default text read returns up to 1,200 lines')
+    const schema = new ReadTool().parameters_schema as any
+    expect(schema.properties.files.items.properties.offset.description).toContain('Omit for an initial read without an evidence-based relevant range')
+    expect(schema.properties.files.items.properties.limit.description).toContain('Omit for an initial read without an evidence-based relevant range')
   })
 
   it('首次读：返回带行号+SHA 的正文并写入指纹', async () => {

@@ -1,7 +1,10 @@
 import { ChatService } from '../../services/ChatService'
 import { ToolManager } from '../../tools/ToolManager'
 import { EditTransactionService, getEditTransactionService } from '../../services/EditTransactionService'
-import { PermissionManager } from '../../services/PermissionManager'
+import {
+  authorizePermissionToolCall,
+  type PermissionToolAuthorization
+} from '../../services/PermissionManager'
 import { interceptAskUser } from '../../tools/builtin/AskUserQuestionTool'
 import { TaskStore } from '../../services/TaskStore'
 import { SubAgentManager } from '../SubAgentManager'
@@ -16,8 +19,6 @@ import { handleDelegateTasks } from './delegateTasksHelper'
 import { getSessionStore } from '../../ipc/session.handlers'
 import { LoopStateMachine, AgentState, TransitionEvent, TerminationReason } from './LoopStateMachine'
 import { streamWithTimeoutRetry } from '../../services/chat/retry'
-import { getWorkspacePermissionStore } from '../../services/permission/workspacePermissionStore'
-import type { PermissionApprovalResponse } from '../../../shared/types/permission'
 import type { SmartApprovalClient } from '../../services/permission/SmartApprovalService'
 import { ChatSmartApprovalClient } from '../../services/permission/ChatSmartApprovalClient'
 import { ContextBudgetService } from '../../services/context/ContextBudgetService'
@@ -55,11 +56,7 @@ export function unwrapModelToolResultForUi(content: string): string {
   return content
 }
 
-export interface ToolAuthorization {
-  allowed: boolean
-  requestId: string
-  error?: string
-}
+export type ToolAuthorization = PermissionToolAuthorization
 
 export async function authorizeToolCall(
   toolName: string,
@@ -69,64 +66,14 @@ export async function authorizeToolCall(
   smartApprovalClient?: SmartApprovalClient | null,
   sessionId?: string
 ): Promise<ToolAuthorization> {
-  const permissionManager = PermissionManager.getInstance()
-  const context = {
+  return authorizePermissionToolCall(
+    toolName,
+    parsedArgs,
     workspaceRoot,
-    cwd: workspaceRoot,
-    platform: process.platform,
-    shellKind: toolName === 'PowerShell' ? 'powershell' as const : toolName === 'Bash' ? 'bash' as const : undefined,
-    mode: await getWorkspacePermissionStore().getMode(workspaceRoot),
+    onPermissionRequest,
     smartApprovalClient,
     sessionId
-  }
-  const decision = await permissionManager.evaluateToolCall(toolName, parsedArgs, context)
-  await permissionManager.audit(toolName, decision, context)
-  const request = permissionManager.createPermissionRequest(toolName, parsedArgs, context, decision)
-
-  if (decision.action === 'allow') {
-    return await permissionManager.revalidate(decision)
-      ? { allowed: true, requestId: request.id }
-      : { allowed: false, requestId: request.id, error: 'Error: Permission inputs changed before execution.' }
-  }
-  if (decision.action === 'deny') {
-    return {
-      allowed: false,
-      requestId: request.id,
-      error: 'Error: Tool execution denied by security policy.'
-    }
-  }
-  if (!onPermissionRequest) {
-    return {
-      allowed: false,
-      requestId: request.id,
-      error: 'Error: Tool execution denied. No approval handler registered.'
-    }
-  }
-
-  try {
-    const rawResponse = await onPermissionRequest(request)
-    const response: PermissionApprovalResponse = typeof rawResponse === 'boolean'
-      ? { approved: rawResponse, scope: 'once' }
-      : rawResponse
-    const valid = response.approved && await permissionManager.revalidate(decision)
-    if (valid) await permissionManager.rememberApproval(request, response, context)
-    await permissionManager.audit(toolName, decision, context, response)
-    return valid
-      ? { allowed: true, requestId: request.id }
-      : {
-          allowed: false,
-          requestId: request.id,
-          error: response.approved
-            ? 'Error: Permission inputs changed before execution.'
-            : 'Error: User denied permission for this operation.'
-        }
-  } catch (error: any) {
-    return {
-      allowed: false,
-      requestId: request.id,
-      error: `Error: Permission approval failed: ${error?.message || String(error)}`
-    }
-  }
+  )
 }
 
 export function resolveAgentTransition(input: {
