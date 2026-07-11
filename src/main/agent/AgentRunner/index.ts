@@ -500,7 +500,8 @@ export class AgentRunner {
                   toolCallId,
                   args,
                   config,
-                  toolCallbacks
+                  toolCallbacks,
+                  this.abortController?.signal
                 )
               } else if (name === 'DelegateTasks') {
                 return await handleDelegateTasks(

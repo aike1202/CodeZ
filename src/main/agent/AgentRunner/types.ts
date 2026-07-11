@@ -21,7 +21,7 @@ export interface SubAgentStartMeta {
 }
 
 export interface SubAgentEndResult {
-  status: 'completed' | 'failed'
+  status: 'completed' | 'failed' | 'interrupted'
   output?: string
   qualitySummary?: any
   toolCallCount: number

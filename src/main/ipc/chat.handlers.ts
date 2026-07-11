@@ -20,6 +20,9 @@ import {
 
 import type { AgentRunner } from '../agent/AgentRunner'
 import { ChatRuntimeRegistry } from '../services/ChatRuntimeRegistry'
+import { getAttachmentService } from './attachment.handlers'
+import { getProviderImagePolicy } from '../../shared/utils/imageCapabilities'
+import { SubAgentManager } from '../agent/SubAgentManager'
 
 const activeRunners = new ChatRuntimeRegistry<AgentRunner>()
 
@@ -40,7 +43,9 @@ export function registerChatIpc(): void {
 
       log.info('[Chat] stream start', { streamId, providerId: request.providerId, model: request.model, sessionId: request.sessionId })
 
-      if (!request.sessionId || !request.input?.text?.trim()) {
+      const hasText = Boolean(request.input?.text?.trim())
+      const hasImages = Boolean(request.input?.attachments?.length)
+      if (!request.sessionId || (!hasText && !hasImages)) {
         sender.send(IPC_CHANNELS.CHAT_STREAM_ERROR, streamId, '会话 ID 和本次输入不能为空')
         return streamId
       }
@@ -78,6 +83,10 @@ export function registerChatIpc(): void {
       }
 
       const modelConfig = config.models?.find(m => m.id === request.model || m.name === request.model)
+      if (hasImages && modelConfig?.supportsVision !== true) {
+        sender.send(IPC_CHANNELS.CHAT_STREAM_ERROR, streamId, '当前模型未启用图片输入')
+        return streamId
+      }
       const contextWindowTokens = modelConfig?.maxContextTokens || 32000
       const contextCapabilities = {
         contextWindowTokens,
@@ -175,6 +184,7 @@ export function registerChatIpc(): void {
         providerId: request.providerId,
         model: request.model,
         commandMetadata: request.input.commandMetadata
+        ,attachments: request.input.attachments
       })
 
       // 异步执行 Agent 循环，通过 webContents.send 推送
@@ -198,6 +208,11 @@ export function registerChatIpc(): void {
           contextCapabilities,
           systemPrompt: sysPrompt,
           contextInstructions: reminder ? [reminder] : []
+          ,prepareImages: (attachments) => getAttachmentService().prepareSessionImages(
+            request.sessionId,
+            attachments,
+            getProviderImagePolicy(modelConfig?.apiFormat || config.apiFormat)
+          )
         },
         {
           onChunk: (delta, reasoningDelta) => {
@@ -294,7 +309,7 @@ export function registerChatIpc(): void {
   )
 
   ipcMain.handle(IPC_CHANNELS.CHAT_RUNTIME_STATUS, (_event, sessionId: string) => {
-    return activeRunners.getStatus(sessionId, [])
+    return activeRunners.getStatus(sessionId, SubAgentManager.listActiveForSession(sessionId))
   })
 
   ipcMain.handle(IPC_CHANNELS.CHAT_STREAM_STOP, (_event, streamId: string) => {

@@ -92,6 +92,8 @@ export interface SubAgentContext {
   contextCapabilities?: ModelContextCapabilities
   runtimeCoordinator?: SessionRuntimeCoordinator
   contextBuilder?: ModelContextBuilder
+  /** 父 Agent 的取消信号；触发时必须停止当前子智能体。 */
+  parentSignal?: AbortSignal
 
   /**
    * 可写子 Agent 的写权限范围（非交互式校验）。
@@ -115,7 +117,7 @@ export interface SubAgentContext {
 
 export interface SubAgentResult {
   type: string
-  status: 'completed' | 'failed'
+  status: 'completed' | 'failed' | 'interrupted'
   output: string
   structuredOutput?: SubAgentStructuredOutput
   qualitySummary?: SubAgentQualitySummary
@@ -157,8 +159,10 @@ export interface SubAgentDefinition {
 
 export interface SubAgentHandle {
   id: string
+  subAgentId: string
+  sessionId: string
   type: string
-  status: 'running' | 'completed' | 'failed' | 'cancelled'
+  status: 'running' | 'completed' | 'failed' | 'interrupted'
   result?: SubAgentResult
   cancel(): void
 }
@@ -528,14 +532,19 @@ export class SubAgentManager {
 
     const handle: SubAgentHandle = {
       id: handleId,
+      subAgentId,
+      sessionId: ctx.sessionId,
       type: canonical,
       status: 'running',
       cancel: () => {
         abortController.abort()
-        handle.status = 'cancelled'
+        handle.status = 'interrupted'
       }
     }
     this.activeHandles.set(handleId, handle)
+    const abortFromParent = () => handle.cancel()
+    ctx.parentSignal?.addEventListener('abort', abortFromParent, { once: true })
+    if (ctx.parentSignal?.aborted) handle.cancel()
 
     // 生命周期钩子：启动前
     if (def.onBeforeSpawn) {
@@ -949,6 +958,19 @@ export class SubAgentManager {
         }
       }
 
+      if (abortController.signal.aborted) {
+        const interruptedResult: SubAgentResult = {
+          type: canonical,
+          status: 'interrupted',
+          output: 'SubAgent execution was interrupted before completion.',
+          toolCallCount,
+          filesExamined: Array.from(filesExamined)
+        }
+        handle.status = 'interrupted'
+        handle.result = interruptedResult
+        return interruptedResult
+      }
+
       const protocolFailure = Boolean(def.outputSpec && !forcedStructuredOutput)
       if (protocolFailure && !failureReason) {
         failureReason = 'SubAgent exhausted its run without submitting a valid structured result.'
@@ -988,9 +1010,22 @@ export class SubAgentManager {
 
       return subResult
     } catch (err: any) {
+      if (abortController.signal.aborted) {
+        const interruptedResult: SubAgentResult = {
+          type: canonical,
+          status: 'interrupted',
+          output: 'SubAgent execution was interrupted before completion.',
+          toolCallCount,
+          filesExamined: Array.from(filesExamined)
+        }
+        handle.status = 'interrupted'
+        handle.result = interruptedResult
+        return interruptedResult
+      }
       handle.status = 'failed'
       throw err
     } finally {
+      ctx.parentSignal?.removeEventListener('abort', abortFromParent)
       if (!runtimeClosed) {
         await core.coordinator.interruptTurn(
           runtimeTurn,
@@ -1008,5 +1043,11 @@ export class SubAgentManager {
 
   static listActive(): SubAgentHandle[] {
     return Array.from(this.activeHandles.values())
+  }
+
+  static listActiveForSession(sessionId: string): string[] {
+    return Array.from(this.activeHandles.values())
+      .filter((handle) => handle.sessionId === sessionId && handle.status === 'running')
+      .map((handle) => handle.subAgentId)
   }
 }

@@ -17,7 +17,8 @@ export async function handleSubAgentRunnerSpawn(
   toolCallId: string,
   rawArgs: string,
   config: AgentRunConfig,
-  callbacks: AgentRunnerCallbacks
+  callbacks: AgentRunnerCallbacks,
+  parentSignal?: AbortSignal
 ): Promise<{ role: 'tool'; tool_call_id: string; name: string; content: string }> {
   const name = 'SubAgentRunner'
 
@@ -96,6 +97,7 @@ export async function handleSubAgentRunnerSpawn(
         contextCapabilities: config.contextCapabilities,
         runtimeCoordinator: config.runtimeCoordinator,
         contextBuilder: config.contextBuilder,
+        parentSignal,
         apiConfig: {
           baseUrl: config.baseUrl || '',
           apiKey: config.apiKey || '',
@@ -134,13 +136,24 @@ export async function handleSubAgentRunnerSpawn(
         toolCallCount: result.toolCallCount,
         filesExamined: result.filesExamined,
       }
-    const resultMsg = JSON.stringify(result.status === 'completed'
-      ? { ok: true, data: resultData }
-      : {
-          ok: false,
-          error: result.output || `SubAgent '${subagent_type}' did not submit a valid result.`,
-          data: { ...resultData, status: 'failed' }
-        })
+    const resultMsg = JSON.stringify(
+      result.status === 'completed'
+        ? { ok: true, data: resultData }
+        : result.status === 'interrupted'
+          ? {
+              ok: false,
+              error: {
+                code: 'EXECUTION_INTERRUPTED',
+                message: result.output || `SubAgent '${subagent_type}' was interrupted.`
+              },
+              data: resultData
+            }
+          : {
+              ok: false,
+              error: result.output || `SubAgent '${subagent_type}' did not submit a valid result.`,
+              data: resultData
+            }
+    )
     callbacks.onToolEnd?.(toolCallId, resultMsg)
     return { role: 'tool' as const, tool_call_id: toolCallId, name, content: resultMsg }
   } catch (err: any) {
