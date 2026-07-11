@@ -1,3 +1,5 @@
+import type { ImageAttachment } from './attachment'
+
 export type ThinkingMode = 'auto' | 'none' | 'openai' | 'deepseek' | 'qwen' | 'anthropic' | 'gemini' | 'grok' | 'openrouter'
 
 export type ThinkingEffort = 'auto' | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'custom'
@@ -17,6 +19,7 @@ export interface ModelConfig {
   maxInputTokens?: number
   maxOutputTokens?: number
   reasoningCountsAgainstContext?: boolean
+  supportsVision?: boolean
   /** 单独覆盖该模型使用的接口协议 */
   apiFormat?: ApiFormat
   /** 单独覆盖该模型使用的思考模式 */
@@ -117,6 +120,7 @@ export interface ChatMessage {
   tool_calls?: ToolCall[]
   tool_call_id?: string
   name?: string
+  attachments?: ImageAttachment[]
 }
 
 export interface ToolCall {

@@ -84,4 +84,17 @@ export type {
 
 export type { ToolBatchMeta } from './toolExecution'
 
+export type {
+  ImageMimeType,
+  ImageAttachmentBase,
+  ImageAttachment,
+  DraftImageAttachment,
+  ComposerImageAttachment,
+  AttachmentPreviewBytes,
+  ResolvedImageAttachment,
+  ResolveImageAttachment,
+  ProviderImagePolicy,
+  PendingPromptDraft
+} from './attachment'
+
 export { MAIN_CONTEXT_SCOPE, CONTEXT_SCHEMA_VERSION, contextScopeForSubAgent, eventChangesHistory } from './context'

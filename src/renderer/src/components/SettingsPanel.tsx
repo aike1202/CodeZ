@@ -15,6 +15,7 @@ export interface ModelFormData {
   thinkingMode?: ThinkingMode
   thinkingEffort?: ThinkingEffort
   thinkingBudgetTokens?: number | null
+  supportsVision?: boolean
 }
 
 interface ProviderFormData {
@@ -97,7 +98,11 @@ export default function SettingsPanel({
     setModels(models.filter((_, i) => i !== idx))
   }
 
-  const updateModel = (idx: number, field: keyof ModelFormData, value: string | number | undefined) => {
+  const updateModel = (
+    idx: number,
+    field: keyof ModelFormData,
+    value: string | number | boolean | null | undefined
+  ) => {
     setModels(models.map((m, i) => (i === idx ? { ...m, [field]: value } : m)))
   }
 
@@ -245,6 +250,14 @@ export default function SettingsPanel({
                       </Button>
                     </div>
                   </div>
+                  <label className="settings-model-vision-toggle">
+                    <input
+                      type="checkbox"
+                      checked={m.supportsVision === true}
+                      onChange={(event) => updateModel(idx, 'supportsVision', event.target.checked)}
+                    />
+                    支持图片输入
+                  </label>
                 </div>
               ) : null)}
               <div className="settings-add-model-wrapper">

@@ -1,4 +1,5 @@
 import type { AgentStopReason, ProviderTokenUsage } from './provider'
+import type { ImageAttachment } from './attachment'
 
 export const MAIN_CONTEXT_SCOPE = 'main' as const
 export const CONTEXT_SCHEMA_VERSION = 1 as const
@@ -96,6 +97,7 @@ export interface NormalizedModelMessage {
   status: 'complete' | 'interrupted'
   createdAt: string
   sourceSequence?: number
+  attachments?: ImageAttachment[]
 }
 
 export interface ModelContextItem {
@@ -315,6 +317,7 @@ export interface StreamRequestV2 {
   sessionId: string
   input: {
     text: string
+    attachments?: ImageAttachment[]
     isSystem?: boolean
     commandMetadata?: unknown
   }

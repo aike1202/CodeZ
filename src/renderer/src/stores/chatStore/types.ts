@@ -1,6 +1,7 @@
 import type { TaskItem } from '../../../../shared/types/task'
 import type { PermissionApprovalResponse, PermissionRequest } from '../../../../shared/types/permission'
 import type { ContextBudgetSnapshot } from '../../../../shared/types/context'
+import type { ImageAttachment } from '../../../../shared/types/attachment'
 
 export type AgentStateType =
   | 'processing'
@@ -139,6 +140,7 @@ export interface ChatMessage {
   permissionRequests?: PermissionRequestState[]
   askUserRequests?: AskUserRequestState[]
   subAgents?: SubAgentRecord[]
+  attachments?: ImageAttachment[]
 }
 
 export interface ChatSession {
