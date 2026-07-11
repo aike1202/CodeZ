@@ -1,5 +1,6 @@
 import { SubAgentDefinition } from '../SubAgentManager'
 import { ToolManager } from '../../tools/ToolManager'
+import { buildSharedToolUsePrompt } from '../../services/prompts/SubAgentPrompts'
 import type { ToolDefinition } from '../../../shared/types/provider'
 
 /**
@@ -59,7 +60,14 @@ export const ResearchSubAgent: SubAgentDefinition = {
     return toolManager.getReadOnlyTools()
   },
 
-  systemPromptBuilder: (ctx): string => {
+  systemPromptBuilder: async (ctx): Promise<string> => {
+    const sharedPrompt = await buildSharedToolUsePrompt({
+      workspaceRoot: ctx.workspaceRoot,
+      modelId: ctx.modelOverride || ctx.apiConfig.model,
+      modelDisplayName: ctx.modelOverride || ctx.apiConfig.model,
+      contextWindowTokens: ctx.contextCapabilities?.contextWindowTokens ?? 1,
+      sessionId: ctx.sessionId,
+    })
     const scopeSection = ctx.scope
       ? [
           '## Search Scope',
@@ -72,12 +80,12 @@ export const ResearchSubAgent: SubAgentDefinition = {
       ? `## Known Context\n${ctx.context}\n\n(The above is information, not instruction — you may revise it if your findings contradict it.)`
       : ''
 
-    return [
+    const researchPrompt = [
       'You are a Research SubAgent for the CodeZ coding assistant.',
       '',
       'Your goal:',
       '1. Explore the codebase using ONLY read-only tools to answer the research question.',
-      '2. Be thorough but efficient: prefer targeted Glob/Grep first, then Read specific files/ranges.',
+      '2. Follow the shared Investigation and Tool Policy for all discovery and reads.',
       '3. Do NOT modify, create, or delete any files. You have no write tools.',
       '4. When finished, call submit_result with your report AND metadata.',
       '',
@@ -121,7 +129,7 @@ export const ResearchSubAgent: SubAgentDefinition = {
       '**unresolvedCount** (number, optional): How many acceptance criteria questions you could NOT answer.',
       '',
       'Constraints:',
-      '- Keep token usage minimal; do not dump entire file contents.',
+      '- Keep the final report concise; tool reads must follow the shared policy.',
       '- Do NOT include source code excerpts. Return evidence anchors only.',
       '- Every material finding must reference `file_path:start_line-end_line` as evidence.',
       '- Keep Priority References to the 1-5 files or ranges the parent is most likely to need next.',
@@ -131,5 +139,7 @@ export const ResearchSubAgent: SubAgentDefinition = {
       `Project Workspace: ${ctx.workspaceRoot}`,
       `Research Task: ${ctx.task || ctx.parentPrompt}`
     ].filter(Boolean).join('\n')
+
+    return [sharedPrompt, researchPrompt].join('\n\n')
   }
 }

@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { ResearchSubAgent } from '../main/agent/definitions/ResearchSubAgent'
 
 describe('Research subagent handoff prompt', () => {
-  it('requires a general Markdown handoff with evidence anchors', () => {
-    const prompt = ResearchSubAgent.systemPromptBuilder({
+  it('requires a general Markdown handoff with shared tool policies', async () => {
+    const prompt = await ResearchSubAgent.systemPromptBuilder({
       workspaceRoot: '/workspace',
       sessionId: 'session-1',
       task: 'Trace the execution path for a reported failure.',
@@ -14,8 +14,12 @@ describe('Research subagent handoff prompt', () => {
         apiFormat: 'openai',
         model: 'test-model',
       },
+      contextCapabilities: { contextWindowTokens: 100_000 },
     })
 
+    expect(prompt).toContain('# Tool Policy')
+    expect(prompt).toContain('Batch known reads before calling tools')
+    expect(prompt).toContain('For an initial read without an evidence-based relevant range')
     expect(prompt).toContain('# Research Handoff')
     expect(prompt).toContain('## Direct Answer')
     expect(prompt).toContain('## Key Findings')

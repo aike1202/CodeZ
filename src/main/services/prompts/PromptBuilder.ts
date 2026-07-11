@@ -11,8 +11,6 @@ import { PromptPipeline } from './PromptPipeline'
 
 // ── Layer 1: Core — Identity & Thinking ─────────
 import { IdentityModule } from './core/Identity'
-import { SecurityModule } from './core/Security'
-import { HarnessModule } from './core/Harness'
 import { EngineeringPhilosophyModule } from './core/EngineeringPhilosophy'
 import { ReasoningPolicyModule } from './core/ReasoningPolicy'
 import { DecisionPolicyModule } from './core/DecisionPolicy'
@@ -27,17 +25,15 @@ import { SkillsModule } from './context/Skills'
 
 // ── Layer 3: Execution — Action Policies ─────────
 // 顺序 = Agent 执行管线：Investigate → Edit → Verify → Recover → Complete
-import { InvestigationModule } from './execution/Investigation'
 import { EditingModule } from './execution/Editing'
 import { VerificationModule } from './execution/Verification'
-import { FailureRecoveryModule } from './execution/FailureRecovery'
 import { CompletionModule } from './execution/Completion'
 // ── Layer 3: Execution — Workflow Gates ──────────
 import { TaskManagementModule } from './execution/TaskManagement'
 import { WorkerDelegationModule } from './execution/WorkerDelegation'
 // ── Layer 3: Execution — Support ─────────────────
-import { ToolPolicyModule } from './execution/ToolPolicy'
 import { OutputPolicyModule } from './execution/OutputPolicy'
+import { SHARED_TOOL_USE_MODULES } from './SubAgentPrompts'
 
 // ── Layer 4: Dynamic — Runtime Injection ─────────
 import { AvailableToolsModule } from './dynamic/AvailableTools'
@@ -47,8 +43,7 @@ export function createDefaultPipeline(): PromptPipeline {
   return new PromptPipeline()
     // Layer 1: Core — Identity & Thinking
     .register(IdentityModule)
-    .register(SecurityModule)
-    .register(HarnessModule)
+    .registerAll(SHARED_TOOL_USE_MODULES)
     .register(EngineeringPhilosophyModule)
     .register(ReasoningPolicyModule)
     .register(DecisionPolicyModule)
@@ -60,16 +55,13 @@ export function createDefaultPipeline(): PromptPipeline {
     .register(GitStatusModule)
     .register(SkillsModule)
     // Layer 3: Execution — Action Pipeline
-    .register(InvestigationModule)
     .register(EditingModule)
     .register(VerificationModule)
-    .register(FailureRecoveryModule)
     .register(CompletionModule)
     // Layer 3: Execution — Workflow Gates
     .register(TaskManagementModule)
     .register(WorkerDelegationModule)
     // Layer 3: Execution — Support
-    .register(ToolPolicyModule)
     .register(OutputPolicyModule)
     // Layer 4: Dynamic — Runtime Injection
     .register(AvailableToolsModule)

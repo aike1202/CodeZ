@@ -14,12 +14,12 @@ When an approach fails:
 5. **Retry** with the new strategy.
 
 ## Exceptions
-- When the failure reveals a deeper issue that requires user input, stop and ask — don't guess at a fix.
-- When two different strategies both fail, report to the user rather than trying a third without feedback.
+- When the failure requires external or user input, request it if your role can interact directly; otherwise report the blocker through your role's output channel — don't guess at a fix.
+- When two different strategies both fail, report the failure through your role's output channel rather than trying a third without feedback.
 
 ## Never
 - Never retry the same tool call with the same arguments more than twice.
-- Never hide failures — they must appear in the final summary.
+- Never hide failures — they must appear in the final output.
 - Never silently skip a verification failure.
 
 ## Golden Rule

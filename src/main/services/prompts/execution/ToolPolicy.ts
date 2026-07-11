@@ -17,6 +17,8 @@ Guide which tool to reach for — simplest tool that works.
 
 Prefer: search before read, read before edit, verify before complete.
 
+Use only tools available to your role; this policy guides selection and does not grant additional capabilities.
+
 - Put every currently known independent file or range into the fewest \`Read.files\` calls the schema permits.
 - When known targets exceed one call's capacity, dispatch the additional independent Read calls in the same response.
 - Split reads across model loops only when the next target depends on the current result.

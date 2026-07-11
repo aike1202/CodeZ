@@ -1,5 +1,5 @@
 import { PromptPipeline } from './PromptPipeline'
-import type { PromptContext } from './PromptTypes'
+import type { PromptContext, PromptModule } from './PromptTypes'
 
 import { IdentityModule } from './core/Identity'
 import { SecurityModule } from './core/Security'
@@ -19,11 +19,22 @@ import { FailureRecoveryModule } from './execution/FailureRecovery'
 import { ToolPolicyModule } from './execution/ToolPolicy'
 import { OutputPolicyModule } from './execution/OutputPolicy'
 
+export const SHARED_TOOL_USE_MODULES: PromptModule[] = [
+  SecurityModule,
+  HarnessModule,
+  InvestigationModule,
+  FailureRecoveryModule,
+  ToolPolicyModule,
+]
+
+export async function buildSharedToolUsePrompt(ctx: PromptContext): Promise<string> {
+  return new PromptPipeline().registerAll(SHARED_TOOL_USE_MODULES).run(ctx)
+}
+
 function createExecutorPipeline(): PromptPipeline {
   return new PromptPipeline()
     .register(IdentityModule)
-    .register(SecurityModule)
-    .register(HarnessModule)
+    .registerAll(SHARED_TOOL_USE_MODULES)
     .register(EngineeringPhilosophyModule)
     .register(ReasoningPolicyModule)
     .register(DecisionPolicyModule)
@@ -32,11 +43,8 @@ function createExecutorPipeline(): PromptPipeline {
     .register(EnvironmentModule)
     .register(GitStatusModule)
     .register(SkillsModule)
-    .register(InvestigationModule)
     .register(EditingModule)
     .register(VerificationModule)
-    .register(FailureRecoveryModule)
-    .register(ToolPolicyModule)
     .register(OutputPolicyModule)
 }
 

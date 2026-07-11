@@ -126,7 +126,7 @@ describe('SystemPromptService', () => {
       expect(prompt).toContain('merge adjacent or overlapping ranges')
       expect(prompt).toContain('only when the next target depends on the current result')
       expect(prompt).toContain('After a file changes, re-read it without an arbitrary range')
-      expect(prompt).toContain('Plan reads, batch known targets, then edit')
+      expect(prompt).toContain('Plan reads, batch known targets, then act within your role')
       expect(prompt).not.toContain('Read twice, edit once')
     })
 

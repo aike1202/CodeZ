@@ -1,5 +1,6 @@
 import { SubAgentDefinition, SubAgentContext } from '../SubAgentManager'
 import { ToolManager } from '../../tools/ToolManager'
+import { buildSharedToolUsePrompt } from '../../services/prompts/SubAgentPrompts'
 import type { ToolDefinition } from '../../../shared/types/provider'
 
 /**
@@ -58,8 +59,15 @@ export const ExecutionPlannerSubAgent: SubAgentDefinition = {
     ],
   },
 
-  systemPromptBuilder: (ctx: SubAgentContext): string => {
-    return [
+  systemPromptBuilder: async (ctx: SubAgentContext): Promise<string> => {
+    const sharedPrompt = await buildSharedToolUsePrompt({
+      workspaceRoot: ctx.workspaceRoot,
+      modelId: ctx.modelOverride || ctx.apiConfig.model,
+      modelDisplayName: ctx.modelOverride || ctx.apiConfig.model,
+      contextWindowTokens: ctx.contextCapabilities?.contextWindowTokens ?? 1,
+      sessionId: ctx.sessionId,
+    })
+    const plannerPrompt = [
       'You are an ExecutionPlanner SubAgent for the CodeZ coding assistant.',
       '',
       'Your goal: read the approved plan and group its steps into parallel execution WAVES.',
@@ -70,7 +78,7 @@ export const ExecutionPlannerSubAgent: SubAgentDefinition = {
       '   AND there is no logical dependency (e.g. B uses an interface A creates → B must be in a LATER wave).',
       '2. If B needs A\'s output, put A in an earlier wave than B.',
       '3. Prefer fewer waves / more parallelism, but NEVER at the cost of correctness.',
-      '4. Read the actual step descriptions and spot-check files with Grep/Read to confirm independence —',
+      '4. Read the actual step descriptions and follow the shared tool policy to confirm independence —',
       '   do NOT blindly trust the declared `files` field.',
       '5. Isolation recommendation:',
       '   - Recommend "worktree" if you are unsure files are truly disjoint, or steps touch shared',
@@ -87,10 +95,12 @@ export const ExecutionPlannerSubAgent: SubAgentDefinition = {
       '',
       'Constraints:',
       '- You have ONLY read-only tools. Do NOT modify anything.',
-      '- Keep token usage minimal; spot-check, do not dump whole files.',
+      '- Keep the final rationale concise; tool reads must follow the shared policy.',
       '',
       `Project Workspace: ${ctx.workspaceRoot}`,
       `Task: ${ctx.task || ctx.parentPrompt}`,
     ].join('\n')
+
+    return [sharedPrompt, plannerPrompt].join('\n\n')
   },
 }
