@@ -47,14 +47,17 @@ export type {
   PermissionRiskLevel,
   PermissionAction,
   PermissionApprovalScope,
+  PermissionCapability,
+  PermissionAnalysisStatus,
   PermissionImpact,
   PermissionSnapshot,
+  PermissionCheck,
   PermissionDecision,
   PermissionRequest,
   PermissionApprovalResponse
 } from './permission'
 
-export { DEFAULT_PERMISSION_MODE, allowedScopesForRisk } from './permission'
+export { DEFAULT_PERMISSION_MODE, allowedScopesForDecision, allowedScopesForRisk } from './permission'
 
 export type {
   ContextScopeId,
@@ -78,5 +81,7 @@ export type {
   SessionRuntimeRef,
   StreamRequestV2
 } from './context'
+
+export type { ToolBatchMeta } from './toolExecution'
 
 export { MAIN_CONTEXT_SCOPE, CONTEXT_SCHEMA_VERSION, contextScopeForSubAgent, eventChangesHistory } from './context'

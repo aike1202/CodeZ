@@ -10,8 +10,10 @@ interface ContextTrackerProps {
 }
 
 function formatTokens(tokens: number): string {
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`
-  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`
+  const sign = tokens < 0 ? '-' : ''
+  const absolute = Math.abs(tokens)
+  if (absolute >= 1_000_000) return `${sign}${(absolute / 1_000_000).toFixed(1)}M`
+  if (absolute >= 1_000) return `${sign}${(absolute / 1_000).toFixed(1)}k`
   return String(tokens)
 }
 
@@ -33,9 +35,10 @@ export default function ContextTracker({ snapshot, compactionState }: ContextTra
     return () => document.removeEventListener('mousedown', closeOutside)
   }, [])
 
-  const percent = snapshot
-    ? Math.min(100, (snapshot.totalInputTokens / Math.max(1, snapshot.usableInputBudget)) * 100)
+  const usagePercent = snapshot
+    ? (snapshot.totalInputTokens / Math.max(1, snapshot.usableInputBudget)) * 100
     : 0
+  const barPercent = Math.min(100, usagePercent)
   const color = snapshot?.pressureLevel === 'overflow' || snapshot?.pressureLevel === 'compact'
     ? '#dc2626'
     : snapshot?.pressureLevel === 'prune'
@@ -46,7 +49,7 @@ export default function ContextTracker({ snapshot, compactionState }: ContextTra
   const radius = 6
   const circumference = 2 * Math.PI * radius
 
-  const rows = snapshot ? [
+  const rows: Array<readonly [string, number, string]> = snapshot ? [
     ['System Prompt', snapshot.systemPromptTokens, '#2563eb'],
     ['工具定义', snapshot.toolSchemaTokens, '#059669'],
     ['规则与状态', snapshot.instructionTokens, '#7c3aed'],
@@ -54,14 +57,17 @@ export default function ContextTracker({ snapshot, compactionState }: ContextTra
     ['最近历史', snapshot.recentHistoryTokens, '#0891b2'],
     ['当前输入', snapshot.currentInputTokens, '#db2777'],
     ['协议开销', snapshot.protocolTokens, '#64748b']
-  ] as const : []
+  ] : []
+  if (snapshot?.providerAdjustmentTokens) {
+    rows.push(['Provider 校准', snapshot.providerAdjustmentTokens, '#475569'])
+  }
 
   return (
     <div ref={containerRef} style={{ position: 'relative' }}>
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
-        title={snapshot ? `上下文占用 ${percent.toFixed(1)}%` : '上下文数据不可用'}
+        title={snapshot ? `上下文占用 ${usagePercent.toFixed(1)}%` : '上下文数据不可用'}
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28,
           border: 'none', borderRadius: 4, cursor: 'pointer',
@@ -70,11 +76,11 @@ export default function ContextTracker({ snapshot, compactionState }: ContextTra
       >
         <svg width="16" height="16" viewBox="0 0 16 16" style={{ transform: 'rotate(-90deg)' }}>
           <circle cx="8" cy="8" r={radius} fill="none" stroke="var(--border-color)" strokeWidth="3" />
-          {snapshot && percent > 0 && (
+          {snapshot && barPercent > 0 && (
             <circle
               cx="8" cy="8" r={radius} fill="none" stroke={color} strokeWidth="3"
               strokeDasharray={circumference}
-              strokeDashoffset={circumference - (percent / 100) * circumference}
+              strokeDashoffset={circumference - (barPercent / 100) * circumference}
               strokeLinecap="round"
             />
           )}
@@ -92,13 +98,13 @@ export default function ContextTracker({ snapshot, compactionState }: ContextTra
           ) : (
             <>
               <Flex align="center" justify="between" style={{ marginBottom: 10, fontSize: 12 }}>
-                <span style={{ color: 'var(--text-muted)' }}>输入预算</span>
+                <span style={{ color: 'var(--text-muted)' }}>本轮模型输入</span>
                 <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                  {formatTokens(snapshot.totalInputTokens)} / {formatTokens(snapshot.usableInputBudget)} ({percent.toFixed(1)}%)
+                  {formatTokens(snapshot.totalInputTokens)} / {formatTokens(snapshot.usableInputBudget)} ({usagePercent.toFixed(1)}%)
                 </span>
               </Flex>
               <div style={{ height: 6, borderRadius: 3, overflow: 'hidden', background: 'var(--bg-modifier-hover)', marginBottom: 12 }}>
-                <div style={{ width: `${percent}%`, height: '100%', background: color }} />
+                <div style={{ width: `${barPercent}%`, height: '100%', background: color }} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                 {rows.map(([label, tokens, rowColor]) => (
@@ -115,6 +121,7 @@ export default function ContextTracker({ snapshot, compactionState }: ContextTra
                 <Flex justify="between"><span>硬输入限制</span><span>{formatTokens(snapshot.hardInputLimit)}</span></Flex>
                 <Flex justify="between"><span>输出预留</span><span>{formatTokens(snapshot.outputReserveTokens)}</span></Flex>
                 <Flex justify="between"><span>安全边际</span><span>{formatTokens(snapshot.safetyMarginTokens)}</span></Flex>
+                <Flex justify="between"><span>原始持久化历史</span><span>{formatTokens(snapshot.rawHistoryTokens)}</span></Flex>
                 <Flex justify="between"><span>数据来源</span><span>{SOURCE_LABEL[snapshot.estimateSource]}</span></Flex>
                 {compactionState?.status === 'running' && <div style={{ marginTop: 6, color: '#d97706' }}>正在压缩上下文</div>}
                 {compactionState?.status === 'failed' && <div style={{ marginTop: 6, color: '#dc2626' }}>{compactionState.error || '压缩失败'}</div>}

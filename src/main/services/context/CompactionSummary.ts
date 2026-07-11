@@ -10,6 +10,8 @@ export interface BuildCompactionPromptInput {
   previousSummary?: CompactionSummaryV1
   resumeState?: VersionedResumeState
   instructions?: string
+  validationFeedback?: string
+  previousInvalidOutput?: string
 }
 
 function invalid(detail: string): never {
@@ -117,6 +119,29 @@ export function renderCompactionSummary(summary: CompactionSummaryV1): string {
 }
 
 export function buildCompactionPrompt(input: BuildCompactionPromptInput): string {
+  const requiredShape = JSON.stringify({
+    version: 1,
+    goal: {
+      originalRequest: 'optional string',
+      currentObjective: 'string',
+      requirements: ['string'],
+      successCriteria: ['string']
+    },
+    status: {
+      phase: 'string',
+      completed: ['string'],
+      inProgress: ['string'],
+      nextActions: ['string']
+    },
+    decisions: [{ decision: 'string', rationale: 'optional string' }],
+    facts: [{ fact: 'string', evidence: 'optional string' }],
+    files: [{ path: 'string', relevance: 'string', state: 'read|modified|created|deleted|unknown' }],
+    validation: [{ commandOrCheck: 'string', result: 'string', status: 'passed|failed|pending' }],
+    errors: [{ symptom: 'string', cause: 'optional string', resolution: 'optional string' }],
+    openQuestions: ['string'],
+    userInstructions: ['string'],
+    coveredThroughSequence: input.coveredThroughSequence
+  }, null, 2)
   const transcript = input.messages.map((message) => JSON.stringify({
     sequence: message.sourceSequence,
     role: message.role,
@@ -128,8 +153,10 @@ export function buildCompactionPrompt(input: BuildCompactionPromptInput): string
   return [
     'Summarize the durable coding-agent history as exactly one JSON object. Do not use Markdown fences.',
     `Set coveredThroughSequence to exactly ${input.coveredThroughSequence}.`,
-    'Required keys: version, goal, status, decisions, facts, files, validation, errors, openQuestions, userInstructions, coveredThroughSequence.',
+    `Return this exact JSON shape with evidence-based values and no extra keys:\n${requiredShape}`,
     'Do not claim work completed without evidence. Keep paths and decisions; omit long source text and resolved logs.',
+    input.validationFeedback ? `Previous output failed validation: ${input.validationFeedback}` : '',
+    input.previousInvalidOutput ? `Previous invalid output to repair:\n${input.previousInvalidOutput}` : '',
     input.instructions ? `One-shot retention instructions: ${input.instructions}` : '',
     input.previousSummary ? `Previous summary:\n${JSON.stringify(input.previousSummary)}` : '',
     input.resumeState ? `Resume state:\n${JSON.stringify(input.resumeState)}` : '',

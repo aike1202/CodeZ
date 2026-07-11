@@ -4,6 +4,7 @@ import { IPC_CHANNELS } from '../shared/ipc/channels'
 import type { ProviderFormData, ProviderInfo, ConnectionTestResult } from '../shared/types/provider'
 import type { SessionData } from '../shared/types/session'
 import type { StreamRequestV2 } from '../shared/types/context'
+import type { ToolBatchMeta } from '../shared/types/toolExecution'
 
 const api = {
   workspace: {
@@ -83,7 +84,13 @@ const api = {
         onChunk: (delta: string, reasoningDelta?: string) => void
         onDone: (fullContent: string, stopReason?: string, txId?: string) => void
         onError: (error: string) => void
-        onToolStart?: (toolCallId: string, name: string, args: string, thoughtSignature?: string) => void
+        onToolStart?: (
+          toolCallId: string,
+          name: string,
+          args: string,
+          thoughtSignature?: string,
+          batch?: ToolBatchMeta
+        ) => void
         onToolEnd?: (toolCallId: string, result: string) => void
         onPermissionRequest?: (request: any) => void
         onAskUserRequest?: (request: any) => void
@@ -133,9 +140,17 @@ const api = {
         if (streamId !== activeStreamId) return
         callbacks.onCompactionFailed?.(payload)
       }
-      const toolStartHandler = (_event: unknown, streamId: string, toolCallId: string, name: string, args: string, thoughtSignature?: string) => {
+      const toolStartHandler = (
+        _event: unknown,
+        streamId: string,
+        toolCallId: string,
+        name: string,
+        args: string,
+        thoughtSignature?: string,
+        batch?: ToolBatchMeta
+      ) => {
         if (streamId !== activeStreamId) return
-        callbacks.onToolStart?.(toolCallId, name, args, thoughtSignature)
+        callbacks.onToolStart?.(toolCallId, name, args, thoughtSignature, batch)
       }
       const toolEndHandler = (_event: unknown, streamId: string, toolCallId: string, result: string) => {
         if (streamId !== activeStreamId) return

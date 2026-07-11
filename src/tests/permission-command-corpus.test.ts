@@ -19,4 +19,28 @@ describe('permission common command corpus', () => {
     const classified = commands.filter((command) => classifyKnownCommand(command.split(/\s+/))).length
     expect(classified / commands.length).toBeGreaterThanOrEqual(0.95)
   })
+
+  it.each([
+    ['npm --version', 'shell', 0],
+    ['npm version', 'external_effect', 1],
+    ['npm publish', 'network', 2],
+    ['npm config get registry', 'shell', 1],
+    ['npm config set registry https://registry.example.test', 'external_effect', 2],
+    ['pnpm config delete registry', 'external_effect', 2],
+    ['yarn config unset registry', 'external_effect', 2],
+    ['npm --prefix packages/app install', 'network', 2],
+    ['pnpm -C packages/app add react', 'network', 2],
+    ['npm install react --version', 'network', 2],
+    ['cargo install ripgrep --version 14.1.0', 'network', 2],
+    ['docker run node:22 --version', 'external_effect', 2],
+    ['iwr https://example.test', 'network', 2],
+    ['irm https://example.test/api', 'network', 2],
+    ['git reset --hard', 'delete', 3],
+    ['git push --force origin main', 'hardline', 4],
+    ['git push -fu origin main', 'hardline', 4],
+    ['git push origin +main', 'hardline', 4],
+    ['git push --mirror origin', 'hardline', 4]
+  ] as const)('classifies %s with the expected capability and metadata', (command, permission, riskLevel) => {
+    expect(classifyKnownCommand(command.split(/\s+/))).toMatchObject({ permission, riskLevel })
+  })
 })

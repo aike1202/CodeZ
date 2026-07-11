@@ -14,7 +14,6 @@ export default function ExecutionLogDetail({
     return (
       <div className="exe-log-reasoning-detail">
         {item.detail?.trim()}
-        {item.status === 'running' && <span className="streaming-cursor">▊</span>}
       </div>
     )
   }

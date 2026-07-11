@@ -35,7 +35,7 @@ export class SubAgentRunnerTool extends Tool {
       '- `description` is a short label (max 60 chars) shown in the execution log.',
       '- Use `expectations.questions` to specify what the subagent MUST answer — it will self-check against this list.',
       '- Use `context` to share what you already know (natural language) so the subagent does not duplicate work.',
-      '- Use `depth` to control exploration depth: quick (6 loops), normal (12, default), exhaustive (20).',
+      '- Use `depth` to control exploration depth. Budgets are subagent-specific; Research uses quick (16 loops), normal (48 loops), exhaustive (96 loops), and defaults to 64 loops when omitted.',
       '- The subagent result is returned as the tool output; it includes structuredOutput, qualitySummary, and filesExamined.'
     ].join('\n')
   }
@@ -102,7 +102,7 @@ export class SubAgentRunnerTool extends Tool {
         depth: {
           type: 'string',
           enum: ['quick', 'normal', 'exhaustive'],
-          description: 'Exploration depth: quick=6 tool calls, normal=12, exhaustive=20. Default: normal. Use quick for simple lookups, exhaustive for full audits.'
+          description: 'Exploration depth. Research uses quick=16 loops, normal=48 loops, exhaustive=96 loops; omitted depth uses the subagent default. Use quick for simple lookups and exhaustive for full audits.'
         }
       },
       required: ['subagent_type', 'description', 'prompt']

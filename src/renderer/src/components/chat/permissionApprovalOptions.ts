@@ -6,9 +6,9 @@ export interface ApprovalOption {
 }
 
 export function approvalOptionsForRequest(
-  request: Pick<PermissionRequest, 'riskLevel' | 'allowedScopes'>
+  request: Pick<PermissionRequest, 'hardline' | 'allowedScopes'> & Partial<Pick<PermissionRequest, 'riskLevel'>>
 ): ApprovalOption[] {
-  if (request.riskLevel === 4) return [{ scope: 'once', label: '仅本次允许' }]
+  if (request.hardline ?? request.riskLevel === 4) return [{ scope: 'once', label: '仅本次允许' }]
   const labels = {
     once: '仅本次允许',
     session: '本会话允许',

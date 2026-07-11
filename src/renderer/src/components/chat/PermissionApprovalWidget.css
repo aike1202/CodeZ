@@ -160,3 +160,16 @@
 .permission-approval-float-item.is-critical .permission-approval-tool {
   color: #f87171;
 }
+
+.permission-approval-float-item.is-unparsed {
+  border-color: rgba(245, 158, 11, 0.7);
+  background: rgba(120, 53, 15, 0.12);
+}
+
+.permission-approval-float-item.is-unparsed .permission-approval-tool {
+  color: #d97706;
+}
+
+[data-theme='dark'] .permission-approval-float-item.is-unparsed .permission-approval-tool {
+  color: #fbbf24;
+}

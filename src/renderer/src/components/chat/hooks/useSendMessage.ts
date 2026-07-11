@@ -4,6 +4,7 @@ import { useProviderStore } from '../../../stores/providerStore'
 import { useChatStore } from '../../../stores/chatStore'
 import { parseSlashCommand } from '../../../commands/SlashCommandParser'
 import type { SkillDefinition } from '../../../../../shared/types/skill'
+import type { ToolBatchMeta } from '../../../../../shared/types/toolExecution'
 
 export function buildChatStreamInput(
   message: string,
@@ -221,12 +222,21 @@ export function useSendMessage() {
             useChatStore.getState().persistSession(sid)
             setStreamCleanup(sid, null)
           },
-          onToolStart: (toolCallId: string, name: string, args: string, thoughtSignature?: string) => {
+          onToolStart: (
+            toolCallId: string,
+            name: string,
+            args: string,
+            thoughtSignature?: string,
+            batch?: ToolBatchMeta
+          ) => {
             startToolCall(agentId, {
               id: toolCallId || genId(),
               name,
               args,
-              thoughtSignature
+              thoughtSignature,
+              batchId: batch?.batchId,
+              batchIndex: batch?.batchIndex,
+              batchSize: batch?.batchSize
             })
             // Persist periodically during long tool execution
             useChatStore.getState().persistSession(sid)

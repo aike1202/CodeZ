@@ -4,11 +4,21 @@ import * as path from 'path'
 import type { PermissionSnapshot } from '../../../shared/types/permission'
 import type { PermissionShellKind } from './operationTypes'
 
+const PACKAGE_MANAGER_VERSION_FLAGS = new Set(['-v', '--version', '-version'])
+const PACKAGE_MANAGER_BUILTINS = new Set([
+  'install', 'add', 'update', 'ci', 'remove', 'uninstall', 'audit', 'publish', 'unpublish',
+  'login', 'logout', 'deprecate', 'dist-tag', 'access', 'owner', 'token', 'version',
+  'exec', 'x', 'dlx', 'create', 'init', 'config', 'cache', 'list', 'ls', 'view', 'info',
+  'search', 'outdated', 'doctor', 'root', 'bin', 'prefix', 'whoami', 'help', 'set'
+])
+
 export interface ExpandedCommand {
   command: string | null
   shell: PermissionShellKind | null
   snapshots: PermissionSnapshot[]
   opaqueReason?: string
+  kind?: 'wrapper' | 'script'
+  cwd?: string
 }
 
 async function snapshot(filePath: string): Promise<PermissionSnapshot> {
@@ -30,7 +40,7 @@ export class NestedCommandExpander {
     if (['bash', 'sh', 'zsh'].includes(executable)) {
       const index = argv.findIndex((arg) => /^-[a-z]*c[a-z]*$/i.test(arg))
       return index >= 0 && argv[index + 1]
-        ? { command: argv[index + 1], shell: 'bash', snapshots: [] }
+        ? { command: argv[index + 1], shell: 'bash', snapshots: [], kind: 'wrapper', cwd }
         : { command: null, shell: null, snapshots: [], opaqueReason: 'dynamic-shell' }
     }
     if (['powershell', 'pwsh'].includes(executable)) {
@@ -39,27 +49,44 @@ export class NestedCommandExpander {
       }
       const index = argv.findIndex((arg) => /^-(?:command|c)$/i.test(arg))
       return index >= 0 && argv[index + 1]
-        ? { command: argv[index + 1], shell: 'powershell', snapshots: [] }
+        ? { command: argv.slice(index + 1).join(' '), shell: 'powershell', snapshots: [], kind: 'wrapper', cwd }
         : { command: null, shell: null, snapshots: [], opaqueReason: 'dynamic-powershell' }
     }
     if (executable === 'cmd') {
       const index = argv.findIndex((arg) => /^\/(?:c|k)$/i.test(arg))
       return index >= 0 && argv[index + 1]
-        ? { command: argv.slice(index + 1).join(' '), shell: 'cmd', snapshots: [] }
+        ? { command: argv.slice(index + 1).join(' '), shell: 'cmd', snapshots: [], kind: 'wrapper', cwd }
         : { command: null, shell: null, snapshots: [], opaqueReason: 'dynamic-cmd' }
     }
     if (['npm', 'pnpm', 'yarn', 'bun'].includes(executable)) {
-      if (['install', 'add', 'update', 'ci', 'remove', 'uninstall'].includes((argv[1] || '').toLowerCase())) {
+      let commandIndex = 1
+      let packageRoot = cwd
+      const directoryOption = argv[1]
+      const acceptsDirectoryOption =
+        (executable === 'npm' && directoryOption === '--prefix') ||
+        (executable === 'pnpm' && ['-C', '--dir'].includes(directoryOption)) ||
+        (['yarn', 'bun'].includes(executable) && directoryOption === '--cwd')
+      if (acceptsDirectoryOption) {
+        if (!argv[2]) return { command: null, shell: null, snapshots: [], opaqueReason: 'missing-package-root' }
+        packageRoot = path.resolve(cwd, argv[2])
+        commandIndex = 3
+      }
+      const rawSubcommand = argv[commandIndex] || ''
+      const subcommand = rawSubcommand.toLowerCase()
+      if (PACKAGE_MANAGER_BUILTINS.has(subcommand)) {
         return { command: null, shell: null, snapshots: [] }
       }
-      const scriptName = argv[1] === 'run' ? argv[2] : argv[1]
+      if (commandIndex === 1 && argv.length === 2 && PACKAGE_MANAGER_VERSION_FLAGS.has(rawSubcommand)) {
+        return { command: null, shell: null, snapshots: [] }
+      }
+      const scriptName = rawSubcommand === 'run' ? argv[commandIndex + 1] : rawSubcommand
       if (!scriptName) return { command: null, shell: null, snapshots: [], opaqueReason: 'missing-script' }
-      const packagePath = path.join(workspaceRoot, 'package.json')
+      const packagePath = path.join(packageRoot, 'package.json')
       try {
         const content = await fs.readFile(packagePath, 'utf8')
         const command = JSON.parse(content)?.scripts?.[scriptName]
         if (typeof command !== 'string') return { command: null, shell: null, snapshots: [], opaqueReason: 'unknown-script' }
-        return { command, shell: parentShell, snapshots: [await snapshot(packagePath)] }
+        return { command, shell: parentShell, snapshots: [await snapshot(packagePath)], kind: 'script', cwd: packageRoot }
       } catch {
         return { command: null, shell: null, snapshots: [], opaqueReason: 'unreadable-package-script' }
       }
@@ -67,10 +94,13 @@ export class NestedCommandExpander {
     const candidate = argv[0] && (path.isAbsolute(argv[0]) ? argv[0] : path.resolve(cwd, argv[0]))
     const extension = candidate ? path.extname(candidate).toLowerCase() : ''
     const shell = extension === '.ps1' ? 'powershell' : extension === '.cmd' || extension === '.bat' ? 'cmd' : extension === '.sh' ? 'bash' : null
-    if (candidate && shell && !seen.has(candidate)) {
+    if (candidate && shell && seen.has(candidate)) {
+      return { command: null, shell: null, snapshots: [], opaqueReason: 'nested-cycle' }
+    }
+    if (candidate && shell) {
       try {
         seen.add(candidate)
-        return { command: await fs.readFile(candidate, 'utf8'), shell, snapshots: [await snapshot(candidate)] }
+        return { command: await fs.readFile(candidate, 'utf8'), shell, snapshots: [await snapshot(candidate)], kind: 'script', cwd }
       } catch {
         return { command: null, shell: null, snapshots: [], opaqueReason: 'unreadable-script' }
       }

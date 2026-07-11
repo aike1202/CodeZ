@@ -390,7 +390,10 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
                   ...item,
                   name: toolCall.name,
                   args: toolCall.args,
-                  thoughtSignature: toolCall.thoughtSignature || item.thoughtSignature
+                  thoughtSignature: toolCall.thoughtSignature || item.thoughtSignature,
+                  batchId: toolCall.batchId ?? item.batchId,
+                  batchIndex: toolCall.batchIndex ?? item.batchIndex,
+                  batchSize: toolCall.batchSize ?? item.batchSize
                 }
               : item
           ),
@@ -398,7 +401,14 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
             item.id === 'tool_' + toolCall.id && item.type === 'tool'
               ? {
                   ...item,
-                  toolCall: { ...item.toolCall, name: toolCall.name, args: toolCall.args },
+                  toolCall: {
+                    ...item.toolCall,
+                    name: toolCall.name,
+                    args: toolCall.args,
+                    batchId: toolCall.batchId ?? item.toolCall.batchId,
+                    batchIndex: toolCall.batchIndex ?? item.toolCall.batchIndex,
+                    batchSize: toolCall.batchSize ?? item.toolCall.batchSize
+                  },
                   updatedAt: now
                 }
               : item

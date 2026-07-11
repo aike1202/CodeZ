@@ -42,4 +42,19 @@ describe('CompactionSummary', () => {
     expect(prompt).toContain('coveredThroughSequence')
     expect(prompt).toContain('ship context ledger')
   })
+
+  it('includes a complete JSON shape and repair feedback', () => {
+    const prompt = buildCompactionPrompt({
+      coveredThroughSequence: 9,
+      messages: [],
+      validationFeedback: 'version must be 1',
+      previousInvalidOutput: '{"version":"1"}'
+    })
+    expect(prompt).toContain('"version": 1')
+    expect(prompt).toContain('"goal": {')
+    expect(prompt).toContain('"currentObjective":')
+    expect(prompt).toContain('"status": {')
+    expect(prompt).toContain('version must be 1')
+    expect(prompt).toContain('{"version":"1"}')
+  })
 })

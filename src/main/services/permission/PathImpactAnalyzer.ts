@@ -46,7 +46,7 @@ export class PathImpactAnalyzer {
     const relative = path.relative(normalizeForCompare(realRoot), normalizeForCompare(canonicalTarget))
     const insideWorkspace = relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
     const normalized = canonicalTarget.replace(/\\/g, '/').toLowerCase()
-    const sensitive = /\/(?:\.ssh|\.aws)(?:\/|$)|\/(?:etc|private\/etc)(?:\/|$)|\/(?:\.bashrc|\.zshrc|\.profile)$|\/(?:\.npmrc|\.pypirc|\.netrc)$/.test(normalized)
+    const sensitive = /\/(?:\.ssh|\.aws)(?:\/|$)|\/(?:etc|private\/etc)(?:\/|$)|\/(?:\.bashrc|\.zshrc|\.profile)$|\/(?:\.npmrc|\.pypirc|\.netrc)$|\/codez\/(?:permission-rules|workspace-permissions)\.json$/.test(normalized)
     return { inputPath, resolvedPath: canonicalTarget, realParentPath, insideWorkspace, sensitive }
   }
 }

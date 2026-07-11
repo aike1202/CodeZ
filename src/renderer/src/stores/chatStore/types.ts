@@ -23,6 +23,9 @@ export interface ToolCallState {
   id: string
   name: string
   args: string
+  batchId?: string
+  batchIndex?: number
+  batchSize?: number
   status: 'running' | 'success' | 'error'
   result?: string
   startedAt: number

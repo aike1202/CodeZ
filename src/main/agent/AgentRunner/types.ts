@@ -8,6 +8,7 @@ import type { ContextBudgetSnapshot } from '../../../shared/types/context'
 import type { RuntimeTurnHandle, SessionRuntimeCoordinator } from '../../services/context/SessionRuntimeCoordinator'
 import type { ModelContextBuilder } from '../../services/context/ModelContextBuilder'
 import type { CompactionService } from '../../services/context/CompactionService'
+import type { ToolBatchMeta } from '../../../shared/types/toolExecution'
 
 export interface SubAgentStartMeta {
   type: string
@@ -28,7 +29,13 @@ export interface SubAgentEndResult {
 }
 
 export interface AgentRunnerCallbacks extends StreamCallbacks {
-  onToolStart?: (toolCallId: string, name: string, args: string, thoughtSignature?: string) => void
+  onToolStart?: (
+    toolCallId: string,
+    name: string,
+    args: string,
+    thoughtSignature?: string,
+    batch?: ToolBatchMeta
+  ) => void
   onToolEnd?: (toolCallId: string, result: string) => void
   onPermissionRequest?: (request: PermissionRequest) => Promise<boolean | PermissionApprovalResponse>
   onAskUserRequest?: (request: AskUserRequest) => Promise<AskUserAnswer[]>

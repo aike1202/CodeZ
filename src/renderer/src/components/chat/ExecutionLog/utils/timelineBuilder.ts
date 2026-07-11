@@ -61,6 +61,12 @@ export function buildUnifiedTimeline(
     } else if (item.type === 'tool') {
       const tc = item.toolCall
       const duration = formatDuration(tc)
+      const toolTimelineMeta = {
+        completedAt: tc.completedAt,
+        batchId: tc.batchId,
+        batchIndex: tc.batchIndex,
+        batchSize: tc.batchSize
+      }
 
       if (tc.name === 'Read') {
         const argsObj = parseArgs(tc.args)
@@ -82,7 +88,8 @@ export function buildUnifiedTimeline(
           args: tc.args,
           detail: tc.result,
           duration,
-          toolName: tc.name
+          toolName: tc.name,
+          ...toolTimelineMeta
         })
       } else if (tc.name === 'read_files') {
         const argsObj = parseArgs(tc.args)
@@ -116,7 +123,8 @@ export function buildUnifiedTimeline(
           args: tc.args,
           detail: tc.result,
           duration: duration,
-          toolName: tc.name
+          toolName: tc.name,
+          ...toolTimelineMeta
         })
       } else {
         const target = getToolTarget(tc) || getToolNoun(tc.name)
@@ -144,7 +152,8 @@ export function buildUnifiedTimeline(
             fileName: target.split(/[/\\]/).pop(),
             detail: tc.result,
             args: tc.args,
-            toolName: tc.name
+            toolName: tc.name,
+            ...toolTimelineMeta
           })
           return
         }
@@ -168,7 +177,8 @@ export function buildUnifiedTimeline(
                 detail: index === 0 ? tc.result : undefined,
                 duration: formatDuration(tc),
                 fileName: fileName,
-                toolName: tc.name
+                toolName: tc.name,
+                ...toolTimelineMeta
               })
             })
             return
@@ -253,7 +263,8 @@ export function buildUnifiedTimeline(
                   detail: tc.result,
                   duration: index === 0 ? formatDuration(tc) : undefined,
                   fileName: undefined,
-                  toolName: tc.name
+                  toolName: tc.name,
+                  ...toolTimelineMeta
                 })
               })
               return
@@ -360,7 +371,8 @@ export function buildUnifiedTimeline(
           detail: tc.result,
           duration: formatDuration(tc),
           fileName: target.split(/[/\\]/).pop(),
-          toolName: tc.name
+          toolName: tc.name,
+          ...toolTimelineMeta
         })
       }
     }

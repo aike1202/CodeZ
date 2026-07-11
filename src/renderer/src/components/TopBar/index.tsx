@@ -9,7 +9,7 @@ import IconMoon from '../icons/IconMoon'
 import IconMonitor from '../icons/IconMonitor'
 import IconMinimize from '../icons/IconMinimize'
 import IconMaximize from '../icons/IconMaximize'
-import IconRestore from '../icons/IconRestore'
+import IconWindowRestore from '../icons/IconWindowRestore'
 import IconClose from '../icons/IconClose'
 
 import './TopBar.css'
@@ -207,7 +207,7 @@ export default function TopBar({
             title={isMaximized ? '向下还原' : '最大化'}
             onClick={() => sendWindowControl('maximize')}
           >
-            {isMaximized ? <IconRestore /> : <IconMaximize />}
+            {isMaximized ? <IconWindowRestore /> : <IconMaximize />}
           </button>
           <button
             className="window-control-btn topbar-window-control-close-btn"

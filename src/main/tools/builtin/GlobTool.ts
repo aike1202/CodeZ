@@ -9,7 +9,11 @@ import { resolveRgPath } from '../ripgrepPath'
 interface GlobArgs {
   pattern?: string
   path?: string
+  head_limit?: number
 }
+
+const DEFAULT_HEAD_LIMIT = 1000
+const MAX_HEAD_LIMIT = 5000
 
 function toPosix(p: string): string {
   return p.replace(/\\/g, '/')
@@ -33,7 +37,11 @@ export class GlobTool extends Tool {
       type: 'object',
       properties: {
         pattern: { type: 'string', description: 'Glob pattern, e.g. "**/*.ts".' },
-        path: { type: 'string', description: 'Optional subdirectory to scope the search. Default workspace root.' }
+        path: { type: 'string', description: 'Optional subdirectory to scope the search. Default workspace root.' },
+        head_limit: {
+          type: 'integer', minimum: 1, maximum: MAX_HEAD_LIMIT, default: DEFAULT_HEAD_LIMIT,
+          description: 'Maximum number of matching paths to return. Narrow pattern/path before raising this limit.'
+        }
       },
       required: ['pattern']
     }
@@ -64,7 +72,17 @@ export class GlobTool extends Tool {
       }
 
       if (files.length === 0) return 'No files matched.'
-      return files.map(toPosix).join('\n')
+      const requestedLimit = Number(parsed.head_limit)
+      const headLimit = Number.isFinite(requestedLimit)
+        ? Math.max(1, Math.min(MAX_HEAD_LIMIT, Math.floor(requestedLimit)))
+        : DEFAULT_HEAD_LIMIT
+      const shown = files.slice(0, headLimit).map(toPosix)
+      if (shown.length === files.length) return shown.join('\n')
+      return [
+        ...shown,
+        '',
+        `[Glob results truncated: showing ${shown.length} of ${files.length} files. Use a narrower pattern or path; head_limit may be raised up to ${MAX_HEAD_LIMIT}.]`
+      ].join('\n')
     } catch (err: any) {
       return `Error: ${err.message}`
     }

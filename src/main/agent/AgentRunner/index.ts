@@ -20,6 +20,7 @@ import { getWorkspacePermissionStore } from '../../services/permission/workspace
 import type { PermissionApprovalResponse } from '../../../shared/types/permission'
 import type { SmartApprovalClient } from '../../services/permission/SmartApprovalService'
 import { ChatSmartApprovalClient } from '../../services/permission/ChatSmartApprovalClient'
+import { ContextBudgetService } from '../../services/context/ContextBudgetService'
 
 export enum NormalizedStopReason {
   Truncated = 'Truncated',
@@ -65,7 +66,8 @@ export async function authorizeToolCall(
   parsedArgs: unknown,
   workspaceRoot: string,
   onPermissionRequest?: AgentRunnerCallbacks['onPermissionRequest'],
-  smartApprovalClient?: SmartApprovalClient | null
+  smartApprovalClient?: SmartApprovalClient | null,
+  sessionId?: string
 ): Promise<ToolAuthorization> {
   const permissionManager = PermissionManager.getInstance()
   const context = {
@@ -74,7 +76,8 @@ export async function authorizeToolCall(
     platform: process.platform,
     shellKind: toolName === 'PowerShell' ? 'powershell' as const : toolName === 'Bash' ? 'bash' as const : undefined,
     mode: await getWorkspacePermissionStore().getMode(workspaceRoot),
-    smartApprovalClient
+    smartApprovalClient,
+    sessionId
   }
   const decision = await permissionManager.evaluateToolCall(toolName, parsedArgs, context)
   await permissionManager.audit(toolName, decision, context)
@@ -243,6 +246,7 @@ export class AgentRunner {
 
     let consecutiveIdleTurns = 0
     let currentState = AgentState.Running
+    const contextBudgetService = new ContextBudgetService()
 
     try {
       while (loopCount < MAX_LOOPS && !this.abortController?.signal.aborted) {
@@ -379,6 +383,12 @@ export class AgentRunner {
           }
         )
 
+        if (currentUsage?.inputTokens) {
+          callbacks.onContextBudget?.(
+            contextBudgetService.applyProviderUsage(built.budget, currentUsage)
+          )
+        }
+
         if (
           gotError && providerErrorCode === 'CONTEXT_OVERFLOW' &&
           !overflowRetried && config.compactionService
@@ -448,14 +458,21 @@ export class AgentRunner {
           })),
           usage: currentUsage
         })
-        for (const toolCall of toolCallsArray) {
+        const batchId = toolCallsArray.length > 1
+          ? `batch_${runtimeTurn!.turnId}_${loopCount}`
+          : undefined
+
+        toolCallsArray.forEach((toolCall, batchIndex) => {
           callbacks.onToolStart?.(
             toolCall.id,
             toolCall.function.name,
             toolCall.function.arguments,
-            toolCall.thought_signature
+            toolCall.thought_signature,
+            batchId
+              ? { batchId, batchIndex, batchSize: toolCallsArray.length }
+              : undefined
           )
-        }
+        })
 
         if (toolCallsArray.length > 0) {
           const toolCallbacks: AgentRunnerCallbacks = { ...callbacks, onToolEnd: undefined }
@@ -506,7 +523,8 @@ export class AgentRunner {
                   apiKey: config.apiKey,
                   model: config.model,
                   apiFormat: config.apiFormat
-                })
+                }),
+                sessionId
               )
 
               if (!authorization.allowed) {

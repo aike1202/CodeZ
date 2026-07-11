@@ -45,8 +45,34 @@ describe('ContextBudgetService', () => {
     expect(snapshot.totalInputTokens).toBe(
       snapshot.systemPromptTokens + snapshot.toolSchemaTokens + snapshot.instructionTokens +
       snapshot.protocolTokens + snapshot.summaryTokens + snapshot.recentHistoryTokens +
-      snapshot.currentInputTokens
+      snapshot.currentInputTokens + snapshot.providerAdjustmentTokens
     )
     expect(snapshot.historyVersion).toBe(3)
+  })
+
+  it('replaces the estimate with provider-reported input usage', () => {
+    const estimated = service.measureRequest({
+      capabilities: {
+        contextWindowTokens: 200_000,
+        maxInputTokens: 191_800,
+        maxOutputTokens: 8_200
+      },
+      systemPrompt: 'system',
+      recentHistory: ['short history'],
+      currentInput: 'input',
+      historyVersion: 4
+    })
+
+    const actual = service.applyProviderUsage(estimated, {
+      inputTokens: 295_000,
+      outputTokens: 20,
+      totalTokens: 295_020
+    })
+
+    expect(actual.totalInputTokens).toBe(295_000)
+    expect(actual.providerAdjustmentTokens).toBe(295_000 - estimated.totalInputTokens)
+    expect(actual.estimateSource).toBe('provider')
+    expect(actual.pressureLevel).toBe('overflow')
+    expect(actual.rawHistoryTokens).toBe(estimated.rawHistoryTokens)
   })
 })

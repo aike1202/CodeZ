@@ -5,6 +5,7 @@ import { ContextBudgetService } from './ContextBudgetService'
 export interface ToolOutputPruneOptions {
   targetTokens: number
   protectedTailStart: number
+  maxSingleToolTokens?: number
 }
 
 export interface ToolOutputPruneRecord {
@@ -48,22 +49,22 @@ export class ToolOutputPruner {
       (total, message) => total + this.budget.estimateValueTokens(message), 0
     )
     const tokensBefore = estimateTotal()
-    const candidates = messages
+    const prunedIds = new Set<string>()
+    const eligible = (message: NormalizedModelMessage) =>
+      message.role === 'tool' &&
+      message.status === 'complete' &&
+      !PROTECTED_TOOLS.has(message.name || '') &&
+      !isErrorResult(message.content) &&
+      !prunedIds.has(message.id)
+    const candidates = () => messages
       .map((message, index) => ({ message, index, tokens: this.budget.estimateStringTokens(message.content) }))
-      .filter(({ message, index }) =>
-        index < options.protectedTailStart &&
-        message.role === 'tool' &&
-        message.status === 'complete' &&
-        !PROTECTED_TOOLS.has(message.name || '') &&
-        !isErrorResult(message.content)
-      )
-      .sort((left, right) => right.tokens - left.tokens || left.index - right.index)
+      .filter(({ message }) => eligible(message))
 
     const records: ToolOutputPruneRecord[] = []
     let currentTokens = tokensBefore
-    for (const candidate of candidates) {
-      if (currentTokens <= options.targetTokens) break
+    const pruneCandidate = (candidate: ReturnType<typeof candidates>[number]) => {
       const content = candidate.message.content
+      const before = this.budget.estimateValueTokens(candidate.message)
       const record: ToolOutputPruneRecord = {
         messageId: candidate.message.id,
         toolName: candidate.message.name || 'unknown',
@@ -82,8 +83,23 @@ export class ToolOutputPruner {
         head: content.slice(0, headLength),
         tail: tailLength ? content.slice(-tailLength) : ''
       })
-      currentTokens -= Math.max(0, candidate.tokens - this.budget.estimateStringTokens(candidate.message.content))
+      currentTokens -= Math.max(0, before - this.budget.estimateValueTokens(candidate.message))
+      prunedIds.add(candidate.message.id)
       records.push(record)
+    }
+
+    const maxSingleToolTokens = options.maxSingleToolTokens ?? Number.POSITIVE_INFINITY
+    for (const candidate of candidates()
+      .filter(({ tokens }) => tokens > maxSingleToolTokens)
+      .sort((left, right) => right.tokens - left.tokens || left.index - right.index)) {
+      pruneCandidate(candidate)
+    }
+
+    for (const candidate of candidates()
+      .filter(({ index }) => index < options.protectedTailStart)
+      .sort((left, right) => right.tokens - left.tokens || left.index - right.index)) {
+      if (currentTokens <= options.targetTokens) break
+      pruneCandidate(candidate)
     }
 
     return { messages, records, tokensBefore, tokensAfter: estimateTotal() }

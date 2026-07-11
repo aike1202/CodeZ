@@ -20,7 +20,7 @@ export class SmartApprovalService {
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 8000))
       ])
       if (!Number.isInteger(result.riskLevel) || result.riskLevel < 0 || result.riskLevel > 4 || result.confidence < 0.9) return null
-      return { riskLevel: result.riskLevel, ruleId: 'smart.unknown-command', reason: result.reason }
+      return { permission: 'unknown', riskLevel: result.riskLevel, ruleId: 'smart.unknown-command', reason: result.reason }
     } catch {
       return null
     }

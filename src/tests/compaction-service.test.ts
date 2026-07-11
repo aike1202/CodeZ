@@ -111,4 +111,80 @@ describe('CompactionService', () => {
     })
     expect(calls).toBe(3)
   })
+
+  it('repairs one invalid schema response and then commits', async () => {
+    const f = await fixture()
+    let calls = 0
+    const generate = vi.fn(async (input: {
+      coveredThroughSequence: number
+      validationFeedback?: string
+    }) => {
+      calls++
+      return calls === 1
+        ? JSON.stringify({ version: '1', goal: 'continue' })
+        : JSON.stringify(summary(input.coveredThroughSequence))
+    })
+    const result = await new CompactionService(f.ledger, { generate }).compact({
+      sessionId: 's1', contextScopeId: 'main', trigger: 'manual',
+      capabilities: { contextWindowTokens: 10_000, maxOutputTokens: 2_000 }, systemPrompt: 'system'
+    })
+    expect(result.status).toBe('completed')
+    expect(generate).toHaveBeenCalledTimes(2)
+    expect(generate.mock.calls[1][0].validationFeedback).toContain('version must be 1')
+  })
+
+  it('opens a circuit after two invalid schema responses', async () => {
+    const f = await fixture()
+    const generate = vi.fn().mockResolvedValue(JSON.stringify({ version: '1', goal: 'continue' }))
+    const service = new CompactionService(f.ledger, { generate })
+    const request = {
+      sessionId: 's1', contextScopeId: 'main' as const, trigger: 'manual' as const,
+      capabilities: { contextWindowTokens: 10_000, maxOutputTokens: 2_000 }, systemPrompt: 'system'
+    }
+    const first = await service.compact(request)
+    const second = await service.compact(request)
+    expect(first).toMatchObject({ status: 'failed', errorCode: 'COMPACTION_SCHEMA_INVALID' })
+    expect(second).toEqual(first)
+    expect(generate).toHaveBeenCalledTimes(2)
+  })
+
+  it('bounds oversized tool output before sending the compaction request', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codez-compact-huge-tool-'))
+    dirs.push(root)
+    const ledger = new ModelLedgerStore(root)
+    const runtime = new SessionRuntimeCoordinator(ledger)
+    const toolTurn = await runtime.beginTurn({
+      sessionId: 's1', contextScopeId: 'main', text: 'list every file'
+    })
+    await runtime.recordAssistant(toolTurn, {
+      content: '',
+      toolCalls: [{ id: 'glob-1', name: 'Glob', arguments: '{"pattern":"**/*"}' }]
+    })
+    await runtime.recordToolResult(toolTurn, {
+      callId: 'glob-1', name: 'Glob', content: 'G'.repeat(621_396), status: 'success'
+    })
+    await runtime.completeTurn(toolTurn, { stopReason: 'tool_calls' })
+    for (let index = 0; index < 5; index++) {
+      const turn = await runtime.beginTurn({
+        sessionId: 's1', contextScopeId: 'main', text: `question ${index} ${'Q'.repeat(2000)}`
+      })
+      await runtime.recordAssistant(turn, { content: `answer ${index} ${'A'.repeat(2000)}` })
+      await runtime.completeTurn(turn, { stopReason: 'stop' })
+    }
+
+    const generate = vi.fn(async (input: {
+      coveredThroughSequence: number
+      messages: Array<{ role: string; content: string }>
+    }) => JSON.stringify(summary(input.coveredThroughSequence)))
+    const result = await new CompactionService(ledger, { generate }).compact({
+      sessionId: 's1', contextScopeId: 'main', trigger: 'manual',
+      capabilities: { contextWindowTokens: 10_000, maxOutputTokens: 2_000 }, systemPrompt: 'system'
+    })
+
+    expect(result.status).toBe('completed')
+    const compactionMessages = generate.mock.calls[0][0].messages
+    const toolResult = compactionMessages.find((message) => message.role === 'tool')
+    expect(toolResult?.content).toContain('TOOL_OUTPUT_PRUNED')
+    expect(toolResult?.content.length).toBeLessThan(10_000)
+  })
 })

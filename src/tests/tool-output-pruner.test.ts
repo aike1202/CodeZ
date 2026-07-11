@@ -29,4 +29,22 @@ describe('ToolOutputPruner', () => {
     expect(result.messages[0].content).toBe(messages[0].content)
     expect(result.messages[1].content).toContain('TOOL_OUTPUT_PRUNED')
   })
+
+  it('prunes an oversized successful result even inside the protected tail', () => {
+    const huge = 'G'.repeat(621_396)
+    const messages = [tool('recent-glob', huge, 'Glob')]
+    const result = new ToolOutputPruner().prune(messages, {
+      targetTokens: 100_000,
+      protectedTailStart: 0,
+      maxSingleToolTokens: 8_000
+    })
+
+    expect(result.messages[0].content).toContain('TOOL_OUTPUT_PRUNED')
+    expect(JSON.parse(result.messages[0].content)).toMatchObject({
+      toolName: 'Glob',
+      originalChars: 621_396
+    })
+    expect(result.tokensAfter).toBeLessThan(1_000)
+    expect(messages[0].content).toBe(huge)
+  })
 })

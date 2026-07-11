@@ -210,9 +210,9 @@ export function registerChatIpc(): void {
           onContextBudget: (snapshot) => {
             sender.send(IPC_CHANNELS.CHAT_CONTEXT_BUDGET_UPDATED, streamId, request.sessionId, snapshot)
           },
-          onToolStart: (toolCallId, name, args, thoughtSignature) => {
+          onToolStart: (toolCallId, name, args, thoughtSignature, batch) => {
             log.info('[Chat] tool start', { streamId, name })
-            sender.send(IPC_CHANNELS.CHAT_STREAM_TOOL_START, streamId, toolCallId, name, args, thoughtSignature)
+            sender.send(IPC_CHANNELS.CHAT_STREAM_TOOL_START, streamId, toolCallId, name, args, thoughtSignature, batch)
           },
           onToolEnd: (toolCallId, result) => {
             log.info('[Chat] tool end', { streamId })

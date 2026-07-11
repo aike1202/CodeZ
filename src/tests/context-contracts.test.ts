@@ -45,10 +45,12 @@ describe('context contracts', () => {
       protocolTokens: 10,
       summaryTokens: 0,
       recentHistoryTokens: 10,
+      rawHistoryTokens: 10,
       currentInputTokens: 10,
       outputReserveTokens: 1000,
       safetyMarginTokens: 256,
       totalInputTokens: 60,
+      providerAdjustmentTokens: 0,
       pressureLevel: 'normal',
       estimateSource: 'heuristic',
       historyVersion: 1

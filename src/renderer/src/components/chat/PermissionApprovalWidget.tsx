@@ -38,15 +38,22 @@ export default function PermissionApprovalWidget({ msgId, requests, onResolve }:
         <div className="permission-approval-title">需要您的授权 ({pendingRequests.length} 项)</div>
         {pendingRequests.map((request) => {
           const loading = loadingRequestId === request.id
+          const hardline = request.hardline ?? request.critical
+          const unparsed = !hardline && request.analysisStatus === 'unparsed'
+          const label = hardline ? '极度危险' : unparsed ? '无法完整分析' : '需要授权'
+          const visibleChecks = (request.checks ?? []).filter((check) => check.action !== 'allow')
           return (
-            <div key={request.id} className={`permission-approval-float-item ${request.critical ? 'is-critical' : ''}`}>
+            <div key={request.id} className={`permission-approval-float-item ${hardline ? 'is-critical' : unparsed ? 'is-unparsed' : ''}`}>
               <Flex align="center" justify="between" gap={2}>
-                <span className="permission-approval-tool">{request.critical ? '极度危险' : `L${request.riskLevel}`}</span>
+                <span className="permission-approval-tool">{label}</span>
                 <span>{request.toolName}</span>
               </Flex>
               <div className="permission-approval-float-details">
                 <strong>{request.reason}</strong>
                 <pre>{JSON.stringify(request.args, null, 2)}</pre>
+                {visibleChecks.map((check) => (
+                  <div key={`${check.permission}:${check.pattern}`}>{check.permission}: {check.pattern}</div>
+                ))}
                 {request.impacts.map((impact) => <div key={`${impact.kind}:${impact.target}`}>{impact.kind}: {impact.target}</div>)}
                 <small>规则：{request.ruleId}</small>
                 <Flex justify="end" gap={2} className="permission-approval-actions">

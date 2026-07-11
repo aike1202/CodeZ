@@ -147,10 +147,12 @@ export interface ContextBudgetSnapshot {
   protocolTokens: number
   summaryTokens: number
   recentHistoryTokens: number
+  rawHistoryTokens: number
   currentInputTokens: number
   outputReserveTokens: number
   safetyMarginTokens: number
   totalInputTokens: number
+  providerAdjustmentTokens: number
   pressureLevel: ContextPressureLevel
   estimateSource: ContextEstimateSource
   historyVersion: number

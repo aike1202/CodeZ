@@ -13,8 +13,8 @@ export function IconRestore(props: React.SVGProps<SVGSVGElement>): React.ReactEl
       strokeLinejoin="round" 
       {...props}
     >
-      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-      <path d="M3 3v5h5" />
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
     </svg>
   )
 }

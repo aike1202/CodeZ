@@ -18,16 +18,12 @@ const FILE_PATH_RE = new RegExp(`([\\w./\\\\-]+\\.(${EXTENSIONS.join('|')})(:\\d
 export function parseInline(
   text: string,
   onFileClick: (path: string) => void,
-  showCursor = false,
   validFiles?: Set<string>
 ): React.ReactNode[] {
   const nodes: React.ReactNode[] = []
   const files = validFiles ?? new Set<string>()
 
   if (!text) {
-    if (showCursor) {
-      nodes.push(React.createElement('span', { key: 'cursor', className: 'streaming-cursor' }, '▊'))
-    }
     return nodes
   }
 
@@ -276,10 +272,6 @@ export function parseInline(
       )
       remaining = remaining.slice(cmdText.length)
     }
-  }
-
-  if (showCursor) {
-    nodes.push(React.createElement('span', { key: 'cursor', className: 'streaming-cursor' }, '▊'))
   }
 
   return nodes

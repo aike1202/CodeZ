@@ -2,7 +2,7 @@ import React from 'react'
 import Button from '../../ui/Button'
 import IconMinimize from '../../icons/IconMinimize'
 import IconMaximize from '../../icons/IconMaximize'
-import IconRestore from '../../icons/IconRestore'
+import IconWindowRestore from '../../icons/IconWindowRestore'
 import IconClose from '../../icons/IconClose'
 
 interface WindowControlsProps {
@@ -44,7 +44,7 @@ export default function WindowControls({
           sendWindowControl('maximize')
         }}
       >
-        {isMaximized ? <IconRestore /> : <IconMaximize />}
+        {isMaximized ? <IconWindowRestore /> : <IconMaximize />}
       </Button>
       <Button
         variant="ghost"

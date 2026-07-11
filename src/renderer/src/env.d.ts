@@ -42,7 +42,13 @@ declare global {
             onChunk: (delta: string, reasoningDelta?: string) => void
             onDone: (fullContent: string, stopReason?: string, txId?: string) => void
             onError: (error: string) => void
-            onToolStart?: (toolCallId: string, name: string, args: string, thoughtSignature?: string) => void
+            onToolStart?: (
+              toolCallId: string,
+              name: string,
+              args: string,
+              thoughtSignature?: string,
+              batch?: import('../../shared/types/toolExecution').ToolBatchMeta
+            ) => void
             onToolEnd?: (toolCallId: string, result: string) => void
             onPermissionRequest?: (request: any) => void
             onAskUserRequest?: (request: any) => void

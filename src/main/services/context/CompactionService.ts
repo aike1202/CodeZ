@@ -11,6 +11,7 @@ import type { CompactionModelClient } from './CompactionModelClient'
 import { parseAndValidateSummary, renderCompactionSummary } from './CompactionSummary'
 import { ModelHistoryNormalizer } from './ModelHistoryNormalizer'
 import { ModelLedgerStore } from './ModelLedgerStore'
+import { ToolOutputPruner } from './ToolOutputPruner'
 
 export interface CompactionRequest {
   sessionId: string
@@ -45,6 +46,8 @@ export interface CompactionObserver {
 }
 
 export class CompactionService {
+  private terminalFailure?: CompactionResult
+
   constructor(
     private readonly ledger: ModelLedgerStore,
     private readonly model: CompactionModelClient,
@@ -53,6 +56,7 @@ export class CompactionService {
   ) {}
 
   async compact(request: CompactionRequest): Promise<CompactionResult> {
+    if (this.terminalFailure) return this.terminalFailure
     let lastFailure: { code: ContextErrorCode; message: string } = {
       code: 'COMPACTION_INSUFFICIENT_REDUCTION',
       message: 'Compaction did not produce a usable reduction'
@@ -114,22 +118,55 @@ export class CompactionService {
         tokensBefore
       })
 
-      let summary
-      try {
-        const raw = await this.model.generate({
-          coveredThroughSequence,
-          messages: head,
-          previousSummary: scope.latestCompaction,
-          resumeState: scope.resumeState,
-          instructions: request.manualInstructions
-        })
-        summary = parseAndValidateSummary(raw, coveredThroughSequence)
-      } catch (error) {
-        const code = (error as any)?.code === 'COMPACTION_SCHEMA_INVALID'
-          ? 'COMPACTION_SCHEMA_INVALID'
-          : 'COMPACTION_SUMMARY_FAILED'
-        return this.fail(request, code, error instanceof Error ? error.message : String(error))
+      const usable = this.budget.resolveLimits(request.capabilities).usableInputBudget
+      const summaryMessages = new ToolOutputPruner(this.budget).prune(head, {
+        targetTokens: Number.POSITIVE_INFINITY,
+        protectedTailStart: 0,
+        maxSingleToolTokens: Math.min(8_000, Math.floor(usable * 0.1))
+      }).messages
+      let summary: ReturnType<typeof parseAndValidateSummary> | undefined
+      let validationFeedback: string | undefined
+      let previousInvalidOutput: string | undefined
+      for (let schemaAttempt = 0; schemaAttempt < 2; schemaAttempt++) {
+        let raw: string
+        try {
+          raw = await this.model.generate({
+            coveredThroughSequence,
+            messages: summaryMessages,
+            previousSummary: scope.latestCompaction,
+            resumeState: scope.resumeState,
+            instructions: request.manualInstructions,
+            validationFeedback,
+            previousInvalidOutput
+          })
+        } catch (error) {
+          return this.fail(
+            request,
+            'COMPACTION_SUMMARY_FAILED',
+            error instanceof Error ? error.message : String(error)
+          )
+        }
+        try {
+          summary = parseAndValidateSummary(raw, coveredThroughSequence)
+          break
+        } catch (error) {
+          const schemaError = (error as any)?.code === 'COMPACTION_SCHEMA_INVALID'
+          if (schemaError && schemaAttempt === 0) {
+            validationFeedback = error instanceof Error ? error.message : String(error)
+            previousInvalidOutput = raw.slice(0, 32_000)
+            continue
+          }
+          const code = schemaError ? 'COMPACTION_SCHEMA_INVALID' : 'COMPACTION_SUMMARY_FAILED'
+          const failure = await this.fail(
+            request,
+            code,
+            error instanceof Error ? error.message : String(error)
+          )
+          if (code === 'COMPACTION_SCHEMA_INVALID') this.terminalFailure = failure
+          return failure
+        }
       }
+      if (!summary) throw new Error('Compaction summary retry ended without a result')
 
       const latest = await this.ledger.load(request.sessionId)
       if (latest.scopes[request.contextScopeId]?.historyVersion !== sourceHistoryVersion) {
@@ -147,7 +184,6 @@ export class CompactionService {
         renderedSummary,
         sourceHistoryVersion
       ).totalInputTokens
-      const usable = this.budget.resolveLimits(request.capabilities).usableInputBudget
       if (tokensAfter > usable * 0.55 && tokensAfter > tokensBefore * 0.8) {
         lastFailure = {
           code: 'COMPACTION_INSUFFICIENT_REDUCTION',

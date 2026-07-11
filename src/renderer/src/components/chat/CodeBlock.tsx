@@ -6,13 +6,11 @@ import hljs from 'highlight.js'
 interface CodeBlockProps {
   lang: string
   code: string
-  showCursor?: boolean
 }
 
 export default function CodeBlock({
   lang,
-  code,
-  showCursor = false
+  code
 }: CodeBlockProps): React.ReactElement {
   const [copied, setCopied] = useState(false)
 
@@ -55,7 +53,7 @@ export default function CodeBlock({
       <pre className="code-block-pre hljs">
         <code
           dangerouslySetInnerHTML={{
-            __html: highlightedCode + (showCursor ? '<span class="streaming-cursor">▊</span>' : '')
+            __html: highlightedCode
           }}
         />
       </pre>

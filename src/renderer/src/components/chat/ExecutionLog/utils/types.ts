@@ -17,6 +17,10 @@ export interface UnifiedTimelineItem {
   id: string
   type: 'reasoning' | 'tool' | 'command' | 'edit' | 'text'
   timestamp: number
+  completedAt?: number
+  batchId?: string
+  batchIndex?: number
+  batchSize?: number
   status: 'running' | 'success' | 'error'
   verb:
     | 'Thought'
@@ -57,6 +61,18 @@ export interface UnifiedTimelineItem {
   toolName?: string
   realPath?: string
 }
+
+export interface ParallelToolBatchItem {
+  id: string
+  type: 'parallel-batch'
+  batchId: string
+  batchSize: number
+  timestamp: number
+  status: 'running' | 'success' | 'error'
+  items: UnifiedTimelineItem[]
+}
+
+export type ExecutionLogDisplayItem = UnifiedTimelineItem | ParallelToolBatchItem
 
 export type EditItemWithStatus = EditItem & {
   status: 'running' | 'success' | 'error'

@@ -13,6 +13,8 @@ export interface CompactionModelInput {
   previousSummary?: CompactionSummaryV1
   resumeState?: VersionedResumeState
   instructions?: string
+  validationFeedback?: string
+  previousInvalidOutput?: string
 }
 
 export interface CompactionModelClient {

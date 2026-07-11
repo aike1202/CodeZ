@@ -31,6 +31,7 @@ export interface MeasureRequestInput {
   instructions?: string[]
   summary?: string
   recentHistory?: unknown[]
+  rawHistoryTokens?: number
   currentInput: string
   historyVersion: number
   providerUsage?: ProviderTokenUsage
@@ -130,14 +131,35 @@ export class ContextBudgetService {
       protocolTokens,
       summaryTokens,
       recentHistoryTokens,
+      rawHistoryTokens: input.rawHistoryTokens ?? recentHistoryTokens,
       currentInputTokens,
       totalInputTokens,
+      providerAdjustmentTokens: 0,
       pressureLevel: this.pressureLevel(
         totalInputTokens / limits.usableInputBudget,
         projected > limits.hardInputLimit
       ),
       estimateSource,
       historyVersion: input.historyVersion
+    }
+  }
+
+  applyProviderUsage(
+    snapshot: ContextBudgetSnapshot,
+    usage: ProviderTokenUsage
+  ): ContextBudgetSnapshot {
+    if (!Number.isFinite(usage.inputTokens) || usage.inputTokens <= 0) return snapshot
+
+    const totalInputTokens = Math.floor(usage.inputTokens)
+    const providerAdjustmentTokens = snapshot.providerAdjustmentTokens +
+      totalInputTokens - snapshot.totalInputTokens
+
+    return {
+      ...snapshot,
+      totalInputTokens,
+      providerAdjustmentTokens,
+      pressureLevel: this.pressureLevel(totalInputTokens / snapshot.usableInputBudget),
+      estimateSource: 'provider'
     }
   }
 

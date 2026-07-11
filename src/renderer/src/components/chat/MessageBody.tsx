@@ -8,8 +8,6 @@ import './MessageBody.css'
 
 export default function MessageBody({
   content,
-  streaming,
-  reasoning,
   onFileClick
 }: {
   content: string
@@ -19,28 +17,18 @@ export default function MessageBody({
 }): React.ReactElement {
   const validFiles = useWorkspaceStore((s) => s.validFiles)
 
-  // 极度罕见的字符串作为标记，防止触发 react-markdown 的 markdown 词法解析（如加粗、斜体等）
-  const STREAMING_TOKEN = '▌▌STREAMING_TOKEN▐▐'
-
-  // 辅助函数：深度遍历 React Node，移除 token 并决定是否渲染 cursor，同时将纯文本丢给 parseInline
-  const renderInline = (children: React.ReactNode, forceShowCursor = false): React.ReactNode => {
+  const renderInline = (children: React.ReactNode): React.ReactNode => {
     if (typeof children === 'string') {
-      const hasToken = children.includes(STREAMING_TOKEN)
-      const cleanStr = children.replace(STREAMING_TOKEN, '')
-      return parseInline(cleanStr, onFileClick, forceShowCursor || hasToken, validFiles)
+      return parseInline(children, onFileClick, validFiles)
     }
     if (Array.isArray(children)) {
       return children.map((c, i) => (
-        <React.Fragment key={i}>{renderInline(c, forceShowCursor)}</React.Fragment>
+        <React.Fragment key={i}>{renderInline(c)}</React.Fragment>
       ))
     }
 
     return children
   }
-
-  const renderContent = streaming && !content 
-    ? '▊' 
-    : content + (streaming ? STREAMING_TOKEN : '')
 
   return (
     <div className="markdown-body">
@@ -59,21 +47,15 @@ export default function MessageBody({
             // 去除 react-markdown 自动追加的换行
             let textContent = rawText.replace(/\n$/, '')
             
-            const isLast = streaming && textContent.includes(STREAMING_TOKEN)
-            const cleanText = textContent.replace(STREAMING_TOKEN, '')
-
-            return <CodeBlock lang={lang} code={cleanText} showCursor={isLast} />
+            return <CodeBlock lang={lang} code={textContent} />
           },
           // 行内代码
           code(props: any) {
             const { children, className, node, ...rest } = props
             const textContent = Array.isArray(children) ? children.join('') : String(children || '')
-            const isLast = streaming && textContent.includes(STREAMING_TOKEN)
-            const cleanText = textContent.replace(STREAMING_TOKEN, '')
             return (
               <code className="inline-code" {...rest}>
-                {cleanText}
-                {isLast && <span className="streaming-cursor">▊</span>}
+                {textContent}
               </code>
             )
           },
@@ -110,14 +92,8 @@ export default function MessageBody({
           )
         }}
       >
-        {renderContent}
+        {content}
       </ReactMarkdown>
-
-      {streaming && !content && !reasoning && (
-        <div className="msg-empty-streaming">
-          <span className="streaming-cursor">▊</span>
-        </div>
-      )}
     </div>
   )
 }

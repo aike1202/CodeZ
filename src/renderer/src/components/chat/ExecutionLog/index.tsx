@@ -10,11 +10,13 @@ import {
   buildEditItems,
   buildUnifiedTimeline,
   buildSummaryText,
-  extractAskSummary
+  extractAskSummary,
+  groupParallelToolBatches
 } from './utils'
 import './ExecutionLog.css'
 import type { ExecutionLogProps } from './types'
 import { LogItemRow } from './components/LogItemRow'
+import { ParallelToolBatchCard } from './components/ParallelToolBatchCard'
 import SubAgentCard from '../SubAgentCard'
 
 export default function ExecutionLog({
@@ -37,6 +39,7 @@ export default function ExecutionLog({
     () => buildUnifiedTimeline(normalizedTimeline, commands, edits, reasoning, streaming),
     [normalizedTimeline, commands, edits, reasoning, streaming]
   )
+  const displayItems = useMemo(() => groupParallelToolBatches(unifiedItems), [unifiedItems])
 
   const running = useMemo(() => {
     return Boolean(streaming) || unifiedItems.some((item) => item.status === 'running')
@@ -153,7 +156,22 @@ export default function ExecutionLog({
 
       <div className={`timeline-list-wrapper ${expanded ? 'timeline-list-wrapper--expanded' : ''}`}>
         <Stack className="timeline-list">
-          {unifiedItems.map((item, idx) => {
+          {displayItems.map((item, idx) => {
+            if (item.type === 'parallel-batch') {
+              return (
+                <ParallelToolBatchCard
+                  key={item.id}
+                  batch={item}
+                  expandedMap={expandedMap}
+                  hasItemDetail={hasDetail}
+                  toggleItemExpand={toggleItemExpand}
+                  subAgents={subAgents}
+                  onFileClick={onFileClick}
+                  onDiffClick={onDiffClick}
+                />
+              )
+            }
+
             const isOrchestratorTool =
               item.toolName === 'DelegateTasks' ||
               item.toolName === 'spawn'
@@ -180,7 +198,7 @@ export default function ExecutionLog({
               <LogItemRow
                 key={item.id}
                 item={item}
-                isLast={idx === unifiedItems.length - 1}
+                isLast={idx === displayItems.length - 1}
                 isItemExpanded={Boolean(expandedMap[item.id])}
                 hasItemDetail={hasDetail(item)}
                 toggleItemExpand={toggleItemExpand}

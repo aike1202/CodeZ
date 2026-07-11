@@ -11,7 +11,13 @@ export const ResearchSubAgent: SubAgentDefinition = {
   type: 'Research',
   description:
     'Read-only research agent. Explores the codebase to answer a scoped question and returns a Markdown report with evidence anchors. Use it when you need to understand a module, trace a data flow, or gather context without modifying files.',
-  maxLoops: 12,
+  maxLoops: 64,
+  finalizationReserveLoops: 2,
+  depthLoops: {
+    quick: 16,
+    normal: 48,
+    exhaustive: 96,
+  },
 
   whenToUse: [
     'You need to understand how a module/feature works across 3+ files or directories.',
@@ -24,7 +30,7 @@ export const ResearchSubAgent: SubAgentDefinition = {
     'The answer is already available in your conversation context.',
     'The task requires writing or modifying files (use TaskGroup in the main agent instead).',
   ].join('\n'),
-  costHint: 'Up to 12 read-only tool calls. Good for medium-complexity exploration.',
+  costHint: 'Default: up to 64 loops with 2 reserved for the report. Depth budgets: quick 16, normal 48, exhaustive 96.',
 
   outputSpec: {
     description: 'Submit your research report as a Markdown document with a short metadata summary.',
@@ -35,6 +41,18 @@ export const ResearchSubAgent: SubAgentDefinition = {
       { name: 'filesExamined', type: 'string[]', description: 'List of files actually read during research (relative paths)', required: false },
       { name: 'unresolvedCount', type: 'number', description: 'Number of acceptance criteria questions you could not answer', required: false },
     ]
+  },
+
+  validateStructuredOutput: (output) => {
+    const requiredHeadings = ['# Research Handoff', '## Direct Answer', '## Key Findings']
+    const missingHeading = requiredHeadings.find((heading) => !output.report.includes(heading))
+    if (missingHeading) {
+      return `Research report must include the heading "${missingHeading}".`
+    }
+    if (!/`[^`\n]+:\d+-\d+`/.test(output.report)) {
+      return 'Research report must include at least one evidence anchor formatted as `file_path:start_line-end_line`.'
+    }
+    return undefined
   },
 
   getTools: (toolManager: ToolManager): ToolDefinition[] => {
@@ -69,17 +87,29 @@ export const ResearchSubAgent: SubAgentDefinition = {
       '## Output Format',
       'Your submit_result call has two required parts:',
       '',
-      '**report** (string, required): A Markdown document. Structure it like this:',
+      '**report** (string, required): A concise Markdown handoff for the parent agent. Structure it like this:',
       '```',
+      '# Research Handoff',
+      '',
+      '## Direct Answer',
+      'Answer the research task directly.',
+      '',
       '## Key Findings',
-      '- Finding 1 with evidence: `src/foo.ts:42` — what it shows',
-      '- Finding 2 ...',
+      '- Finding with evidence: `file_path:start_line-end_line` — what it shows and why it matters.',
       '',
-      '## Architecture / Modules',
-      'Describe the relevant modules, their responsibilities, and how they connect.',
+      '## Relevant Components',
+      'Only describe modules, configuration, scripts, interfaces, tests, data structures, or dependencies directly relevant to the task.',
       '',
-      '## Recommendations / Next Steps',
-      'What should the caller do next based on these findings?',
+      '## Priority References',
+      '| Priority | File and lines | When the parent should re-read it |',
+      '| --- | --- | --- |',
+      '| required | `file_path:start_line-end_line` | Before implementing or verifying the related logic |',
+      '',
+      '## Constraints / Risks',
+      'Include only known assumptions, boundaries, compatibility risks, or other facts that affect the conclusion.',
+      '',
+      '## Open Questions',
+      'List only facts that could not be confirmed from the available evidence.',
       '```',
       '',
       '**conclusion** (string, required): ONE sentence answering the research question.',
@@ -92,7 +122,10 @@ export const ResearchSubAgent: SubAgentDefinition = {
       '',
       'Constraints:',
       '- Keep token usage minimal; do not dump entire file contents.',
-      '- Every finding must reference `file_path:line_number` as evidence.',
+      '- Do NOT include source code excerpts. Return evidence anchors only.',
+      '- Every material finding must reference `file_path:start_line-end_line` as evidence.',
+      '- Keep Priority References to the 1-5 files or ranges the parent is most likely to need next.',
+      '- Omit any optional heading that has no relevant content; do not invent frontend, backend, database, or other technology-specific sections.',
       '- If the question is ambiguous, make a reasonable interpretation and proceed.',
       '',
       `Project Workspace: ${ctx.workspaceRoot}`,

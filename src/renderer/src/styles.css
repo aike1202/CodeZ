@@ -186,22 +186,6 @@ textarea::placeholder {
 }
 
 /* ============================================
-   流式输出闪烁光标
-   ============================================ */
-.streaming-cursor {
-  display: inline-block;
-  width: 2px;
-  height: 1.1em;
-  background: #2563eb;
-  margin-left: 1px;
-  vertical-align: text-bottom;
-  animation: blink 1s step-end infinite;
-}
-@keyframes blink {
-  50% { opacity: 0; }
-}
-
-/* ============================================
    TopBar 自定义标题栏
    ============================================ */
 .topbar {
@@ -673,5 +657,4 @@ textarea::placeholder {
   color: #ffdcd7;
   background-color: #78191b;
 }
-
 

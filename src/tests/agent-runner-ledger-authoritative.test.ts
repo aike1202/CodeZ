@@ -6,6 +6,7 @@ import { AgentRunner, unwrapModelToolResultForUi } from '../main/agent/AgentRunn
 import { ModelLedgerStore } from '../main/services/context/ModelLedgerStore'
 import { SessionRuntimeCoordinator } from '../main/services/context/SessionRuntimeCoordinator'
 import { ModelContextBuilder } from '../main/services/context/ModelContextBuilder'
+import type { ContextBudgetSnapshot } from '../shared/types/context'
 
 const dirs: string[] = []
 afterEach(async () => { await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))) })
@@ -28,6 +29,7 @@ describe('AgentRunner canonical ledger path', () => {
     })
     const builder = new ModelContextBuilder(ledger)
     const order: string[] = []
+    const budgets: ContextBudgetSnapshot[] = []
     const originalRecord = runtime.recordToolResult.bind(runtime)
     vi.spyOn(runtime, 'recordToolResult').mockImplementation(async (...args) => {
       order.push('persist-tool')
@@ -73,7 +75,8 @@ describe('AgentRunner canonical ledger path', () => {
       onChunk: () => undefined,
       onDone: () => order.push('ui-done'),
       onError: (error) => { throw new Error(error) },
-      onToolEnd: () => order.push('ui-tool-end')
+      onToolEnd: () => order.push('ui-tool-end'),
+      onContextBudget: (budget) => budgets.push(budget)
     })
 
     const scope = (await ledger.load('s1')).scopes.main
@@ -83,5 +86,7 @@ describe('AgentRunner canonical ledger path', () => {
     expect(scope.lastCompletedTurnId).toBe(turn.turnId)
     expect(order.indexOf('persist-tool')).toBeLessThan(order.indexOf('ui-tool-end'))
     expect(order.at(-1)).toBe('ui-done')
+    expect(budgets.at(-1)?.estimateSource).toBe('provider')
+    expect(budgets.at(-1)?.totalInputTokens).toBe(100)
   })
 })

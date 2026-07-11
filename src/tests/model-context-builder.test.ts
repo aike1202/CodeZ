@@ -67,4 +67,70 @@ describe('ModelContextBuilder', () => {
     expect(built.messages).toContainEqual({ role: 'system', content: 'dynamic reminder' })
     expect(built.budget.instructionTokens).toBeGreaterThan(0)
   })
+
+  it('bounds an oversized recent tool result without changing the ledger', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codez-builder-huge-tool-'))
+    dirs.push(root)
+    const ledger = new ModelLedgerStore(root)
+    const runtime = new SessionRuntimeCoordinator(ledger)
+    const first = await runtime.beginTurn({ sessionId: 'huge', contextScopeId: 'main', text: 'list files' })
+    await runtime.recordAssistant(first, {
+      content: '',
+      toolCalls: [{ id: 'glob-1', name: 'Glob', arguments: '{"pattern":"**/*"}' }]
+    })
+    const huge = JSON.stringify({ ok: true, data: 'G'.repeat(621_396) })
+    await runtime.recordToolResult(first, {
+      callId: 'glob-1', name: 'Glob', content: huge, status: 'success'
+    })
+    await runtime.completeTurn(first, { stopReason: 'tool_calls' })
+    const current = await runtime.beginTurn({
+      sessionId: 'huge', contextScopeId: 'main', text: 'continue'
+    })
+
+    const built = await new ModelContextBuilder(ledger).build({
+      sessionId: 'huge', contextScopeId: 'main',
+      currentInputMessageId: current.userMessageId,
+      currentInput: current.inputText,
+      capabilities: { contextWindowTokens: 200_000, maxOutputTokens: 8_192 },
+      systemPrompt: 'system', toolSchemas: []
+    })
+
+    expect(built.budget.rawHistoryTokens).toBeGreaterThan(150_000)
+    expect(built.budget.recentHistoryTokens).toBeLessThan(10_000)
+    expect(built.messages.find((message) => message.role === 'tool')?.content).toContain('TOOL_OUTPUT_PRUNED')
+    expect((await ledger.load('huge')).scopes.main.activeMessages.find((message) => message.name === 'Glob')?.content).toBe(huge)
+  })
+
+  it('applies the single-tool cap before overall pressure reaches the prune threshold', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codez-builder-tool-cap-'))
+    dirs.push(root)
+    const ledger = new ModelLedgerStore(root)
+    const runtime = new SessionRuntimeCoordinator(ledger)
+    const first = await runtime.beginTurn({
+      sessionId: 'tool-cap', contextScopeId: 'main', text: 'generate a medium report'
+    })
+    await runtime.recordAssistant(first, {
+      content: '',
+      toolCalls: [{ id: 'report-1', name: 'Report', arguments: '{}' }]
+    })
+    await runtime.recordToolResult(first, {
+      callId: 'report-1', name: 'Report', content: 'R'.repeat(40_000), status: 'success'
+    })
+    await runtime.completeTurn(first, { stopReason: 'tool_calls' })
+    const current = await runtime.beginTurn({
+      sessionId: 'tool-cap', contextScopeId: 'main', text: 'continue'
+    })
+
+    const built = await new ModelContextBuilder(ledger).build({
+      sessionId: 'tool-cap', contextScopeId: 'main',
+      currentInputMessageId: current.userMessageId,
+      currentInput: current.inputText,
+      capabilities: { contextWindowTokens: 200_000, maxOutputTokens: 8_192 },
+      systemPrompt: 'system', toolSchemas: []
+    })
+
+    expect(built.budget.rawHistoryTokens / built.budget.usableInputBudget).toBeLessThan(0.8)
+    expect(built.messages.find((message) => message.role === 'tool')?.content)
+      .toContain('TOOL_OUTPUT_PRUNED')
+  })
 })

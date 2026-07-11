@@ -59,12 +59,34 @@ export class ModelContextBuilder {
     if (!current || current.role !== 'user') throw new Error('Current input is not durably recorded')
     let activeMessages = scope.activeMessages
     let recentHistory = activeMessages.filter((message) => message.id !== current.id)
+    const rawHistoryTokens = recentHistory.reduce(
+      (total, message) => total + this.budgetService.estimateValueTokens(message),
+      0
+    )
     const summary = scope.latestCompaction ? renderCompactionSummary(scope.latestCompaction) : ''
     const resume = scope.resumeState && scope.resumeState.revision !== scope.latestCompactionResumeRevision
       ? this.resumeStates.renderBounded(scope.resumeState)
       : ''
 
-    let budget = this.measure(request, recentHistory, summary, resume, scope.historyVersion)
+    let budget = this.measure(
+      request, recentHistory, summary, resume, scope.historyVersion, rawHistoryTokens
+    )
+    const maxSingleToolTokens = Math.min(
+      8_000,
+      Math.floor(budget.usableInputBudget * 0.1)
+    )
+    const emergencyPrune = this.pruner.prune(activeMessages, {
+      targetTokens: Number.POSITIVE_INFINITY,
+      protectedTailStart: activeMessages.length,
+      maxSingleToolTokens
+    })
+    if (emergencyPrune.records.length > 0) {
+      activeMessages = emergencyPrune.messages
+      recentHistory = activeMessages.filter((message) => message.id !== current.id)
+      budget = this.measure(
+        request, recentHistory, summary, resume, scope.historyVersion, rawHistoryTokens
+      )
+    }
     if (budget.pressureLevel === 'prune' || budget.pressureLevel === 'compact' || budget.pressureLevel === 'overflow') {
       const protectedTail = ModelHistoryNormalizer.selectProtocolSafeTail(
         activeMessages,
@@ -76,10 +98,13 @@ export class ModelContextBuilder {
         : activeMessages.length
       activeMessages = this.pruner.prune(activeMessages, {
         targetTokens: Math.floor(budget.usableInputBudget * 0.75),
-        protectedTailStart: Math.max(0, protectedTailStart)
+        protectedTailStart: Math.max(0, protectedTailStart),
+        maxSingleToolTokens
       }).messages
       recentHistory = activeMessages.filter((message) => message.id !== current.id)
-      budget = this.measure(request, recentHistory, summary, resume, scope.historyVersion)
+      budget = this.measure(
+        request, recentHistory, summary, resume, scope.historyVersion, rawHistoryTokens
+      )
     }
 
     if (
@@ -128,7 +153,8 @@ export class ModelContextBuilder {
     recentHistory: NormalizedModelMessage[],
     summary: string,
     resume: string,
-    historyVersion: number
+    historyVersion: number,
+    rawHistoryTokens: number
   ): ContextBudgetSnapshot {
     return this.budgetService.measureRequest({
       capabilities: request.capabilities,
@@ -137,6 +163,7 @@ export class ModelContextBuilder {
       instructions: [...(request.instructions || []), resume],
       summary,
       recentHistory,
+      rawHistoryTokens,
       currentInput: request.currentInput,
       historyVersion,
       providerUsage: request.providerUsage,

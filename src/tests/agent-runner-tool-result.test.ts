@@ -53,4 +53,12 @@ describe('AgentRunner tool result helpers', () => {
       expect(approve.mock.calls[0][0]).toMatchObject({ toolName, args: { task: 'test' } })
     }
   )
+
+  it('passes the active session id into permission requests', async () => {
+    const approve = vi.fn().mockResolvedValue(true)
+    const result = await authorizeToolCall('WebFetch', { url: 'https://example.test' }, '/tmp/codez-workspace', approve, null, 'session-a')
+
+    expect(result.allowed).toBe(true)
+    expect(approve.mock.calls[0][0]).toMatchObject({ sessionId: 'session-a' })
+  })
 })

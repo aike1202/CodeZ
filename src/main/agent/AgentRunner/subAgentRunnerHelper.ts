@@ -112,11 +112,11 @@ export async function handleSubAgentRunnerSpawn(
     )
 
     if (win) {
-      win.webContents.send(IPC_CHANNELS.PLAN_SUBAGENT_PROGRESS, { status: 'completed' })
+      win.webContents.send(IPC_CHANNELS.PLAN_SUBAGENT_PROGRESS, { status: result.status })
     }
 
     callbacks.onSubAgentEnd?.(subAgentId, {
-      status: 'completed',
+      status: result.status,
       output: result.output || '',
       qualitySummary: result.qualitySummary,
       toolCallCount: result.toolCallCount,
@@ -124,10 +124,8 @@ export async function handleSubAgentRunnerSpawn(
       conclusion: result.structuredOutput?.conclusion
     })
 
-    const resultMsg = JSON.stringify({
-      ok: true,
-      data: {
-        status: 'completed',
+    const resultData = {
+        status: result.status,
         subagent_type,
         description: description || '',
         output: result.output || '(subagent produced no text output)',
@@ -136,7 +134,13 @@ export async function handleSubAgentRunnerSpawn(
         toolCallCount: result.toolCallCount,
         filesExamined: result.filesExamined,
       }
-    })
+    const resultMsg = JSON.stringify(result.status === 'completed'
+      ? { ok: true, data: resultData }
+      : {
+          ok: false,
+          error: result.output || `SubAgent '${subagent_type}' did not submit a valid result.`,
+          data: { ...resultData, status: 'failed' }
+        })
     callbacks.onToolEnd?.(toolCallId, resultMsg)
     return { role: 'tool' as const, tool_call_id: toolCallId, name, content: resultMsg }
   } catch (err: any) {

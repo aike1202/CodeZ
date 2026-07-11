@@ -15,7 +15,6 @@ import type { SubAgentDetail } from '../../shared/types/subagent'
 import { allSubAgentDefinitions } from './definitions'
 import {
   generateSubmitResultTool,
-  extractJsonBlock,
   validateAgainstSpec,
   computeQualitySummary,
   formatSubmitResultValidationMessage
@@ -115,6 +114,7 @@ export interface SubAgentContext {
 
 export interface SubAgentResult {
   type: string
+  status: 'completed' | 'failed'
   output: string
   structuredOutput?: SubAgentStructuredOutput
   qualitySummary?: SubAgentQualitySummary
@@ -141,6 +141,12 @@ export interface SubAgentDefinition {
   outputSpec?: SubAgentOutputSpec
 
   maxLoops: number
+  /** Number of final turns reserved for submit_result after exploration ends. */
+  finalizationReserveLoops?: number
+  /** Optional per-subagent depth budgets. Omitted entries use the shared defaults. */
+  depthLoops?: Partial<Record<'quick' | 'normal' | 'exhaustive', number>>
+  /** Reject a parsed structured result that does not meet agent-specific requirements. */
+  validateStructuredOutput?: (output: SubAgentStructuredOutput) => string | undefined
   defaultModel?: string
   isolation?: 'none' | 'worktree'
   canRunInBackground?: boolean
@@ -273,8 +279,13 @@ export function checkSubAgentToolPermission(
 
 function resolveMaxLoops(def: SubAgentDefinition, ctx: SubAgentContext): number {
   if (ctx.maxLoopsOverride) return ctx.maxLoopsOverride
-  if (ctx.depth && DEPTH_LOOPS[ctx.depth]) return DEPTH_LOOPS[ctx.depth]
+  if (ctx.depth) return def.depthLoops?.[ctx.depth] ?? DEPTH_LOOPS[ctx.depth] ?? def.maxLoops
   return def.maxLoops
+}
+
+function resolveFinalizationReserveLoops(def: SubAgentDefinition, maxLoops: number): number {
+  if (!def.outputSpec || maxLoops < 2) return 0
+  return Math.min(def.finalizationReserveLoops ?? 2, maxLoops - 1)
 }
 
 function buildRecoverableStopOutput(
@@ -506,10 +517,12 @@ export class SubAgentManager {
 
     const toolManager = new ToolManager()
     const availableTools = def.getTools(toolManager)
+    let submitResultTool: ToolDefinition | undefined
 
     // 注入 submit_result 工具（如果设置了 outputSpec）
     if (def.outputSpec) {
-      availableTools.push(generateSubmitResultTool(def.outputSpec))
+      submitResultTool = generateSubmitResultTool(def.outputSpec)
+      availableTools.push(submitResultTool)
     }
 
     const systemPrompt = await buildExtendedSystemPrompt(def, ctx)
@@ -537,12 +550,30 @@ export class SubAgentManager {
     let toolCallCount = 0
     let finalOutput = ''
     let forcedStructuredOutput: SubAgentStructuredOutput | undefined
+    let failureReason: string | undefined
     const filesExamined = new Set<string>()
     const effectiveMaxLoops = resolveMaxLoops(def, ctx)
+    const finalizationReserveLoops = resolveFinalizationReserveLoops(def, effectiveMaxLoops)
+    let finalizationNoticeRecorded = false
 
     try {
       while (loopCount < effectiveMaxLoops && !abortController.signal.aborted) {
         loopCount++
+        const isFinalizationPhase = Boolean(
+          submitResultTool && finalizationReserveLoops > 0 &&
+          loopCount > effectiveMaxLoops - finalizationReserveLoops
+        )
+        const activeTools = isFinalizationPhase && submitResultTool
+          ? [submitResultTool]
+          : availableTools
+
+        if (isFinalizationPhase && !finalizationNoticeRecorded) {
+          await core.coordinator.recordUserContinuation(
+            runtimeTurn,
+            'Exploration budget is exhausted. Do not perform more research or return plain text. Synthesize the evidence already collected and call submit_result with the required Markdown handoff now.'
+          )
+          finalizationNoticeRecorded = true
+        }
 
         const builtContext = await contextBuilder.build({
           sessionId: ctx.sessionId,
@@ -551,7 +582,7 @@ export class SubAgentManager {
           currentInput: runtimeTurn.inputText,
           capabilities: contextCapabilities,
           systemPrompt,
-          toolSchemas: availableTools
+          toolSchemas: activeTools
         })
 
         let currentContent = ''
@@ -571,7 +602,7 @@ export class SubAgentManager {
                   apiFormat: ctx.apiConfig.apiFormat,
                   model: ctx.modelOverride || ctx.apiConfig.model,
                   messages: builtContext.messages,
-                  tools: availableTools,
+                  tools: activeTools,
                   thinking: ctx.apiConfig.thinking
                 },
                 attemptCallbacks,
@@ -669,6 +700,7 @@ export class SubAgentManager {
               }
             }
             forcedStructuredOutput = buildRecoverableStopOutput(def.outputSpec, lastError)
+            failureReason = lastError
             finalOutput =
               forcedStructuredOutput?.conclusion ||
               `Executor stopped after recoverable API/network error: ${lastError}`
@@ -730,9 +762,16 @@ export class SubAgentManager {
 
             // 处理 submit_result
             let structuredOutput: SubAgentStructuredOutput | undefined
+            let submitValidationMessage: string | undefined
             try {
               const args = JSON.parse(submitCall.function.arguments)
               structuredOutput = validateAgainstSpec(args, def.outputSpec)
+              if (structuredOutput) {
+                submitValidationMessage = def.validateStructuredOutput?.(structuredOutput)
+                if (submitValidationMessage) {
+                  structuredOutput = undefined
+                }
+              }
             } catch {
               // 解析失败，继续循环让模型重试
             }
@@ -752,7 +791,8 @@ export class SubAgentManager {
 
               const subResult: SubAgentResult = {
                 type: canonical,
-                output: finalOutput,
+                status: 'completed',
+                output: structuredOutput.report,
                 structuredOutput,
                 toolCallCount,
                 filesExamined: Array.from(filesExamined),
@@ -782,7 +822,7 @@ export class SubAgentManager {
                 ok: false,
                 error: {
                   code: 'VALIDATION_ERROR',
-                  message: formatSubmitResultValidationMessage(def.outputSpec)
+                  message: submitValidationMessage || formatSubmitResultValidationMessage(def.outputSpec)
                 }
               })
               await core.coordinator.recordToolResult(runtimeTurn, {
@@ -848,43 +888,37 @@ export class SubAgentManager {
           // SubAgent 产出最终文本（未调用 submit_result 的纯文本回退）
           finalOutput = currentContent
 
-          // 尝试从纯文本中提取 JSON
-          if (def.outputSpec && currentContent) {
-            const maybeJson = extractJsonBlock(currentContent)
-            if (maybeJson) {
-              const structured = validateAgainstSpec(maybeJson, def.outputSpec)
-              if (structured) {
-                const subResult: SubAgentResult = {
-                  type: canonical,
-                  output: finalOutput,
-                  structuredOutput: structured,
-                  toolCallCount,
-                  filesExamined: Array.from(filesExamined),
-                }
-                subResult.qualitySummary = computeQualitySummary(
-                  ctx.expectations?.questions ?? [],
-                  structured
-                )
-                handle.status = 'completed'
-                handle.result = subResult
-                if (def.onAfterComplete) {
-                  await def.onAfterComplete(ctx, subResult)
-                }
-                await core.coordinator.completeTurn(runtimeTurn, { stopReason: 'stop', usage: currentUsage })
-                runtimeClosed = true
-                return subResult
-              }
-            }
+          if (def.outputSpec && loopCount < effectiveMaxLoops) {
+            await core.coordinator.recordUserContinuation(
+              runtimeTurn,
+              isFinalizationPhase
+                ? 'A plain-text response is not a valid result. Call submit_result now with every required field.'
+                : 'Do not stop with a plain-text status update. Continue investigating with the available tools, or call submit_result only after the required Markdown handoff is complete.'
+            )
+            continue
           }
 
           await core.coordinator.completeTurn(runtimeTurn, { stopReason: 'stop', usage: currentUsage })
           runtimeClosed = true
+          if (def.outputSpec) {
+            failureReason = 'SubAgent exhausted its run without submitting a valid structured result.'
+          }
           break
         }
       }
 
+      const protocolFailure = Boolean(def.outputSpec && !forcedStructuredOutput)
+      if (protocolFailure && !failureReason) {
+        failureReason = 'SubAgent exhausted its run without submitting a valid structured result.'
+      }
+      if (protocolFailure && failureReason) {
+        finalOutput = failureReason
+      } else if (failureReason && !finalOutput) {
+        finalOutput = failureReason
+      }
       const subResult: SubAgentResult = {
         type: canonical,
+        status: failureReason ? 'failed' : 'completed',
         output: finalOutput,
         structuredOutput: forcedStructuredOutput,
         toolCallCount,
@@ -892,17 +926,17 @@ export class SubAgentManager {
       }
 
       // 如果设置了 outputSpec 但没有 structuredOutput，生成警告质量摘要
-      if (def.outputSpec && !subResult.structuredOutput && ctx.expectations?.questions?.length) {
+      if (def.outputSpec && !subResult.structuredOutput) {
         subResult.qualitySummary = {
           coverage: 0,
           confidence: 'low',
           unresolvedCount: 0,
           filesExaminedCount: 0,
-          warning: 'SubAgent produced plain text instead of structured output via submit_result. Findings may be incomplete.',
+          warning: failureReason || 'SubAgent produced plain text instead of structured output via submit_result. Findings may be incomplete.',
         }
       }
 
-      handle.status = 'completed'
+      handle.status = subResult.status
       handle.result = subResult
 
       // 生命周期钩子：完成后
