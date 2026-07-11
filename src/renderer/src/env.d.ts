@@ -53,6 +53,11 @@ declare global {
         getRuntimeStatus: (
           sessionId: string
         ) => Promise<import('@shared/types/subagent').SessionRuntimeStatus>
+        onRuntimeStatusChanged: (
+          callback: (
+            payload: import('@shared/types/subagent').SessionRuntimeStatusChanged
+          ) => void
+        ) => () => void
         stream: (
           providerId: string,
           model: string,

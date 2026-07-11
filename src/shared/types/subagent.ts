@@ -52,3 +52,9 @@ export interface SessionRuntimeStatus {
   mainRunnerActive: boolean
   activeSubAgentIds: string[]
 }
+
+/** 会话 runtime 状态变化事件；version 在同一会话内单调递增。 */
+export interface SessionRuntimeStatusChanged {
+  version: number
+  status: SessionRuntimeStatus
+}

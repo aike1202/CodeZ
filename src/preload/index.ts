@@ -5,7 +5,10 @@ import type { ProviderFormData, ProviderInfo, ConnectionTestResult } from '../sh
 import type { SessionData } from '../shared/types/session'
 import type { StreamRequestV2 } from '../shared/types/context'
 import type { ToolBatchMeta } from '../shared/types/toolExecution'
-import type { SessionRuntimeStatus } from '../shared/types/subagent'
+import type {
+  SessionRuntimeStatus,
+  SessionRuntimeStatusChanged
+} from '../shared/types/subagent'
 import type {
   AttachmentPreviewBytes,
   ComposerImageAttachment,
@@ -113,6 +116,16 @@ const api = {
   chat: {
     getRuntimeStatus: (sessionId: string): Promise<SessionRuntimeStatus> =>
       ipcRenderer.invoke(IPC_CHANNELS.CHAT_RUNTIME_STATUS, sessionId),
+
+    onRuntimeStatusChanged: (
+      callback: (payload: SessionRuntimeStatusChanged) => void
+    ): (() => void) => {
+      const handler = (_event: unknown, payload: SessionRuntimeStatusChanged) => callback(payload)
+      ipcRenderer.on(IPC_CHANNELS.CHAT_RUNTIME_STATUS_CHANGED, handler)
+      return () => {
+        ipcRenderer.removeListener(IPC_CHANNELS.CHAT_RUNTIME_STATUS_CHANGED, handler)
+      }
+    },
 
     /**
      * 发起流式聊天请求，并接收 tool call 日志。
