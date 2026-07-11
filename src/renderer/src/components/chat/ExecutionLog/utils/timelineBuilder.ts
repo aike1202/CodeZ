@@ -396,11 +396,11 @@ export function buildUnifiedTimeline(
             const task = res.data?.task
             if (task) {
               if (task.status === 'completed') {
-                targetDisplay = `完成任务: ${task.subject}`
+                targetDisplay = `完成任务：${task.subject}`
               } else if (task.status === 'in_progress') {
                 targetDisplay = `开始执行: ${task.subject}`
               } else if (task.status === 'cancelled') {
-                targetDisplay = `取消任务: ${task.subject}`
+                targetDisplay = `取消任务：${task.subject}`
               } else {
                 targetDisplay = `更新任务: ${task.subject}`
               }

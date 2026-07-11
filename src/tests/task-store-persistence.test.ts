@@ -124,6 +124,34 @@ describe('TaskStore persistence', () => {
     }))
   })
 
+  it('returns the complete updated task snapshot for execution-log persistence', async () => {
+    const { TaskUpdateTool } = await import('../main/tools/builtin/TaskUpdateTool')
+    const { TaskStore } = await import('../main/services/TaskStore')
+    const store = TaskStore.getInstance()
+    store.create('s1', [{
+      subject: 'Verify lifecycle',
+      description: 'Confirm terminal Task logging',
+      files: ['src/task.ts'],
+      acceptanceCriteria: ['Capsule no longer shows the Task'],
+      verificationCommand: 'npm test -- task-store-persistence'
+    }])
+
+    const result = JSON.parse(await new TaskUpdateTool().execute(
+      JSON.stringify({ taskId: 't1', status: 'completed' }),
+      { workspaceRoot: process.cwd(), sessionId: 's1' } as any
+    ))
+
+    expect(result.data.task).toMatchObject({
+      id: 't1',
+      subject: 'Verify lifecycle',
+      description: 'Confirm terminal Task logging',
+      status: 'completed',
+      files: ['src/task.ts'],
+      acceptanceCriteria: ['Capsule no longer shows the Task'],
+      verificationCommand: 'npm test -- task-store-persistence'
+    })
+  })
+
   it('restores the original status when rejecting a second in_progress task', async () => {
     const { TaskUpdateTool } = await import('../main/tools/builtin/TaskUpdateTool')
     const { TaskStore } = await import('../main/services/TaskStore')

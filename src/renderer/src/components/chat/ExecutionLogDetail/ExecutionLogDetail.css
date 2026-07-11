@@ -329,6 +329,37 @@
   margin-top: 2px;
 }
 
+.exe-log-task-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  background: var(--bg-panel);
+}
+
+.exe-log-task-detail-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.exe-log-task-command {
+  min-width: 0;
+  color: var(--text-main);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 680px) {
+  .exe-log-task-detail-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
 /* ---- Skill invocation ---- */
 .exe-log-skill-card {
   --skill-accent: #7557df;

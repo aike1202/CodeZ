@@ -9,6 +9,7 @@ import {
   groupParallelToolBatches
 } from '../renderer/src/components/chat/ExecutionLog/utils'
 import type { ExecutionTimelineItem } from '../renderer/src/stores/chatStore'
+import { parseTaskUpdateDetail } from '../renderer/src/components/chat/ExecutionLogDetail/taskUpdateDetail'
 
 const toolItem = (
   id: string,
@@ -188,5 +189,64 @@ describe('execution log parallel batch builder', () => {
     expect((batch as ParallelToolBatchItem).items[1].target).toContain('#L10-29')
     expect((batch as ParallelToolBatchItem).items[1].status).toBe('error')
     expect((batch as ParallelToolBatchItem).status).toBe('error')
+  })
+})
+
+const taskUpdateTimeline = (status: 'completed' | 'cancelled'): ExecutionTimelineItem[] => [{
+  id: `tool_task-${status}`,
+  type: 'tool',
+  toolCall: {
+    id: `task-${status}`,
+    name: 'TaskUpdate',
+    args: JSON.stringify({ taskId: 't1', status }),
+    status: 'success',
+    result: JSON.stringify({
+      ok: true,
+      data: {
+        task: {
+          id: 't1',
+          subject: 'Lifecycle task',
+          description: 'Detailed terminal snapshot',
+          status,
+          files: ['src/task.ts'],
+          acceptanceCriteria: ['Terminal state is logged'],
+          verificationCommand: 'npm test'
+        },
+        summary: '1/1 completed'
+      }
+    }),
+    startedAt: 100,
+    completedAt: 200,
+    sequence: 0
+  },
+  startedAt: 100,
+  updatedAt: 200,
+  sequence: 0
+}]
+
+describe('TaskUpdate execution log', () => {
+  it.each([
+    ['completed', '完成任务：Lifecycle task'],
+    ['cancelled', '取消任务：Lifecycle task']
+  ] as const)('keeps a %s TaskUpdate as a terminal execution log', (status, target) => {
+    const [item] = buildUnifiedTimeline(taskUpdateTimeline(status), [], [], undefined, false)
+    expect(item).toMatchObject({ toolName: 'TaskUpdate', target, status: 'success' })
+  })
+
+  it('parses complete TaskUpdate detail and tolerates legacy reduced snapshots', () => {
+    const [fullItem] = buildUnifiedTimeline(taskUpdateTimeline('completed'), [], [], undefined, false)
+    expect(parseTaskUpdateDetail(fullItem.detail)).toMatchObject({
+      task: {
+        description: 'Detailed terminal snapshot',
+        files: ['src/task.ts'],
+        acceptanceCriteria: ['Terminal state is logged'],
+        verificationCommand: 'npm test'
+      }
+    })
+
+    expect(parseTaskUpdateDetail(JSON.stringify({
+      ok: true,
+      data: { task: { id: 't1', subject: 'Legacy', status: 'completed' } }
+    }))).toMatchObject({ task: { subject: 'Legacy', status: 'completed' } })
   })
 })

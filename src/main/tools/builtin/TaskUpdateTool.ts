@@ -161,7 +161,7 @@ export class TaskUpdateTool extends Tool {
     return JSON.stringify({
       ok: true,
       data: {
-        task: updated ? { id: updated.id, subject: updated.subject, status: updated.status } : null,
+        task: updated ? { ...updated } : null,
         summary: store.summary(sessionId)
       }
     })

@@ -6,6 +6,7 @@ import { parseArgs } from '../../../utils/parseArgs'
 import IconSkills from '../../icons/IconSkills'
 import MarkdownDetail from '../MarkdownDetail'
 import type { ExecutionLogDetailProps } from './types'
+import { parseTaskUpdateDetail } from './taskUpdateDetail'
 import './ExecutionLogDetail.css'
 
 function SkillValue({ value }: { value: unknown }): React.ReactElement {
@@ -381,8 +382,47 @@ export default function ExecutionLogDetail({
         if (item.detail) parsedResult = JSON.parse(item.detail)
       } catch {}
 
+      const taskUpdateDetail = item.toolName === 'TaskUpdate'
+        ? parseTaskUpdateDetail(item.detail)
+        : null
+      const task = taskUpdateDetail?.task
+      const isTerminalTask = task?.status === 'completed' || task?.status === 'cancelled'
+      const terminalStatusLabel = task?.status === 'completed' ? '已完成' : '已取消'
+
       return (
         <div className="exe-log-cmd-details-box">
+          {item.toolName === 'TaskUpdate' && task && isTerminalTask && (
+            <div className="exe-log-task-detail">
+              <div className="exe-log-task-detail-row">
+                <span className="exe-log-param-key">最终状态</span>
+                <span className="exe-log-param-val">{terminalStatusLabel}</span>
+              </div>
+              {task.description && (
+                <div className="exe-log-task-detail-row">
+                  <span className="exe-log-param-key">描述</span>
+                  <span className="exe-log-param-val">{task.description}</span>
+                </div>
+              )}
+              {task.files && task.files.length > 0 && (
+                <div className="exe-log-task-detail-row">
+                  <span className="exe-log-param-key">涉及文件</span>
+                  <span className="exe-log-param-val">{task.files.join('\n')}</span>
+                </div>
+              )}
+              {task.acceptanceCriteria && task.acceptanceCriteria.length > 0 && (
+                <div className="exe-log-task-detail-row">
+                  <span className="exe-log-param-key">验收标准</span>
+                  <span className="exe-log-param-val">{task.acceptanceCriteria.join('\n')}</span>
+                </div>
+              )}
+              {task.verificationCommand && (
+                <div className="exe-log-task-detail-row">
+                  <span className="exe-log-param-key">验证命令</span>
+                  <code className="exe-log-task-command">{task.verificationCommand}</code>
+                </div>
+              )}
+            </div>
+          )}
           {item.toolName === 'TaskCreate' && parsedResult?.data?.created && (
             <div className="exe-log-params-section">
               <span className="exe-log-params-label">Created Tasks:</span>
