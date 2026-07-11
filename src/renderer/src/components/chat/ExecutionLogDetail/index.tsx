@@ -1,10 +1,56 @@
 import React from 'react'
-import { Check, X, MessageCircleQuestion } from 'lucide-react'
+import { Braces, Check, FileText, MessageCircleQuestion, X } from 'lucide-react'
 import { getFileIconComponent } from '../ExecutionLog/utils'
 import { FolderIcon } from '@react-symbols/icons/utils'
 import { parseArgs } from '../../../utils/parseArgs'
+import IconSkills from '../../icons/IconSkills'
+import MarkdownDetail from '../MarkdownDetail'
 import type { ExecutionLogDetailProps } from './types'
 import './ExecutionLogDetail.css'
+
+function SkillValue({ value }: { value: unknown }): React.ReactElement {
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <span className="exe-log-skill-empty-value">空列表</span>
+
+    return (
+      <div className="exe-log-skill-token-list">
+        {value.map((entry, entryIndex) => (
+          entry !== null && typeof entry === 'object' ? (
+            <div key={entryIndex} className="exe-log-skill-nested-value">
+              <SkillValue value={entry} />
+            </div>
+          ) : (
+            <span key={entryIndex} className="exe-log-skill-token" title={String(entry)}>
+              {String(entry)}
+            </span>
+          )
+        ))}
+      </div>
+    )
+  }
+
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.entries(value)
+    if (entries.length === 0) return <span className="exe-log-skill-empty-value">空对象</span>
+
+    return (
+      <div className="exe-log-skill-object">
+        {entries.map(([key, entryValue]) => (
+          <div key={key} className="exe-log-skill-object-row">
+            <span className="exe-log-skill-object-key">{key}</span>
+            <SkillValue value={entryValue} />
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <span className={`exe-log-skill-primitive exe-log-skill-primitive-${typeof value}`}>
+      {value === null || value === undefined ? '—' : String(value)}
+    </span>
+  )
+}
 
 export default function ExecutionLogDetail({
   item,
@@ -19,6 +65,73 @@ export default function ExecutionLogDetail({
   }
 
   if (item.type === 'tool') {
+    if (item.toolName === 'Skill' || item.toolName === 'invoke_skill') {
+      const skillArgs = parseArgs(item.args || '')
+      const skillName = String(skillArgs.skill || item.target || 'Skill')
+      const rawInvocationArgs = skillArgs.args
+      const argumentEntries = rawInvocationArgs !== null && typeof rawInvocationArgs === 'object' && !Array.isArray(rawInvocationArgs)
+        ? Object.entries(rawInvocationArgs)
+        : rawInvocationArgs !== undefined
+          ? [['args', rawInvocationArgs] as [string, unknown]]
+          : Object.entries(skillArgs).filter(([key]) => key !== 'skill')
+      const statusLabel = item.status === 'running' ? '调用中' : item.status === 'error' ? '调用失败' : '已完成'
+
+      return (
+        <div className="exe-log-skill-card">
+          <div className="exe-log-skill-header">
+            <span className="exe-log-skill-icon" aria-hidden="true">
+              <IconSkills />
+            </span>
+            <div className="exe-log-skill-heading">
+              <span className="exe-log-skill-eyebrow">Skill invocation</span>
+              <strong className="exe-log-skill-name">{skillName}</strong>
+            </div>
+            <span className={`exe-log-skill-status is-${item.status}`}>
+              <span className="exe-log-skill-status-dot" aria-hidden="true" />
+              {statusLabel}
+            </span>
+          </div>
+
+          <section className="exe-log-skill-section" aria-label="技能调用参数">
+            <div className="exe-log-skill-section-title">
+              <Braces size={13} aria-hidden="true" />
+              <span>调用参数</span>
+              <span className="exe-log-skill-count">{argumentEntries.length}</span>
+            </div>
+            {argumentEntries.length > 0 ? (
+              <div className="exe-log-skill-args">
+                {argumentEntries.map(([key, value]) => (
+                  <div key={key} className="exe-log-skill-arg-row">
+                    <span className="exe-log-skill-arg-key">{key}</span>
+                    <SkillValue value={value} />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="exe-log-skill-empty">无额外调用参数</div>
+            )}
+          </section>
+
+          <section className="exe-log-skill-section exe-log-skill-output-section" aria-label="技能输出">
+            <div className="exe-log-skill-section-title">
+              <FileText size={13} aria-hidden="true" />
+              <span>输出内容</span>
+              {item.detail && <span className="exe-log-skill-format">Markdown</span>}
+            </div>
+            {item.detail ? (
+              <div className="exe-log-skill-markdown markdown-body">
+                <MarkdownDetail content={item.detail} />
+              </div>
+            ) : (
+              <div className="exe-log-skill-empty">
+                {item.status === 'running' ? '正在等待技能输出…' : '本次调用没有输出内容'}
+              </div>
+            )}
+          </section>
+        </div>
+      )
+    }
+
     if (item.verb === 'Explored') {
       let detailText = item.detail || ''
       try {

@@ -7,6 +7,8 @@ import {
 import { buildDiffEditInfo } from '../../../../utils/editDiffUtils'
 import ExecutionLogDetail from '../../ExecutionLogDetail'
 import { ThoughtIcon, SearchIcon, CmdIcon, AskIcon } from '../../../svg-icons'
+import IconSkills from '../../../icons/IconSkills'
+import { CircleCheck } from 'lucide-react'
 import { FileIcon, FolderIcon } from '@react-symbols/icons/utils'
 import './LogItemRow.css'
 
@@ -68,11 +70,17 @@ export function LogItemRow({
   onFileClick,
   onDiffClick
 }: LogItemRowProps): React.ReactElement {
+  const isSkillItem =
+    item.type === 'tool' && (item.toolName === 'Skill' || item.toolName === 'invoke_skill')
+  const isTaskSummarySkill = isSkillItem && item.target === 'task-summary'
+
   const getItemIcon = (item: UnifiedTimelineItem) => {
     if (item.type === 'reasoning') return <ThoughtIcon running={item.status === 'running'} />
     if (item.type === 'command') return <CmdIcon />
     if (item.type === 'edit') return getFileIconComponent(item.fileName)
     if (item.type === 'tool') {
+      if (isTaskSummarySkill) return <CircleCheck />
+      if (isSkillItem) return <IconSkills />
       if (item.verb === 'Searched' || item.verb === 'Searching') return <SearchIcon />
       if (item.verb === 'Explored' || item.verb === 'Exploring') return <FolderIcon folderName="" />
       if (item.verb === 'Asked' || item.verb === 'Asking') return <AskIcon />
@@ -104,15 +112,17 @@ export function LogItemRow({
             onClick={(e) => hasItemDetail && toggleItemExpand(item.id, e)}
           >
             <Flex align="center" gap={2} className="relative" style={{ flex: 1, minWidth: 0 }}>
-              <span className="timeline-icon-box">{getItemIcon(item)}</span>
+              <span className={`timeline-icon-box${isTaskSummarySkill ? ' timeline-icon-completed' : isSkillItem ? ' timeline-icon-skill' : ''}`}>
+                {getItemIcon(item)}
+              </span>
               <span className="timeline-target-truncate-box pr-4">
                 <span
-                  className={`timeline-verb-text timeline-verb-${item.verb.toLowerCase()}`}
-                  title={item.toolName ? `调用工具: ${item.toolName}` : undefined}
+                  className={`timeline-verb-text timeline-verb-${item.verb.toLowerCase()}${isTaskSummarySkill ? ' timeline-verb-task-completed' : ''}`}
+                  title={isTaskSummarySkill ? '任务总结已生成' : item.toolName ? `调用工具: ${item.toolName}` : undefined}
                 >
-                  {VERB_TRANSLATIONS[item.verb] || item.verb}
+                  {isTaskSummarySkill ? '任务已完成' : VERB_TRANSLATIONS[item.verb] || item.verb}
                 </span>
-                {item.verb === 'Searched' || item.verb === 'Searching' ? (
+                {isTaskSummarySkill ? null : item.verb === 'Searched' || item.verb === 'Searching' ? (
                   <span className="timeline-target-link" style={{ textDecoration: 'none', cursor: 'default' }}>
                     查找 {item.target}
                   </span>
@@ -135,7 +145,9 @@ export function LogItemRow({
                     {item.target}
                   </span>
                 ) : (
-                  <span className="timeline-target-text">{item.target}</span>
+                  <span className={`timeline-target-text${isSkillItem ? ' timeline-target-skill' : ''}`}>
+                    {item.target}
+                  </span>
                 )}
               </span>
             </Flex>
