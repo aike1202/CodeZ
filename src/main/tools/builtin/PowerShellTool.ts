@@ -78,7 +78,8 @@ export class PowerShellTool extends Tool {
         shell: 'powershell',
         executable,
         timeout,
-        run_in_background: parsed.run_in_background === true
+        run_in_background: parsed.run_in_background === true,
+        abortSignal: context.abortSignal
       })
 
       if (!result.background) {

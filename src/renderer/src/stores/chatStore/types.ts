@@ -27,6 +27,7 @@ export interface ToolCallState {
   batchId?: string
   batchIndex?: number
   batchSize?: number
+  textAskUserFallback?: boolean
   status: 'running' | 'success' | 'error'
   result?: string
   startedAt: number
@@ -78,6 +79,7 @@ export interface SubAgentRecord {
   expectations?: { questions: string[]; outOfScope?: string[] }
   parentToolCallId: string
   status: 'running' | 'completed' | 'failed' | 'interrupted'
+  interruptionReason?: 'runtime_missing' | 'user_aborted'
   startedAt: number
   completedAt?: number
   content: string
@@ -164,6 +166,11 @@ export interface CompactionUiState {
   error?: string
 }
 
+export interface PendingInternalContinuation {
+  sessionId: string
+  text: string
+}
+
 export interface ChatState {
   sessions: ChatSession[]
   activeSessionId: string | null
@@ -176,6 +183,7 @@ export interface ChatState {
   planReview: { plan: any; status: string } | null
   activePlanStreamId: string | null
   pendingPrompt: PendingPromptDraft | null
+  pendingInternalContinuation: PendingInternalContinuation | null
   tasks: TaskItem[]
   contextBudgets: Record<string, ContextBudgetSnapshot | undefined>
   compactionStates: Record<string, CompactionUiState | undefined>
@@ -235,7 +243,7 @@ export interface ChatState {
   endSubAgent: (
     msgId: string,
     subAgentId: string,
-    result: { status: 'completed' | 'failed'; output?: string; qualitySummary?: any; toolCallCount: number; filesExamined?: string[] }
+    result: { status: 'completed' | 'failed' | 'interrupted'; output?: string; qualitySummary?: any; toolCallCount: number; filesExamined?: string[] }
   ) => void
 
   setExpandedCapsule: (capsule: 'task' | 'plan' | null) => void
@@ -248,5 +256,8 @@ export interface ChatState {
   setContextBudget: (sessionId: string, snapshot: ContextBudgetSnapshot) => void
   setCompactionState: (sessionId: string, state: CompactionUiState) => void
   setPendingPrompt: (prompt: PendingPromptDraft | null) => void
+  setPendingInternalContinuation: (continuation: PendingInternalContinuation | null) => void
+  consumeInternalContinuation: (sessionId: string) => PendingInternalContinuation | null
+  markActiveRunUserAborted: (sessionId: string) => void
   setTasks: (tasks: TaskItem[]) => void
 }

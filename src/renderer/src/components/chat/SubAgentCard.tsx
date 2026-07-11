@@ -148,7 +148,7 @@ export function SubAgentCard({
           <span>工具调用 {toolCount}</span>
           {filesExamined > 0 && <span>· 读取 {filesExamined} 文件</span>}
           {isRunning && <span className="subagent-card-meta-running">· 运行中…</span>}
-          {isInterrupted && <span className="subagent-card-meta-running">· 已中断，可继续</span>}
+          {isInterrupted && <span className="subagent-card-meta-running">· 已中断</span>}
           {subAgent.depth && <span>· {subAgent.depth}</span>}
         </div>
       )}

@@ -93,7 +93,8 @@ export class BashTool extends Tool {
         shell: 'bash',
         executable,
         timeout,
-        run_in_background: parsed.run_in_background === true
+        run_in_background: parsed.run_in_background === true,
+        abortSignal: context.abortSignal
       })
 
       // 持久化 cd 后的工作目录（前台命令才检测；后台不切换主会话 cwd）

@@ -282,7 +282,8 @@ export function useSendMessage() {
               thoughtSignature,
               batchId: batch?.batchId,
               batchIndex: batch?.batchIndex,
-              batchSize: batch?.batchSize
+              batchSize: batch?.batchSize,
+              textAskUserFallback: batch?.textAskUserFallback
             })
             // Persist periodically during long tool execution
             useChatStore.getState().persistSession(sid)
@@ -362,6 +363,16 @@ export function useSendMessage() {
       } catch (error) {
         if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
         streamHandle.stop()
+        if (internal) {
+          appendStreamChunk(
+            agentId,
+            `\n\n⚠️ 中断任务自动续跑启动失败：${error instanceof Error ? error.message : String(error)}`
+          )
+          finishStreaming(agentId)
+          await useChatStore.getState().persistSession(sid)
+          setStreamCleanup(sid, null)
+          return false
+        }
         removeMessages([uiMessageId, agentId])
         const rollbackIds = promotedAttachments
           .filter((_item, index) => attachments[index]?.scope === 'draft')

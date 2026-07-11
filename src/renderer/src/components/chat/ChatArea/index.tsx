@@ -171,7 +171,31 @@ export default function ChatArea({
 
   const resolvePermissionRequest = useChatStore((s) => s.resolvePermissionRequest)
   const resolveAskUserRequest = useChatStore((s) => s.resolveAskUserRequest)
+  const pendingInternalContinuation = useChatStore((s) => s.pendingInternalContinuation)
+  const consumeInternalContinuation = useChatStore((s) => s.consumeInternalContinuation)
+  const streamCleanups = useChatStore((s) => s.streamCleanups)
   const { handleSendMessage } = useSendMessage()
+
+  useEffect(() => {
+    if (!activeSessionId || !pendingInternalContinuation) return
+    if (pendingInternalContinuation.sessionId !== activeSessionId) return
+    if (streamCleanups[activeSessionId]) return
+    const targetSession = useChatStore.getState().sessions.find(
+      (session) => session.id === activeSessionId
+    )
+    if (!workspace || targetSession?.projectId !== workspace.id) return
+
+    const continuation = consumeInternalContinuation(activeSessionId)
+    if (!continuation) return
+    void handleSendMessage(continuation.text, '', true, [], { visibility: 'internal' })
+  }, [
+    activeSessionId,
+    pendingInternalContinuation,
+    streamCleanups,
+    consumeInternalContinuation,
+    handleSendMessage,
+    workspace
+  ])
 
   const handleResolvePermission = useCallback(
     async (msgId: string, requestId: string, response: PermissionApprovalResponse) => {

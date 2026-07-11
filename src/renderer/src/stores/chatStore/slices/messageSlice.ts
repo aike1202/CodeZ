@@ -8,7 +8,8 @@ import type {
   ReasoningTimelineItem,
   TextTimelineItem,
   SubAgentRecord,
-  ChatSession
+  ChatSession,
+  PendingInternalContinuation
 } from '../types'
 import type { TaskItem } from '../../../../../shared/types/task'
 import { IPC_CHANNELS } from '../../../../../shared/ipc/channels'
@@ -41,6 +42,7 @@ export interface MessageSlice {
   planReview: { plan: any; status: string } | null
   activePlanStreamId: string | null
   pendingPrompt: PendingPromptDraft | null
+  pendingInternalContinuation: PendingInternalContinuation | null
   tasks: TaskItem[]
 
   addUserMessage: (content: string, attachments?: ImageAttachment[]) => ChatMessage
@@ -77,7 +79,7 @@ export interface MessageSlice {
   endSubAgent: (
     msgId: string,
     subAgentId: string,
-    result: { status: 'completed' | 'failed'; output?: string; qualitySummary?: any; toolCallCount: number; filesExamined?: string[] }
+    result: { status: 'completed' | 'failed' | 'interrupted'; output?: string; qualitySummary?: any; toolCallCount: number; filesExamined?: string[] }
   ) => void
   setExpandedCapsule: (capsule: 'task' | 'plan' | null) => void
   setSubAgentStatus: (status: 'idle' | 'running' | 'completed' | 'failed') => void
@@ -87,6 +89,9 @@ export interface MessageSlice {
   setPlanReview: (review: { plan: any; status: string } | null) => void
   setActivePlanStreamId: (streamId: string | null) => void
   setPendingPrompt: (prompt: PendingPromptDraft | null) => void
+  setPendingInternalContinuation: (continuation: PendingInternalContinuation | null) => void
+  consumeInternalContinuation: (sessionId: string) => PendingInternalContinuation | null
+  markActiveRunUserAborted: (sessionId: string) => void
   setTasks: (tasks: TaskItem[]) => void
   revertToMessage: (msgId: string) => Promise<void>
   previewRevertMessage: (msgId: string) => Promise<{ toDelete: string[], toRestore: string[] } | null>
@@ -170,6 +175,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
   planReview: null,
   activePlanStreamId: null,
   pendingPrompt: null,
+  pendingInternalContinuation: null,
   tasks: [],
 
   addUserMessage: (content: string, attachments?: ImageAttachment[]) => {
@@ -398,7 +404,10 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
   startToolCall: (msgId: string, toolCall: Omit<ToolCallState, 'status' | 'startedAt' | 'sequence'>) => {
     set((s) => updateMessageInState(s, msgId, (m) => {
       const existing = m.toolCalls || []
-      const timeline = m.executionTimeline || []
+      const isTextAskFallback = toolCall.textAskUserFallback === true
+      const timeline = isTextAskFallback
+        ? (m.executionTimeline || []).filter((item) => item.type !== 'text')
+        : m.executionTimeline || []
       const now = Date.now()
 
       const alreadyExists = existing.some((item) => item.id === toolCall.id)
@@ -454,6 +463,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
 
       return {
         ...m,
+        ...(isTextAskFallback ? { content: '' } : {}),
         toolCalls: [...existing, nextToolCall].sort((a, b) => a.sequence - b.sequence),
         executionTimeline: [...timeline, nextTimelineItem].sort((a, b) => a.sequence - b.sequence)
       }
@@ -757,6 +767,46 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
   setPlanReview: (review) => set({ planReview: review }),
   setActivePlanStreamId: (streamId) => set({ activePlanStreamId: streamId }),
   setPendingPrompt: (prompt) => set({ pendingPrompt: prompt }),
+  setPendingInternalContinuation: (continuation) => set({ pendingInternalContinuation: continuation }),
+  consumeInternalContinuation: (sessionId) => {
+    const pending = get().pendingInternalContinuation
+    if (!pending || pending.sessionId !== sessionId) return null
+    set({ pendingInternalContinuation: null })
+    return pending
+  },
+  markActiveRunUserAborted: (sessionId) => {
+    const now = Date.now()
+    set((state) => {
+      const updateMessages = (messages: ChatMessage[]) => messages.map((message) => {
+        if (!message.subAgents?.some((sub) => sub.status === 'running')) return message
+        return {
+          ...message,
+          streaming: false,
+          interrupted: true,
+          subAgents: message.subAgents.map((sub) => sub.status === 'running'
+            ? {
+                ...sub,
+                status: 'interrupted' as const,
+                interruptionReason: 'user_aborted' as const,
+                completedAt: now
+              }
+            : sub)
+        }
+      })
+      const sessions = state.sessions.map((session) => session.id === sessionId
+        ? { ...session, messages: updateMessages(session.messages) }
+        : session)
+      const active = sessions.find((session) => session.id === state.activeSessionId)
+      return {
+        sessions,
+        messages: active?.messages ?? state.messages,
+        pendingInternalContinuation: state.pendingInternalContinuation?.sessionId === sessionId
+          ? null
+          : state.pendingInternalContinuation
+      }
+    })
+    void get().persistSession(sessionId)
+  },
   setTasks: (tasks) => set((s) => ({
     tasks,
     sessions: s.sessions.map((session) =>

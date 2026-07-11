@@ -10,6 +10,8 @@ export interface ToolContext {
   transactionId?: string
   /** 修改事务管理服务实例 */
   editTransactionService?: EditTransactionService
+  /** 取消当前 Agent/子智能体时终止仍在运行的工具。 */
+  abortSignal?: AbortSignal
 }
 
 export abstract class Tool {

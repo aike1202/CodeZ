@@ -541,44 +541,68 @@ export class SubAgentManager {
         handle.status = 'interrupted'
       }
     }
-    this.activeHandles.set(handleId, handle)
     const abortFromParent = () => handle.cancel()
+
+    this.activeHandles.set(handleId, handle)
     ctx.parentSignal?.addEventListener('abort', abortFromParent, { once: true })
     if (ctx.parentSignal?.aborted) handle.cancel()
 
-    // 生命周期钩子：启动前
-    if (def.onBeforeSpawn) {
-      await def.onBeforeSpawn(ctx)
-    }
+    const setup = await (async () => {
+      if (def.onBeforeSpawn) await def.onBeforeSpawn(ctx)
 
-    const toolManager = new ToolManager()
-    const availableTools = def.getTools(toolManager)
-    let submitResultTool: ToolDefinition | undefined
+      const toolManager = new ToolManager()
+      const availableTools = def.getTools(toolManager)
+      let submitResultTool: ToolDefinition | undefined
+      if (def.outputSpec) {
+        submitResultTool = generateSubmitResultTool(def.outputSpec)
+        availableTools.push(submitResultTool)
+      }
 
-    // 注入 submit_result 工具（如果设置了 outputSpec）
-    if (def.outputSpec) {
-      submitResultTool = generateSubmitResultTool(def.outputSpec)
-      availableTools.push(submitResultTool)
-    }
-
-    const systemPrompt = await buildExtendedSystemPrompt(def, ctx)
-
-    const task = ctx.task || ctx.parentPrompt || ''
-    const core = ctx.runtimeCoordinator
-      ? { coordinator: ctx.runtimeCoordinator, ledger: ctx.runtimeCoordinator.ledger }
-      : getContextCoreServices()
-    const contextBuilder = ctx.contextBuilder || new CanonicalModelContextBuilder(core.ledger)
-    if (!ctx.contextCapabilities) {
-      throw new Error('SubAgent requires resolved model context capabilities')
-    }
-    const contextCapabilities: ModelContextCapabilities = ctx.contextCapabilities
-    const contextScopeId = contextScopeForSubAgent(handleId)
-    const runtimeTurn = await core.coordinator.beginTurn({
-      sessionId: ctx.sessionId,
-      contextScopeId,
-      text: task,
-      model: ctx.modelOverride || ctx.apiConfig.model
+      const systemPrompt = await buildExtendedSystemPrompt(def, ctx)
+      const task = ctx.task || ctx.parentPrompt || ''
+      const core = ctx.runtimeCoordinator
+        ? { coordinator: ctx.runtimeCoordinator, ledger: ctx.runtimeCoordinator.ledger }
+        : getContextCoreServices()
+      const contextBuilder = ctx.contextBuilder || new CanonicalModelContextBuilder(core.ledger)
+      if (!ctx.contextCapabilities) {
+        throw new Error('SubAgent requires resolved model context capabilities')
+      }
+      const contextCapabilities: ModelContextCapabilities = ctx.contextCapabilities
+      const contextScopeId = contextScopeForSubAgent(handleId)
+      const runtimeTurn = await core.coordinator.beginTurn({
+        sessionId: ctx.sessionId,
+        contextScopeId,
+        text: task,
+        model: ctx.modelOverride || ctx.apiConfig.model
+      })
+      return {
+        toolManager,
+        availableTools,
+        submitResultTool,
+        systemPrompt,
+        core,
+        contextBuilder,
+        contextCapabilities,
+        contextScopeId,
+        runtimeTurn
+      }
+    })().catch((error) => {
+      ctx.parentSignal?.removeEventListener('abort', abortFromParent)
+      this.activeHandles.delete(handleId)
+      handle.status = abortController.signal.aborted ? 'interrupted' : 'failed'
+      throw error
     })
+    const {
+      toolManager,
+      availableTools,
+      submitResultTool,
+      systemPrompt,
+      core,
+      contextBuilder,
+      contextCapabilities,
+      contextScopeId,
+      runtimeTurn
+    } = setup
     let runtimeClosed = false
 
     const chatService = new ChatService()
@@ -675,9 +699,6 @@ export class SubAgentManager {
               onError: (err) => {
                 gotError = true
                 lastError = err
-                if (!isRecoverableProviderError(err)) {
-                  callbacks.onError?.(err)
-                }
                 resolve()
               }
             },
@@ -695,6 +716,10 @@ export class SubAgentManager {
         })
 
         if (gotError || abortController.signal.aborted) {
+          if (gotError && !abortController.signal.aborted && !isRecoverableProviderError(lastError)) {
+            failureReason = lastError || 'SubAgent provider request failed.'
+            finalOutput = failureReason
+          }
           if (gotError && !abortController.signal.aborted && isRecoverableProviderError(lastError)) {
             callbacks.onSubAgentChunk?.(
               subAgentId,
@@ -906,7 +931,11 @@ export class SubAgentManager {
                   return { role: 'tool' as const, tool_call_id: tc.id, name, content: result }
                 }
                 try {
-                  const raw = await toolInstance.execute(args, { workspaceRoot: ctx.workspaceRoot, sessionId: ctx.sessionId })
+                  const raw = await toolInstance.execute(args, {
+                    workspaceRoot: ctx.workspaceRoot,
+                    sessionId: ctx.sessionId,
+                    abortSignal: abortController.signal
+                  })
                   result = JSON.stringify({ ok: true, data: raw })
 
                   // 追踪读取的文件

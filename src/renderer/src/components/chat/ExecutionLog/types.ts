@@ -15,5 +15,6 @@ export interface ExecutionLogProps {
     }
   ) => void
   streaming?: boolean
+  interrupted?: boolean
   subAgents?: SubAgentRecord[]
 }

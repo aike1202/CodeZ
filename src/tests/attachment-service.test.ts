@@ -97,4 +97,25 @@ describe('AttachmentService', () => {
       dataBase64: 'AQID'
     })
   })
+
+  it('rejects traversal and keeps persisted metadata free of request bytes', async () => {
+    const { service } = await fixture()
+    const draft = await service.importDraft({
+      name: 'photo.jpg',
+      declaredMimeType: 'image/jpeg',
+      bytes: new Uint8Array([1, 2, 3, 4])
+    })
+    const [stored] = await service.promoteDrafts('s1', [draft])
+
+    await expect(service.readPreview(
+      { ...draft, storageKey: 'attachment:../outside' },
+      'original'
+    )).rejects.toThrow('Invalid attachment storage key')
+
+    const persistedSession = {
+      messages: [{ id: 'u1', role: 'user', content: '', attachments: [stored] }]
+    }
+    expect(JSON.stringify(persistedSession)).not.toContain('AQIDBA==')
+    expect(JSON.stringify(persistedSession)).not.toMatch(/[A-Za-z]:\\/)
+  })
 })

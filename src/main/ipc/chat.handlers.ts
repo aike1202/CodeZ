@@ -25,9 +25,21 @@ import { getProviderImagePolicy } from '../../shared/utils/imageCapabilities'
 import { SubAgentManager } from '../agent/SubAgentManager'
 
 const activeRunners = new ChatRuntimeRegistry<AgentRunner>()
+const stoppedBeforeRegistration = new Set<string>()
 
 function finishStream(streamId: string): void {
   activeRunners.unregister(streamId)
+  stoppedBeforeRegistration.delete(streamId)
+}
+
+function consumePendingStop(streamId: string): boolean {
+  return stoppedBeforeRegistration.delete(streamId)
+}
+
+function rememberPendingStop(streamId: string): void {
+  stoppedBeforeRegistration.add(streamId)
+  const timer = setTimeout(() => stoppedBeforeRegistration.delete(streamId), 60_000)
+  timer.unref()
 }
 
 export function registerChatIpc(): void {
@@ -86,6 +98,7 @@ export function registerChatIpc(): void {
       }
       const { AgentRunner } = await import('../agent/AgentRunner')
       const runner = new AgentRunner()
+      if (consumePendingStop(streamId)) return streamId
 
       const { SystemPromptService } = await import('../services/SystemPromptService')
 
@@ -166,6 +179,11 @@ export function registerChatIpc(): void {
         commandMetadata: request.input.commandMetadata,
         attachments: request.input.attachments
       })
+
+      if (consumePendingStop(streamId)) {
+        await core.coordinator.interruptTurn(runtimeTurn, 'User aborted before runner registration')
+        return streamId
+      }
 
       // 异步执行 Agent 循环，通过 webContents.send 推送
       log.info('[Chat] runner start', { streamId, model: request.model, contextWindowTokens })
@@ -297,6 +315,8 @@ export function registerChatIpc(): void {
     if (runner) {
       runner.abort()
       finishStream(streamId)
+    } else {
+      rememberPendingStop(streamId)
     }
   })
 

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { validateAskUserRequest, interceptAskUser, AskUserQuestionTool } from '../main/tools/builtin/AskUserQuestionTool'
+import {
+  validateAskUserRequest,
+  interceptAskUser,
+  AskUserQuestionTool,
+  normalizeAskUserTextFallback
+} from '../main/tools/builtin/AskUserQuestionTool'
 
 const validArgs = {
   questions: [{
@@ -29,6 +34,11 @@ describe('validateAskUserRequest', () => {
   it('缺 question：error', () => {
     expect(validateAskUserRequest({ questions: [{ header: 'h', options: [{ label: 'a' }, { label: 'b' }] }] }).ok).toBe(false)
   })
+  it('缺 header 或选项 label 无效：error', () => {
+    expect(validateAskUserRequest({ questions: [{ question: 'q', options: [{ label: 'a' }, { label: 'b' }] }] }).ok).toBe(false)
+    expect(validateAskUserRequest({ questions: [{ question: 'q', header: 'h', options: [null, { label: 'b' }] }] }).ok).toBe(false)
+    expect(validateAskUserRequest({ questions: [{ question: 'q', header: 'h', options: [{ label: ' ' }, { label: 'b' }] }] }).ok).toBe(false)
+  })
   it('ignoreLabel/submitLabel 合法：保留', () => {
     const r = validateAskUserRequest({ questions: [{ question: 'q', header: 'h', options: [{ label: 'a' }, { label: 'b' }], ignoreLabel: '跳过', submitLabel: '确定' }] })
     expect(r.ok).toBe(true)
@@ -43,6 +53,36 @@ describe('validateAskUserRequest', () => {
     const r = validateAskUserRequest({ questions: [{ question: 'q', header: 'h', options: [{ label: 'a' }, { label: 'b' }], submitLabel: '   ' }] })
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.questions[0].submitLabel).toBeUndefined()
+  })
+})
+
+describe('normalizeAskUserTextFallback', () => {
+  it('将模型输出的 question/options 文本转换为 AskUserQuestion 参数', () => {
+    const result = normalizeAskUserTextFallback(JSON.stringify({
+      question: '首期要支持哪些平台？',
+      options: ['Windows 10/11', 'Windows + macOS', 'Windows + macOS + Linux']
+    }))
+
+    expect(result).not.toBeNull()
+    expect(JSON.parse(result || '{}')).toEqual({
+      questions: [{
+        question: '首期要支持哪些平台？',
+        header: '需要确认',
+        options: [
+          { label: 'Windows 10/11' },
+          { label: 'Windows + macOS' },
+          { label: 'Windows + macOS + Linux' }
+        ]
+      }]
+    })
+  })
+
+  it('不将代码块、普通 JSON 或额外字段的对象误判为提问', () => {
+    expect(normalizeAskUserTextFallback('```json\n{"question":"使用哪个数据库？","options":["SQLite","PostgreSQL"]}\n```')).toBeNull()
+    expect(normalizeAskUserTextFallback('{"name":"TodoList","version":1}')).toBeNull()
+    expect(normalizeAskUserTextFallback('{"question":"配置项","options":["a","b"]}')).toBeNull()
+    expect(normalizeAskUserTextFallback('{"question":"使用哪个数据库？","options":["SQLite","PostgreSQL"],"header":"数据库"}')).toBeNull()
+    expect(normalizeAskUserTextFallback('{"questions":[{"question":"使用哪个数据库？","header":"数据库","options":[{"label":"SQLite"},{"label":"PostgreSQL"}]}]}')).toBeNull()
   })
 })
 

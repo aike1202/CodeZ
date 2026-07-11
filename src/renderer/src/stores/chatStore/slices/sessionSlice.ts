@@ -27,34 +27,31 @@ function normalizeSession(session: ChatSession): ChatSession {
   }
 }
 
-function buildInterruptedSubAgentPrompt(subAgent: any): string {
-  const description = subAgent.description || subAgent.type || '未命名子智能体任务'
-  const prompt = subAgent.prompt || subAgent.description || ''
-  const partial = subAgent.content?.trim()
-  return [
-    `继续刚才中断的子智能体任务：${description}`,
-    prompt ? `原始任务：${prompt}` : '',
-    partial ? `已产生的部分结果：${partial}` : '',
-    '请先基于当前会话里已有的执行记录判断已完成内容，再继续未完成分析。'
-  ].filter(Boolean).join('\n\n')
-}
+const SUBAGENT_INTERRUPTED_CONTINUATION = [
+  'A previous SubAgentRunner call ended with EXECUTION_INTERRUPTED.',
+  'Treat it as a tool failure and continue the existing user request autonomously using another method.',
+  'Do not ask the user to resend or confirm the task.'
+].join(' ')
 
-function healInterruptedSubAgents(messages: any[]): { messages: any[]; prompt: string | null; changed: boolean } {
-  let prompt: string | null = null
+function healInterruptedSubAgents(messages: any[]): { messages: any[]; changed: boolean; shouldContinue: boolean } {
   let changed = false
+  let shouldContinue = false
   const healedMessages = messages.map((message) => {
     const subAgents = message.subAgents
     if (!Array.isArray(subAgents) || !subAgents.some((sub: any) => sub.status === 'running')) {
-      return message.streaming ? { ...message, streaming: false, interrupted: true } : message
+      if (!message.streaming) return message
+      changed = true
+      return { ...message, streaming: false, interrupted: true }
     }
 
     changed = true
+    shouldContinue = true
     const healedSubAgents = subAgents.map((sub: any) => {
       if (sub.status !== 'running') return sub
-      if (!prompt) prompt = buildInterruptedSubAgentPrompt(sub)
       return {
         ...sub,
         status: 'interrupted',
+        interruptionReason: 'runtime_missing',
         completedAt: sub.completedAt || Date.now()
       }
     })
@@ -66,7 +63,21 @@ function healInterruptedSubAgents(messages: any[]): { messages: any[]; prompt: s
     }
   })
 
-  return { messages: healedMessages, prompt, changed }
+  return { messages: healedMessages, changed, shouldContinue }
+}
+
+function hasNewerSettledSubAgent(messagesFromDisk: any[], messagesInMemory: any[]): boolean {
+  const settledIds = new Set<string>()
+  for (const message of messagesInMemory) {
+    for (const subAgent of message.subAgents || []) {
+      if (subAgent.status !== 'running') settledIds.add(subAgent.id)
+    }
+  }
+  return messagesFromDisk.some((message) =>
+    message.subAgents?.some((subAgent: any) =>
+      subAgent.status === 'running' && settledIds.has(subAgent.id)
+    )
+  )
 }
 
 export interface SessionSlice {
@@ -91,15 +102,7 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     try {
       const sessions = await window.api.session.list()
       if (Array.isArray(sessions) && sessions.length > 0) {
-        // 愈合崩溃残留：将 streaming:true 的消息标记为 interrupted
-        const healedSessions = sessions.map((session) => {
-          const normalized = normalizeSession(session)
-          return {
-            ...normalized,
-            messages: healInterruptedSubAgents(normalized.messages).messages
-          }
-        })
-        set({ sessions: healedSessions })
+        set({ sessions: sessions.map((session) => normalizeSession(session)) })
       }
     } catch (err) {
       console.error('[sessionSlice.loadSessions] Failed:', err)
@@ -132,14 +135,38 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     const seq = ++_selectSessionSeq
     // 优先从主进程获取最新数据，避免使用内存中的旧快照
     try {
-      const freshSession = await window.api.session.get(sessionId)
+      const runtimeStatusPromise = window.api.chat?.getRuntimeStatus
+        ? window.api.chat.getRuntimeStatus(sessionId)
+        : Promise.resolve({
+            sessionId,
+            mainRunnerActive: true,
+            activeSubAgentIds: []
+          })
+      const [freshSession, runtimeStatus] = await Promise.all([
+        window.api.session.get(sessionId),
+        runtimeStatusPromise
+      ])
       // 防止竞态：IPC 返回时用户可能已切换到其他会话
       if (seq !== _selectSessionSeq) return
       if (freshSession) {
-        const normalizedSession = normalizeSession(freshSession)
-        const healed = healInterruptedSubAgents(normalizedSession.messages)
+        const runtimeActive = runtimeStatus.mainRunnerActive ||
+          runtimeStatus.activeSubAgentIds.length > 0 ||
+          Boolean(get().streamCleanups[sessionId])
+        const cachedSession = get().sessions.find((session) => session.id === sessionId)
+        const freshMessages = Array.isArray(freshSession.messages)
+          ? freshSession.messages.map(normalizeMessage)
+          : []
+        const cachedMessages = cachedSession?.messages.map(normalizeMessage) || []
+        const memoryHasNewerTerminalState = Boolean(cachedSession) &&
+          hasNewerSettledSubAgent(freshMessages, cachedMessages)
+        const sourceMessages = cachedSession && (runtimeActive || memoryHasNewerTerminalState)
+          ? cachedMessages
+          : freshMessages
+        const healed = runtimeActive
+          ? { messages: sourceMessages, changed: false, shouldContinue: false }
+          : healInterruptedSubAgents(sourceMessages)
         const healedSession = {
-          ...normalizedSession,
+          ...freshSession,
           messages: healed.messages
         }
         set((s) => {
@@ -156,12 +183,20 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
               : s.expandedCapsule === 'task'
                 ? null
                 : s.expandedCapsule,
-            pendingPrompt: healed.prompt ? { text: healed.prompt, attachments: [] } : s.pendingPrompt,
+            pendingInternalContinuation: null,
             activePlan: null
           }
         })
         if (healed.changed) {
           await window.api.session.save(healedSession)
+        }
+        if (healed.shouldContinue && seq === _selectSessionSeq && get().activeSessionId === sessionId) {
+          set({
+            pendingInternalContinuation: {
+              sessionId,
+              text: SUBAGENT_INTERRUPTED_CONTINUATION
+            }
+          })
         }
         if (freshSession.linkedPlanSlug) {
           try {
@@ -187,18 +222,20 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     // Fallback: 从内存中查找
     const session = get().sessions.find((s) => s.id === sessionId)
     if (session) {
-      const normalizedSession = normalizeSession(session)
-      const healed = healInterruptedSubAgents(normalizedSession.messages)
+      const messages = session.messages.map(normalizeMessage)
       set((s) => ({
+        sessions: s.sessions.map((item) => item.id === sessionId
+          ? { ...item, messages }
+          : item),
         activeSessionId: sessionId,
-        messages: healed.messages,
+        messages,
         tasks: (session as any).tasks || [],
         expandedCapsule: hasUnfinishedTasks((session as any).tasks)
           ? 'task'
           : s.expandedCapsule === 'task'
             ? null
             : s.expandedCapsule,
-        pendingPrompt: healed.prompt ? { text: healed.prompt, attachments: [] } : s.pendingPrompt,
+        pendingInternalContinuation: null,
         activePlan: null
       }))
       if (session.linkedPlanSlug) {

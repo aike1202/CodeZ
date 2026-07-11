@@ -3,6 +3,7 @@ import Flex from '../../ui/Flex'
 import Stack from '../../ui/Stack'
 import IconLoading from '../../icons/IconLoading'
 import IconCheck from '../../icons/IconCheck'
+import IconWarning from '../../icons/IconWarning'
 import {
   type UnifiedTimelineItem,
   buildFallbackTimeline,
@@ -26,6 +27,7 @@ export default function ExecutionLog({
   onFileClick,
   onDiffClick,
   streaming,
+  interrupted,
   subAgents
 }: ExecutionLogProps): React.ReactElement | null {
   const [expanded, setExpanded] = useState(false)
@@ -42,8 +44,10 @@ export default function ExecutionLog({
   const displayItems = useMemo(() => groupParallelToolBatches(unifiedItems), [unifiedItems])
 
   const running = useMemo(() => {
-    return Boolean(streaming) || unifiedItems.some((item) => item.status === 'running')
-  }, [unifiedItems, streaming])
+    return !interrupted && (
+      Boolean(streaming) || unifiedItems.some((item) => item.status === 'running')
+    )
+  }, [unifiedItems, streaming, interrupted])
 
   useEffect(() => {
     if (running) {
@@ -90,7 +94,7 @@ export default function ExecutionLog({
 
   if (unifiedItems.length === 0) return null
 
-  const summary = buildSummaryText(unifiedItems, running)
+  const summary = buildSummaryText(unifiedItems, running, interrupted)
   const askSummary = useMemo(() => extractAskSummary(unifiedItems), [unifiedItems])
 
   const hasDetail = (item: UnifiedTimelineItem) => {
@@ -126,7 +130,9 @@ export default function ExecutionLog({
       >
         <div className="timeline-header-content">
           <Flex align="center" gap={2} className="timeline-header-text">
-            {running ? (
+            {interrupted ? (
+              <IconWarning width="12" height="12" className="subagent-card-status-icon--error" />
+            ) : running ? (
               <IconLoading width="12" height="12" className="spin-slow" />
             ) : (
               <IconCheck

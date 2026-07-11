@@ -21,6 +21,31 @@ describe('multimodal provider payloads', () => {
     ])
   })
 
+  it('preserves multiple-image order and omits empty OpenAI text blocks', async () => {
+    const first = { ...attachment, id: 'first' }
+    const second = { ...attachment, id: 'second' }
+    const resolveOrdered = async (item: typeof attachment) => ({
+      mimeType: 'image/jpeg' as const,
+      dataBase64: item.id === 'first' ? 'FIRST' : 'SECOND'
+    })
+
+    const withText = await resolveOpenAIMessages([
+      { role: 'user', content: 'inspect', attachments: [first, second] }
+    ], resolveOrdered)
+    expect((withText[0].content as any[]).map((part) => part.text || part.image_url.url)).toEqual([
+      'inspect',
+      'data:image/jpeg;base64,FIRST',
+      'data:image/jpeg;base64,SECOND'
+    ])
+
+    const imageOnly = await resolveOpenAIMessages([
+      { role: 'user', content: '', attachments: [first] }
+    ], resolveOrdered)
+    expect(imageOnly[0].content).toEqual([
+      { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,FIRST' } }
+    ])
+  })
+
   it('builds Anthropic source blocks and preserves tool result order', async () => {
     const result = await buildAnthropicMessages([
       { role: 'user', content: '', attachments: [attachment] },

@@ -62,7 +62,12 @@ export function extractAskSummary(items: UnifiedTimelineItem[]): AskSummary | nu
   return null
 }
 
-export function buildSummaryText(items: UnifiedTimelineItem[], running: boolean): string {
+export function buildSummaryText(
+  items: UnifiedTimelineItem[],
+  running: boolean,
+  interrupted = false
+): string {
+  if (interrupted) return '执行已中断'
   const readCount = items.filter((i) => i.type === 'tool' && i.verb === 'Analyzed').length
   const dirCount = items.filter((i) => i.type === 'tool' && i.verb === 'Explored').length
   const searchCount = items.filter((i) => i.verb === 'Searched').length

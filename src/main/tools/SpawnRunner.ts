@@ -24,6 +24,7 @@ export interface RunOptions {
   run_in_background?: boolean
   executable?: string
   env?: NodeJS.ProcessEnv
+  abortSignal?: AbortSignal
 }
 
 export interface BackgroundTaskEntry {
@@ -32,6 +33,28 @@ export interface BackgroundTaskEntry {
   stderrFile: string
   startedAt: number
   shellType: 'bash' | 'powershell'
+}
+
+function terminateProcess(proc: ChildProcess, detached = false): void {
+  if (typeof proc.pid !== 'number') return
+  if (process.platform === 'win32') {
+    try {
+      const killer = spawn('taskkill.exe', ['/pid', String(proc.pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore'
+      })
+      killer.on('error', () => {
+        try { proc.kill('SIGKILL') } catch {}
+      })
+      killer.unref()
+      return
+    } catch {}
+  }
+  try {
+    process.kill(detached ? -proc.pid : proc.pid, 'SIGKILL')
+  } catch {
+    try { proc.kill('SIGKILL') } catch {}
+  }
 }
 
 export function truncateOutput(text: string, head = 1000, tail = 3000): { text: string; truncated: boolean } {
@@ -72,6 +95,16 @@ export function getBackgroundTaskRegistry(): BackgroundTaskRegistry {
 
 export class SpawnRunner {
   run(opts: RunOptions): Promise<SpawnResult> {
+    if (opts.abortSignal?.aborted) {
+      return Promise.resolve({
+        exitCode: null,
+        stdout: '',
+        stderr: 'Execution interrupted before process start.',
+        timedOut: false,
+        background: opts.run_in_background === true,
+        truncated: false
+      })
+    }
     return opts.run_in_background ? this.runBackground(opts) : this.runForeground(opts)
   }
 
@@ -85,17 +118,28 @@ export class SpawnRunner {
   private runForeground(opts: RunOptions): Promise<SpawnResult> {
     return new Promise((resolve) => {
       const { exe, args } = this.buildArgs(opts)
-      const proc = spawn(exe, args, { cwd: opts.cwd, env: opts.env || process.env, windowsHide: true })
+      const detached = process.platform !== 'win32'
+      const proc = spawn(exe, args, {
+        cwd: opts.cwd,
+        env: opts.env || process.env,
+        windowsHide: true,
+        detached
+      })
       let stdout = ''
       let stderr = ''
       let timedOut = false
       let timer: NodeJS.Timeout | null = null
+      let settled = false
 
       proc.stdout?.on('data', (d) => { stdout += d.toString() })
       proc.stderr?.on('data', (d) => { stderr += d.toString() })
 
+      const abortProcess = () => terminateProcess(proc, detached)
       const finish = (exitCode: number | null) => {
+        if (settled) return
+        settled = true
         if (timer) clearTimeout(timer)
+        opts.abortSignal?.removeEventListener('abort', abortProcess)
         const out = truncateOutput(stdout)
         const err = truncateOutput(stderr)
         resolve({
@@ -109,10 +153,13 @@ export class SpawnRunner {
         })
       }
 
+      opts.abortSignal?.addEventListener('abort', abortProcess, { once: true })
+      if (opts.abortSignal?.aborted) abortProcess()
+
       if (opts.timeout && opts.timeout > 0) {
         timer = setTimeout(() => {
           timedOut = true
-          try { proc.kill('SIGKILL') } catch {}
+          terminateProcess(proc, detached)
         }, opts.timeout)
       }
 
@@ -150,7 +197,14 @@ export class SpawnRunner {
         truncated: false
       })
     }
-    getBackgroundTaskRegistry().add({ pid, stdoutFile, stderrFile, startedAt: Date.now(), shellType: opts.shell })
+    const registry = getBackgroundTaskRegistry()
+    const taskId = registry.add({ pid, stdoutFile, stderrFile, startedAt: Date.now(), shellType: opts.shell })
+    const abortProcess = () => {
+      registry.remove(taskId)
+      terminateProcess(proc, true)
+    }
+    opts.abortSignal?.addEventListener('abort', abortProcess, { once: true })
+    if (opts.abortSignal?.aborted) abortProcess()
     try { proc.unref() } catch {}
 
     return Promise.resolve({

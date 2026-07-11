@@ -295,7 +295,10 @@ const api = {
         input
       } satisfies StreamRequestV2)
         .then((streamId: string) => {
-          if (cleanedUp) return
+          if (cleanedUp) {
+            resolveStarted()
+            return
+          }
           if (streamId !== requestedStreamId) {
             cleanup()
             const error = new Error('IPC 错误: 主进程返回了不匹配的 stream ID')

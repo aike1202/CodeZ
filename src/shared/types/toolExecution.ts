@@ -1,5 +1,6 @@
 export interface ToolBatchMeta {
-  batchId: string
-  batchIndex: number
-  batchSize: number
+  batchId?: string
+  batchIndex?: number
+  batchSize?: number
+  textAskUserFallback?: boolean
 }

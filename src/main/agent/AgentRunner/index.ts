@@ -5,7 +5,7 @@ import {
   authorizePermissionToolCall,
   type PermissionToolAuthorization
 } from '../../services/PermissionManager'
-import { interceptAskUser } from '../../tools/builtin/AskUserQuestionTool'
+import { interceptAskUser, normalizeAskUserTextFallback } from '../../tools/builtin/AskUserQuestionTool'
 import { TaskStore } from '../../services/TaskStore'
 import { SubAgentManager } from '../SubAgentManager'
 import type { ChatProviderErrorCode, ProviderTokenUsage, ToolDefinition } from '../../../shared/types/provider'
@@ -401,6 +401,28 @@ export class AgentRunner {
           return result
         })
 
+        const fallbackAskArgs = toolCallsArray.length === 0
+          ? normalizeAskUserTextFallback(currentFullContent)
+          : null
+        if (fallbackAskArgs) {
+          const fallbackId = `fallback_ask_${runtimeTurn!.turnId}_${loopCount}`
+          toolCallsArray.push({
+            id: fallbackId,
+            type: 'function',
+            function: {
+              name: 'AskUserQuestion',
+              arguments: fallbackAskArgs,
+              thought_signature: 'skip_thought_signature_validator'
+            },
+            thought_signature: 'skip_thought_signature_validator'
+          })
+          currentFullContent = ''
+          log.warn('[AgentRunner] converted text clarification payload to AskUserQuestion', {
+            loopCount,
+            model: config.model
+          })
+        }
+
         await runtimeCoordinator!.recordAssistant(runtimeTurn!, {
           content: currentFullContent || '',
           toolCalls: toolCallsArray.map((toolCall) => ({
@@ -414,6 +436,11 @@ export class AgentRunner {
         const batchId = toolCallsArray.length > 1
           ? `batch_${runtimeTurn!.turnId}_${loopCount}`
           : undefined
+        const toolBatchMeta = batchId
+          ? { batchId, batchIndex: 0, batchSize: toolCallsArray.length }
+          : fallbackAskArgs
+            ? { textAskUserFallback: true }
+            : undefined
 
         toolCallsArray.forEach((toolCall, batchIndex) => {
           callbacks.onToolStart?.(
@@ -422,8 +449,8 @@ export class AgentRunner {
             toolCall.function.arguments,
             toolCall.thought_signature,
             batchId
-              ? { batchId, batchIndex, batchSize: toolCallsArray.length }
-              : undefined
+              ? { ...toolBatchMeta!, batchIndex }
+              : toolBatchMeta
           )
         })
 
@@ -538,7 +565,8 @@ export class AgentRunner {
                       runtimeCoordinator,
                       runtimeTurn,
                       transactionId: txId || undefined,
-                      editTransactionService: this.editTransactionService
+                      editTransactionService: this.editTransactionService,
+                      abortSignal: this.abortController?.signal
                     })
                     if (isToolErrorResult(resultMessage)) {
                       isError = true

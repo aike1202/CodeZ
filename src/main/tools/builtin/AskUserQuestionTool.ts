@@ -27,6 +27,52 @@ export interface AskUserAnswer {
   answer: string | string[]
 }
 
+const FALLBACK_HEADER = '需要确认'
+
+function parseStandaloneJson(content: string): unknown | null {
+  const json = content.trim()
+  if (!json.startsWith('{') || !json.endsWith('}')) return null
+
+  try {
+    return JSON.parse(json)
+  } catch {
+    return null
+  }
+}
+
+function isQuestionText(value: unknown): value is string {
+  return typeof value === 'string' && /[?？]\s*$/.test(value)
+}
+
+/**
+ * Some OpenAI-compatible models render the known { question, options } payload
+ * as text instead of returning a function call. The exact shape is intentional:
+ * a JSON/code response must not become a blocking question by accident.
+ */
+export function normalizeAskUserTextFallback(content: string): string | null {
+  const parsed = parseStandaloneJson(content)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+
+  const legacy = parsed as {
+    question?: unknown
+    options?: unknown
+  }
+  const keys = Object.keys(legacy)
+  if (keys.length !== 2 || !keys.includes('question') || !keys.includes('options')) return null
+  if (!isQuestionText(legacy.question) || !Array.isArray(legacy.options)) return null
+  if (!legacy.options.every((option) => typeof option === 'string' && option.trim())) return null
+
+  const request = {
+    questions: [{
+      question: legacy.question.trim(),
+      header: FALLBACK_HEADER,
+      options: legacy.options.map((option) => ({ label: option.trim() }))
+    }]
+  }
+  const normalized = validateAskUserRequest(request)
+  return normalized.ok ? JSON.stringify({ questions: normalized.questions }) : null
+}
+
 export type AskUserHandler = (req: AskUserRequest) => Promise<AskUserAnswer[]>
 
 export function validateAskUserRequest(parsed: any): { ok: true; questions: AskUserQuestionItem[] } | { ok: false; error: string } {
@@ -36,11 +82,25 @@ export function validateAskUserRequest(parsed: any): { ok: true; questions: AskU
   }
   for (let i = 0; i < qs.length; i++) {
     const q = qs[i]
-    if (!q || typeof q.question !== 'string' || !q.question) {
+    if (!q || typeof q.question !== 'string' || !q.question.trim()) {
       return { ok: false, error: `questions[${i}].question is required.` }
+    }
+    if (typeof q.header !== 'string' || !q.header.trim()) {
+      return { ok: false, error: `questions[${i}].header is required.` }
     }
     if (!Array.isArray(q.options) || q.options.length < 2 || q.options.length > 4) {
       return { ok: false, error: `questions[${i}].options must have 2-4 items.` }
+    }
+    for (const option of q.options) {
+      if (!option || typeof option !== 'object' || Array.isArray(option) || typeof option.label !== 'string' || !option.label.trim()) {
+        return { ok: false, error: `questions[${i}].options must contain non-empty labels.` }
+      }
+      if (option.description !== undefined && typeof option.description !== 'string') {
+        return { ok: false, error: `questions[${i}].options.description must be a string.` }
+      }
+      if (option.detail !== undefined && typeof option.detail !== 'string') {
+        return { ok: false, error: `questions[${i}].options.detail must be a string.` }
+      }
     }
     // 可选按钮文案：仅接受 1-16 字符非空字符串，否则忽略该字段
     if (q.ignoreLabel !== undefined) {
@@ -85,7 +145,7 @@ export class AskUserQuestionTool extends Tool {
   }
 
   get summary() {
-    return 'Ask the user a multiple-choice question.'
+    return 'Ask the user a multiple-choice question through a tool call; never print its JSON.'
   }
 
   get description() {
