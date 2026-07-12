@@ -134,6 +134,7 @@ testmsg.txt
 scratch_*
 electron.vite.config.*.mjs
 .myagent-cache/
+.codez/worktrees/
 dist-app
 
 # Agent test temporaries
