@@ -219,14 +219,14 @@ export function useSendMessage() {
         uiMessageId = addUserMessage(message, promotedAttachments).id
       }
       await useChatStore.getState().persistSession(sid)
-      const agentId = startStreamingReply()
+      let activeAgentId = startStreamingReply()
 
       const streamUpdates = createStreamUpdateBatcher({
         appendMain: (delta, reasoningDelta) => {
-          appendStreamChunk(agentId, delta, reasoningDelta)
+          appendStreamChunk(activeAgentId, delta, reasoningDelta)
         },
         appendSubAgent: (subAgentId, delta, reasoningDelta) => {
-          appendSubAgentChunk(agentId, subAgentId, delta, reasoningDelta)
+          appendSubAgentChunk(activeAgentId, subAgentId, delta, reasoningDelta)
         }
       })
 
@@ -247,8 +247,8 @@ export function useSendMessage() {
           clearTimeout(firstByteTimer)
           firstByteTimer = null
         }
-        setMessageStreamPhase(agentId, 'running')
-        setResponseWaitWarning(agentId, false)
+        setMessageStreamPhase(activeAgentId, 'running')
+        setResponseWaitWarning(activeAgentId, false)
       }
 
       const streamHandle = (window as any).api.chat.stream(
@@ -261,18 +261,39 @@ export function useSendMessage() {
             markResponseActivity()
             streamUpdates.pushMain(delta, reasoningDelta)
           },
+          onSteerConsumed: (input: import('../../../../../shared/types/queuedPrompt').ChatSteerInput) => {
+            streamUpdates.flush()
+            const activeMessage = useChatStore.getState().sessions
+              .find((session) => session.id === sid)?.messages
+              .find((message) => message.id === activeAgentId)
+            const hasVisibleProgress = Boolean(
+              activeMessage?.content || activeMessage?.reasoningContent ||
+              activeMessage?.toolCalls?.length || activeMessage?.subAgents?.length
+            )
+            if (hasVisibleProgress) {
+              finishStreaming(activeAgentId)
+              setMessageExecutionStatus(activeAgentId, 'completed')
+            } else {
+              removeMessages([activeAgentId])
+            }
+            useChatStore.getState().removeQueuedPrompt(sid, input.queueId)
+            addUserMessage(input.text, input.attachments, sid)
+            activeAgentId = startStreamingReply(sid)
+            setMessageStreamPhase(activeAgentId, 'running')
+            void useChatStore.getState().persistSession(sid)
+          },
           onDone: async (fullContent: string, _stopReason?: string, txId?: string) => {
             if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
-            setResponseWaitWarning(agentId, false)
+            setResponseWaitWarning(activeAgentId, false)
             streamUpdates.flush()
-            finishStreaming(agentId, txId)
-            setMessageExecutionStatus(agentId, 'completed')
+            finishStreaming(activeAgentId, txId)
+            setMessageExecutionStatus(activeAgentId, 'completed')
             if (txId) {
-              useChatStore.getState().setTransactionId(agentId, txId)
+              useChatStore.getState().setTransactionId(activeAgentId, txId)
               try {
                 const diffs = await window.api.chat.getDiff(txId)
                 if (Array.isArray(diffs) && diffs.length > 0) {
-                  setDiffEntries(agentId, diffs)
+                  setDiffEntries(activeAgentId, diffs)
                 }
               } catch (err) {
                 console.warn('Failed to load transaction diff:', err)
@@ -283,11 +304,11 @@ export function useSendMessage() {
           },
           onError: (error: string) => {
             if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
-            setResponseWaitWarning(agentId, false)
+            setResponseWaitWarning(activeAgentId, false)
             streamUpdates.flush()
-            appendStreamChunk(agentId, `\n\n⚠️ 错误：${error}`)
-            finishStreaming(agentId)
-            setMessageExecutionStatus(agentId, 'error')
+            appendStreamChunk(activeAgentId, `\n\n⚠️ 错误：${error}`)
+            finishStreaming(activeAgentId)
+            setMessageExecutionStatus(activeAgentId, 'error')
             useChatStore.getState().persistSession(sid)
             setStreamCleanup(sid, null)
           },
@@ -300,7 +321,7 @@ export function useSendMessage() {
           ) => {
             markResponseActivity()
             streamUpdates.flush()
-            startToolCall(agentId, {
+            startToolCall(activeAgentId, {
               id: toolCallId || genId(),
               name,
               args,
@@ -314,16 +335,16 @@ export function useSendMessage() {
             useChatStore.getState().persistSession(sid)
           },
           onToolEnd: (toolCallId: string, result: string) => {
-            finishToolCall(agentId, toolCallId, result)
+            finishToolCall(activeAgentId, toolCallId, result)
             useChatStore.getState().persistSession(sid)
           },
           onPermissionRequest: (request: any) => {
             markResponseActivity()
-            addPermissionRequest(agentId, request)
+            addPermissionRequest(activeAgentId, request)
           },
           onAskUserRequest: (request: any) => {
             markResponseActivity()
-            addAskUserRequest(agentId, request)
+            addAskUserRequest(activeAgentId, request)
           },
           onContextBudget: (snapshot: any) => {
             useChatStore.getState().setContextBudget(sid, snapshot)
@@ -347,7 +368,7 @@ export function useSendMessage() {
           onSubAgentStart: (subAgentId: string, meta: any) => {
             markResponseActivity()
             streamUpdates.flush()
-            startSubAgent(agentId, subAgentId, meta)
+            startSubAgent(activeAgentId, subAgentId, meta)
             useChatStore.getState().persistSession(sid)
           },
           onSubAgentChunk: (subAgentId: string, delta: string, reasoningDelta: string) => {
@@ -355,7 +376,7 @@ export function useSendMessage() {
           },
           onSubAgentToolStart: (subAgentId: string, toolCallId: string, name: string, args: string, thoughtSignature?: string) => {
             streamUpdates.flush()
-            startSubAgentToolCall(agentId, subAgentId, {
+            startSubAgentToolCall(activeAgentId, subAgentId, {
               id: toolCallId || genId(),
               name,
               args,
@@ -363,11 +384,11 @@ export function useSendMessage() {
             })
           },
           onSubAgentToolEnd: (subAgentId: string, toolCallId: string, result: string) => {
-            finishSubAgentToolCall(agentId, subAgentId, toolCallId, result)
+            finishSubAgentToolCall(activeAgentId, subAgentId, toolCallId, result)
           },
           onSubAgentEnd: (subAgentId: string, result: any) => {
             streamUpdates.flush()
-            endSubAgent(agentId, subAgentId, result)
+            endSubAgent(activeAgentId, subAgentId, result)
             useChatStore.getState().persistSession(sid)
           }
         }
@@ -375,18 +396,18 @@ export function useSendMessage() {
 
       firstByteTimer = setTimeout(() => {
         if (!gotFirstByte) {
-          setResponseWaitWarning(agentId, true)
+          setResponseWaitWarning(activeAgentId, true)
         }
       }, 90_000)
 
       const wrappedCleanup = () => {
         if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
-        setResponseWaitWarning(agentId, false)
+        setResponseWaitWarning(activeAgentId, false)
         streamUpdates.flush()
         useChatStore.getState().markActiveRunUserAborted(sid)
         streamHandle.stop()
-        finishStreaming(agentId)
-        setMessageExecutionStatus(agentId, 'interrupted')
+        finishStreaming(activeAgentId)
+        setMessageExecutionStatus(activeAgentId, 'interrupted')
         useChatStore.getState().persistSession(sid)
         setStreamCleanup(sid, null)
       }
@@ -394,23 +415,23 @@ export function useSendMessage() {
       setStreamCleanup(sid, wrappedCleanup)
       try {
         await streamHandle.started
-        setMessageStreamPhase(agentId, 'running')
+        setMessageStreamPhase(activeAgentId, 'running')
       } catch (error) {
         if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
-        setResponseWaitWarning(agentId, false)
+        setResponseWaitWarning(activeAgentId, false)
         streamUpdates.cancel()
         streamHandle.stop()
         if (internal) {
           appendStreamChunk(
-            agentId,
+            activeAgentId,
             `\n\n⚠️ 中断任务自动续跑启动失败：${error instanceof Error ? error.message : String(error)}`
           )
-          finishStreaming(agentId)
+          finishStreaming(activeAgentId)
           await useChatStore.getState().persistSession(sid)
           setStreamCleanup(sid, null)
           return false
         }
-        removeMessages([uiMessageId, agentId])
+        removeMessages([uiMessageId, activeAgentId])
         const rollbackIds = promotedAttachments
           .filter((_item, index) => attachments[index]?.scope === 'draft')
           .map((item) => item.id)

@@ -24,9 +24,26 @@ import { getAttachmentService } from './attachment.handlers'
 import { getProviderImagePolicy, supportsImageInput } from '../../shared/utils/imageCapabilities'
 import { SubAgentManager } from '../agent/SubAgentManager'
 import { getExecutionController } from '../services/execution/ExecutionController'
+import { PromptPredictionService } from '../services/PromptPredictionService'
+import type {
+  PromptPredictionRequest,
+  PromptPredictionResponse
+} from '../../shared/types/promptPrediction'
+import type { ChatSteerInput, ChatSteerResult } from '../../shared/types/queuedPrompt'
 
 const activeRunners = new ChatRuntimeRegistry<AgentRunner>()
 const stoppedBeforeRegistration = new Set<string>()
+interface ActivePromptPrediction {
+  key: string
+  controller: AbortController
+  promise: Promise<PromptPredictionResponse>
+}
+
+const activePromptPredictions = new Map<number, ActivePromptPrediction>()
+const recentPromptPredictions = new Map<number, {
+  key: string
+  response: PromptPredictionResponse
+}>()
 
 function buildRuntimeStatus(sessionId: string) {
   return activeRunners.getStatus(sessionId, SubAgentManager.listActiveForSession(sessionId))
@@ -66,6 +83,76 @@ function rememberPendingStop(streamId: string): void {
 }
 
 export function registerChatIpc(): void {
+  ipcMain.handle(
+    IPC_CHANNELS.CHAT_PREDICT_NEXT_INPUT,
+    async (event, request: PromptPredictionRequest): Promise<PromptPredictionResponse> => {
+      const empty = { suggestion: '' }
+      if (
+        !request?.providerId
+        || !request.model
+        || typeof request.draft !== 'string'
+        || !Array.isArray(request.context)
+      ) return empty
+
+      const requestKey = JSON.stringify(request)
+      if (requestKey.length > 100_000) return empty
+
+      const senderId = event.sender.id
+      const recent = recentPromptPredictions.get(senderId)
+      if (recent?.key === requestKey) return recent.response
+
+      const active = activePromptPredictions.get(senderId)
+      if (active?.key === requestKey) return active.promise
+
+      const providerService = getProviderService()
+      const provider = providerService.getConfig(request.providerId)
+      const apiKey = providerService.getApiKey(request.providerId)
+      if (!provider || !apiKey) return empty
+
+      const modelConfig = provider.models.find(
+        (model) => model.id === request.model || model.name === request.model
+      )
+      if (!modelConfig) return empty
+
+      active?.controller.abort()
+      const controller = new AbortController()
+      const predictionPromise = (async (): Promise<PromptPredictionResponse> => {
+        try {
+          const service = new PromptPredictionService({
+            baseUrl: provider.baseUrl,
+            apiKey,
+            apiFormat: modelConfig.apiFormat || provider.apiFormat,
+            model: modelConfig.name
+          })
+          const suggestion = await service.predict(request, controller.signal)
+          const response = { suggestion }
+          recentPromptPredictions.set(senderId, { key: requestKey, response })
+          return response
+        } catch (error) {
+          if (!controller.signal.aborted) {
+            log.warn('[Chat] next input prediction failed', {
+              providerId: request.providerId,
+              model: request.model,
+              error: error instanceof Error ? error.message : String(error)
+            })
+          }
+          return empty
+        } finally {
+          if (activePromptPredictions.get(senderId)?.controller === controller) {
+            activePromptPredictions.delete(senderId)
+          }
+        }
+      })()
+
+      activePromptPredictions.set(senderId, {
+        key: requestKey,
+        controller,
+        promise: predictionPromise
+      })
+      return predictionPromise
+    }
+  )
+
   ipcMain.handle(
     IPC_CHANNELS.CHAT_STREAM_START,
     async (event, request: StreamRequestV2): Promise<string> => {
@@ -239,6 +326,9 @@ export function registerChatIpc(): void {
           onChunk: (delta, reasoningDelta) => {
             sender.send(IPC_CHANNELS.CHAT_STREAM_CHUNK, streamId, delta, reasoningDelta)
           },
+          onSteerConsumed: (input) => {
+            sender.send(IPC_CHANNELS.CHAT_STREAM_STEER_CONSUMED, streamId, input)
+          },
           onDone: (fullContent, stopReason, txId) => {
             log.info('[Chat] done', { streamId, stopReason, contentLen: fullContent?.length ?? 0 })
             sender.send(IPC_CHANNELS.CHAT_STREAM_END, streamId, fullContent, stopReason, txId)
@@ -332,6 +422,20 @@ export function registerChatIpc(): void {
   ipcMain.handle(IPC_CHANNELS.CHAT_RUNTIME_STATUS, (_event, sessionId: string) => {
     return buildRuntimeStatus(sessionId)
   })
+
+  ipcMain.handle(
+    IPC_CHANNELS.CHAT_STREAM_STEER,
+    (_event, sessionId: string, input: ChatSteerInput): ChatSteerResult => {
+      if (!sessionId || !input?.queueId || (!input.text?.trim() && !input.attachments?.length)) {
+        return { accepted: false, reason: 'INVALID_INPUT' }
+      }
+      const runner = activeRunners.getRunnerForSession(sessionId)
+      if (!runner) return { accepted: false, reason: 'NO_ACTIVE_RUNNER' }
+      return runner.steer(input)
+        ? { accepted: true }
+        : { accepted: false, reason: 'RUNNER_FINISHING' }
+    }
+  )
 
   ipcMain.handle(IPC_CHANNELS.CHAT_STREAM_STOP, (_event, streamId: string) => {
     const runner = activeRunners.getRunner(streamId)

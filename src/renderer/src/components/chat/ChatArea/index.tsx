@@ -20,6 +20,7 @@ import ConversationNavigator from '../ConversationNavigator'
 const SCROLL_BOTTOM_RATIO = 0.15
 /** "在底部"阈值的最小像素值(小视口保护) */
 const SCROLL_BOTTOM_MIN_PX = 100
+const EMPTY_QUEUED_PROMPTS: never[] = []
 
 function isNearBottom(container: HTMLElement): boolean {
   const distance = container.scrollHeight - container.scrollTop - container.clientHeight
@@ -183,7 +184,17 @@ export default function ChatArea({
   const pendingInternalContinuation = useChatStore((s) => s.pendingInternalContinuation)
   const consumeInternalContinuation = useChatStore((s) => s.consumeInternalContinuation)
   const streamCleanups = useChatStore((s) => s.streamCleanups)
+  const queuedPrompts = useChatStore((s) => {
+    if (!s.activeSessionId) return EMPTY_QUEUED_PROMPTS
+    return s.sessions.find((session) => session.id === s.activeSessionId)?.queuedPrompts || EMPTY_QUEUED_PROMPTS
+  })
+  const activeRuntimeStatus = useChatStore((s) => s.activeSessionId
+    ? s.runtimeStatuses[s.activeSessionId]?.status
+    : undefined)
+  const updateQueuedPrompt = useChatStore((s) => s.updateQueuedPrompt)
+  const removeQueuedPrompt = useChatStore((s) => s.removeQueuedPrompt)
   const { handleSendMessage } = useSendMessage()
+  const queuedDispatchRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!activeSessionId || !pendingInternalContinuation) return
@@ -204,6 +215,35 @@ export default function ChatArea({
     consumeInternalContinuation,
     handleSendMessage,
     workspace
+  ])
+
+  useEffect(() => {
+    if (!activeSessionId || pendingInternalContinuation || queuedPrompts.length === 0) return
+    if (streamCleanups[activeSessionId]) return
+    if (activeRuntimeStatus?.mainRunnerActive || activeRuntimeStatus?.activeSubAgentIds.length) return
+    const prompt = queuedPrompts[0]
+    if (prompt.status === 'failed') return
+    if (queuedDispatchRef.current) return
+
+    queuedDispatchRef.current = prompt.id
+    updateQueuedPrompt(activeSessionId, prompt.id, { status: 'steering' })
+    void handleSendMessage(prompt.text, prompt.modelName, false, prompt.attachments)
+      .then((accepted) => {
+        if (accepted) removeQueuedPrompt(activeSessionId, prompt.id)
+        else updateQueuedPrompt(activeSessionId, prompt.id, { status: 'failed' })
+      })
+      .finally(() => {
+        if (queuedDispatchRef.current === prompt.id) queuedDispatchRef.current = null
+      })
+  }, [
+    activeRuntimeStatus,
+    activeSessionId,
+    handleSendMessage,
+    pendingInternalContinuation,
+    queuedPrompts,
+    removeQueuedPrompt,
+    streamCleanups,
+    updateQueuedPrompt
   ])
 
   const handleResolvePermission = useCallback(
@@ -403,6 +443,15 @@ export default function ChatArea({
           <PromptArea
             onSend={(message, modelName, attachments) =>
               handleSendMessage(message, modelName, false, attachments)}
+            onSteer={async (prompt) => {
+              if (!activeSessionId) return false
+              const result = await window.api.chat.steer(activeSessionId, {
+                queueId: prompt.id,
+                text: prompt.text,
+                attachments: prompt.attachments.filter((attachment) => attachment.scope === 'session')
+              })
+              return result.accepted
+            }}
             placeholder={activeSessionId ? '随心输入...' : '开始新的对话...'}
             onOpenSettings={() => onOpenSettings('model-config')}
             workspace={workspace}

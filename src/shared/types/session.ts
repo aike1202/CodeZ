@@ -1,6 +1,7 @@
 import type { TaskItem } from './task'
 import type { SessionRuntimeRef } from './context'
 import type { ImageAttachment } from './attachment'
+import type { QueuedPrompt } from './queuedPrompt'
 
 export interface SessionData {
   id: string
@@ -14,5 +15,6 @@ export interface SessionData {
   linkedPlanSlug?: string
   /** 轻量任务清单——落盘持久化，会话恢复时加载 */
   tasks?: TaskItem[]
+  queuedPrompts?: QueuedPrompt[]
   runtime?: SessionRuntimeRef
 }

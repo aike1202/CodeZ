@@ -52,6 +52,32 @@ describe('SessionRuntimeCoordinator', () => {
     expect(state.scopes.main.lastCompletedTurnId).toBe(turn.turnId)
   })
 
+  it('records a steered continuation with attachments after tool results settle', async () => {
+    const { ledger, runtime } = await fixture()
+    const turn = await runtime.beginTurn({
+      sessionId: 's1', contextScopeId: 'main', text: 'start'
+    })
+    await runtime.recordAssistant(turn, {
+      content: '', toolCalls: [{ id: 'c1', name: 'Read', arguments: '{}' }]
+    })
+    await expect(runtime.recordUserContinuation(turn, 'steer now'))
+      .rejects.toThrow('pending tool calls')
+    await runtime.recordToolResult(turn, {
+      callId: 'c1', name: 'Read', content: 'ok', status: 'success'
+    })
+    const attachment = {
+      id: 'img2', kind: 'image' as const, name: 'guide.png', mimeType: 'image/png' as const,
+      width: 64, height: 64, sizeBytes: 100, storageKey: 'attachment:sessions/s1/img2',
+      scope: 'session' as const, sessionId: 's1'
+    }
+    await runtime.recordUserContinuation(turn, 'steer now', [attachment])
+    await runtime.completeTurn(turn, { stopReason: 'stop' })
+
+    const messages = (await ledger.load('s1')).scopes.main.activeMessages
+    expect(messages.map((message) => message.role)).toEqual(['user', 'assistant', 'tool', 'user'])
+    expect(messages.at(-1)).toMatchObject({ content: 'steer now', attachments: [attachment] })
+  })
+
   it('allows different scopes concurrently but rejects two turns in one scope', async () => {
     const { runtime } = await fixture()
     const main = await runtime.beginTurn({ sessionId: 's1', contextScopeId: 'main', text: 'main' })

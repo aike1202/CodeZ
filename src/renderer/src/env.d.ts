@@ -50,6 +50,9 @@ declare global {
         ) => Promise<import('@shared/types/attachment').AttachmentPreviewBytes>
       }
       chat: {
+        predictNextInput: (
+          request: import('@shared/types/promptPrediction').PromptPredictionRequest
+        ) => Promise<import('@shared/types/promptPrediction').PromptPredictionResponse>
         getRuntimeStatus: (
           sessionId: string
         ) => Promise<import('@shared/types/subagent').SessionRuntimeStatus>
@@ -58,6 +61,10 @@ declare global {
             payload: import('@shared/types/subagent').SessionRuntimeStatusChanged
           ) => void
         ) => () => void
+        steer: (
+          sessionId: string,
+          input: import('@shared/types/queuedPrompt').ChatSteerInput
+        ) => Promise<import('@shared/types/queuedPrompt').ChatSteerResult>
         stream: (
           providerId: string,
           model: string,
@@ -67,6 +74,9 @@ declare global {
             onChunk: (delta: string, reasoningDelta?: string) => void
             onDone: (fullContent: string, stopReason?: string, txId?: string) => void
             onError: (error: string) => void
+            onSteerConsumed?: (
+              input: import('@shared/types/queuedPrompt').ChatSteerInput
+            ) => void
             onToolStart?: (
               toolCallId: string,
               name: string,

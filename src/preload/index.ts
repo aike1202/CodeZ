@@ -4,6 +4,10 @@ import { IPC_CHANNELS } from '../shared/ipc/channels'
 import type { ProviderFormData, ProviderInfo, ConnectionTestResult } from '../shared/types/provider'
 import type { SessionData } from '../shared/types/session'
 import type { StreamRequestV2 } from '../shared/types/context'
+import type {
+  PromptPredictionRequest,
+  PromptPredictionResponse
+} from '../shared/types/promptPrediction'
 import type { ToolBatchMeta } from '../shared/types/toolExecution'
 import type {
   SessionRuntimeStatus,
@@ -15,6 +19,7 @@ import type {
   DraftImageAttachment,
   ImageAttachment
 } from '../shared/types/attachment'
+import type { ChatSteerInput, ChatSteerResult } from '../shared/types/queuedPrompt'
 
 export interface ChatStreamHandle {
   stop: () => void
@@ -114,6 +119,11 @@ const api = {
   },
 
   chat: {
+    predictNextInput: (
+      request: PromptPredictionRequest
+    ): Promise<PromptPredictionResponse> =>
+      ipcRenderer.invoke(IPC_CHANNELS.CHAT_PREDICT_NEXT_INPUT, request),
+
     getRuntimeStatus: (sessionId: string): Promise<SessionRuntimeStatus> =>
       ipcRenderer.invoke(IPC_CHANNELS.CHAT_RUNTIME_STATUS, sessionId),
 
@@ -127,6 +137,9 @@ const api = {
       }
     },
 
+    steer: (sessionId: string, input: ChatSteerInput): Promise<ChatSteerResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.CHAT_STREAM_STEER, sessionId, input),
+
     /**
      * 发起流式聊天请求，并接收 tool call 日志。
      */
@@ -139,6 +152,7 @@ const api = {
         onChunk: (delta: string, reasoningDelta?: string) => void
         onDone: (fullContent: string, stopReason?: string, txId?: string) => void
         onError: (error: string) => void
+        onSteerConsumed?: (input: ChatSteerInput) => void
         onToolStart?: (
           toolCallId: string,
           name: string,
@@ -184,6 +198,10 @@ const api = {
         if (streamId !== activeStreamId) return
         cleanup()
         callbacks.onError(error)
+      }
+      const steerConsumedHandler = (_event: unknown, streamId: string, input: ChatSteerInput) => {
+        if (streamId !== activeStreamId) return
+        callbacks.onSteerConsumed?.(input)
       }
       const contextBudgetHandler = (_event: unknown, streamId: string, _sessionId: string, snapshot: import('../shared/types/context').ContextBudgetSnapshot) => {
         if (streamId !== activeStreamId) return
@@ -267,6 +285,7 @@ const api = {
         ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_CHUNK, chunkHandler)
         ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_END, endHandler)
         ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_ERROR, errorHandler)
+        ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_STEER_CONSUMED, steerConsumedHandler)
         ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_TOOL_START, toolStartHandler)
         ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_TOOL_END, toolEndHandler)
         ipcRenderer.removeListener(IPC_CHANNELS.CHAT_STREAM_SUBAGENT_START, subAgentStartHandler)
@@ -285,6 +304,7 @@ const api = {
       ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_CHUNK, chunkHandler)
       ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_END, endHandler)
       ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_ERROR, errorHandler)
+      ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_STEER_CONSUMED, steerConsumedHandler)
       ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_TOOL_START, toolStartHandler)
       ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_TOOL_END, toolEndHandler)
       ipcRenderer.on(IPC_CHANNELS.CHAT_STREAM_SUBAGENT_START, subAgentStartHandler)

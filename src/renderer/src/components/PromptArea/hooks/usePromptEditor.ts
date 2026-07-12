@@ -15,6 +15,11 @@ export function usePromptEditor(
     modelName: string,
     attachments: ComposerImageAttachment[]
   ) => Promise<boolean>,
+  onQueue: (
+    message: string,
+    modelName: string,
+    attachments: ComposerImageAttachment[]
+  ) => Promise<boolean>,
   workspace: WorkspaceInfo | null | undefined,
   attachments: ComposerImageAttachment[],
   clearComposerAttachments: () => void,
@@ -52,8 +57,7 @@ export function usePromptEditor(
     text,
     attachmentCount: attachments.length,
     importing: importingAttachments,
-    supportsVision: supportsImageInput(selectedModel),
-    blockedReason: conversationBusy ? '当前会话仍在运行' : null
+    supportsVision: supportsImageInput(selectedModel)
   })
 
   useEffect(() => {
@@ -252,7 +256,8 @@ export function usePromptEditor(
     clearComposerAttachments()
 
     try {
-      const accepted = await onSend(
+      const submit = conversationBusy ? onQueue : onSend
+      const accepted = await submit(
         finalContent,
         selectedModelName || models[0]?.name || '',
         submittedAttachments

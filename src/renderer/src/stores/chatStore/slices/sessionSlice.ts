@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand'
 import type { ChatMessage, ChatState, ChatSession } from '../types'
 import { useWorkspaceStore } from '../../workspaceStore'
 import type { SubAgentHandoff, SubAgentHandoffTool } from '../../../../../shared/types/subagent'
+import type { QueuedPrompt } from '../../../../../shared/types/queuedPrompt'
 
 function genId(): string {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -24,7 +25,16 @@ const normalizeMessage = (message: ChatMessage): ChatMessage => ({
 function normalizeSession(session: ChatSession): ChatSession {
   return {
     ...session,
-    messages: Array.isArray(session.messages) ? session.messages.map(normalizeMessage) : []
+    messages: Array.isArray(session.messages) ? session.messages.map(normalizeMessage) : [],
+    queuedPrompts: Array.isArray(session.queuedPrompts)
+      ? session.queuedPrompts.map((prompt) => ({
+          ...prompt,
+          attachments: Array.isArray(prompt.attachments)
+            ? prompt.attachments.map((attachment) => ({ ...attachment }))
+            : [],
+          status: prompt.status === 'steering' ? 'queued' : prompt.status || 'queued'
+        }))
+      : []
   }
 }
 
@@ -327,6 +337,17 @@ export interface SessionSlice {
   linkPlanToSession: (sessionId: string, planSlug: string | null) => Promise<void>
   persistCurrentSession: () => Promise<void>
   persistSession: (sessionId: string) => Promise<void>
+  enqueueQueuedPrompt: (
+    sessionId: string,
+    prompt: Omit<QueuedPrompt, 'id' | 'createdAt' | 'status'>
+  ) => QueuedPrompt
+  updateQueuedPrompt: (
+    sessionId: string,
+    promptId: string,
+    patch: Partial<Pick<QueuedPrompt, 'text' | 'modelName' | 'attachments' | 'status'>>
+  ) => QueuedPrompt | null
+  removeQueuedPrompt: (sessionId: string, promptId: string) => QueuedPrompt | null
+  clearQueuedPrompts: (sessionId: string) => QueuedPrompt[]
   archiveSession: (sessionId: string, archive: boolean) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
   restoreSession: (sessionId: string) => Promise<void>
@@ -356,7 +377,8 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
       summary: '新会话',
       relativeTime: '刚刚',
       messages: [],
-      tasks: []
+      tasks: [],
+      queuedPrompts: []
     }
     set((s) => ({
       sessions: [session, ...s.sessions],
@@ -404,9 +426,11 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
           ? { messages: sourceMessages, changed: false, continuationText: undefined }
           : healInterruptedSubAgents(sourceMessages)
         const interruptedRequests = interruptPendingRequests(healed.messages, runtimeStatus)
+        const normalizedFreshSession = normalizeSession(freshSession as ChatSession)
         const healedSession = {
           ...freshSession,
-          messages: interruptedRequests.messages
+          messages: interruptedRequests.messages,
+          queuedPrompts: normalizedFreshSession.queuedPrompts
         }
         set((s) => {
           const sessions = s.sessions.map((sess) =>
@@ -539,6 +563,80 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
         console.error('[sessionSlice.persistSession] Failed:', err)
       }
     }
+  },
+
+  enqueueQueuedPrompt: (sessionId, input) => {
+    const prompt: QueuedPrompt = {
+      ...input,
+      id: `queued_${genId()}`,
+      attachments: input.attachments.map((attachment) => ({ ...attachment })),
+      createdAt: Date.now(),
+      status: 'queued'
+    }
+    set((state) => ({
+      sessions: state.sessions.map((session) => session.id === sessionId
+        ? { ...session, queuedPrompts: [...(session.queuedPrompts || []), prompt] }
+        : session)
+    }))
+    void get().persistSession(sessionId)
+    return prompt
+  },
+
+  updateQueuedPrompt: (sessionId, promptId, patch) => {
+    let updated: QueuedPrompt | null = null
+    set((state) => ({
+      sessions: state.sessions.map((session) => {
+        if (session.id !== sessionId) return session
+        return {
+          ...session,
+          queuedPrompts: (session.queuedPrompts || []).map((prompt) => {
+            if (prompt.id !== promptId) return prompt
+            updated = {
+              ...prompt,
+              ...patch,
+              attachments: patch.attachments
+                ? patch.attachments.map((attachment) => ({ ...attachment }))
+                : prompt.attachments
+            }
+            return updated
+          })
+        }
+      })
+    }))
+    if (updated) void get().persistSession(sessionId)
+    return updated
+  },
+
+  removeQueuedPrompt: (sessionId, promptId) => {
+    let removed: QueuedPrompt | null = null
+    set((state) => ({
+      sessions: state.sessions.map((session) => {
+        if (session.id !== sessionId) return session
+        return {
+          ...session,
+          queuedPrompts: (session.queuedPrompts || []).filter((prompt) => {
+            if (prompt.id !== promptId) return true
+            removed = prompt
+            return false
+          })
+        }
+      })
+    }))
+    if (removed) void get().persistSession(sessionId)
+    return removed
+  },
+
+  clearQueuedPrompts: (sessionId) => {
+    let removed: QueuedPrompt[] = []
+    set((state) => ({
+      sessions: state.sessions.map((session) => {
+        if (session.id !== sessionId) return session
+        removed = session.queuedPrompts || []
+        return { ...session, queuedPrompts: [] }
+      })
+    }))
+    if (removed.length > 0) void get().persistSession(sessionId)
+    return removed
   },
 
   archiveSession: async (sessionId: string, archive: boolean) => {

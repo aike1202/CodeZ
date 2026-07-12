@@ -48,10 +48,10 @@ export interface MessageSlice {
   pendingInternalContinuation: PendingInternalContinuation | null
   tasks: TaskItem[]
 
-  addUserMessage: (content: string, attachments?: ImageAttachment[]) => ChatMessage
+  addUserMessage: (content: string, attachments?: ImageAttachment[], sessionId?: string) => ChatMessage
   removeMessages: (messageIds: string[]) => void
   addSystemMessage: (content: string) => ChatMessage
-  startStreamingReply: () => string
+  startStreamingReply: (sessionId?: string) => string
   appendStreamChunk: (msgId: string, delta: string, reasoningDelta?: string) => void
   finishStreaming: (msgId: string, txId?: string) => void
   setMessageExecutionStatus: (
@@ -211,7 +211,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
   pendingInternalContinuation: null,
   tasks: [],
 
-  addUserMessage: (content: string, attachments?: ImageAttachment[]) => {
+  addUserMessage: (content: string, attachments?: ImageAttachment[], sessionId?: string) => {
     const msg: ChatMessage = {
       id: genId(),
       role: 'user',
@@ -219,14 +219,19 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       ...(attachments?.length ? { attachments: attachments.map((item) => ({ ...item })) } : {})
     }
     set((s) => {
-      const nextMsgs = [...s.messages, msg]
-      const activeId = s.activeSessionId
+      const targetId = sessionId || s.activeSessionId
+      const target = s.sessions.find((session) => session.id === targetId)
+      const nextMsgs = [...(target?.messages || []), msg]
       const sessions = s.sessions.map((session) =>
-        session.id === activeId ? { ...session, messages: nextMsgs } : session
+        session.id === targetId ? { ...session, messages: nextMsgs } : session
       )
-      return { messages: nextMsgs, sessions }
+      return {
+        sessions,
+        messages: s.activeSessionId === targetId ? nextMsgs : s.messages
+      }
     })
-    get().persistCurrentSession()
+    const targetId = sessionId || get().activeSessionId
+    if (targetId) void get().persistSession(targetId)
     return msg
   },
 
@@ -253,7 +258,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
     return msg
   },
 
-  startStreamingReply: () => {
+  startStreamingReply: (sessionId?: string) => {
     const msg: ChatMessage = {
       id: genId(),
       role: 'agent',
@@ -262,14 +267,19 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       streamPhase: 'starting'
     }
     set((s) => {
-      const nextMsgs = [...s.messages, msg]
-      const activeId = s.activeSessionId
+      const targetId = sessionId || s.activeSessionId
+      const target = s.sessions.find((session) => session.id === targetId)
+      const nextMsgs = [...(target?.messages || []), msg]
       const sessions = s.sessions.map((session) =>
-        session.id === activeId ? { ...session, messages: nextMsgs } : session
+        session.id === targetId ? { ...session, messages: nextMsgs } : session
       )
-      return { messages: nextMsgs, sessions }
+      return {
+        sessions,
+        messages: s.activeSessionId === targetId ? nextMsgs : s.messages
+      }
     })
-    get().persistCurrentSession()
+    const targetId = sessionId || get().activeSessionId
+    if (targetId) void get().persistSession(targetId)
     return msg.id
   },
 

@@ -3,6 +3,7 @@ import type { PermissionApprovalResponse, PermissionRequest } from '../../../../
 import type { ContextBudgetSnapshot } from '../../../../shared/types/context'
 import type { ImageAttachment, PendingPromptDraft } from '../../../../shared/types/attachment'
 import type { SessionRuntimeStatusChanged, SubAgentHandoff } from '../../../../shared/types/subagent'
+import type { QueuedPrompt } from '../../../../shared/types/queuedPrompt'
 
 export type AgentStateType =
   | 'processing'
@@ -163,6 +164,7 @@ export interface ChatSession {
   deletedAt?: number
   linkedPlanSlug?: string
   tasks?: TaskItem[]
+  queuedPrompts?: QueuedPrompt[]
 }
 
 export interface CompactionUiState {
@@ -206,10 +208,10 @@ export interface ChatState {
   createSession: (projectId: string) => string
   selectSession: (sessionId: string) => Promise<void>
   linkPlanToSession: (sessionId: string, planSlug: string | null) => Promise<void>
-  addUserMessage: (content: string, attachments?: ImageAttachment[]) => ChatMessage
+  addUserMessage: (content: string, attachments?: ImageAttachment[], sessionId?: string) => ChatMessage
   removeMessages: (messageIds: string[]) => void
   addSystemMessage: (content: string) => ChatMessage
-  startStreamingReply: () => string
+  startStreamingReply: (sessionId?: string) => string
   appendStreamChunk: (msgId: string, delta: string, reasoningDelta?: string) => void
   finishStreaming: (msgId: string, txId?: string) => void
   setMessageExecutionStatus: (
@@ -232,6 +234,17 @@ export interface ChatState {
   ) => void
   persistCurrentSession: () => Promise<void>
   persistSession: (sessionId: string) => Promise<void>
+  enqueueQueuedPrompt: (
+    sessionId: string,
+    prompt: Omit<QueuedPrompt, 'id' | 'createdAt' | 'status'>
+  ) => QueuedPrompt
+  updateQueuedPrompt: (
+    sessionId: string,
+    promptId: string,
+    patch: Partial<Pick<QueuedPrompt, 'text' | 'modelName' | 'attachments' | 'status'>>
+  ) => QueuedPrompt | null
+  removeQueuedPrompt: (sessionId: string, promptId: string) => QueuedPrompt | null
+  clearQueuedPrompts: (sessionId: string) => QueuedPrompt[]
   archiveSession: (sessionId: string, archive: boolean) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
   restoreSession: (sessionId: string) => Promise<void>

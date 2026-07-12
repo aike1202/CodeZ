@@ -24,6 +24,151 @@
   z-index: 20;
 }
 
+.prompt-card.has-queue {
+  box-shadow: 0 7px 24px rgba(20, 24, 31, 0.09);
+}
+
+.queued-prompt-panel {
+  position: relative;
+  z-index: auto;
+  margin: 0 24px -8px;
+  padding: 4px 10px 13px;
+  overflow: visible;
+  background: color-mix(in srgb, var(--bg-panel) 96%, var(--text-muted));
+  border: 1px solid var(--border-gray-100);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+}
+
+.queued-prompt-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 14px 16px minmax(0, 1fr) auto auto;
+  align-items: center;
+  min-height: 38px;
+  gap: 5px;
+  color: var(--text-main);
+  font-size: 13px;
+}
+
+.queued-prompt-row + .queued-prompt-row {
+  border-top: 1px solid color-mix(in srgb, var(--border-light) 72%, transparent);
+}
+
+.queued-prompt-grip {
+  color: color-mix(in srgb, var(--text-muted) 62%, transparent);
+}
+
+.queued-prompt-branch {
+  display: inline-flex;
+  color: var(--text-muted);
+}
+
+.queued-prompt-copy {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queued-prompt-attachments {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.queued-prompt-actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.queued-prompt-actions button {
+  border: 0;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.queued-prompt-steer,
+.queued-prompt-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  color: var(--text-muted);
+  background: transparent;
+  border-radius: 5px;
+}
+
+.queued-prompt-steer {
+  gap: 4px;
+  padding: 0 7px;
+  font-size: 12px;
+}
+
+.queued-prompt-icon-btn {
+  width: 28px;
+  padding: 0;
+}
+
+.queued-prompt-steer:hover:not(:disabled),
+.queued-prompt-icon-btn:hover {
+  color: var(--text-main);
+  background: var(--bg-hover);
+}
+
+.queued-prompt-steer:disabled {
+  cursor: default;
+  opacity: 0.62;
+}
+
+.queued-prompt-more {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-hover) 74%, transparent);
+}
+
+.queued-prompt-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  z-index: 80;
+  width: 132px;
+  padding: 5px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(20, 24, 31, 0.14);
+}
+
+.queued-prompt-menu button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 34px;
+  gap: 8px;
+  padding: 0 9px;
+  color: var(--text-main);
+  background: transparent;
+  border-radius: 5px;
+  font-size: 13px;
+  text-align: left;
+}
+
+.queued-prompt-menu button:hover {
+  background: var(--bg-hover);
+}
+
+.queued-prompt-actions button:focus-visible,
+.queued-prompt-menu button:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 1px;
+}
+
 .prompt-card.is-image-dragging {
   border-color: var(--primary-color);
   box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.12), 0 2px 12px rgba(0, 0, 0, 0.06);
@@ -184,6 +329,14 @@
 
 .prompt-scroll-container .cm-cursor {
   border-left-color: var(--text-main) !important;
+}
+
+.cm-prompt-prediction {
+  color: color-mix(in srgb, var(--text-muted) 72%, transparent);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  user-select: none;
 }
 
 .cm-pill-widget {
@@ -482,6 +635,10 @@
   background-color: rgba(255, 77, 79, 0.06) !important;
 }
 
+.prompt-queue-send-btn {
+  margin-right: -5px;
+}
+
 .prompt-send-btn.is-streaming:hover {
   color: var(--color-error-hover) !important;
   border-color: var(--color-error-hover) !important;
@@ -495,6 +652,14 @@
   }
   .prompt-card {
     border-color: #27272a; /* border-zinc-800 */
+  }
+  .queued-prompt-panel {
+    background: color-mix(in srgb, var(--bg-panel) 92%, white);
+    border-color: #303033;
+  }
+  .queued-prompt-menu {
+    border-color: #343438;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.38);
   }
   .prompt-top-toolbar {
     background-color: #27272a; /* 稍微深一点的背景（深色模式） */
@@ -557,6 +722,26 @@
     color: #ff7875 !important;
     border-color: #ff7875 !important;
     background-color: rgba(255, 77, 79, 0.2) !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .queued-prompt-panel {
+    margin-left: 10px;
+    margin-right: 10px;
+  }
+  .queued-prompt-row {
+    grid-template-columns: 14px 16px minmax(0, 1fr) auto;
+  }
+  .queued-prompt-attachments {
+    display: none;
+  }
+  .queued-prompt-steer span {
+    display: none;
+  }
+  .queued-prompt-steer {
+    width: 28px;
+    padding: 0;
   }
 }
 

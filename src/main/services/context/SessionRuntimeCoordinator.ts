@@ -148,7 +148,11 @@ export class SessionRuntimeCoordinator {
     await this.ledger.append(turn.sessionId, turn.contextScopeId, 'resume_state_updated', { resumeState }, turn.turnId)
   }
 
-  async recordUserContinuation(handle: RuntimeTurnHandle, text: string): Promise<NormalizedModelMessage> {
+  async recordUserContinuation(
+    handle: RuntimeTurnHandle,
+    text: string,
+    attachments?: ImageAttachment[]
+  ): Promise<NormalizedModelMessage> {
     const turn = this.requireActive(handle)
     if (turn.pendingCalls.size > 0) throw new Error('Cannot add user continuation with pending tool calls')
     const message: NormalizedModelMessage = {
@@ -157,7 +161,8 @@ export class SessionRuntimeCoordinator {
       role: 'user',
       content: text,
       status: 'complete',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      attachments: attachments?.map((attachment) => ({ ...attachment }))
     }
     await this.ledger.append(turn.sessionId, turn.contextScopeId, 'user_message', { message }, turn.turnId)
     return message

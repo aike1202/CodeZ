@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ImagePlus } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
 import { useProviderStore } from '../../stores/providerStore'
@@ -27,6 +27,7 @@ import { usePromptEditor } from './hooks/usePromptEditor'
 import ModelSelector from './components/ModelSelector'
 import PlusActionMenu from './components/PlusActionMenu'
 import SlashMentionMenu from './components/SlashMentionMenu'
+import QueuedPromptList from './components/QueuedPromptList'
 import PermissionModeSelector from './components/PermissionModeSelector'
 import { useImageAttachments } from './hooks/useImageAttachments'
 import ImageAttachmentGrid from '../chat/ImageAttachmentGrid'
@@ -35,6 +36,10 @@ import {
   cloneComposerDraft,
   getSessionComposerDraft
 } from '../../stores/chatStore/composerDrafts'
+import { mergeRejectedAttachments, restoreRejectedPromptText } from './promptSubmissionState'
+import type { QueuedPrompt } from '@shared/types/queuedPrompt'
+import { usePromptPrediction } from './hooks/usePromptPrediction'
+import { promptPredictionExtension } from './extensions/promptPredictionExtension'
 
 const EFFORT_LABELS: Partial<Record<ThinkingEffort, string>> = {
   none: '关闭',
@@ -45,6 +50,7 @@ const EFFORT_LABELS: Partial<Record<ThinkingEffort, string>> = {
   xhigh: '极高',
   max: '最高'
 }
+const EMPTY_QUEUED_PROMPTS: QueuedPrompt[] = []
 
 function containsImageFiles(dataTransfer: DataTransfer): boolean {
   return Array.from(dataTransfer.items).some(
@@ -54,6 +60,7 @@ function containsImageFiles(dataTransfer: DataTransfer): boolean {
 
 export default function PromptArea({
   onSend,
+  onSteer,
   placeholder,
   onOpenSettings,
   workspace
@@ -77,6 +84,14 @@ export default function PromptArea({
   } = useImageAttachments()
 
   const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const queuedPrompts = useChatStore((s) => {
+    if (!s.activeSessionId) return EMPTY_QUEUED_PROMPTS
+    return s.sessions.find((session) => session.id === s.activeSessionId)?.queuedPrompts || EMPTY_QUEUED_PROMPTS
+  })
+  const enqueueQueuedPrompt = useChatStore((s) => s.enqueueQueuedPrompt)
+  const updateQueuedPrompt = useChatStore((s) => s.updateQueuedPrompt)
+  const removeQueuedPrompt = useChatStore((s) => s.removeQueuedPrompt)
+  const clearQueuedPrompts = useChatStore((s) => s.clearQueuedPrompts)
   const pendingPrompt = useChatStore((s) => s.pendingPrompt)
   const setPendingPrompt = useChatStore((s) => s.setPendingPrompt)
   const setComposerDraft = useChatStore((s) => s.setComposerDraft)
@@ -112,6 +127,15 @@ export default function PromptArea({
     sendState
   } = usePromptEditor(
     onSend,
+    async (message, modelName, queuedAttachments) => {
+      if (!activeSessionId) return false
+      enqueueQueuedPrompt(activeSessionId, {
+        text: message,
+        modelName,
+        attachments: queuedAttachments
+      })
+      return true
+    },
     workspace,
     attachments,
     clearComposerAttachments,
@@ -119,6 +143,72 @@ export default function PromptArea({
     importing,
     conversationBusy
   )
+
+  const cleanupQueuedAttachments = async (prompts: QueuedPrompt[]) => {
+    if (!activeSessionId || prompts.length === 0) return
+    const draftIds = prompts.flatMap((prompt) => prompt.attachments)
+      .filter((attachment) => attachment.scope === 'draft')
+      .map((attachment) => attachment.draftId)
+    const sessionIds = prompts.flatMap((prompt) => prompt.attachments)
+      .filter((attachment) => attachment.scope === 'session')
+      .map((attachment) => attachment.id)
+    await Promise.all([
+      draftIds.length > 0 ? window.api.attachment.discardDrafts(draftIds) : Promise.resolve(),
+      sessionIds.length > 0
+        ? window.api.attachment.rollbackPromotion(activeSessionId, sessionIds)
+        : Promise.resolve()
+    ])
+  }
+
+  const handleEditQueuedPrompt = (prompt: QueuedPrompt) => {
+    if (!activeSessionId || prompt.status === 'steering') return
+    const removed = removeQueuedPrompt(activeSessionId, prompt.id)
+    if (!removed) return
+    setText((current) => restoreRejectedPromptText(current, removed.text))
+    replaceAttachments(mergeRejectedAttachments(attachments, removed.attachments))
+    window.setTimeout(() => viewRef.current?.focus(), 0)
+  }
+
+  const handleDeleteQueuedPrompt = (prompt: QueuedPrompt) => {
+    if (!activeSessionId) return
+    const removed = removeQueuedPrompt(activeSessionId, prompt.id)
+    if (removed) void cleanupQueuedAttachments([removed])
+  }
+
+  const handleClearQueuedPrompts = () => {
+    if (!activeSessionId) return
+    const removed = clearQueuedPrompts(activeSessionId)
+    void cleanupQueuedAttachments(removed)
+  }
+
+  const handleSteerQueuedPrompt = async (prompt: QueuedPrompt) => {
+    if (!activeSessionId || prompt.status === 'steering') return
+    updateQueuedPrompt(activeSessionId, prompt.id, { status: 'steering' })
+    try {
+      const promoted = prompt.attachments.length > 0
+        ? await window.api.attachment.promoteDrafts(activeSessionId, prompt.attachments)
+        : []
+      const accepted = await onSteer({ ...prompt, attachments: promoted, status: 'steering' })
+      if (!accepted) {
+        if (promoted.length > 0) {
+          await window.api.attachment.rollbackPromotion(activeSessionId, promoted.map((item) => item.id))
+        }
+        updateQueuedPrompt(activeSessionId, prompt.id, { status: 'queued' })
+        return
+      }
+      const draftIds = prompt.attachments
+        .filter((attachment) => attachment.scope === 'draft')
+        .map((attachment) => attachment.draftId)
+      updateQueuedPrompt(activeSessionId, prompt.id, {
+        attachments: promoted,
+        status: 'steering'
+      })
+      if (draftIds.length > 0) await window.api.attachment.discardDrafts(draftIds)
+    } catch (error) {
+      console.warn('[PromptArea] Failed to steer queued prompt:', error)
+      updateQueuedPrompt(activeSessionId, prompt.id, { status: 'failed' })
+    }
+  }
 
   const composerDraftInitializedRef = useRef(false)
   const composerDraftSessionRef = useRef<string | null>(activeSessionId)
@@ -207,6 +297,20 @@ export default function PromptArea({
       })
     : null
 
+  const promptPrediction = usePromptPrediction({
+    activeSessionId,
+    providerId: activeProviderId,
+    model: selectedModelName,
+    draft: text,
+    conversationBusy,
+    menuOpen: Boolean(activeToken && popupItems.length > 0)
+  })
+  const editorExtensions = useMemo(() => [
+    pillDecoration,
+    EditorView.lineWrapping,
+    promptPredictionExtension(promptPrediction.suffix)
+  ], [promptPrediction.suffix])
+
   const updateActiveModel = (patch: Partial<ModelConfig>) => {
     if (!activeProvider || !activeModel) return
     updateProvider(activeProvider.id, {
@@ -276,6 +380,40 @@ export default function PromptArea({
     void addFiles(imageFiles)
   }
 
+  const handlePromptKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const view = viewRef.current
+    const selection = view?.state.selection.main
+    const menuOpen = Boolean(activeToken && popupItems.length > 0)
+    const canAcceptPrediction = (
+      event.key === 'Tab'
+      && !event.shiftKey
+      && !event.altKey
+      && !event.ctrlKey
+      && !event.metaKey
+      && !event.nativeEvent.isComposing
+      && !menuOpen
+      && Boolean(promptPrediction.suffix)
+      && Boolean(view && selection?.empty && selection.head === view.state.doc.length)
+    )
+
+    if (canAcceptPrediction && view) {
+      event.preventDefault()
+      const insertAt = view.state.doc.length
+      const acceptedText = `${view.state.doc.toString()}${promptPrediction.suffix}`
+      view.dispatch({
+        changes: {
+          from: insertAt,
+          insert: promptPrediction.suffix
+        },
+        selection: { anchor: insertAt + promptPrediction.suffix.length }
+      })
+      promptPrediction.accept(acceptedText)
+      return
+    }
+
+    handleKeyDown(event)
+  }
+
   return (
     <div className="prompt-area-container">
       <div className="prompt-area-inner relative">
@@ -290,10 +428,20 @@ export default function PromptArea({
           filteredFiles={filteredMentions}
         />
 
+        {queuedPrompts.length > 0 ? (
+          <QueuedPromptList
+            prompts={queuedPrompts}
+            onSteer={(prompt) => { void handleSteerQueuedPrompt(prompt) }}
+            onEdit={handleEditQueuedPrompt}
+            onDelete={handleDeleteQueuedPrompt}
+            onClear={handleClearQueuedPrompts}
+          />
+        ) : null}
+
         <Card
           variant="default"
           rounded="lg"
-          className={`prompt-card${isImageDragging ? ' is-image-dragging' : ''}`}
+          className={`prompt-card${isImageDragging ? ' is-image-dragging' : ''}${queuedPrompts.length > 0 ? ' has-queue' : ''}`}
           onPaste={handlePaste}
           onDragEnter={handleDragEnter}
           onDragOver={handleDragOver}
@@ -326,12 +474,12 @@ export default function PromptArea({
               </div>
             ) : null}
             <Flex align="start" className="prompt-input-wrapper w-full">
-              <div className="prompt-scroll-container" onKeyDownCapture={handleKeyDown}>
+              <div className="prompt-scroll-container" onKeyDownCapture={handlePromptKeyDown}>
                 <CodeMirror
                   value={text}
                   onChange={handleChange}
-                  placeholder={placeholder || '随心输入...'}
-                  extensions={[pillDecoration, EditorView.lineWrapping]}
+                  placeholder={promptPrediction.suffix ? undefined : placeholder || '随心输入...'}
+                  extensions={editorExtensions}
                   onCreateEditor={(view) => {
                     viewRef.current = view
                   }}
@@ -425,15 +573,28 @@ export default function PromptArea({
                 )}
 
                 {isStreaming ? (
-                  <Button
-                    variant="danger"
-                    size="none"
-                    onClick={() => stopStream && stopStream()}
-                    className="prompt-send-btn is-streaming"
-                    title="停止生成"
-                  >
-                    <IconStop />
-                  </Button>
+                  <>
+                    {sendState.canSend ? (
+                      <Button
+                        variant="dark"
+                        size="none"
+                        onClick={() => { void handleSend() }}
+                        className="prompt-send-btn prompt-queue-send-btn"
+                        title="加入排队"
+                      >
+                        <IconSend />
+                      </Button>
+                    ) : null}
+                    <Button
+                      variant="danger"
+                      size="none"
+                      onClick={() => stopStream && stopStream()}
+                      className="prompt-send-btn is-streaming"
+                      title="停止生成"
+                    >
+                      <IconStop />
+                    </Button>
+                  </>
                 ) : (
                   <Button
                     variant={sendState.canSend ? 'dark' : 'secondary'}

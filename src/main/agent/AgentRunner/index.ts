@@ -23,6 +23,7 @@ import { streamWithTimeoutRetry } from '../../services/chat/retry'
 import type { SmartApprovalClient } from '../../services/permission/SmartApprovalService'
 import { ChatSmartApprovalClient } from '../../services/permission/ChatSmartApprovalClient'
 import { ContextBudgetService } from '../../services/context/ContextBudgetService'
+import type { ChatSteerInput } from '../../../shared/types/queuedPrompt'
 
 export enum NormalizedStopReason {
   Truncated = 'Truncated',
@@ -107,6 +108,8 @@ export class AgentRunner {
   private toolManager: ToolManager
   private editTransactionService: EditTransactionService
   private abortController: AbortController | null = null
+  private pendingSteers: ChatSteerInput[] = []
+  private acceptingSteers = false
 
   constructor(dependencies: {
     chatService?: ChatService
@@ -120,6 +123,7 @@ export class AgentRunner {
 
   async run(config: AgentRunConfig, callbacks: AgentRunnerCallbacks): Promise<void> {
     this.abortController = new AbortController()
+    this.pendingSteers = []
 
     if (!(
       config.runtimeTurn && config.runtimeCoordinator && config.contextBuilder &&
@@ -127,8 +131,17 @@ export class AgentRunner {
     )) {
       throw new Error('AgentRunner requires the canonical model ledger runtime')
     }
+    this.acceptingSteers = true
     const runtimeTurn = config.runtimeTurn
     const runtimeCoordinator = config.runtimeCoordinator
+    const flushPendingSteers = async (): Promise<number> => {
+      const pending = this.pendingSteers.splice(0)
+      for (const input of pending) {
+        await runtimeCoordinator!.recordUserContinuation(runtimeTurn!, input.text, input.attachments)
+        callbacks.onSteerConsumed?.(input)
+      }
+      return pending.length
+    }
     let runtimeClosed = false
     let overflowRetried = false
     let allMessages: import('../../../shared/types/provider').ChatMessage[] = []
@@ -199,6 +212,8 @@ export class AgentRunner {
     try {
       while (loopCount < MAX_LOOPS && !this.abortController?.signal.aborted) {
         loopCount++
+
+        await flushPendingSteers()
 
         log.info('[AgentRunner] loop start', { loopCount, msgCount: allMessages.length })
 
@@ -677,6 +692,12 @@ export class AgentRunner {
 
         const isVerificationFailure = filesModifiedInSession && lastVerificationResult && !lastVerificationResult.success;
         
+        if (await flushPendingSteers() > 0) {
+          consecutiveIdleTurns = 0
+          currentState = AgentState.Running
+          continue
+        }
+
         const transitionEvent = resolveAgentTransition({
           toolCallCount: toolCallsArray.length,
           isVerificationFailure,
@@ -689,6 +710,7 @@ export class AgentRunner {
         currentState = LoopStateMachine.next(currentState, transitionEvent);
 
         if (currentState === AgentState.Terminated) {
+          this.acceptingSteers = false
           const finishReason = transitionEvent === TransitionEvent.Completed ? TerminationReason.Completed : TerminationReason.Failed;
           if (!gotError && callbacks.onDone) {
             if (!runtimeClosed) {
@@ -705,6 +727,7 @@ export class AgentRunner {
         }
 
         if (currentState === AgentState.WaitingUser || currentState === AgentState.Suspended) {
+           this.acceptingSteers = false
            if (!gotError && callbacks.onDone) {
              if (!runtimeClosed) {
                await runtimeCoordinator!.completeTurn(runtimeTurn!, {
@@ -768,7 +791,19 @@ export class AgentRunner {
         } catch {}
       }
       throw err
+    } finally {
+      this.acceptingSteers = false
     }
+  }
+
+  steer(input: ChatSteerInput): boolean {
+    if (!this.acceptingSteers || this.abortController?.signal.aborted) return false
+    if (!input.text.trim() && !input.attachments?.length) return false
+    this.pendingSteers.push({
+      ...input,
+      attachments: input.attachments?.map((attachment) => ({ ...attachment }))
+    })
+    return true
   }
 
   abort(): void {
