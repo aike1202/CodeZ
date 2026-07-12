@@ -463,6 +463,30 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SAVE, settings)
   },
 
+  mcp: {
+    list: (): Promise<any> => ipcRenderer.invoke(IPC_CHANNELS.MCP_LIST),
+    saveUser: (servers: Record<string, unknown>): Promise<any> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MCP_SAVE_USER, servers),
+    reconnect: (name: string): Promise<any> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MCP_RECONNECT, name),
+    authorize: (name: string): Promise<any> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MCP_AUTHORIZE, name),
+    logout: (name: string): Promise<any> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MCP_LOGOUT, name),
+    trustProject: (fingerprint: string): Promise<any> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MCP_TRUST_PROJECT, fingerprint),
+    listSecretKeys: (): Promise<string[]> => ipcRenderer.invoke(IPC_CHANNELS.MCP_SECRET_KEYS),
+    setSecret: (key: string, value: string): Promise<string[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MCP_SECRET_SET, key, value),
+    deleteSecret: (key: string): Promise<string[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MCP_SECRET_DELETE, key),
+    onChanged: (callback: (statuses: any[]) => void): (() => void) => {
+      const listener = (_event: unknown, statuses: any[]) => callback(statuses)
+      ipcRenderer.on(IPC_CHANNELS.MCP_CHANGED, listener)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.MCP_CHANGED, listener)
+    }
+  },
+
   subAgent: {
     list: (): Promise<any[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.SUBAGENT_LIST),

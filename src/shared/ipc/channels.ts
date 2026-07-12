@@ -113,6 +113,18 @@ export const IPC_CHANNELS = {
   SETTINGS_GET: 'settings:get',
   SETTINGS_SAVE: 'settings:save',
 
+  // MCP
+  MCP_LIST: 'mcp:list',
+  MCP_SAVE_USER: 'mcp:save-user',
+  MCP_RECONNECT: 'mcp:reconnect',
+  MCP_AUTHORIZE: 'mcp:authorize',
+  MCP_LOGOUT: 'mcp:logout',
+  MCP_TRUST_PROJECT: 'mcp:trust-project',
+  MCP_SECRET_KEYS: 'mcp:secret-keys',
+  MCP_SECRET_SET: 'mcp:secret-set',
+  MCP_SECRET_DELETE: 'mcp:secret-delete',
+  MCP_CHANGED: 'mcp:changed',
+
   // Permissions
   PERMISSION_MODE_GET: 'permission:mode:get',
   PERMISSION_MODE_SET: 'permission:mode:set',

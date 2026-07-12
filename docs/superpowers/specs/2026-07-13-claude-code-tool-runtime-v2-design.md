@@ -2017,20 +2017,20 @@ src/renderer/src/components/settings/mcp/
 
 ### 21.23 MCP 完成标准
 
-- [ ] 使用官方 MCP SDK 完成 initialize 和版本协商。
-- [ ] stdio、Streamable HTTP、legacy SSE 均通过集成测试。
-- [ ] tools list/call/list_changed 完整接入 ToolRegistry 和 ToolSearch。
-- [ ] resources、resource templates、read 和 list_changed 可用。
-- [ ] prompts list/get/list_changed 可用，且不会伪造 system role。
-- [ ] OAuth discovery、PKCE、secure storage、refresh、logout/revoke 可用。
-- [ ] project 配置有 fingerprint trust gate。
-- [ ] MCP 工具和资源调用经过统一权限及审计。
-- [ ] MCP text/image/blob/structuredContent/_meta 正确映射并受结果预算限制。
-- [ ] server 断线、重连、认证过期和应用退出不会遗留调用或进程。
-- [ ] Electron 设置页可以配置、连接、认证、检查和禁用 server。
-- [ ] 动态 catalog 变化只影响下一轮 snapshot。
-- [ ] sampling、elicitation、roots、logging/progress 有明确策略和默认安全行为。
-- [ ] 至少使用一个 stdio docs server、一个 OAuth HTTP server 和一个提供 resource/prompt 的测试 server 完成端到端验收。
+- [x] 使用官方 MCP SDK 完成 initialize 和版本协商。
+- [x] stdio、Streamable HTTP、legacy SSE 均通过集成测试。
+- [x] tools list/call/list_changed 完整接入 ToolRegistry 和 ToolSearch。
+- [x] resources、resource templates、read 和 list_changed 可用。
+- [x] prompts list/get/list_changed 可用，且不会伪造 system role。
+- [x] OAuth discovery、PKCE、secure storage、refresh、logout/revoke 可用。
+- [x] project 配置有 fingerprint trust gate。
+- [x] MCP 工具和资源调用经过统一权限及审计。
+- [x] MCP text/image/blob/structuredContent/_meta 正确映射并受结果预算限制。
+- [x] server 断线、重连、认证过期和应用退出不会遗留调用或进程。
+- [x] Electron 设置页可以配置、连接、认证、检查和禁用 server。
+- [x] 动态 catalog 变化只影响下一轮 snapshot。
+- [x] sampling、elicitation、roots、logging/progress 有明确策略和默认安全行为。
+- [x] 至少使用一个 stdio docs server、一个 OAuth HTTP server 和一个提供 resource/prompt 的测试 server 完成端到端验收。
 
 ---
 
@@ -2697,32 +2697,32 @@ OAuth：
 
 Tool Runtime V2 只有满足以下条件才算完成：
 
-- [ ] ToolRegistry 是工具身份、schema、权限 metadata 和行为 metadata 的单一事实源。
-- [ ] 每次模型请求都绑定不可变 catalog snapshot 和 exposure plan。
-- [ ] 三家 Provider 均通过 canonical ToolCallAssembler。
-- [ ] 工具输入在 handler 前统一完成 JSON parse 和 schema validation。
-- [ ] AgentRunner 不再按工具名分发特殊工具。
-- [ ] PermissionManager 不再依赖工具名白名单判断主要 capability。
-- [ ] 同文件写、用户交互和全局状态工具不会被无条件并行。
-- [ ] 每个 assistant tool call 都有一个 durable result，包括 deny/cancel。
-- [ ] 新工具原生返回 typed result，legacy 字符串兼容被隔离在 adapter。
-- [ ] 单工具和单批次结果在进入 ledger 前受预算限制。
-- [ ] 大结果可通过受控 handle 读取，不放宽 workspace 文件边界。
-- [ ] eager schema 不再在 system prompt 中重复描述。
-- [ ] deferred tool 在 OpenAI、Anthropic、Gemini 都能按下一轮激活。
-- [ ] session restore、compaction、steer 和 abort 不破坏工具调用协议。
-- [ ] V1/V2 有可比较基线、灰度开关和独立回滚路径。
-- [ ] 新增架构有单元、集成、Provider fixture、并发和属性测试。
-- [ ] 日志和审计默认不记录完整参数或结果内容。
-- [ ] MCP 使用官方 SDK，stdio、Streamable HTTP 和 legacy SSE 可用。
-- [ ] MCP tools/resources/templates/prompts 和动态 list_changed 完整实现。
-- [ ] MCP tools 默认 deferred，并经过统一 ToolSearch、权限、调度和结果预算。
-- [ ] MCP OAuth 具备 discovery、PKCE、安全存储、refresh 和 revoke/logout。
-- [ ] project MCP server 有配置 fingerprint trust gate。
-- [ ] MCP sampling、elicitation、roots、progress、logging 和 cancellation 有明确安全策略。
-- [ ] Electron MCP 设置页支持配置、连接、认证、诊断、重连、禁用和删除。
-- [ ] MCP server 返回内容始终作为带来源的外部数据，不得提升指令层级。
-- [ ] 21.23 的全部 MCP 完成标准和 24.9 的 MCP 测试矩阵通过。
+- [x] ToolRegistry 是工具身份、schema、权限 metadata 和行为 metadata 的单一事实源。
+- [x] 每次模型请求都绑定不可变 catalog snapshot 和 exposure plan。
+- [x] 三家 Provider 均通过 canonical ToolCallAssembler。
+- [x] 工具输入在 handler 前统一完成 JSON parse 和 schema validation。
+- [x] AgentRunner 不再按工具名分发特殊工具。
+- [x] PermissionManager 不再依赖工具名白名单判断主要 capability。
+- [x] 同文件写、用户交互和全局状态工具不会被无条件并行。
+- [x] 每个 assistant tool call 都有一个 durable result，包括 deny/cancel。
+- [x] 新工具原生返回 typed result，legacy 字符串兼容被隔离在 adapter。
+- [x] 单工具和单批次结果在进入 ledger 前受预算限制。
+- [x] 大结果可通过受控 handle 读取，不放宽 workspace 文件边界。
+- [x] eager schema 不再在 system prompt 中重复描述。
+- [x] deferred tool 在 OpenAI、Anthropic、Gemini 都能按下一轮激活。
+- [x] session restore、compaction、steer 和 abort 不破坏工具调用协议。
+- [x] V1/V2 有可比较基线、灰度开关和独立回滚路径。
+- [x] 新增架构有单元、集成、Provider fixture、并发和属性测试。
+- [x] 日志和审计默认不记录完整参数或结果内容。
+- [x] MCP 使用官方 SDK，stdio、Streamable HTTP 和 legacy SSE 可用。
+- [x] MCP tools/resources/templates/prompts 和动态 list_changed 完整实现。
+- [x] MCP tools 默认 deferred，并经过统一 ToolSearch、权限、调度和结果预算。
+- [x] MCP OAuth 具备 discovery、PKCE、安全存储、refresh 和 revoke/logout。
+- [x] project MCP server 有配置 fingerprint trust gate。
+- [x] MCP sampling、elicitation、roots、progress、logging 和 cancellation 有明确安全策略。
+- [x] Electron MCP 设置页支持配置、连接、认证、诊断、重连、禁用和删除。
+- [x] MCP server 返回内容始终作为带来源的外部数据，不得提升指令层级。
+- [x] 21.23 的全部 MCP 完成标准和 24.9 的 MCP 测试矩阵通过。
 
 ---
 

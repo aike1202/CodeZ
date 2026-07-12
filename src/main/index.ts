@@ -21,6 +21,7 @@ import { registerPlanIpc } from './ipc/plan.handlers'
 import { TerminalService } from './services/TerminalService'
 import { getContextCoreServices } from './services/context'
 import { getAttachmentService, registerAttachmentIpc } from './ipc/attachment.handlers'
+import { registerMcpIpc } from './ipc/mcp.handlers'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -114,6 +115,7 @@ app.whenReady().then(async () => {
   registerPermissionIpc()
   registerSubAgentIpc()
   registerPlanIpc()
+  registerMcpIpc()
 
   // Initialize memory system for the current workspace
   import('./services/MemoryService').then(({ MemoryService }) => {
@@ -179,6 +181,22 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+let mcpShutdownComplete = false
+let mcpShutdownStarted = false
+app.on('before-quit', (event) => {
+  if (mcpShutdownComplete) return
+  event.preventDefault()
+  if (mcpShutdownStarted) return
+  mcpShutdownStarted = true
+  void import('./services/mcp')
+    .then(({ getMcpConnectionManager }) => getMcpConnectionManager().stopAll())
+    .catch((error) => console.error('Failed to stop MCP transports before quit:', error))
+    .finally(() => {
+      mcpShutdownComplete = true
+      app.quit()
+    })
 })
 
 app.on('will-quit', () => {

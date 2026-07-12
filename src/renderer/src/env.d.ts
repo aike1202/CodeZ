@@ -152,6 +152,18 @@ declare global {
         get: () => Promise<any>
         save: (settings: any) => Promise<boolean>
       }
+      mcp: {
+        list: () => Promise<any>
+        saveUser: (servers: Record<string, unknown>) => Promise<any>
+        reconnect: (name: string) => Promise<any>
+        authorize: (name: string) => Promise<any>
+        logout: (name: string) => Promise<any>
+        trustProject: (fingerprint: string) => Promise<any>
+        listSecretKeys: () => Promise<string[]>
+        setSecret: (key: string, value: string) => Promise<string[]>
+        deleteSecret: (key: string) => Promise<string[]>
+        onChanged: (callback: (statuses: any[]) => void) => () => void
+      }
       subAgent: {
         list: () => Promise<import('@shared/types/subagent').SubAgentInfo[]>
         toggle: (type: string, enabled: boolean) => Promise<void>

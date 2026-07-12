@@ -25,6 +25,7 @@ import type { SmartApprovalClient } from './permission/SmartApprovalService'
 import { getWorkspacePermissionStore } from './permission/workspacePermissionStore'
 import { classifyKnownCommand, type CommandAssessment } from './permission/commandPolicies'
 import type { PermissionShellKind } from './permission/operationTypes'
+import type { ToolEffectPlan } from '../tools/runtime/types'
 
 export type PermissionResult = 'allow' | 'ask' | 'deny'
 export type { PermissionRequest } from '../../shared/types/permission'
@@ -46,9 +47,11 @@ export interface PermissionToolAuthorization {
   allowed: boolean
   requestId: string
   error?: string
+  permissionRuleId?: string
+  permissionMode?: PermissionMode
 }
 
-const READ_ONLY_TOOLS = new Set(['Read', 'list_files', 'Glob', 'Grep', 'Skill', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet', 'ExecutionInspect', 'update_resume_state', 'AskUserQuestion'])
+const READ_ONLY_TOOLS = new Set(['Read', 'list_files', 'Glob', 'Grep', 'Skill', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet', 'ExecutionInspect', 'update_resume_state', 'AskUserQuestion', 'ToolSearch', 'ToolResultRead', 'ListMcpResources', 'ReadMcpResource', 'GetMcpPrompt'])
 const WRITE_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
 const WEB_TOOLS = new Set(['WebSearch', 'WebFetch'])
 const EXTERNAL_EFFECT_TOOLS = new Map<string, { reason: string; ruleId: string; riskLevel: PermissionRiskLevel }>([
@@ -155,6 +158,84 @@ export class PermissionManager {
     }
     if (toolName === 'Bash' || toolName === 'PowerShell' || toolName === 'run_command') return this.evaluateShell(toolName, args, context)
     return this.evaluateCapability('unknown', toolName, '未知工具调用', 'unknown.tool', 2, context)
+  }
+
+  async evaluateEffectPlan(
+    toolName: string,
+    args: unknown,
+    effectPlan: ToolEffectPlan,
+    context: PermissionEvaluationContext
+  ): Promise<PermissionDecision> {
+    if (effectPlan.analysisStatus === 'unparsed' || effectPlan.effects.length === 0) {
+      return this.evaluateToolCall(toolName, args, context)
+    }
+    const decisions: PermissionDecision[] = []
+    for (const effect of effectPlan.effects) {
+      if (effect.kind === 'unknown') return this.evaluateToolCall(toolName, args, context)
+      if (effect.kind === 'read-file') {
+        decisions.push(await this.evaluateCapability(
+          effect.scope === 'workspace' ? 'read' : 'external_directory',
+          effect.path,
+          effect.scope === 'workspace' ? '读取工作区文件' : '读取工作区外文件',
+          `effect.read-file.${effect.scope}`,
+          effect.scope === 'workspace' ? 0 : 2,
+          context,
+          'parsed',
+          [{ kind: effect.scope === 'workspace' ? 'workspace' : 'external-path', target: effect.path }]
+        ))
+      } else if (effect.kind === 'write-file') {
+        decisions.push(await this.evaluateWrite(toolName, { ...(args as any), file_path: effect.path }, context))
+      } else if (effect.kind === 'delete-file') {
+        decisions.push(await this.evaluateCapability('edit', effect.path, '删除文件', 'effect.delete-file', 3, context, 'parsed', [
+          { kind: 'workspace', target: effect.path }
+        ]))
+      } else if (effect.kind === 'execute-command') {
+        decisions.push(await this.evaluateShell(
+          effect.shell === 'powershell' ? 'PowerShell' : 'Bash',
+          { command: effect.command },
+          { ...context, shellKind: effect.shell }
+        ))
+      } else if (effect.kind === 'network') {
+        decisions.push(await this.evaluateCapability('network', effect.target || toolName, '访问外部网络', 'effect.network', 2, context))
+      } else if (effect.kind === 'read-memory') {
+        decisions.push(await this.evaluateCapability('read', effect.path, '读取本地记忆', 'effect.read-memory', 0, context))
+      } else if (effect.kind === 'internal') {
+        decisions.push(await this.evaluateCapability('read', effect.target, '使用内部运行时能力', 'effect.internal', 0, context))
+      } else if (effect.kind === 'user-interaction') {
+        decisions.push(await this.evaluateCapability('read', effect.channel, '请求用户输入', 'effect.user-interaction', 0, context))
+      } else if (effect.kind === 'rollback') {
+        decisions.push(await this.evaluateCapability('rollback', effect.target, '回滚工作区修改', 'effect.rollback', 3, context))
+      } else {
+        const target = 'target' in effect
+          ? effect.target
+          : 'executionId' in effect ? effect.executionId : toolName
+        decisions.push(await this.evaluateCapability(
+          'external_effect',
+          String(target || toolName),
+          '执行声明的外部副作用',
+          `effect.${effect.kind}`,
+          effect.kind === 'spawn-agent' || effect.kind === 'control-execution' ? 2 : 1,
+          context
+        ))
+      }
+    }
+    const action = decisions.some((decision) => decision.action === 'deny')
+      ? 'deny'
+      : decisions.some((decision) => decision.action === 'ask') ? 'ask' : 'allow'
+    return {
+      action,
+      permission: decisions.find((decision) => decision.action === action)?.permission || 'unknown',
+      checks: decisions.flatMap((decision) => decision.checks),
+      analysisStatus: effectPlan.analysisStatus === 'parsed' ? 'parsed' : 'unparsed',
+      hardline: decisions.some((decision) => decision.hardline),
+      critical: decisions.some((decision) => decision.critical),
+      riskLevel: Math.max(...decisions.map((decision) => decision.riskLevel)) as PermissionRiskLevel,
+      reason: [...new Set(decisions.map((decision) => decision.reason))].join('; '),
+      ruleId: 'tool.effect-plan',
+      normalizedPattern: toolName,
+      impacts: decisions.flatMap((decision) => decision.impacts),
+      snapshots: decisions.flatMap((decision) => decision.snapshots)
+    }
   }
 
   private async evaluateWrite(toolName: string, args: unknown, context: PermissionEvaluationContext): Promise<PermissionDecision> {
@@ -395,7 +476,8 @@ export async function authorizePermissionToolCall(
   onPermissionRequest?: PermissionRequestHandler,
   smartApprovalClient?: SmartApprovalClient | null,
   sessionId?: string,
-  agentId?: string
+  agentId?: string,
+  effectPlan?: ToolEffectPlan
 ): Promise<PermissionToolAuthorization> {
   const permissionManager = PermissionManager.getInstance()
   const context: PermissionEvaluationContext = {
@@ -408,27 +490,33 @@ export async function authorizePermissionToolCall(
     sessionId,
     agentId
   }
-  const decision = await permissionManager.evaluateToolCall(toolName, parsedArgs, context)
+  const decision = effectPlan
+    ? await permissionManager.evaluateEffectPlan(toolName, parsedArgs, effectPlan, context)
+    : await permissionManager.evaluateToolCall(toolName, parsedArgs, context)
   await permissionManager.audit(toolName, decision, context)
   const request = permissionManager.createPermissionRequest(toolName, parsedArgs, context, decision)
 
   if (decision.action === 'allow') {
     return await permissionManager.revalidate(decision)
-      ? { allowed: true, requestId: request.id }
-      : { allowed: false, requestId: request.id, error: 'Error: Permission inputs changed before execution.' }
+      ? { allowed: true, requestId: request.id, permissionRuleId: decision.ruleId, permissionMode: context.mode }
+      : { allowed: false, requestId: request.id, error: 'Error: Permission inputs changed before execution.', permissionRuleId: decision.ruleId, permissionMode: context.mode }
   }
   if (decision.action === 'deny') {
     return {
       allowed: false,
       requestId: request.id,
-      error: 'Error: Tool execution denied by security policy.'
+      error: 'Error: Tool execution denied by security policy.',
+      permissionRuleId: decision.ruleId,
+      permissionMode: context.mode
     }
   }
   if (!onPermissionRequest) {
     return {
       allowed: false,
       requestId: request.id,
-      error: 'Error: Tool execution denied. No approval handler registered.'
+      error: 'Error: Tool execution denied. No approval handler registered.',
+      permissionRuleId: decision.ruleId,
+      permissionMode: context.mode
     }
   }
 
@@ -441,19 +529,44 @@ export async function authorizePermissionToolCall(
     if (valid) await permissionManager.rememberApproval(request, response, context)
     await permissionManager.audit(toolName, decision, context, response)
     return valid
-      ? { allowed: true, requestId: request.id }
+      ? { allowed: true, requestId: request.id, permissionRuleId: decision.ruleId, permissionMode: context.mode }
       : {
           allowed: false,
           requestId: request.id,
           error: response.approved
             ? 'Error: Permission inputs changed before execution.'
-            : 'Error: User denied permission for this operation.'
+            : 'Error: User denied permission for this operation.',
+          permissionRuleId: decision.ruleId,
+          permissionMode: context.mode
         }
   } catch (error: any) {
     return {
       allowed: false,
       requestId: request.id,
-      error: `Error: Permission approval failed: ${error?.message || String(error)}`
+      error: `Error: Permission approval failed: ${error?.message || String(error)}`,
+      permissionRuleId: decision.ruleId,
+      permissionMode: context.mode
     }
   }
+}
+
+export async function evaluatePermissionEffectPlanShadow(
+  toolName: string,
+  parsedArgs: unknown,
+  workspaceRoot: string,
+  effectPlan: ToolEffectPlan,
+  sessionId?: string,
+  agentId?: string
+): Promise<PermissionDecision> {
+  const permissionManager = PermissionManager.getInstance()
+  const context: PermissionEvaluationContext = {
+    workspaceRoot,
+    cwd: workspaceRoot,
+    platform: process.platform,
+    shellKind: toolName === 'PowerShell' ? 'powershell' : toolName === 'Bash' ? 'bash' : undefined,
+    mode: await getWorkspacePermissionStore().getMode(workspaceRoot),
+    sessionId,
+    agentId
+  }
+  return permissionManager.evaluateEffectPlan(toolName, parsedArgs, effectPlan, context)
 }

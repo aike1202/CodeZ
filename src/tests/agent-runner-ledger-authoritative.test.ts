@@ -9,7 +9,10 @@ import { ModelContextBuilder } from '../main/services/context/ModelContextBuilde
 import type { ContextBudgetSnapshot } from '../shared/types/context'
 
 const dirs: string[] = []
-afterEach(async () => { await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))) })
+afterEach(async () => {
+  delete process.env.CODEZ_TOOL_RUNTIME_V2
+  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
+})
 
 describe('AgentRunner canonical ledger path', () => {
   it('keeps model wrappers out of the UI tool result boundary', () => {
@@ -19,7 +22,11 @@ describe('AgentRunner canonical ledger path', () => {
     }))).toBe('readable failure')
   })
 
-  it('persists model and tool protocol before completing the UI lifecycle', async () => {
+  it.each([
+    ['V2 runtime', '1'],
+    ['legacy rollback runtime', '0']
+  ])('persists model and tool protocol before completing the UI lifecycle with %s', async (_label, runtimeFlag) => {
+    process.env.CODEZ_TOOL_RUNTIME_V2 = runtimeFlag
     const root = await mkdtemp(path.join(os.tmpdir(), 'codez-runner-ledger-'))
     dirs.push(root)
     const ledger = new ModelLedgerStore(path.join(root, 'runtime'))

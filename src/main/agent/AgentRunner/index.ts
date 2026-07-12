@@ -3,9 +3,10 @@ import { ToolManager } from '../../tools/ToolManager'
 import { EditTransactionService, getEditTransactionService } from '../../services/EditTransactionService'
 import {
   authorizePermissionToolCall,
+  evaluatePermissionEffectPlanShadow,
   type PermissionToolAuthorization
 } from '../../services/PermissionManager'
-import { interceptAskUser, normalizeAskUserTextFallback } from '../../tools/builtin/AskUserQuestionTool'
+import { normalizeAskUserTextFallback } from '../../tools/builtin/AskUserQuestionTool'
 import { TaskStore } from '../../services/TaskStore'
 import { SubAgentManager } from '../SubAgentManager'
 import type { ChatProviderErrorCode, ProviderTokenUsage, ToolDefinition } from '../../../shared/types/provider'
@@ -13,10 +14,15 @@ import log from '../../logger'
 import { logPrompt } from '../../services/PromptLogger'
 
 import type { AgentRunConfig, AgentRunnerCallbacks } from './types'
-import { isToolErrorResult, buildToolError } from './agentErrorHandler'
-import { handleSubAgentRunnerSpawn } from './subAgentRunnerHelper'
-import { handleDelegateTasks } from './delegateTasksHelper'
-import { handleExecutionControl } from './executionControlHelper'
+import {
+  getToolRuntimeFeatureFlags,
+  LegacyToolExecutionPipeline,
+  ToolCallAssembler,
+  ToolExecutionPipeline
+} from '../../tools/runtime'
+import { getToolExposureState } from '../../tools/runtime/ToolExposurePlanner'
+import type { NormalizedToolCall, ToolEffectPlan, ToolPipelineResult } from '../../tools/runtime'
+import { createAgentRuntimeToolInvoker } from './runtimeToolInvoker'
 import { getSessionStore } from '../../ipc/session.handlers'
 import { LoopStateMachine, AgentState, TransitionEvent, TerminationReason } from './LoopStateMachine'
 import { streamWithTimeoutRetry } from '../../services/chat/retry'
@@ -69,7 +75,8 @@ export async function authorizeToolCall(
   workspaceRoot: string,
   onPermissionRequest?: AgentRunnerCallbacks['onPermissionRequest'],
   smartApprovalClient?: SmartApprovalClient | null,
-  sessionId?: string
+  sessionId?: string,
+  effectPlan?: ToolEffectPlan
 ): Promise<ToolAuthorization> {
   return authorizePermissionToolCall(
     toolName,
@@ -77,7 +84,9 @@ export async function authorizeToolCall(
     workspaceRoot,
     onPermissionRequest,
     smartApprovalClient,
-    sessionId
+    sessionId,
+    undefined,
+    effectPlan
   )
 }
 
@@ -170,7 +179,8 @@ export class AgentRunner {
     const MAX_VERIFICATION_RETRIES = 3
 
     const taskStore = TaskStore.getInstance()
-    let availableTools: ToolDefinition[] = config.tools || this.toolManager.getToolDefinitions()
+    const configuredTools: ToolDefinition[] = config.tools || this.toolManager.getToolDefinitions()
+    let availableTools: ToolDefinition[] = configuredTools
 
     const sessionId = runtimeTurn?.sessionId || config.sessionId || `session_${Date.now()}`
 
@@ -179,6 +189,10 @@ export class AgentRunner {
     try {
       const sessionStore = getSessionStore()
       const session = sessionStore.getAll().find((s: any) => s.id === sessionId)
+      const restoredTools = session?.toolRuntime?.activatedDeferredTools?.[runtimeTurn!.contextScopeId]
+      if (restoredTools?.length) {
+        getToolExposureState().activate(`${sessionId}:${runtimeTurn!.contextScopeId}`, restoredTools)
+      }
 
       // ─── 恢复 Task 状态到会话内存 ──────────────────
       if (session && session.tasks && session.tasks.length > 0) {
@@ -236,6 +250,28 @@ export class AgentRunner {
     let consecutiveIdleTurns = 0
     let currentState = AgentState.Running
     const contextBudgetService = new ContextBudgetService()
+    const runtimeToolManager = typeof (this.toolManager as any).createCatalogSnapshot === 'function'
+      ? this.toolManager
+      : new ToolManager()
+    const runtimeFlags = getToolRuntimeFeatureFlags()
+    const toolExecutionPipeline = runtimeFlags.runtimeV2
+      ? new ToolExecutionPipeline({
+          schedulerMode: runtimeFlags.scheduler,
+          resultStoreEnabled: runtimeFlags.resultStore
+        })
+      : new LegacyToolExecutionPipeline()
+    const smartApprovalClient = new ChatSmartApprovalClient({
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      model: config.model,
+      apiFormat: config.apiFormat
+    })
+    const runtimeToolInvoker = createAgentRuntimeToolInvoker({
+      config,
+      callbacks,
+      parentSignal: this.abortController?.signal,
+      parentTransaction: txId ? { id: txId, service: this.editTransactionService } : undefined
+    })
 
     try {
       while (loopCount < MAX_LOOPS && !this.abortController?.signal.aborted) {
@@ -244,6 +280,28 @@ export class AgentRunner {
         await flushPendingSteers()
 
         log.info('[AgentRunner] loop start', { loopCount, msgCount: allMessages.length })
+
+        const catalogSnapshot = runtimeToolManager.createCatalogSnapshot('main', config.workspaceRoot)
+        const exposureScopeId = `${sessionId}:${runtimeTurn!.contextScopeId}`
+        const exposureState = getToolExposureState()
+        const configuredNames = new Set(configuredTools.map((tool) => tool.function.name))
+        const deniedByConfiguration = new Set(catalogSnapshot.descriptors
+          .map((descriptor) => descriptor.name)
+          .filter((name) => !configuredNames.has(name)))
+        if (!runtimeFlags.toolSearch) deniedByConfiguration.add('ToolSearch')
+        const activatedDeferredTools = runtimeFlags.toolSearch
+          ? exposureState.get(exposureScopeId)
+          : new Set(catalogSnapshot.descriptors
+              .filter((descriptor) => descriptor.availability.exposure === 'deferred')
+              .map((descriptor) => descriptor.name))
+        const exposurePlan = runtimeToolManager.createExposurePlan({
+          catalog: catalogSnapshot,
+          agentRole: 'main',
+          workspaceRoot: config.workspaceRoot,
+          deniedTools: deniedByConfiguration,
+          activatedDeferredTools
+        })
+        availableTools = runtimeToolManager.getToolDefinitionsForExposure(exposurePlan)
 
         const built = await config.contextBuilder!.build({
           sessionId,
@@ -275,15 +333,7 @@ export class AgentRunner {
 
         let currentFullContent = ''
         let currentReasoningContent = ''
-        let toolCallsAcc: Record<
-          number,
-          {
-            id: string
-            type: 'function'
-            function: { name: string; arguments: string }
-            thought_signature?: string
-          }
-        > = {}
+        const toolCallAssembler = new ToolCallAssembler(`call_${runtimeTurn!.turnId}_${loopCount}`)
         let thoughtSignatureForThisTurn: string | undefined = undefined
 
         let gotError = false
@@ -338,26 +388,16 @@ export class AgentRunner {
 
               if (toolCallsChunk) {
                 for (const tc of toolCallsChunk) {
-                  const index = tc.index
-                  if (!toolCallsAcc[index]) {
-                    toolCallsAcc[index] = {
-                      id: tc.id || '',
-                      type: 'function',
-                      function: { name: tc.function?.name || '', arguments: '' }
-                    }
-                  }
-                  const acc = toolCallsAcc[index]
-                  if (tc.id) acc.id = tc.id
-                  if (tc.function?.name) acc.function.name = tc.function.name
-                  if (tc.function?.arguments) acc.function.arguments += tc.function.arguments
-
-                  if (tc.thought_signature) {
-                    acc.thought_signature = tc.thought_signature
-                    thoughtSignatureForThisTurn = tc.thought_signature
-                  } else if (thoughtSignature) {
-                    acc.thought_signature = thoughtSignature
-                  }
-
+                  const signature = tc.thought_signature || thoughtSignature
+                  toolCallAssembler.push({
+                    provider: config.apiFormat === 'anthropic' ? 'anthropic' : config.apiFormat === 'gemini' ? 'gemini' : 'openai',
+                    position: tc.index,
+                    callId: tc.id,
+                    nameDelta: tc.function?.name,
+                    argumentsDelta: tc.function?.arguments,
+                    thoughtSignature: signature
+                  })
+                  if (signature) thoughtSignatureForThisTurn = signature
                 }
               }
             },
@@ -439,23 +479,21 @@ export class AgentRunner {
         }
 
         const finalSig = thoughtSignatureForThisTurn
-        const toolCallsArray = Object.keys(toolCallsAcc).map((k) => {
-          const tc = (toolCallsAcc as any)[k]
-          const sig = tc.thought_signature || finalSig
+        const normalizedToolCalls: NormalizedToolCall[] = toolCallAssembler.finalize().map((call) => ({
+          ...call,
+          thoughtSignature: call.thoughtSignature || finalSig || 'skip_thought_signature_validator'
+        }))
+        const toolCallsArray = normalizedToolCalls.map((call) => {
           const result: any = {
-            id: tc.id,
-            type: tc.type,
+            id: call.callId,
+            type: 'function',
             function: {
-              ...tc.function
+              name: call.name,
+              arguments: call.rawArguments
             }
           }
-          if (sig) {
-            result.function.thought_signature = sig
-            result.thought_signature = sig
-          } else {
-            result.function.thought_signature = 'skip_thought_signature_validator'
-            result.thought_signature = 'skip_thought_signature_validator'
-          }
+          result.function.thought_signature = call.thoughtSignature
+          result.thought_signature = call.thoughtSignature
           return result
         })
 
@@ -475,6 +513,13 @@ export class AgentRunner {
             thought_signature: 'skip_thought_signature_validator'
           })
           currentFullContent = ''
+          normalizedToolCalls.push({
+            callId: fallbackId,
+            position: normalizedToolCalls.length,
+            name: 'AskUserQuestion',
+            rawArguments: fallbackAskArgs,
+            thoughtSignature: 'skip_thought_signature_validator'
+          })
           log.warn('[AgentRunner] converted text clarification payload to AskUserQuestion', {
             loopCount,
             model: config.model
@@ -514,172 +559,150 @@ export class AgentRunner {
         })
 
         if (toolCallsArray.length > 0) {
-          const toolCallbacks: AgentRunnerCallbacks = { ...callbacks, onToolEnd: undefined }
-
-          const toolResults = await Promise.all(
-            toolCallsArray.map(async (tc) => {
-              const toolCallId = tc.id
-              const name = tc.function.name
-              const args = tc.function.arguments
-
-              if (loopCount >= MAX_LOOPS - 1 || consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-                const reason =
-                  loopCount >= MAX_LOOPS - 1
-                    ? `已达 ${MAX_LOOPS} 步的安全上限`
-                    : `已连续失败 ${MAX_CONSECUTIVE_FAILURES} 次`
-
-                const errMsg = [
-                  `提示：当前任务${reason}。`,
-                  '为了保障运行安全并防止死循环，后续的工具执行已被自动挂起。',
-                  '请您放心，已完成的工作均已妥善保存。请在下方的回复中直接告诉用户：',
-                  '1. 目前已为您完成了哪些修改和成果；',
-                  '2. 还有哪些步骤因为达到限制而暂时挂起；',
-                  '3. 温馨提示用户：如果需要继续，可以直接点击右上角的“继续”按钮，或者在对话框中回复“继续”或“继续推进”。'
-                ].join('\n')
-
-                return {
-                  role: 'tool' as const,
-                  tool_call_id: toolCallId,
-                  name: name,
-                  content: JSON.stringify({ ok: false, error: errMsg })
-                }
+          let pipelineResults: ToolPipelineResult[]
+          if (loopCount >= MAX_LOOPS - 1 || consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            const reason = loopCount >= MAX_LOOPS - 1
+              ? `已达 ${MAX_LOOPS} 步的安全上限`
+              : `已连续失败 ${MAX_CONSECUTIVE_FAILURES} 次`
+            const errMsg = [
+              `提示：当前任务${reason}。`,
+              '为了保障运行安全并防止死循环，后续的工具执行已被自动挂起。',
+              '请您放心，已完成的工作均已妥善保存。请在下方的回复中直接告诉用户：',
+              '1. 目前已为您完成了哪些修改和成果；',
+              '2. 还有哪些步骤因为达到限制而暂时挂起；',
+              '3. 温馨提示用户：如果需要继续，可以直接点击右上角的“继续”按钮，或者在对话框中回复“继续”或“继续推进”。'
+            ].join('\n')
+            pipelineResults = normalizedToolCalls.map((call) => ({
+              call,
+              canonicalName: call.name,
+              result: {
+                status: 'denied',
+                error: { code: 'TOOL_LOOP_LIMIT', message: errMsg, recoverable: false },
+                modelContent: `Error: ${errMsg}`
               }
-
-              log.info('[AgentRunner] tool start', { name, loopCount })
-
-              let parsedArgs = {}
-              try {
-                parsedArgs = JSON.parse(args)
-              } catch {}
-
-              const authorization = await authorizeToolCall(
-                name,
-                parsedArgs,
-                config.workspaceRoot,
-                callbacks.onPermissionRequest,
-                new ChatSmartApprovalClient({
-                  baseUrl: config.baseUrl,
-                  apiKey: config.apiKey,
-                  model: config.model,
-                  apiFormat: config.apiFormat
-                }),
-                sessionId
-              )
-
-              if (!authorization.allowed) {
-                const resultMessage = authorization.error || 'Error: Tool execution denied.'
-                log.info('[AgentRunner] tool end', { name, isError: true, loopCount })
-                return {
-                  role: 'tool' as const,
-                  tool_call_id: toolCallId,
-                  name,
-                  content: JSON.stringify({
-                    ok: false,
-                    error: buildToolError(resultMessage)
-                  }),
-                  _rawArgs: args
-                }
-              }
-
-              if (name === 'SubAgentRunner') {
-                return await handleSubAgentRunnerSpawn(
-                  toolCallId,
-                  args,
-                  config,
-                  toolCallbacks,
-                  this.abortController?.signal
-                )
-              } else if (name === 'DelegateTasks') {
-                return await handleDelegateTasks(
-                  toolCallId,
-                  args,
-                  config,
-                  toolCallbacks,
-                  this.abortController?.signal,
-                  txId ? { id: txId, service: this.editTransactionService } : undefined
-                )
-              } else if (name === 'ExecutionControl') {
-                return await handleExecutionControl(
-                  toolCallId,
-                  args,
-                  config,
-                  toolCallbacks,
-                  this.abortController?.signal,
-                  txId ? { id: txId, service: this.editTransactionService } : undefined
-                )
-              }
-
-              const toolInstance = this.toolManager.getTool(name)
-              let resultMessage = ''
-              let uiResultMessage: string | undefined
-              let fileReferences: import('../../../shared/types/context').FileContextReference[] | undefined
-              let isError = false
-              if (!toolInstance) {
-                resultMessage = `Error: Tool '${name}' not found.`
-                isError = true
-              } else {
-                try {
-                  const askIntercept = await interceptAskUser(
-                    name,
-                    parsedArgs,
-                    authorization.requestId,
-                    callbacks.onAskUserRequest || null
+            }))
+          } else {
+            pipelineResults = await toolExecutionPipeline.executeBatch(normalizedToolCalls, {
+              catalog: catalogSnapshot,
+              exposure: exposurePlan,
+              workspaceRoot: config.workspaceRoot,
+              sessionId,
+              agentRole: 'main',
+              journalIdentity: {
+                sessionId,
+                turnId: runtimeTurn!.turnId,
+                contextScopeId: runtimeTurn!.contextScopeId,
+                providerId: config.providerId,
+                model: config.model,
+                apiFormat: config.apiFormat,
+                catalogSnapshotId: catalogSnapshot.id,
+                exposurePlanId: exposurePlan.id,
+                schemaFingerprint: exposurePlan.schemaFingerprint
+              },
+              authorize: async (prepared) => {
+                if (runtimeFlags.effectPolicy === 'shadow') {
+                  const shadow = await evaluatePermissionEffectPlanShadow(
+                    prepared.handler.descriptor.name,
+                    prepared.input,
+                    config.workspaceRoot,
+                    prepared.effects,
+                    sessionId
                   )
-                  if (askIntercept.handled) {
-                    resultMessage = askIntercept.result || ''
-                    if (askIntercept.isError) isError = true
-                  }
-
-                  if (!resultMessage) {
-                    const toolContext = {
-                      workspaceRoot: config.workspaceRoot,
-                      sessionId,
-                      contextScopeId: runtimeTurn?.contextScopeId,
-                      runtimeCoordinator,
-                      runtimeTurn,
-                      transactionId: txId || undefined,
-                      editTransactionService: this.editTransactionService,
-                      abortSignal: this.abortController?.signal
-                    }
-                    const executed = typeof toolInstance.executeWithMetadata === 'function'
-                      ? await toolInstance.executeWithMetadata(args, toolContext)
-                      : { content: await toolInstance.execute(args, toolContext) }
-                    resultMessage = executed.content
-                    uiResultMessage = executed.uiContent
-                    fileReferences = executed.fileReferences
-                    if (isToolErrorResult(resultMessage)) {
-                      isError = true
-                    }
-                  }
-                } catch (err: any) {
-                  resultMessage = `Error: ${err.message}`
-                  isError = true
+                  log.info('[ToolRuntime] shadow effect decision', {
+                    tool: prepared.handler.descriptor.name,
+                    action: shadow.action,
+                    ruleId: shadow.ruleId
+                  })
                 }
-              }
-
-              log.info('[AgentRunner] tool end', { name, isError, loopCount })
-
-              const toolResultWrapper = isError
-                ? {
-                    ok: false,
-                    error: buildToolError(resultMessage)
+                const authorization = await authorizeToolCall(
+                  prepared.handler.descriptor.name,
+                  prepared.input,
+                  config.workspaceRoot,
+                  callbacks.onPermissionRequest,
+                  smartApprovalClient,
+                  sessionId,
+                  runtimeFlags.effectPolicy === 'enforce' ? prepared.effects : undefined
+                )
+                return authorization.allowed
+                  ? {
+                      allowed: true,
+                      requestId: authorization.requestId,
+                      permissionRuleId: authorization.permissionRuleId,
+                      permissionMode: authorization.permissionMode
+                    }
+                  : {
+                      allowed: false,
+                      requestId: authorization.requestId,
+                      permissionRuleId: authorization.permissionRuleId,
+                      permissionMode: authorization.permissionMode,
+                      error: {
+                        code: 'TOOL_DENIED',
+                        message: authorization.error || 'Tool execution denied.',
+                        recoverable: false
+                      }
+                    }
+              },
+              createToolContext: (call, requestId) => ({
+                workspaceRoot: config.workspaceRoot,
+                sessionId,
+                contextScopeId: runtimeTurn?.contextScopeId,
+                runtimeCoordinator,
+                runtimeTurn,
+                transactionId: txId || undefined,
+                editTransactionService: this.editTransactionService,
+                abortSignal: this.abortController?.signal,
+                toolCallId: call.callId,
+                permissionRequestId: requestId,
+                runtimeToolInvoker,
+                toolExposure: {
+                  deferredTools: exposurePlan.deferredTools,
+                  activate: (toolNames) => {
+                    exposureState.activate(exposureScopeId, toolNames)
+                    const sessionStore = getSessionStore()
+                    const session = sessionStore.getAll().find((item) => item.id === sessionId)
+                    if (!session) return
+                    const activated = [...exposureState.get(exposureScopeId)]
+                    void sessionStore.save({
+                      ...session,
+                      toolRuntime: {
+                        ...session.toolRuntime,
+                        activatedDeferredTools: {
+                          ...session.toolRuntime?.activatedDeferredTools,
+                          [runtimeTurn!.contextScopeId]: activated
+                        }
+                      }
+                    }).catch((error) => log.error('[AgentRunner] failed to persist tool exposure state', {
+                      sessionId,
+                      error: error instanceof Error ? error.message : String(error)
+                    }))
                   }
-                : {
-                    ok: true,
-                    data: resultMessage
-                  }
-
-              return {
-                role: 'tool' as const,
-                tool_call_id: toolCallId,
-                name: name,
-                content: JSON.stringify(toolResultWrapper),
-                _rawArgs: args,
-                _uiContent: uiResultMessage,
-                _fileReferences: fileReferences
-              }
+                }
+              })
             })
-          )
+          }
+
+          const toolResults = pipelineResults.map((item) => {
+            const result = item.result
+            const isSuccess = result.status === 'success'
+            const content = result.status === 'success'
+              ? JSON.stringify({ ok: true, data: result.modelContent })
+              : JSON.stringify({ ok: false, error: result.error })
+            const fileReferences = result.status === 'success' ? result.fileReferences : undefined
+            log.info('[AgentRunner] tool end', {
+              name: item.canonicalName,
+              isError: !isSuccess,
+              loopCount
+            })
+            return {
+              role: 'tool' as const,
+              tool_call_id: item.call.callId,
+              name: item.canonicalName,
+              content,
+              _uiContent: result.uiContent,
+              _fileReferences: fileReferences,
+              _pipelineResult: item
+            }
+          })
 
           for (const toolResult of toolResults) {
             let status: 'success' | 'error' = 'error'
@@ -700,42 +723,29 @@ export class AgentRunner {
           }
 
           for (const tr of toolResults) {
-            try {
-              const parsed = JSON.parse(tr.content)
-              if (parsed.ok) {
-                if (['Edit', 'Write'].includes(tr.name)) {
-                  filesModifiedInSession = true
-                } else if (tr.name === 'Bash' || tr.name === 'PowerShell') {
-                  const cmdArgs = JSON.parse((tr as any)._rawArgs || '{}')
-                  const cmdStr = cmdArgs.command || cmdArgs.commandLine || ''
-                  if (/(test|typecheck|build|lint)/.test(cmdStr)) {
-                    let cmdData = parsed.data
-                    if (typeof cmdData === 'string') {
-                      try {
-                        cmdData = JSON.parse(cmdData)
-                      } catch (e) {}
-                    }
-                    if (cmdData && typeof cmdData === 'object') {
-                      lastVerificationResult = {
-                        success: cmdData.exitCode === 0 && !cmdData.timedOut,
-                        command: cmdStr
-                      }
+            const item = tr._pipelineResult
+            if (item.result.status === 'success') {
+              if (['Edit', 'Write', 'NotebookEdit'].includes(tr.name)) {
+                filesModifiedInSession = true
+              } else if (tr.name === 'Bash' || tr.name === 'PowerShell') {
+                const cmdStr = String(item.input?.command || item.input?.commandLine || '')
+                if (/(test|typecheck|build|lint)/.test(cmdStr)) {
+                  let cmdData: any = item.result.data
+                  if (typeof cmdData === 'string') {
+                    try { cmdData = JSON.parse(cmdData) } catch {}
+                  }
+                  if (cmdData && typeof cmdData === 'object') {
+                    lastVerificationResult = {
+                      success: cmdData.exitCode === 0 && !cmdData.timedOut,
+                      command: cmdStr
                     }
                   }
                 }
               }
-            } catch (e) {}
-
-            delete (tr as any)._rawArgs
+            }
           }
 
-          const hasSuccess = toolResults.some((tr) => {
-            try {
-              return JSON.parse(tr.content).ok === true
-            } catch {
-              return false
-            }
-          })
+          const hasSuccess = pipelineResults.some((item) => item.result.status === 'success')
           if (!hasSuccess) {
             consecutiveFailures++
           } else {

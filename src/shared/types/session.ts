@@ -17,4 +17,7 @@ export interface SessionData {
   tasks?: TaskItem[]
   queuedPrompts?: QueuedPrompt[]
   runtime?: SessionRuntimeRef
+  toolRuntime?: {
+    activatedDeferredTools?: Record<string, string[]>
+  }
 }

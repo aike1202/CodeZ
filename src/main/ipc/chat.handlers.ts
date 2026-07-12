@@ -41,6 +41,7 @@ import {
   resolveEffectiveReasoningBudgetTokens
 } from '../services/chat/utils'
 import { ToolManager } from '../tools/ToolManager'
+import { getMcpConnectionManager } from '../services/mcp'
 
 function applyRequestReasoningReserve(
   capabilities: ModelContextCapabilities,
@@ -243,6 +244,7 @@ export function registerChatIpc(): void {
         : 0
       const { contextWindowTokens } = contextCapabilities
       const { AgentRunner } = await import('../agent/AgentRunner')
+      await getMcpConnectionManager().syncWorkspace(currentWorkspace)
       const toolManager = new ToolManager()
       const toolSchemas = toolManager.getToolDefinitions()
       const runner = new AgentRunner({ toolManager })
@@ -548,6 +550,7 @@ export function registerChatIpc(): void {
         sessionId: request.sessionId
       })
       const reminder = await SystemPromptService.buildSystemReminder(workspace)
+      await getMcpConnectionManager().syncWorkspace(workspace)
       const toolSchemas = new ToolManager().getToolDefinitions()
       const modelClient = new ChatCompactionModelClient({
         baseUrl: provider.baseUrl,

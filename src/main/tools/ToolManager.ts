@@ -23,11 +23,28 @@ import { WebSearchTool } from './builtin/WebSearchTool'
 import { WebFetchTool } from './builtin/WebFetchTool'
 import { ExecutionInspectTool } from './builtin/ExecutionInspectTool'
 import { ExecutionControlTool } from './builtin/ExecutionControlTool'
+import { ToolSearchTool } from './builtin/ToolSearchTool'
+import { ToolResultReadTool } from './builtin/ToolResultReadTool'
+import { ListMcpResourcesTool } from './builtin/ListMcpResourcesTool'
+import { ReadMcpResourceTool } from './builtin/ReadMcpResourceTool'
+import { GetMcpPromptTool } from './builtin/GetMcpPromptTool'
+import { McpAuthTool } from './builtin/McpAuthTool'
 
 import type { ToolDefinition } from '../../shared/types/provider'
+import { ToolRegistry } from './runtime/ToolRegistry'
+import { ToolExposurePlanner } from './runtime/ToolExposurePlanner'
+import type {
+  AgentRole,
+  ToolCatalogSnapshot,
+  ToolExposurePlan,
+  ToolHandler
+} from './runtime/types'
 
 export class ToolManager {
-  private tools: Map<string, Tool> = new Map()
+  private static readonly sharedRegistry = new ToolRegistry()
+  private static builtinsRegistered = false
+  private readonly registry = ToolManager.sharedRegistry
+  private readonly exposurePlanner = new ToolExposurePlanner()
 
   private static READ_ONLY_TOOL_NAMES = new Set([
     'Read',
@@ -37,7 +54,10 @@ export class ToolManager {
   ])
 
   constructor() {
-    this.registerBuiltinTools()
+    if (!ToolManager.builtinsRegistered) {
+      this.registerBuiltinTools()
+      ToolManager.builtinsRegistered = true
+    }
   }
 
   private registerBuiltinTools() {
@@ -51,6 +71,12 @@ export class ToolManager {
       new GrepTool(),
       new BashTool(),
       new PowerShellTool(),
+      new ToolSearchTool(),
+      new ToolResultReadTool(),
+      new ListMcpResourcesTool(),
+      new ReadMcpResourceTool(),
+      new GetMcpPromptTool(),
+      new McpAuthTool(),
       new AskUserQuestionTool(),
       new PushNotificationTool(),
       new SkillTool(),
@@ -69,26 +95,75 @@ export class ToolManager {
     ]
     
     for (const tool of builtinTools) {
-      this.tools.set(tool.name, tool)
+      this.registry.registerLegacy(tool)
     }
   }
 
   getTool(name: string): Tool | undefined {
-    return this.tools.get(name)
+    return this.registry.resolve(name)?.legacyTool
   }
 
   getAllTools(): Tool[] {
-    return Array.from(this.tools.values())
+    return this.registry.getAllHandlers()
+      .map((handler) => handler.legacyTool)
+      .filter((tool): tool is Tool => Boolean(tool))
+  }
+
+  getRegistry(): ToolRegistry {
+    return this.registry
+  }
+
+  registerHandler(handler: ToolHandler): void {
+    this.registry.register(handler)
+  }
+
+  unregisterSource(sourceId: string): void {
+    this.registry.unregisterSource(sourceId)
+  }
+
+  createCatalogSnapshot(
+    agentRole: AgentRole = 'main',
+    workspaceRoot?: string
+  ): ToolCatalogSnapshot {
+    return this.registry.createSnapshot({
+      platform: process.platform,
+      agentRole,
+      workspaceRoot
+    })
+  }
+
+  createExposurePlan(input: {
+    catalog?: ToolCatalogSnapshot
+    agentRole?: AgentRole
+    workspaceRoot?: string
+    deniedTools?: ReadonlySet<string>
+    activatedDeferredTools?: ReadonlySet<string>
+    maxTools?: number
+    schemaTokenBudget?: number
+  } = {}): ToolExposurePlan {
+    const agentRole = input.agentRole || 'main'
+    return this.exposurePlanner.plan({
+      catalog: input.catalog || this.createCatalogSnapshot(agentRole, input.workspaceRoot),
+      agentRole,
+      deniedTools: input.deniedTools,
+      activatedDeferredTools: input.activatedDeferredTools,
+      maxTools: input.maxTools,
+      schemaTokenBudget: input.schemaTokenBudget
+    })
+  }
+
+  getToolDefinitionsForExposure(plan: ToolExposurePlan): ToolDefinition[] {
+    return this.exposurePlanner.toToolDefinitions(plan)
   }
 
   /** 返回默认执行路径的 Tool Definitions 列表。 */
   getToolDefinitions(): ToolDefinition[] {
-    return this.getAllTools().map(tool => ({
+    return this.createCatalogSnapshot().descriptors.map(tool => ({
       type: 'function',
       function: {
         name: tool.name,
         description: tool.description,
-        parameters: tool.parameters_schema
+        parameters: tool.inputSchema
       }
     }))
   }

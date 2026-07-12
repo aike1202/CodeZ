@@ -1,0 +1,42 @@
+.mcp-settings { display: flex; flex: 1; min-width: 0; overflow: hidden; }
+.mcp-server-list { width: 280px; flex: 0 0 280px; border-right: 1px solid var(--border); overflow: hidden; display: flex; flex-direction: column; }
+.mcp-list-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 24px 18px 16px; }
+.mcp-list-header h1 { margin: 0 0 6px; font-size: 20px; }
+.mcp-list-header p, .mcp-editor-header p { margin: 0; color: var(--text-muted); font-size: 12px; }
+.mcp-list-body { overflow-y: auto; padding: 0 10px 16px; }
+.mcp-server-row { width: 100%; min-height: 56px; display: grid; grid-template-columns: 20px minmax(0, 1fr) 10px; gap: 10px; align-items: center; border: 0; border-radius: 6px; padding: 9px 10px; background: transparent; color: var(--text-main); text-align: left; cursor: pointer; }
+.mcp-server-row:hover { background: var(--bg-hover); }
+.mcp-server-row.active { background: var(--bg-active); }
+.mcp-server-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.mcp-server-copy strong, .mcp-server-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-server-copy small { color: var(--text-muted); }
+.mcp-state-dot { width: 8px; height: 8px; border-radius: 50%; background: #94a3b8; }
+.mcp-state-dot.is-connected { background: #16a34a; }
+.mcp-state-dot.is-failed, .mcp-state-dot.is-needs-auth { background: #dc2626; }
+.mcp-state-dot.is-connecting, .mcp-state-dot.is-reconnecting { background: #d97706; }
+.mcp-empty-list { padding: 24px 12px; color: var(--text-muted); font-size: 13px; }
+.mcp-editor { flex: 1; min-width: 0; overflow-y: auto; padding: 24px 28px 48px; }
+.mcp-editor-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+.mcp-editor-header h2 { margin: 0 0 5px; font-size: 19px; }
+.mcp-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.mcp-section { padding: 22px 0; border-bottom: 1px solid var(--border); }
+.mcp-section h3 { margin: 0 0 14px; font-size: 14px; }
+.mcp-form { display: grid; grid-template-columns: minmax(0, 640px); gap: 16px; }
+.mcp-field { display: grid; gap: 7px; }
+.mcp-field label, .mcp-check { font-size: 13px; font-weight: 500; }
+.mcp-field textarea { width: 100%; min-height: 88px; resize: vertical; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-surface); color: var(--text-main); font: 12px/1.5 var(--font-mono, monospace); }
+.mcp-check { display: flex; align-items: center; gap: 8px; }
+.mcp-trust-copy { max-width: 720px; margin: 0 0 14px; color: var(--text-muted); font-size: 13px; line-height: 1.6; }
+.mcp-fingerprint { display: block; max-width: 720px; overflow-wrap: anywhere; margin-bottom: 14px; padding: 10px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 6px; font-size: 11px; }
+.mcp-readonly-config { max-width: 720px; max-height: 280px; overflow: auto; margin: 0 0 12px; padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface); color: var(--text-main); font: 11px/1.5 var(--font-mono, monospace); white-space: pre-wrap; overflow-wrap: anywhere; }
+.mcp-metrics { display: flex; gap: 24px; color: var(--text-muted); font-size: 13px; }
+.mcp-metrics strong { color: var(--text-main); font-size: 18px; margin-right: 3px; }
+.mcp-error { max-width: 720px; padding: 10px 12px; border: 1px solid rgba(220, 38, 38, .35); border-radius: 6px; background: rgba(220, 38, 38, .08); color: #dc2626; font-size: 12px; line-height: 1.5; }
+.mcp-log-title { margin-top: 22px !important; }
+.mcp-logs { max-width: 900px; max-height: 280px; overflow: auto; border: 1px solid var(--border); background: var(--bg-surface); font: 11px/1.5 var(--font-mono, monospace); }
+.mcp-logs > div { display: grid; grid-template-columns: 82px 64px minmax(0, 1fr); gap: 8px; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+.mcp-logs time, .mcp-logs b { color: var(--text-muted); font-weight: 400; }
+.mcp-secret-list { display: grid; gap: 8px; max-width: 640px; }
+.mcp-secret-list > div { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface); }
+.mcp-secret-list code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+@media (max-width: 900px) { .mcp-server-list { width: 220px; flex-basis: 220px; } .mcp-editor { padding: 20px; } .mcp-editor-header { align-items: flex-start; flex-direction: column; } }

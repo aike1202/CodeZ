@@ -10,6 +10,7 @@ import SettingsSkillsTab from '../components/SettingsSkillsTab'
 import SettingsRulesTab from '../components/SettingsRulesTab'
 import SettingsAgentsTab from '../components/SettingsAgentsTab'
 import SettingsGeneralTab from '../components/SettingsGeneralTab'
+import SettingsMcpTab from '../components/SettingsMcpTab'
 import './SettingsPage.css'
 
 interface Props {
@@ -23,6 +24,7 @@ const GLOBAL_MENU_ITEMS = [
   { id: 'general', label: '常规', icon: <IconSettings /> },
   { id: 'code-preview', label: '代码预览', icon: <IconCode /> },
   { id: 'model-config', label: '模型设置', icon: <IconServer /> },
+  { id: 'mcp', label: 'MCP', icon: <IconServer /> },
   { id: 'agents', label: '智能体', icon: <IconZap /> },
   { id: 'skills', label: '技能', icon: <IconSkills /> },
   { id: 'rules', label: '规则', icon: <IconBook /> },
@@ -175,6 +177,10 @@ export default function SettingsPage({ onBack, initialTab, onCreateFromSkill }: 
 
     if (activeGlobalMenu === 'general') {
       return <SettingsGeneralTab />
+    }
+
+    if (activeGlobalMenu === 'mcp') {
+      return <SettingsMcpTab />
     }
 
     if (activeGlobalMenu === 'trash') {

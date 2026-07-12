@@ -1,5 +1,7 @@
 import type { EditTransactionService } from '../services/EditTransactionService'
 import type { ContextScopeId, FileContextReference } from '../../shared/types/context'
+import type { DeferredToolSummary } from './runtime/types'
+import type { ToolExecutionResult } from './runtime/types'
 
 export interface ToolContext {
   workspaceRoot: string
@@ -15,6 +17,21 @@ export interface ToolContext {
   editTransactionService?: EditTransactionService
   /** 取消当前 Agent/子智能体时终止仍在运行的工具。 */
   abortSignal?: AbortSignal
+  /** Canonical tool call id for runtime-managed handlers and audit records. */
+  toolCallId?: string
+  /** Permission request id produced before execution. */
+  permissionRequestId?: string
+  /** Per-run handler bridge for tools that need active Agent configuration. */
+  runtimeToolInvoker?: (
+    name: string,
+    input: Record<string, unknown>,
+    context: ToolContext
+  ) => Promise<ToolExecutionOutput | null>
+  /** Deferred tools visible to ToolSearch for this immutable model-turn snapshot. */
+  toolExposure?: {
+    deferredTools: readonly DeferredToolSummary[]
+    activate(toolNames: readonly string[]): void
+  }
 }
 
 export interface ToolExecutionOutput {
@@ -95,6 +112,11 @@ export abstract class Tool {
    * @returns 被转为 string 的响应体给模型
    */
   abstract execute(args: string, context: ToolContext): Promise<string>
+
+  /** New runtime-native tools override this; legacy tools return null. */
+  async executeTyped(_input: Record<string, unknown>, _context: ToolContext): Promise<ToolExecutionResult | null> {
+    return null
+  }
 
   /**
    * Executes a tool while preserving client-only metadata that must not be sent

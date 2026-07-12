@@ -39,12 +39,25 @@ import type { SessionRuntimeCoordinator, RuntimeTurnHandle } from '../services/c
 import { getContextCoreServices } from '../services/context/ContextRuntimeServices'
 import { ModelContextBuilder as CanonicalModelContextBuilder } from '../services/context/ModelContextBuilder'
 import { authorizePermissionToolCall } from '../services/PermissionManager'
+import { evaluatePermissionEffectPlanShadow } from '../services/PermissionManager'
 import type { ExecutorControlToken } from '../../shared/types/parallel'
 import { getExecutionController } from '../services/execution/ExecutionController'
 import { resolveEffectiveReasoningBudgetTokens } from '../services/chat/utils'
 import type { EditTransactionService } from '../services/EditTransactionService'
 import type { CompactionService } from '../services/context/CompactionService'
 import { analyzePathImpactSync } from '../services/permission/PathImpactAnalyzer'
+import {
+  getToolRuntimeFeatureFlags,
+  LegacyToolExecutionPipeline,
+  ToolCallAssembler,
+  ToolExecutionPipeline
+} from '../tools/runtime'
+import type {
+  AgentRole,
+  NormalizedToolCall,
+  ToolCatalogSnapshot,
+  ToolExposurePlan
+} from '../tools/runtime'
 
 // ─── 子 Agent 写权限范围（并行 Worker 用） ──────────────────
 
@@ -442,6 +455,25 @@ function successfulReadFiles(rawArgs: string, rawResult: unknown): string[] {
   }
 }
 
+function exposureForDefinitions(
+  catalog: ToolCatalogSnapshot,
+  definitions: readonly ToolDefinition[]
+): ToolExposurePlan {
+  const names = new Set(definitions.map((definition) => definition.function.name))
+  const eagerTools = catalog.descriptors.filter((descriptor) => names.has(descriptor.name))
+  return {
+    id: `subagent_${catalog.id}`,
+    catalogSnapshotId: catalog.id,
+    eagerTools,
+    deferredTools: [],
+    hiddenTools: catalog.descriptors
+      .filter((descriptor) => !names.has(descriptor.name))
+      .map((descriptor) => ({ name: descriptor.name, reason: 'subagent-tool-policy' })),
+    schemaFingerprint: catalog.fingerprint,
+    estimatedSchemaTokens: 0
+  }
+}
+
 function replayCompletedSubAgentResult(
   canonicalType: string,
   def: SubAgentDefinition,
@@ -825,6 +857,14 @@ export class SubAgentManager {
     const finalizationReserveLoops = resolveFinalizationReserveLoops(def, effectiveMaxLoops)
     let finalizationNoticeRecorded = false
     let overflowRetried = false
+    const runtimeFlags = getToolRuntimeFeatureFlags()
+    const toolExecutionPipeline = runtimeFlags.runtimeV2
+      ? new ToolExecutionPipeline({
+          schedulerMode: runtimeFlags.scheduler,
+          resultStoreEnabled: runtimeFlags.resultStore
+        })
+      : new LegacyToolExecutionPipeline()
+    const agentRole: AgentRole = canonical.toLowerCase()
     const reasoningBudgetTokens = ctx.apiConfig.thinking?.enabled === false
       ? 0
       : ctx.apiConfig.thinking
@@ -934,7 +974,9 @@ export class SubAgentManager {
         )
 
         let currentContent = ''
-        let toolCallsAcc: Record<number, { id: string; type: 'function'; function: { name: string; arguments: string }; thought_signature?: string }> = {}
+        const catalogSnapshot = toolManager.createCatalogSnapshot(agentRole, ctx.workspaceRoot)
+        const exposure = exposureForDefinitions(catalogSnapshot, activeTools)
+        const toolCallAssembler = new ToolCallAssembler(`call_${runtimeTurn.turnId}_${loopCount}`)
         let gotError = false
         let lastError = ''
         let providerErrorCode: ChatProviderErrorCode | undefined
@@ -972,16 +1014,16 @@ export class SubAgentManager {
                 }
                 if (toolCallsChunk) {
                   for (const tc of toolCallsChunk) {
-                    const idx = tc.index
-                    if (!toolCallsAcc[idx]) {
-                      toolCallsAcc[idx] = { id: tc.id || '', type: 'function', function: { name: tc.function?.name || '', arguments: '' } }
-                    }
-                    const acc = toolCallsAcc[idx]
-                    if (tc.id) acc.id = tc.id
-                    if (tc.function?.name) acc.function.name = tc.function.name
-                    if (tc.function?.arguments) acc.function.arguments += tc.function.arguments
-                    if (tc.thought_signature) acc.thought_signature = tc.thought_signature
-                    else if (thoughtSignature) acc.thought_signature = thoughtSignature
+                    toolCallAssembler.push({
+                      provider: ctx.apiConfig.apiFormat === 'anthropic'
+                        ? 'anthropic'
+                        : ctx.apiConfig.apiFormat === 'gemini' ? 'gemini' : 'openai',
+                      position: tc.index,
+                      callId: tc.id,
+                      nameDelta: tc.function?.name,
+                      argumentsDelta: tc.function?.arguments,
+                      thoughtSignature: tc.thought_signature || thoughtSignature
+                    })
                   }
                 }
               },
@@ -1088,14 +1130,20 @@ export class SubAgentManager {
           break
         }
 
-        const toolCallsArray = Object.keys(toolCallsAcc).map((k) => {
-          const tc = (toolCallsAcc as any)[k]
-          const sig = tc.thought_signature || thoughtSig
+        const normalizedToolCalls: NormalizedToolCall[] = toolCallAssembler.finalize().map((call) => ({
+          ...call,
+          thoughtSignature: call.thoughtSignature || thoughtSig || 'skip_thought_signature_validator'
+        }))
+        const toolCallsArray = normalizedToolCalls.map((call) => {
           return {
-            id: tc.id,
-            type: tc.type,
-            function: { ...tc.function, thought_signature: sig || 'skip_thought_signature_validator' },
-            thought_signature: sig || 'skip_thought_signature_validator'
+            id: call.callId,
+            type: 'function' as const,
+            function: {
+              name: call.name,
+              arguments: call.rawArguments,
+              thought_signature: call.thoughtSignature
+            },
+            thought_signature: call.thoughtSignature
           }
         })
 
@@ -1219,142 +1267,151 @@ export class SubAgentManager {
           }
 
           // 执行常规工具调用
-          const toolResults = await Promise.all(
-            toolCallsArray.map(async (tc) => {
-              const name = tc.function.name
-              const args = tc.function.arguments
-              toolCallCount++
-
-              const toolInstance = toolManager.getTool(name)
-              let result = ''
-              let uiResult: string | undefined
-              let fileReferences: import('../../shared/types/context').FileContextReference[] | undefined
-              if (!toolInstance) {
-                result = JSON.stringify({ ok: false, error: { code: 'NOT_FOUND', message: `Tool '${name}' not found` } })
-              } else {
-                // 先校验子代理 scope，再进入与主 Agent 相同的运行时权限策略。
-                let parsedArgs: any = {}
-                try { parsedArgs = JSON.parse(args) } catch {}
-                const denyReason = await authorizeSubAgentToolCall(
-                  name,
-                  parsedArgs,
+          toolCallCount += normalizedToolCalls.length
+          const pipelineResults = await toolExecutionPipeline.executeBatch(normalizedToolCalls, {
+            catalog: catalogSnapshot,
+            exposure,
+            workspaceRoot: ctx.workspaceRoot,
+            sessionId: ctx.sessionId,
+            agentRole,
+            journalIdentity: {
+              sessionId: ctx.sessionId,
+              turnId: runtimeTurn.turnId,
+              contextScopeId,
+              providerId: ctx.providerId,
+              model: ctx.modelOverride || ctx.apiConfig.model,
+              apiFormat: ctx.apiConfig.apiFormat,
+              catalogSnapshotId: catalogSnapshot.id,
+              exposurePlanId: exposure.id,
+              schemaFingerprint: exposure.schemaFingerprint
+            },
+            authorize: async (prepared) => {
+              if (ctx.controlToken) {
+                const leaseDenial = getExecutionController().assertLeaseActive(ctx.controlToken)
+                if (leaseDenial) {
+                  return {
+                    allowed: false,
+                    requestId: `lease_${prepared.call.callId}`,
+                    error: { code: 'EXECUTOR_LEASE_REVOKED', message: leaseDenial, recoverable: false }
+                  }
+                }
+              }
+              const scopeDenial = checkSubAgentToolPermission(
+                prepared.handler.descriptor.name,
+                prepared.input,
+                ctx.workspaceRoot,
+                ctx.permissionScope
+              )
+              if (scopeDenial) {
+                return {
+                  allowed: false,
+                  requestId: `scope_${prepared.call.callId}`,
+                  error: { code: 'PERMISSION_DENIED', message: scopeDenial, recoverable: false }
+                }
+              }
+              if (runtimeFlags.effectPolicy === 'shadow') {
+                await evaluatePermissionEffectPlanShadow(
+                  prepared.handler.descriptor.name,
+                  prepared.input,
                   ctx.workspaceRoot,
+                  prepared.effects,
                   ctx.sessionId,
-                  ctx.permissionScope,
-                  callbacks.onPermissionRequest,
-                  subAgentId,
-                  ctx.controlToken
+                  subAgentId
                 )
-                if (denyReason) {
-                  result = JSON.stringify({ ok: false, error: { code: 'PERMISSION_DENIED', message: denyReason } })
-                  await core.coordinator.recordToolResult(runtimeTurn, {
-                    callId: tc.id, name, content: result, status: 'error'
-                  })
-                  callbacks.onSubAgentToolEnd?.(subAgentId, tc.id, result)
-                  recentTools.push({
-                    name,
-                    status: 'error',
-                    target: extractToolTarget(name, args),
-                    summary: summarizeToolResult(result)
-                  })
-                  return { role: 'tool' as const, tool_call_id: tc.id, name, content: result }
-                }
-                if (ctx.controlToken) {
-                  const leaseDenial = getExecutionController().assertLeaseActive(ctx.controlToken)
-                  if (leaseDenial) {
-                    result = JSON.stringify({
-                      ok: false,
-                      error: { code: 'EXECUTOR_LEASE_REVOKED', message: leaseDenial }
-                    })
-                    await core.coordinator.recordToolResult(runtimeTurn, {
-                      callId: tc.id, name, content: result, status: 'interrupted'
-                    })
-                    callbacks.onSubAgentToolEnd?.(subAgentId, tc.id, result)
-                    recentTools.push({
-                      name,
-                      status: 'interrupted',
-                      target: extractToolTarget(name, args),
-                      summary: leaseDenial
-                    })
-                    return { role: 'tool' as const, tool_call_id: tc.id, name, content: result }
+              }
+              const authorization = await authorizePermissionToolCall(
+                prepared.handler.descriptor.name,
+                prepared.input,
+                ctx.workspaceRoot,
+                callbacks.onPermissionRequest,
+                null,
+                ctx.sessionId,
+                subAgentId,
+                runtimeFlags.effectPolicy === 'enforce' ? prepared.effects : undefined
+              )
+              return authorization.allowed
+                ? {
+                    allowed: true,
+                    requestId: authorization.requestId,
+                    permissionRuleId: authorization.permissionRuleId,
+                    permissionMode: authorization.permissionMode
                   }
-                }
-                try {
-                  const toolContext = {
-                    workspaceRoot: ctx.workspaceRoot,
-                    sessionId: ctx.sessionId,
-                    contextScopeId,
-                    runtimeCoordinator: core.coordinator,
-                    runtimeTurn,
-                    transactionId: ctx.transactionId,
-                    editTransactionService: ctx.editTransactionService,
-                    abortSignal: abortController.signal
+                : {
+                    allowed: false,
+                    requestId: authorization.requestId,
+                    permissionRuleId: authorization.permissionRuleId,
+                    permissionMode: authorization.permissionMode,
+                    error: {
+                      code: 'PERMISSION_DENIED',
+                      message: authorization.error || 'Tool execution denied by runtime permission policy.',
+                      recoverable: false
+                    }
                   }
-                  const executed = typeof toolInstance.executeWithMetadata === 'function'
-                    ? await toolInstance.executeWithMetadata(args, toolContext)
-                    : { content: await toolInstance.execute(args, toolContext) }
-                  result = JSON.stringify({ ok: true, data: executed.content })
-                  uiResult = executed.uiContent
-                  fileReferences = executed.fileReferences
-
-                } catch (err: any) {
-                  result = JSON.stringify({ ok: false, error: { code: 'EXECUTION_ERROR', message: err.message } })
-                }
-              }
-
-              let resultStatus: 'success' | 'error' = 'error'
-              let parsedResult: any
-              try {
-                parsedResult = JSON.parse(result)
-                const rawDataError = typeof parsedResult?.data === 'string' &&
-                  parsedResult.data.trimStart().startsWith('Error:')
-                const readBatchError = name === 'Read' && typeof parsedResult?.data === 'string' &&
-                  /<file\b[^>]*>\s*(?:Error:|Cannot read)/i.test(parsedResult.data)
-                resultStatus = parsedResult?.ok === true && !rawDataError && !readBatchError
-                  ? 'success'
-                  : 'error'
-              } catch {}
-              let handoffStatus: SubAgentHandoffTool['status'] = resultStatus
-              try {
-                if (JSON.parse(result)?.error?.code === 'EXECUTION_INTERRUPTED') handoffStatus = 'interrupted'
-              } catch {}
-              const target = extractToolTarget(name, args)
-              recentTools.push({
-                name,
-                status: handoffStatus,
-                target,
-                summary: summarizeToolResult(result)
-              })
-              if (resultStatus === 'success' && ['Edit', 'Write', 'NotebookEdit'].includes(name) && target) {
-                filesModified.add(target)
-              }
-              if (handoffStatus !== 'error' && ['Bash', 'PowerShell'].includes(name)) {
-                workspaceMayHaveUntrackedChanges = true
-              }
-              if (name === 'Read') {
-                for (const filePath of successfulReadFiles(args, parsedResult?.data)) {
-                  filesExamined.add(filePath)
-                }
-              } else if (resultStatus === 'success' && name === 'list_files' && target) {
-                filesExamined.add(target)
-              }
-              await core.coordinator.recordToolResult(runtimeTurn, {
-                callId: tc.id,
-                name,
-                content: result,
-                status: resultStatus,
-                fileReferences
-              })
-              callbacks.onSubAgentToolEnd?.(subAgentId, tc.id, uiResult || result)
-              return {
-                role: 'tool' as const,
-                tool_call_id: tc.id,
-                name,
-                content: result,
-                _fileReferences: fileReferences
-              }
+            },
+            createToolContext: (call, requestId) => ({
+              workspaceRoot: ctx.workspaceRoot,
+              sessionId: ctx.sessionId,
+              contextScopeId,
+              runtimeCoordinator: core.coordinator,
+              runtimeTurn,
+              transactionId: ctx.transactionId,
+              editTransactionService: ctx.editTransactionService,
+              abortSignal: abortController.signal,
+              toolCallId: call.callId,
+              permissionRequestId: requestId
             })
-          )
+          })
+
+          for (const item of pipelineResults) {
+            const name = item.canonicalName
+            const args = item.call.rawArguments
+            const result = item.result.status === 'success'
+              ? JSON.stringify({ ok: true, data: item.result.modelContent })
+              : JSON.stringify({ ok: false, error: item.result.error })
+            const uiResult = item.result.uiContent
+            const fileReferences = item.result.status === 'success' ? item.result.fileReferences : undefined
+            let resultStatus: 'success' | 'error' = item.result.status === 'success' ? 'success' : 'error'
+            let parsedResult: any
+            try {
+              parsedResult = JSON.parse(result)
+              const rawDataError = typeof parsedResult?.data === 'string' &&
+                parsedResult.data.trimStart().startsWith('Error:')
+              const readBatchError = name === 'Read' && typeof parsedResult?.data === 'string' &&
+                /<file\b[^>]*>\s*(?:Error:|Cannot read)/i.test(parsedResult.data)
+              if (rawDataError || readBatchError) resultStatus = 'error'
+            } catch {}
+            const handoffStatus: SubAgentHandoffTool['status'] = item.result.status === 'cancelled'
+              ? 'interrupted'
+              : resultStatus
+            const target = extractToolTarget(name, args)
+            recentTools.push({
+              name,
+              status: handoffStatus,
+              target,
+              summary: summarizeToolResult(result)
+            })
+            if (resultStatus === 'success' && ['Edit', 'Write', 'NotebookEdit'].includes(name) && target) {
+              filesModified.add(target)
+            }
+            if (handoffStatus !== 'error' && ['Bash', 'PowerShell'].includes(name)) {
+              workspaceMayHaveUntrackedChanges = true
+            }
+            if (name === 'Read') {
+              for (const filePath of successfulReadFiles(args, parsedResult?.data)) {
+                filesExamined.add(filePath)
+              }
+            } else if (resultStatus === 'success' && name === 'list_files' && target) {
+              filesExamined.add(target)
+            }
+            await core.coordinator.recordToolResult(runtimeTurn, {
+              callId: item.call.callId,
+              name,
+              content: result,
+              status: handoffStatus === 'interrupted' ? 'interrupted' : resultStatus,
+              fileReferences
+            })
+            callbacks.onSubAgentToolEnd?.(subAgentId, item.call.callId, uiResult || result)
+          }
 
         } else {
           // SubAgent 产出最终文本（未调用 submit_result 的纯文本回退）

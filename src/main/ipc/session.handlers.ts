@@ -4,6 +4,10 @@ import { SessionStore } from '../services/SessionStore'
 import { deleteSessionWithAttachments, getAttachmentService } from './attachment.handlers'
 import { getReadFingerprintStore } from '../tools/ReadFingerprintStore'
 import { getEditTransactionService } from '../services/EditTransactionService'
+import { getLargeToolResultStore } from '../tools/runtime/LargeToolResultStore'
+import { getToolExposureState } from '../tools/runtime/ToolExposurePlanner'
+import { getWorkspaceService } from './workspace.handlers'
+import { getMcpContentStore } from '../services/mcp'
 
 let sessionStore: SessionStore | null = null
 let loadPromise: Promise<void> | null = null
@@ -44,7 +48,17 @@ export function registerSessionIpc(): void {
 
   ipcMain.handle(IPC_CHANNELS.SESSION_DELETE, async (_event, sessionId: string) => {
     const permanentlyDeleted = await deleteSessionWithAttachments(svc, getAttachmentService(), sessionId)
-    if (permanentlyDeleted) await getEditTransactionService().cleanupSession(sessionId)
+    if (permanentlyDeleted) {
+      await getEditTransactionService().cleanupSession(sessionId)
+      const workspaceRoot = getWorkspaceService()?.getCurrentWorkspace()
+      if (workspaceRoot) {
+        await Promise.all([
+          getLargeToolResultStore().removeSession(workspaceRoot, sessionId),
+          getMcpContentStore().removeSession(workspaceRoot, sessionId)
+        ])
+      }
+      getToolExposureState().clearSession(sessionId)
+    }
     getReadFingerprintStore().clear(sessionId)
   })
 }
