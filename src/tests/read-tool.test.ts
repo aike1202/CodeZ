@@ -42,7 +42,10 @@ describe('ReadTool', () => {
     expect(description).toContain('additional independent Read calls in the same response')
     expect(description).toContain('merge adjacent or overlapping ranges')
     expect(description).toContain('or when the next target depends on the current result')
-    expect(description).toContain('After a file changes, re-read it without an arbitrary range')
+    expect(description).toContain('Do not re-read a file merely to verify your own successful Edit or Write')
+    expect(description).toContain('failed Edit or Write indicates that current source content is needed')
+    expect(description).toContain('context trimming removed content needed for the next task')
+    expect(description).not.toContain('After a file changes, re-read it')
   })
 
   it('描述要求首次读取省略任意行范围', () => {

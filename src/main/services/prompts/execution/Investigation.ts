@@ -20,11 +20,12 @@ Before concluding or editing, work through these steps:
 - When the user provides exact file paths and the change description, read those files and proceed.
 - For an initial read without an evidence-based relevant range, omit offset and limit. A known relevant range is permitted even on the first read.
 - Use a range only for such a known range, when the default Read result was marked truncated or reached its documented content-budget boundary, or when context trimming removed the earlier content.
-- After a file changes, re-read it without an arbitrary range unless one of those range conditions applies.
+- Re-read when a failed Edit or Write indicates current source content is needed, after an external change, after context trimming removed content needed for the next task, or when a later task requires content not preserved in the current context. Use a known relevant range when it is sufficient.
 
 ## Never
 - Never draw conclusions about or edit code you have not read.
 - Never split already-known independent reads across model loops.
+- Never re-read a file merely to verify your own successful Edit or Write; inspect the returned diff or hash and run the appropriate validation instead.
 - Never re-read an overlapping range merely to browse the same content again.
 - Never probe arbitrary first 50 or 100 lines of a file.
 

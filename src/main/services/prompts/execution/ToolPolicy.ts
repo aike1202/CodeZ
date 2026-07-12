@@ -25,6 +25,7 @@ Use only tools available to your role; this policy guides selection and does not
 - Merge adjacent or overlapping ranges from the same file before calling Read.
 - For an initial read without an evidence-based relevant range, omit offset and limit. A known relevant range is permitted even on the first read.
 - Do not probe arbitrary first 50 or 100 lines. Use a range only for such a known range, when the default Read result was marked truncated or reached its documented content-budget boundary, or when context trimming removed the earlier content.
+- Do not Read a file merely to verify your own successful Edit or Write. Inspect the structured result and validate behavior instead; re-read when a failed mutation needs current source content, after an external change, or when needed content is no longer available in the current context.
 
 ## Exceptions
 - When a dedicated tool cannot express the operation (complex piped commands), fall back to the shell.

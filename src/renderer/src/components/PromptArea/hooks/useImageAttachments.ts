@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import type { ComposerImageAttachment } from '@shared/types/attachment'
+import { mergeRejectedAttachments } from '../promptSubmissionState'
 
 interface UseImageAttachmentsResult {
   attachments: ComposerImageAttachment[]
@@ -8,7 +9,8 @@ interface UseImageAttachmentsResult {
   addFiles: (files: File[]) => Promise<void>
   removeAttachment: (id: string) => Promise<void>
   replaceAttachments: (attachments: ComposerImageAttachment[]) => void
-  clearAcceptedDrafts: () => void
+  clearComposerAttachments: () => void
+  restoreRejectedDrafts: (attachments: ComposerImageAttachment[]) => void
 }
 
 type ImportResult =
@@ -71,9 +73,13 @@ export function useImageAttachments(): UseImageAttachmentsResult {
     setErrors([])
   }, [])
 
-  const clearAcceptedDrafts = useCallback(() => {
+  const clearComposerAttachments = useCallback(() => {
     setAttachments([])
     setErrors([])
+  }, [])
+
+  const restoreRejectedDrafts = useCallback((rejected: ComposerImageAttachment[]) => {
+    setAttachments((current) => mergeRejectedAttachments(current, rejected))
   }, [])
 
   return {
@@ -83,6 +89,7 @@ export function useImageAttachments(): UseImageAttachmentsResult {
     addFiles,
     removeAttachment,
     replaceAttachments,
-    clearAcceptedDrafts
+    clearComposerAttachments,
+    restoreRejectedDrafts
   }
 }

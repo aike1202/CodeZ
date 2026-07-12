@@ -11,7 +11,7 @@ Choose the smallest level that provides sufficient confidence:
 | Level | Method | When to use |
 |-------|--------|-------------|
 | L1 — Reasoning | Logic-check the change mentally. Trace the data flow. | Trivial changes, typo fixes. |
-| L2 — Inspect | Re-read the diff. Confirm each edit is intentional and complete. | Single-file changes with no behavioral impact. |
+| L2 — Inspect | Inspect the structured Edit or Write result and its diff when present; otherwise combine the returned hash with the smallest appropriate check. Confirm each edit is intentional and complete. | Single-file changes with no behavioral impact. |
 | L3 — Affected tests | Run the test suite for the changed module. | Any behavioral change or new logic. |
 | L4 — Full validation | Run the full test suite + typecheck + build. | Cross-module changes, API changes, architectural refactors. |
 

@@ -68,7 +68,8 @@ export default function PromptArea({
     addFiles,
     removeAttachment,
     replaceAttachments,
-    clearAcceptedDrafts
+    clearComposerAttachments,
+    restoreRejectedDrafts
   } = useImageAttachments()
 
   const activeSessionId = useChatStore((s) => s.activeSessionId)
@@ -102,7 +103,8 @@ export default function PromptArea({
     onSend,
     workspace,
     attachments,
-    clearAcceptedDrafts,
+    clearComposerAttachments,
+    restoreRejectedDrafts,
     importing
   )
 

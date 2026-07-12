@@ -6,6 +6,7 @@ import { builtinCommands } from '../../../commands/SlashCommandParser'
 import type { WorkspaceInfo } from '@shared/types/workspace'
 import type { ComposerImageAttachment } from '@shared/types/attachment'
 import { evaluateImageSendState } from '../../chat/imageAttachmentState'
+import { restoreRejectedPromptText } from '../promptSubmissionState'
 
 export function usePromptEditor(
   onSend: (
@@ -15,7 +16,8 @@ export function usePromptEditor(
   ) => Promise<boolean>,
   workspace: WorkspaceInfo | null | undefined,
   attachments: ComposerImageAttachment[],
-  clearAcceptedDrafts: () => void,
+  clearComposerAttachments: () => void,
+  restoreRejectedDrafts: (attachments: ComposerImageAttachment[]) => void,
   importingAttachments: boolean
 ) {
   const [text, setText] = useState('')
@@ -37,6 +39,7 @@ export function usePromptEditor(
   const [popupSelectedIndex, setPopupSelectedIndex] = useState(0)
 
   const viewRef = useRef<EditorView | null>(null)
+  const isSubmittingRef = useRef(false)
 
   const providers = useProviderStore((s) => s.providers)
   const activeProviderId = useProviderStore((s) => s.activeProviderId)
@@ -233,20 +236,37 @@ export function usePromptEditor(
   }
 
   const handleSend = async (): Promise<boolean> => {
-    if (!sendState.canSend) return false
-    const trimmed = text.trim()
+    if (!sendState.canSend || isSubmittingRef.current) return false
+
+    const submittedText = text
+    const submittedAttachments = attachments
+    const trimmed = submittedText.trim()
     const finalContent = trimmed ? processSkillsInText(trimmed) : ''
-    const accepted = await onSend(
-      finalContent,
-      selectedModelName || models[0]?.name || '',
-      attachments
-    )
-    if (accepted) {
-      setText('')
-      setActiveToken(null)
-      clearAcceptedDrafts()
+
+    isSubmittingRef.current = true
+    setText('')
+    setActiveToken(null)
+    clearComposerAttachments()
+
+    try {
+      const accepted = await onSend(
+        finalContent,
+        selectedModelName || models[0]?.name || '',
+        submittedAttachments
+      )
+      if (!accepted) {
+        setText((current) => restoreRejectedPromptText(current, submittedText))
+        restoreRejectedDrafts(submittedAttachments)
+      }
+      return accepted
+    } catch (error) {
+      console.error('[PromptArea] Failed to submit prompt:', error)
+      setText((current) => restoreRejectedPromptText(current, submittedText))
+      restoreRejectedDrafts(submittedAttachments)
+      return false
+    } finally {
+      isSubmittingRef.current = false
     }
-    return accepted
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
