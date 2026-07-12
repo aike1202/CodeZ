@@ -62,6 +62,28 @@ describe('SessionRuntimeCoordinator', () => {
     await runtime.completeTurn(sub, { stopReason: 'stop' })
   })
 
+  it('claims a scope before the first ledger write completes', async () => {
+    const { ledger, runtime } = await fixture()
+    const attempts = await Promise.allSettled([
+      runtime.beginTurn({ sessionId: 's1', contextScopeId: 'subagent:resume-1', text: 'resume once' }),
+      runtime.beginTurn({ sessionId: 's1', contextScopeId: 'subagent:resume-1', text: 'resume twice' })
+    ])
+
+    const fulfilled = attempts.filter(
+      (attempt): attempt is PromiseFulfilledResult<Awaited<ReturnType<typeof runtime.beginTurn>>> =>
+        attempt.status === 'fulfilled'
+    )
+    const rejected = attempts.filter((attempt) => attempt.status === 'rejected')
+    expect(fulfilled).toHaveLength(1)
+    expect(rejected).toHaveLength(1)
+    expect((rejected[0] as PromiseRejectedResult).reason).toEqual(
+      expect.objectContaining({ message: expect.stringContaining('already has an active turn') })
+    )
+    expect((await ledger.load('s1')).scopes['subagent:resume-1'].activeMessages).toHaveLength(1)
+
+    await runtime.completeTurn(fulfilled[0].value, { stopReason: 'stop' })
+  })
+
   it('records interrupted results for unfinished calls', async () => {
     const { ledger, runtime } = await fixture()
     const turn = await runtime.beginTurn({ sessionId: 's1', contextScopeId: 'main', text: 'read' })

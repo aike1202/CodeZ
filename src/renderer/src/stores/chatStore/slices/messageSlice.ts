@@ -74,6 +74,8 @@ export interface MessageSlice {
       prompt: string
       depth?: 'quick' | 'normal' | 'exhaustive'
       expectations?: { questions: string[]; outOfScope?: string[] }
+      context?: string
+      scope?: { directories?: string[]; excludeGlobs?: string[] }
       parentToolCallId: string
     }
   ) => void
@@ -107,36 +109,56 @@ export function updateMessageInState(
   updater: (m: ChatMessage) => ChatMessage,
   sessionUpdater?: (session: ChatSession, updatedMessages: ChatMessage[]) => ChatSession
 ): Partial<ChatState> {
-  let foundSessionId: string | null = null
-  const sessions = s.sessions.map((session) => {
-    if (session.messages.some((m) => m.id === msgId)) {
-      foundSessionId = session.id
-      const updatedMessages = session.messages.map((m) => (m.id === msgId ? updater(m) : m))
-      let updatedSession = { ...session, messages: updatedMessages }
+  const replaceMessage = (messages: ChatMessage[], index: number): ChatMessage[] => {
+    const updatedMessage = updater(messages[index])
+    if (updatedMessage === messages[index]) return messages
+    const updatedMessages = messages.slice()
+    updatedMessages[index] = updatedMessage
+    return updatedMessages
+  }
+
+  // Streaming events overwhelmingly target the active conversation. Resolve that
+  // path first so a token does not scan every persisted session and message.
+  if (s.activeSessionId) {
+    const activeMessageIndex = s.messages.findIndex((message) => message.id === msgId)
+    if (activeMessageIndex >= 0) {
+      const updatedMessages = replaceMessage(s.messages, activeMessageIndex)
+      const activeSessionIndex = s.sessions.findIndex(
+        (session) => session.id === s.activeSessionId
+      )
+      if (activeSessionIndex < 0) return { messages: updatedMessages }
+
+      let updatedSession = {
+        ...s.sessions[activeSessionIndex],
+        messages: updatedMessages
+      }
       if (sessionUpdater) {
         updatedSession = sessionUpdater(updatedSession, updatedMessages)
       }
-      return updatedSession
-    }
-    return session
-  })
-
-  // If not found in sessions, check active messages (fallback)
-  if (!foundSessionId) {
-    if (s.messages.some((m) => m.id === msgId)) {
-      return { messages: s.messages.map((m) => (m.id === msgId ? updater(m) : m)) }
-    }
-    return {}
-  }
-
-  const result: Partial<ChatState> = { sessions }
-  if (foundSessionId === s.activeSessionId) {
-    const actSession = sessions.find((x) => x.id === foundSessionId)
-    if (actSession) {
-      result.messages = actSession.messages
+      const sessions = s.sessions.slice()
+      sessions[activeSessionIndex] = updatedSession
+      return { messages: updatedMessages, sessions }
     }
   }
-  return result
+
+  // A background stream can keep running after the user switches sessions.
+  for (let sessionIndex = 0; sessionIndex < s.sessions.length; sessionIndex++) {
+    const session = s.sessions[sessionIndex]
+    const messageIndex = session.messages.findIndex((message) => message.id === msgId)
+    if (messageIndex < 0) continue
+
+    const updatedMessages = replaceMessage(session.messages, messageIndex)
+    let updatedSession = { ...session, messages: updatedMessages }
+    if (sessionUpdater) {
+      updatedSession = sessionUpdater(updatedSession, updatedMessages)
+    }
+    const sessions = s.sessions.slice()
+    sessions[sessionIndex] = updatedSession
+    return { sessions }
+  }
+
+  const messageIndex = s.messages.findIndex((message) => message.id === msgId)
+  return messageIndex >= 0 ? { messages: replaceMessage(s.messages, messageIndex) } : {}
 }
 
 export function removeMessagesFromState(
@@ -244,6 +266,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
   },
 
   appendStreamChunk: (msgId: string, delta: string, reasoningDelta?: string) => {
+    if (!delta && !reasoningDelta) return
     set((s) => updateMessageInState(s, msgId, (m) => {
       const newContent = m.content + (delta || '')
       const newReasoning = m.reasoningContent
@@ -255,11 +278,10 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
         const now = Date.now()
         const last = timeline[timeline.length - 1]
         if (last?.type === 'text') {
-          timeline = timeline.map((item) =>
-            item.id === last.id && item.type === 'text'
-              ? { ...item, content: item.content + delta, updatedAt: now }
-              : item
-          )
+          timeline = [
+            ...timeline.slice(0, -1),
+            { ...last, content: last.content + delta, updatedAt: now }
+          ]
         } else {
           timeline = [
             ...timeline,
@@ -267,6 +289,30 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
               id: genId(),
               type: 'text',
               content: delta,
+              status: 'running',
+              startedAt: now,
+              updatedAt: now,
+              sequence: timeline.length
+            }
+          ]
+        }
+      }
+
+      if (reasoningDelta) {
+        const now = Date.now()
+        const last = timeline[timeline.length - 1]
+        if (last?.type === 'reasoning') {
+          timeline = [
+            ...timeline.slice(0, -1),
+            { ...last, content: last.content + reasoningDelta, status: 'running', updatedAt: now }
+          ]
+        } else {
+          timeline = [
+            ...timeline,
+            {
+              id: genId(),
+              type: 'reasoning',
+              content: reasoningDelta,
               status: 'running',
               startedAt: now,
               updatedAt: now,
@@ -372,10 +418,10 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       if (last?.type === 'reasoning') {
         return {
           ...m,
-          executionTimeline: timeline.map((item) => {
-            if (item.id !== last.id || item.type !== 'reasoning') return item
-            return { ...item, content: item.content + delta, status: 'running', updatedAt: now }
-          })
+          executionTimeline: [
+            ...timeline.slice(0, -1),
+            { ...last, content: last.content + delta, status: 'running', updatedAt: now }
+          ]
         }
       }
 
@@ -532,6 +578,8 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
         prompt: meta.prompt,
         depth: meta.depth,
         expectations: meta.expectations,
+        context: meta.context,
+        scope: meta.scope,
         parentToolCallId: meta.parentToolCallId,
         status: 'running',
         startedAt: now,
@@ -556,11 +604,10 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
         content = sub.content + delta
         const last = timeline[timeline.length - 1]
         if (last?.type === 'text') {
-          timeline = timeline.map((item) =>
-            item.id === last.id && item.type === 'text'
-              ? { ...item, content: item.content + delta, updatedAt: now }
-              : item
-          )
+          timeline = [
+            ...timeline.slice(0, -1),
+            { ...last, content: last.content + delta, updatedAt: now }
+          ]
         } else {
           timeline = [...timeline, {
             id: genId(),
@@ -580,11 +627,10 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
           : reasoningDelta
         const last = timeline[timeline.length - 1]
         if (last?.type === 'reasoning') {
-          timeline = timeline.map((item) =>
-            item.id === last.id && item.type === 'reasoning'
-              ? { ...item, content: item.content + reasoningDelta, status: 'running', updatedAt: now }
-              : item
-          )
+          timeline = [
+            ...timeline.slice(0, -1),
+            { ...last, content: last.content + reasoningDelta, status: 'running', updatedAt: now }
+          ]
         } else {
           timeline = [...timeline, {
             id: genId(),

@@ -19,6 +19,7 @@ import type { ExecutionLogProps } from './types'
 import { LogItemRow } from './components/LogItemRow'
 import { ParallelToolBatchCard } from './components/ParallelToolBatchCard'
 import SubAgentCard from '../SubAgentCard'
+import { ParallelWaveGroup } from '../ParallelWaveGroup'
 
 export default function ExecutionLog({
   timeline,
@@ -29,7 +30,8 @@ export default function ExecutionLog({
   onDiffClick,
   streaming,
   interrupted,
-  subAgents
+  subAgents,
+  showParallelExecution = false
 }: ExecutionLogProps): React.ReactElement | null {
   const [expanded, setExpanded] = useState(false)
   const [expandedMap, setExpandedMap] = useState<Record<string, boolean>>({})
@@ -124,6 +126,7 @@ export default function ExecutionLog({
 
   return (
     <div className="timeline-container">
+      {showParallelExecution ? <ParallelWaveGroup /> : null}
       <button
         type="button"
         className="timeline-header-btn"

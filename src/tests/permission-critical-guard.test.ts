@@ -14,6 +14,9 @@ describe('CriticalOperationGuard', () => {
     ['powershell', 'powershell -e YQ==', 'critical.hidden.encoded-command'],
     ['bash', 'bash -c "$CMD"', 'critical.hidden.dynamic-command'],
     ['powershell', 'powershell -Command $cmd', 'critical.hidden.dynamic-command'],
+    ['powershell', '& $cmd --mode full', 'critical.hidden.dynamic-command'],
+    ['powershell', 'cmd /c "$env:ComSpec /c del C:/tmp/x & rem"', 'critical.hidden.dynamic-command'],
+    ['powershell', 'cmd /c "${env:ComSpec} /c del C:/tmp/x & rem" -- src/a/b', 'critical.hidden.dynamic-command'],
     ['cmd', 'cmd /c %CMD%', 'critical.hidden.dynamic-command'],
     ['bash', 'eval "$CMD"', 'critical.hidden.dynamic-command'],
     ['powershell', 'Invoke-Expression $cmd', 'critical.hidden.dynamic-command'],
@@ -49,7 +52,9 @@ describe('CriticalOperationGuard', () => {
     ['bash', 'git push -fu origin main', 'critical.git.force-push'],
     ['bash', 'git push origin +main', 'critical.git.force-push'],
     ['bash', 'git push --mirror origin', 'critical.git.force-push'],
-    ['bash', 'git -C . push --force origin main', 'critical.git.force-push']
+    ['bash', 'git -C . push --force origin main', 'critical.git.force-push'],
+    ['powershell', 'git.cmd push --force origin main', 'critical.git.force-push'],
+    ['powershell', 'npm.cmd config set //registry.npmjs.org/:_authToken secret', 'critical.credential.access']
   ] as const)('detects %s %s', async (shell, command, ruleId) => {
     expect((await new CriticalOperationGuard().analyzeRaw(shell, command, '/workspace'))?.ruleId).toBe(ruleId)
   })

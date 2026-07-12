@@ -101,6 +101,11 @@
   padding-bottom: 0;
 }
 
+.chat-message-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
+}
+
 .user-message-bubble {
   background-color: var(--bg-panel);
   color: var(--text-main);

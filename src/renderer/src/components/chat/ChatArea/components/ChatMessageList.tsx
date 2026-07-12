@@ -27,6 +27,83 @@ interface ChatMessageListProps {
   ) => void
 }
 
+interface ChatMessageRowProps extends Omit<ChatMessageListProps, 'messages'> {
+  msg: ChatMessage
+  showParallelExecution: boolean
+  onOpenImages: (attachments: ImageAttachment[], index: number) => void
+  onPreviewRevert: (msgId: string) => void
+}
+
+const ChatMessageRow = React.memo(function ChatMessageRow({
+  msg,
+  lastStreamingMsgId,
+  showParallelExecution,
+  handleFileClick,
+  handleDiffClick,
+  onOpenImages,
+  onPreviewRevert
+}: ChatMessageRowProps): React.ReactElement {
+  if (msg.role === 'system') {
+    return (
+      <div
+        className="chat-message-row w-full text-center my-4"
+        style={{ color: 'var(--text-muted, #9ca3af)', fontSize: '0.75rem' }}
+      >
+        {msg.content}
+      </div>
+    )
+  }
+
+  const messageAttachments = msg.attachments || []
+  const hasText = Boolean(msg.content.trim())
+  if (msg.role === 'user') {
+    return (
+      <Flex
+        justify="end"
+        className="chat-message-row w-full group animate-message-in"
+        style={{ position: 'relative' }}
+      >
+        <div className={`user-message-bubble${messageAttachments.length ? ' user-message-bubble--with-images' : ''}`}>
+          {messageAttachments.length > 0 ? (
+            <ImageAttachmentGrid
+              attachments={messageAttachments}
+              mode="readonly"
+              onOpen={(index) => onOpenImages(messageAttachments, index)}
+            />
+          ) : null}
+          {hasText ? <MessageBody content={msg.content} onFileClick={handleFileClick} /> : null}
+        </div>
+        <div className="revert-btn-container">
+          <button
+            onClick={() => {
+              onPreviewRevert(msg.id)
+            }}
+            className="revert-message-btn"
+            title="撤回到此处并还原之后的所有文件修改"
+          >
+            <IconRestore width={14} height={14} />
+          </button>
+        </div>
+      </Flex>
+    )
+  }
+
+  return (
+    <Flex justify="start" className="chat-message-row w-full max-w-3xl animate-message-in">
+      <Flex align="center" justify="center" className="agent-avatar">
+        <IconBot width={18} height={18} />
+      </Flex>
+      <AgentMessageContent
+        msg={msg}
+        lastStreamingMsgId={lastStreamingMsgId}
+        showParallelExecution={showParallelExecution}
+        handleFileClick={handleFileClick}
+        handleDiffClick={handleDiffClick}
+      />
+    </Flex>
+  )
+})
+
 export function ChatMessageList({
   messages,
   lastStreamingMsgId,
@@ -38,64 +115,37 @@ export function ChatMessageList({
     attachments: ImageAttachment[]
     index: number
   } | null>(null)
+  const handleOpenImages = React.useCallback((attachments: ImageAttachment[], index: number) => {
+    setImagePreview({ attachments, index })
+  }, [])
+  const handlePreviewRevert = React.useCallback(async (msgId: string) => {
+    const preview = await useChatStore.getState().previewRevertMessage(msgId)
+    setPreviewData(preview
+      ? { msgId, ...preview }
+      : { msgId, toDelete: [], toRestore: [], unknownStatus: true })
+  }, [])
+
+  const latestAgentMessageId = React.useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index--) {
+      if (messages[index].role === 'agent') return messages[index].id
+    }
+    return null
+  }, [messages])
 
   return (
     <Stack gap={6} className="app-message-list">
       {messages.map((msg) => {
-        if (msg.role === 'system') {
-          return (
-            <div
-              key={msg.id}
-              className="w-full text-center my-4"
-              style={{ color: 'var(--text-muted, #9ca3af)', fontSize: '0.75rem' }}
-            >
-              {msg.content}
-            </div>
-          )
-        }
-        const messageAttachments = msg.attachments || []
-        const hasText = Boolean(msg.content.trim())
-        return msg.role === 'user' ? (
-          <Flex key={msg.id} justify="end" className="w-full group animate-message-in" style={{ position: 'relative' }}>
-            <div className={`user-message-bubble${messageAttachments.length ? ' user-message-bubble--with-images' : ''}`}>
-              {messageAttachments.length > 0 ? (
-                <ImageAttachmentGrid
-                  attachments={messageAttachments}
-                  mode="readonly"
-                  onOpen={(index) => setImagePreview({ attachments: messageAttachments, index })}
-                />
-              ) : null}
-              {hasText ? <MessageBody content={msg.content} onFileClick={handleFileClick} /> : null}
-            </div>
-            <div className="revert-btn-container">
-              <button 
-                onClick={async () => {
-                  const preview = await useChatStore.getState().previewRevertMessage(msg.id)
-                  if (!preview) {
-                    setPreviewData({ msgId: msg.id, toDelete: [], toRestore: [], unknownStatus: true })
-                  } else {
-                    setPreviewData({ msgId: msg.id, ...preview })
-                  }
-                }}
-                className="revert-message-btn"
-                title="撤回到此处并还原之后的所有文件修改"
-              >
-                <IconRestore width={14} height={14} />
-              </button>
-            </div>
-          </Flex>
-        ) : (
-          <Flex key={msg.id} justify="start" className="w-full max-w-3xl animate-message-in">
-            <Flex align="center" justify="center" className="agent-avatar">
-              <IconBot width={18} height={18} />
-            </Flex>
-            <AgentMessageContent
-              msg={msg}
-              lastStreamingMsgId={lastStreamingMsgId}
-              handleFileClick={handleFileClick}
-              handleDiffClick={handleDiffClick}
-            />
-          </Flex>
+        return (
+          <ChatMessageRow
+            key={msg.id}
+            msg={msg}
+            lastStreamingMsgId={lastStreamingMsgId}
+            showParallelExecution={msg.id === latestAgentMessageId}
+            handleFileClick={handleFileClick}
+            handleDiffClick={handleDiffClick}
+            onOpenImages={handleOpenImages}
+            onPreviewRevert={handlePreviewRevert}
+          />
         )
       })}
 

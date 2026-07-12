@@ -3,6 +3,7 @@ import * as fs from 'fs/promises'
 import * as path from 'path'
 import type { PermissionSnapshot } from '../../../shared/types/permission'
 import type { PermissionShellKind } from './operationTypes'
+import { normalizeExecutableName } from './executableName'
 
 const PACKAGE_MANAGER_VERSION_FLAGS = new Set(['-v', '--version', '-version'])
 const PACKAGE_MANAGER_BUILTINS = new Set([
@@ -21,9 +22,9 @@ export interface ExpandedCommand {
   cwd?: string
 }
 
-async function snapshot(filePath: string): Promise<PermissionSnapshot> {
-  const content = await fs.readFile(filePath)
-  return { path: filePath, sha256: createHash('sha256').update(content).digest('hex') }
+async function snapshot(filePath: string, content?: string | Buffer): Promise<PermissionSnapshot> {
+  const bytes = content ?? await fs.readFile(filePath)
+  return { path: filePath, sha256: createHash('sha256').update(bytes).digest('hex') }
 }
 
 export class NestedCommandExpander {
@@ -36,7 +37,29 @@ export class NestedCommandExpander {
     seen = new Set<string>()
   ): Promise<ExpandedCommand> {
     if (depth > 4) return { command: null, shell: null, snapshots: [], opaqueReason: 'nested-depth' }
-    const executable = (argv[0] || '').toLowerCase().replace(/\.exe$/, '')
+    const rawExecutable = argv[0] || ''
+    const executable = normalizeExecutableName(rawExecutable)
+    const candidate = rawExecutable && (path.isAbsolute(rawExecutable) ? rawExecutable : path.resolve(cwd, rawExecutable))
+    const extension = candidate ? path.extname(candidate).toLowerCase() : ''
+    const baseName = candidate ? path.basename(candidate).toLowerCase() : ''
+    const localShell = extension === '.ps1'
+      ? 'powershell'
+      : extension === '.cmd' || extension === '.bat'
+        ? 'cmd'
+        : extension === '.sh' || ['mvnw', 'gradlew'].includes(baseName)
+          ? 'bash'
+          : null
+    const explicitPath = path.isAbsolute(rawExecutable) || /[\\/]/.test(rawExecutable)
+    if (candidate && localShell && (explicitPath || ['npm', 'pnpm', 'yarn', 'bun'].includes(executable))) {
+      if (seen.has(candidate)) return { command: null, shell: null, snapshots: [], opaqueReason: 'nested-cycle' }
+      try {
+        const command = await fs.readFile(candidate, 'utf8')
+        seen.add(candidate)
+        return { command, shell: localShell, snapshots: [await snapshot(candidate, command)], kind: 'script', cwd }
+      } catch {
+        if (explicitPath) return { command: null, shell: null, snapshots: [], opaqueReason: 'unreadable-script' }
+      }
+    }
     if (['bash', 'sh', 'zsh'].includes(executable)) {
       const index = argv.findIndex((arg) => /^-[a-z]*c[a-z]*$/i.test(arg))
       return index >= 0 && argv[index + 1]
@@ -86,21 +109,19 @@ export class NestedCommandExpander {
         const content = await fs.readFile(packagePath, 'utf8')
         const command = JSON.parse(content)?.scripts?.[scriptName]
         if (typeof command !== 'string') return { command: null, shell: null, snapshots: [], opaqueReason: 'unknown-script' }
-        return { command, shell: parentShell, snapshots: [await snapshot(packagePath)], kind: 'script', cwd: packageRoot }
+        return { command, shell: parentShell, snapshots: [await snapshot(packagePath, content)], kind: 'script', cwd: packageRoot }
       } catch {
         return { command: null, shell: null, snapshots: [], opaqueReason: 'unreadable-package-script' }
       }
     }
-    const candidate = argv[0] && (path.isAbsolute(argv[0]) ? argv[0] : path.resolve(cwd, argv[0]))
-    const extension = candidate ? path.extname(candidate).toLowerCase() : ''
-    const shell = extension === '.ps1' ? 'powershell' : extension === '.cmd' || extension === '.bat' ? 'cmd' : extension === '.sh' ? 'bash' : null
-    if (candidate && shell && seen.has(candidate)) {
+    if (candidate && localShell && seen.has(candidate)) {
       return { command: null, shell: null, snapshots: [], opaqueReason: 'nested-cycle' }
     }
-    if (candidate && shell) {
+    if (candidate && localShell) {
       try {
         seen.add(candidate)
-        return { command: await fs.readFile(candidate, 'utf8'), shell, snapshots: [await snapshot(candidate)], kind: 'script', cwd }
+        const command = await fs.readFile(candidate, 'utf8')
+        return { command, shell: localShell, snapshots: [await snapshot(candidate, command)], kind: 'script', cwd }
       } catch {
         return { command: null, shell: null, snapshots: [], opaqueReason: 'unreadable-script' }
       }

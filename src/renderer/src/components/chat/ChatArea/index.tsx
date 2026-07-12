@@ -142,6 +142,7 @@ export default function ChatArea({
   const containerRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const prevSessionIdRef = useRef<string | null>(null)
+  const scrollFrameRef = useRef<number | null>(null)
   const [isFollowing, setIsFollowing] = useState(true)
   const [containerMounted, setContainerMounted] = useState(false)
 
@@ -154,10 +155,17 @@ export default function ChatArea({
 
   const scrollToBottom = useCallback(() => {
     const container = containerRef.current
-    if (!container) return
-    requestAnimationFrame(() => {
+    if (!container || scrollFrameRef.current !== null) return
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = null
       container.scrollTop = container.scrollHeight
     })
+  }, [])
+
+  useEffect(() => () => {
+    if (scrollFrameRef.current !== null) {
+      cancelAnimationFrame(scrollFrameRef.current)
+    }
   }, [])
 
   const handleScroll = useCallback(() => {

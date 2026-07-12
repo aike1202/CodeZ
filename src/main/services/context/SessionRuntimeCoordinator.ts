@@ -77,13 +77,6 @@ export class SessionRuntimeCoordinator {
       createdAt: new Date().toISOString(),
       attachments: input.attachments?.map((attachment) => ({ ...attachment }))
     }
-    await this.ledger.append(input.sessionId, input.contextScopeId, 'user_message', {
-      message,
-      providerId: input.providerId,
-      model: input.model,
-      commandMetadata: input.commandMetadata
-    }, turnId)
-
     const active: ActiveTurn = {
       sessionId: input.sessionId,
       contextScopeId: input.contextScopeId,
@@ -95,6 +88,17 @@ export class SessionRuntimeCoordinator {
       closed: false
     }
     this.activeTurns.set(key, active)
+    try {
+      await this.ledger.append(input.sessionId, input.contextScopeId, 'user_message', {
+        message,
+        providerId: input.providerId,
+        model: input.model,
+        commandMetadata: input.commandMetadata
+      }, turnId)
+    } catch (error) {
+      if (this.activeTurns.get(key) === active) this.activeTurns.delete(key)
+      throw error
+    }
     return this.publicHandle(active)
   }
 

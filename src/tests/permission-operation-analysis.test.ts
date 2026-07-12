@@ -17,6 +17,48 @@ describe('permission operation analysis', () => {
     expect(result).toEqual({ command: null, shell: null, snapshots: [] })
   })
 
+  it('recognizes Windows package-manager shims when expanding scripts', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codez-permission-op-shim-'))
+    try {
+      await writeFile(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'vitest run' } }), 'utf8')
+      const result = await new NestedCommandExpander().expandCommand('powershell', ['npm.cmd', 'test'], root, root)
+
+      expect(result.command).toBe('vitest run')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('prefers a repository-local package-manager shim over package.json expansion', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codez-permission-local-shim-'))
+    try {
+      const shimPath = path.join(root, 'npm.cmd')
+      await writeFile(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'vitest run' } }), 'utf8')
+      await writeFile(shimPath, '@echo off\r\ndel /s /q C:\\Users\\*', 'utf8')
+      const result = await new NestedCommandExpander().expandCommand('powershell', ['.\\npm.cmd', 'test'], root, root)
+
+      expect(result.command).toContain('del /s /q')
+      expect(result.snapshots[0].path).toBe(shimPath)
+      expect(result.kind).toBe('script')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it.each(['mvnw', 'gradlew'])('expands and snapshots extensionless Java wrapper scripts: %s', async (wrapper) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codez-permission-java-wrapper-'))
+    try {
+      const wrapperPath = path.join(root, wrapper)
+      await writeFile(wrapperPath, '#!/bin/sh\nexec java -version', 'utf8')
+      const result = await new NestedCommandExpander().expandCommand('bash', [`./${wrapper}`, 'test'], root, root)
+
+      expect(result).toMatchObject({ command: '#!/bin/sh\nexec java -version', shell: 'bash', kind: 'script' })
+      expect(result.snapshots[0].path).toBe(wrapperPath)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it.each([
     ['npm', 'version'],
     ['npm', 'publish'],

@@ -6,7 +6,9 @@ import CodeBlock from './CodeBlock'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import './MessageBody.css'
 
-export default function MessageBody({
+const REMARK_PLUGINS = [remarkGfm]
+
+function MessageBody({
   content,
   onFileClick
 }: {
@@ -33,7 +35,7 @@ export default function MessageBody({
   return (
     <div className="markdown-body">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={REMARK_PLUGINS}
         components={{
           // 块级代码
           pre(props: any) {
@@ -97,3 +99,5 @@ export default function MessageBody({
     </div>
   )
 }
+
+export default React.memo(MessageBody)

@@ -12,35 +12,60 @@ import './ParallelWaveGroup.css'
  */
 export const ParallelWaveGroup: React.FC = () => {
   const { active, planSlug, isolation, rationale, waves, overallStatus } = useParallelExecStore()
+  const [expanded, setExpanded] = useState(false)
 
   if (!active || waves.length === 0) return null
 
+  const completedSteps = waves.reduce(
+    (count, wave) => count + wave.stepResults.filter((result) => result.status === 'completed').length,
+    0
+  )
+  const failedSteps = waves.reduce(
+    (count, wave) => count + wave.stepResults.filter((result) => result.status === 'failed').length,
+    0
+  )
+  const totalSteps = waves.reduce((count, wave) => count + wave.stepIds.length, 0)
+  const statusText = overallStatus === 'completed'
+    ? `已完成 ${completedSteps}/${totalSteps}`
+    : overallStatus === 'halted'
+      ? `已停止${failedSteps > 0 ? ` · ${failedSteps} 失败` : ''}`
+      : `执行中 ${completedSteps}/${totalSteps}`
+
   return (
     <div className="pwg-root">
-      <div className="pwg-header">
+      <button
+        type="button"
+        className={`pwg-capsule pwg-capsule--${overallStatus ?? 'running'}`}
+        aria-expanded={expanded}
+        aria-controls="parallel-execution-details"
+        onClick={() => setExpanded((value) => !value)}
+      >
         <Zap size={15} className="pwg-header-icon" />
         <span className="pwg-header-title">并行执行{planSlug ? `：${planSlug}` : ''}</span>
         <span className={`pwg-badge pwg-badge--${overallStatus ?? 'running'}`}>
-          {overallStatus === 'completed'
-            ? '全部完成'
-            : overallStatus === 'halted'
-              ? '已停止'
-              : '执行中'}
+          {statusText}
         </span>
-      </div>
+        {expanded
+          ? <ChevronDown size={14} className="pwg-chevron" />
+          : <ChevronRight size={14} className="pwg-chevron" />}
+      </button>
 
-      {rationale && <div className="pwg-rationale">分组理由：{rationale}</div>}
-      {isolation && (
-        <div className="pwg-isolation">
-          隔离：<code>{isolation === 'worktree' ? 'worktree（物理隔离）' : 'shared（共享目录）'}</code>
+      {expanded ? (
+        <div id="parallel-execution-details" className="pwg-panel">
+          {rationale && <div className="pwg-rationale">分组理由：{rationale}</div>}
+          {isolation && (
+            <div className="pwg-isolation">
+              隔离：<code>{isolation === 'worktree' ? 'worktree（物理隔离）' : 'shared（共享目录）'}</code>
+            </div>
+          )}
+
+          <div className="pwg-waves">
+            {waves.map((wave) => (
+              <WaveRow key={wave.index} wave={wave} halted={overallStatus === 'halted'} />
+            ))}
+          </div>
         </div>
-      )}
-
-      <div className="pwg-waves">
-        {waves.map((wave) => (
-          <WaveRow key={wave.index} wave={wave} halted={overallStatus === 'halted'} />
-        ))}
-      </div>
+      ) : null}
     </div>
   )
 }

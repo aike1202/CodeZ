@@ -3,6 +3,7 @@ import { ShellAnalysisService } from './ShellAnalysisService'
 import type { PermissionShellKind } from './operationTypes'
 import * as os from 'os'
 import * as path from 'path'
+import { normalizeExecutableName } from './executableName'
 
 interface CriticalPattern {
   id: string
@@ -33,7 +34,7 @@ interface CriticalMutation {
 }
 
 function criticalSystemMutation(argv: string[]): CriticalMutation | null {
-  const executable = (argv[0] || '').toLowerCase().replace(/\.exe$/, '')
+  const executable = normalizeExecutableName(argv[0] || '')
   const args = argv.slice(1).map((arg) => arg.toLowerCase())
   const subcommand = args[0] || ''
   if (executable === 'systemctl' && ['enable', 'disable', 'mask', 'unmask', 'start', 'stop', 'restart', 'reload', 'edit', 'daemon-reload'].includes(subcommand)) {
@@ -72,7 +73,7 @@ function criticalSystemMutation(argv: string[]): CriticalMutation | null {
 }
 
 function criticalPrivilegeEscalation(argv: string[]): CriticalMutation | null {
-  let executable = (argv[0] || '').toLowerCase().replace(/\.exe$/, '')
+  let executable = normalizeExecutableName(argv[0] || '')
   let args = argv.slice(1)
   let wrappedByEnv = false
   if (executable === 'env') {
@@ -94,7 +95,7 @@ function criticalPrivilegeEscalation(argv: string[]): CriticalMutation | null {
       }
       break
     }
-    executable = (args[index] || '').toLowerCase().replace(/\.exe$/, '')
+    executable = normalizeExecutableName(args[index] || '')
     args = args.slice(index + 1)
   }
   if (['pkexec', 'doas', 'runas'].includes(executable) || (wrappedByEnv && executable === 'sudo')) {
@@ -107,7 +108,7 @@ function criticalPrivilegeEscalation(argv: string[]): CriticalMutation | null {
 }
 
 function packageCredentialMutation(argv: string[]): boolean {
-  const executable = (argv[0] || '').toLowerCase().replace(/\.exe$/, '')
+  const executable = normalizeExecutableName(argv[0] || '')
   if (!['npm', 'pnpm', 'yarn', 'bun'].includes(executable)) return false
   let index = 1
   const directoryOption = argv[index]
@@ -127,14 +128,14 @@ function packageCredentialMutation(argv: string[]): boolean {
 }
 
 function hasDynamicEvaluator(argv: string[]): boolean {
-  const executable = (argv[0] || '').toLowerCase().replace(/\.exe$/, '')
+  const executable = normalizeExecutableName(argv[0] || '')
   if (!['eval', 'invoke-expression', 'iex'].includes(executable)) return false
   const expression = argv.slice(1).join(' ').trim()
   return /(?:^|\s)(?:\$[A-Za-z_]\w*|\$\{[^}]+\}|\$\(.+\)|`.+`|%[^%]+%|![^!]+!)(?:\s|$)/.test(expression)
 }
 
 function gitInvocation(argv: string[]): string[] | null {
-  const executable = (argv[0] || '').toLowerCase().replace(/\.exe$/, '')
+  const executable = normalizeExecutableName(argv[0] || '')
   if (executable !== 'git') return null
   let index = 1
   while (index < argv.length) {
@@ -175,12 +176,12 @@ function referencesPermissionConfig(source: string): boolean {
 }
 
 function isShellWrapper(argv: string[]): boolean {
-  const executable = (argv[0] || '').toLowerCase().replace(/\.exe$/, '')
+  const executable = normalizeExecutableName(argv[0] || '')
   return ['bash', 'sh', 'zsh', 'powershell', 'pwsh', 'cmd'].includes(executable)
 }
 
 function hasDynamicNestedCommand(argv: string[]): boolean {
-  const executable = (argv[0] || '').toLowerCase().replace(/\.exe$/, '')
+  const executable = normalizeExecutableName(argv[0] || '')
   let body = ''
   if (['bash', 'sh', 'zsh'].includes(executable)) {
     const index = argv.findIndex((arg) => /^-[a-z]*c[a-z]*$/i.test(arg))
@@ -227,7 +228,7 @@ export class CriticalOperationGuard {
       }
       const systemMutation = criticalSystemMutation(operation.argv)
       if (systemMutation) return this.decision(systemMutation.id, systemMutation.reason, command, systemMutation.impact)
-      const executable = (operation.argv[0] || '').toLowerCase().replace(/\.exe$/, '')
+      const executable = normalizeExecutableName(operation.argv[0] || '')
       if (referencesPermissionConfig(operation.source) && !PERMISSION_CONFIG_READ_COMMANDS.has(executable) && !isShellWrapper(operation.argv)) {
         return this.decision('critical.permission-config.write', '修改 CodeZ 权限配置', command, 'system')
       }
@@ -241,7 +242,7 @@ export class CriticalOperationGuard {
   }
 
   private criticalDeleteTarget(argv: string[], workspaceRoot: string): PermissionDecision | null {
-    const executable = (argv[0] || '').toLowerCase().replace(/\.exe$/, '')
+    const executable = normalizeExecutableName(argv[0] || '')
     if (!['rm', 'rmdir', 'del', 'erase', 'rd', 'remove-item', 'ri'].includes(executable)) return null
     const targets = argv.slice(1).filter((arg) => arg && !arg.startsWith('-') && !arg.startsWith('/q') && !arg.startsWith('/s'))
     for (const target of targets) {

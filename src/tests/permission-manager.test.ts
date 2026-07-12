@@ -55,6 +55,20 @@ describe('PermissionManager', () => {
     expect((await manager.evaluateToolCall('Bash', { command: 'npm install react' }, context('full-access'))).action).toBe('allow')
   })
 
+  it.each([
+    'npm.cmd install react',
+    'pnpm.cmd add react',
+    '.\\mvnw.cmd dependency:go-offline',
+    '.\\gradlew.bat test --refresh-dependencies'
+  ])('recognizes network operations through Windows build-tool shims: %s', async (command) => {
+    const decision = await manager.evaluateToolCall('PowerShell', { command }, context('auto'))
+
+    expect(decision.action).toBe('ask')
+    expect(decision.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ permission: 'network', action: 'ask' })
+    ]))
+  })
+
   it('allows compound PowerShell version queries as read-only commands', async () => {
     const decision = await manager.evaluateToolCall(
       'PowerShell',
@@ -65,6 +79,93 @@ describe('PermissionManager', () => {
     expect(decision.action).toBe('allow')
     expect(decision.riskLevel).toBe(0)
     expect(decision.critical).toBe(false)
+  })
+
+  it('fully analyzes git status with an option terminator and slash paths', async () => {
+    const command = 'git status --short -- src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/src/error.rs src-tauri/src/database src-tauri/src/todo src-tauri/tests/database.rs src-tauri/src/lib.rs'
+    const decision = await manager.evaluateToolCall('PowerShell', { command }, context('auto'))
+
+    expect(decision).toMatchObject({
+      action: 'allow',
+      analysisStatus: 'parsed',
+      riskLevel: 0
+    })
+    expect(decision.checks.some((check) => check.permission === 'shell_unparsed')).toBe(false)
+  })
+
+  it.each([
+    'cargo fmt --manifest-path src-tauri/Cargo.toml -- --check; if (-not $?) { exit 1 }; cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings; if (-not $?) { exit 1 }; cargo test --manifest-path src-tauri/Cargo.toml',
+    'cargo fmt --manifest-path src-tauri/Cargo.toml; if (-not $?) { exit 1 }; cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings; if (-not $?) { exit 1 }; cargo test --manifest-path src-tauri/Cargo.toml'
+  ])('fully analyzes Cargo validation chains with PowerShell failure guards', async (command) => {
+    const decision = await manager.evaluateToolCall('PowerShell', { command }, context('auto'))
+
+    expect(decision.analysisStatus).toBe('parsed')
+    expect(decision.checks.some((check) => check.permission === 'shell_unparsed')).toBe(false)
+  })
+
+  it('fully analyzes compact relative path lists in PowerShell cmdlets', async () => {
+    const command = "Select-String -Path (Get-ChildItem -Path docs,.codez -Recurse -Include '*.md','*.json' -File -ErrorAction SilentlyContinue).FullName -Pattern 'runtime status changed' -Encoding UTF8 -Context 2,4"
+    const decision = await manager.evaluateToolCall('PowerShell', { command }, context('auto'))
+
+    expect(decision.analysisStatus).toBe('parsed')
+    expect(decision.checks.some((check) => check.permission === 'shell_unparsed')).toBe(false)
+  })
+
+  it('fully analyzes Maven and Gradle Windows wrapper scripts', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codez-permission-java-wrappers-'))
+    try {
+      await writeFile(path.join(root, 'mvnw.cmd'), '@echo off\r\nmvn %*', 'utf8')
+      await writeFile(path.join(root, 'gradlew.bat'), '@echo off\r\ngradle %*', 'utf8')
+      const commands = [
+        '.\\mvnw.cmd -pl :app -am verify -DskipTests=false --batch-mode',
+        '.\\gradlew.bat clean test --no-daemon --stacktrace -Penv=ci -x integrationTest'
+      ]
+
+      for (const command of commands) {
+        const decision = await manager.evaluateToolCall(
+          'PowerShell',
+          { command },
+          { ...context('auto'), workspaceRoot: root, cwd: root }
+        )
+        expect(decision.analysisStatus).toBe('parsed')
+        expect(decision.checks.some((check) => check.permission === 'shell_unparsed')).toBe(false)
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('detects dangerous commands hidden in a repository-local package-manager shim', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codez-permission-dangerous-shim-'))
+    try {
+      await writeFile(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'vitest run' } }), 'utf8')
+      await writeFile(path.join(root, 'npm.cmd'), '@echo off\r\ndel /s /q C:\\Users\\*', 'utf8')
+      const decision = await manager.evaluateToolCall(
+        'PowerShell',
+        { command: '.\\npm.cmd test' },
+        { ...context('auto'), workspaceRoot: root, cwd: root }
+      )
+
+      expect(decision).toMatchObject({ action: 'ask', hardline: true, ruleId: 'critical.delete.system-root' })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('detects dangerous commands hidden with cmd caret line continuations', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codez-permission-dangerous-continuation-shim-'))
+    try {
+      await writeFile(path.join(root, 'npm.cmd'), '@echo off\r\nde^\r\nl /s /q C:\\Users\\*', 'utf8')
+      const decision = await manager.evaluateToolCall(
+        'PowerShell',
+        { command: '.\\npm.cmd test' },
+        { ...context('auto'), workspaceRoot: root, cwd: root }
+      )
+
+      expect(decision).toMatchObject({ action: 'ask', hardline: true, ruleId: 'critical.delete.system-root' })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('evaluates every compound operation independently', async () => {
@@ -140,6 +241,19 @@ describe('PermissionManager', () => {
     } finally {
       await rm(root, { recursive: true, force: true })
     }
+  })
+
+  it.each([
+    'cmd /c "$env:ComSpec /c del C:/tmp/x & rem"',
+    'cmd /c "${env:ComSpec} /c del C:/tmp/x & rem" -- src/a/b'
+  ])('keeps dynamic shell-wrapper bodies out of the auto-allow path', async (command) => {
+    const decision = await manager.evaluateToolCall('PowerShell', { command }, context('auto'))
+
+    expect(decision).toMatchObject({
+      action: 'ask',
+      hardline: true,
+      ruleId: 'critical.hidden.dynamic-command'
+    })
   })
 
   it('keeps a package directory override while scanning nested scripts', async () => {

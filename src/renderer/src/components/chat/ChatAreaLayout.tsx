@@ -1,7 +1,6 @@
 import React, { ReactNode } from 'react';
 import Stack from '../ui/Stack';
 import { TaskCapsule } from './TaskCapsule';
-import { ParallelWaveGroup } from './ParallelWaveGroup';
 import { useParallelExecSubscription } from './hooks/useParallelExecSubscription';
 import { useTaskSubscription } from './hooks/useTaskSubscription';
 import { useChatStore } from '../../stores/chatStore';
@@ -37,7 +36,6 @@ export const ChatAreaLayout: React.FC<ChatAreaLayoutProps> = ({
         onScroll={onScroll}
       >
         <TaskCapsule />
-        <ParallelWaveGroup />
         {messageArea}
       </Stack>
       {auditArea}

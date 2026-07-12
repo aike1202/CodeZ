@@ -17,6 +17,8 @@ export interface SubAgentStartMeta {
   prompt: string
   depth?: 'quick' | 'normal' | 'exhaustive'
   expectations?: { questions: string[]; outOfScope?: string[] }
+  context?: string
+  scope?: { directories?: string[]; excludeGlobs?: string[] }
   parentToolCallId: string
 }
 

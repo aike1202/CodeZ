@@ -6,6 +6,7 @@
   "private": true,
   "scripts": {
     "dev": "electron-vite dev",
+    "analyze:shell-corpus": "vite-node scripts/analyze-shell-command-corpus.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "build": "electron-vite build",

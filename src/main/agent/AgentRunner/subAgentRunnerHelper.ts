@@ -1,5 +1,6 @@
 import { SubAgentManager } from '../SubAgentManager'
 import { BrowserWindow } from 'electron'
+import { createHash } from 'crypto'
 import { IPC_CHANNELS } from '../../../shared/ipc/channels'
 import type { AgentRunConfig, AgentRunnerCallbacks } from './types'
 
@@ -31,6 +32,7 @@ export async function handleSubAgentRunnerSpawn(
     expectations?: { questions: string[]; outOfScope?: string[] }
     scope?: { directories?: string[]; excludeGlobs?: string[] }
     depth?: 'quick' | 'normal' | 'exhaustive'
+    resume_subagent_id?: string
   } = {}
   try {
     parsed = JSON.parse(rawArgs || '{}')
@@ -64,6 +66,43 @@ export async function handleSubAgentRunnerSpawn(
     return { role: 'tool' as const, tool_call_id: toolCallId, name, content: errMsg }
   }
 
+  const resumeSubAgentId = parsed.resume_subagent_id?.trim()
+  const typeToken = def.type.replace(/[^A-Za-z0-9._:-]/g, '_')
+  const resumeFingerprint = createHash('sha256').update(JSON.stringify({
+    type: def.type,
+    task: parsed.task || prompt || '',
+    context: parsed.context || null,
+    expectations: parsed.expectations
+      ? {
+          questions: parsed.expectations.questions || [],
+          outOfScope: parsed.expectations.outOfScope || []
+        }
+      : null,
+    scope: parsed.scope
+      ? {
+          directories: parsed.scope.directories || [],
+          excludeGlobs: parsed.scope.excludeGlobs || []
+        }
+      : null,
+    depth: parsed.depth || null
+  })).digest('hex').slice(0, 16)
+  const resumePrefix = `subagent_${typeToken}_${resumeFingerprint}_`
+  if (
+    resumeSubAgentId &&
+    (
+      resumeSubAgentId.length > 512 ||
+      /[\u0000-\u001f]/.test(resumeSubAgentId) ||
+      !resumeSubAgentId.startsWith(resumePrefix)
+    )
+  ) {
+    const errMsg = JSON.stringify({
+      ok: false,
+      error: `SubAgentRunner \`resume_subagent_id\` is invalid for subagent type '${def.type}'.`
+    })
+    callbacks.onToolEnd?.(toolCallId, errMsg)
+    return { role: 'tool' as const, tool_call_id: toolCallId, name, content: errMsg }
+  }
+
   // 通知前端 SubAgent 开始运行（复用 Plan 的进度通道，UI 已接听）
   const win = BrowserWindow.getAllWindows()[0]
   if (win) {
@@ -71,13 +110,15 @@ export async function handleSubAgentRunnerSpawn(
   }
 
   // 生成与父工具调用绑定的 subAgentId，并通知前端开始（驱动 SubAgentCard）
-  const subAgentId = `subagent_${toolCallId}`
+  const subAgentId = resumeSubAgentId || `${resumePrefix}${toolCallId}`
   callbacks.onSubAgentStart?.(subAgentId, {
     type: subagent_type,
     description: description || '',
     prompt: parsed.task || prompt || '',
     depth: parsed.depth,
     expectations: parsed.expectations,
+    context: parsed.context,
+    scope: parsed.scope,
     parentToolCallId: toolCallId
   })
 
@@ -90,6 +131,7 @@ export async function handleSubAgentRunnerSpawn(
         task: parsed.task || prompt || '',
         parentPrompt: parsed.task || prompt || '',
         subAgentId,
+        resumeSubAgentId,
         expectations: parsed.expectations,
         context: parsed.context,
         scope: parsed.scope,
@@ -135,6 +177,7 @@ export async function handleSubAgentRunnerSpawn(
         qualitySummary: result.qualitySummary,
         toolCallCount: result.toolCallCount,
         filesExamined: result.filesExamined,
+        resume_subagent_id: result.status === 'interrupted' ? subAgentId : undefined,
       }
     const resultMsg = JSON.stringify(
       result.status === 'completed'

@@ -18,4 +18,5 @@ export interface ExecutionLogProps {
   streaming?: boolean
   interrupted?: boolean
   subAgents?: SubAgentRecord[]
+  showParallelExecution?: boolean
 }

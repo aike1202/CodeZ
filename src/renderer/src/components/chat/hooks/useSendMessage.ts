@@ -7,6 +7,7 @@ import type { SkillDefinition } from '../../../../../shared/types/skill'
 import type { ToolBatchMeta } from '../../../../../shared/types/toolExecution'
 import type { ComposerImageAttachment, ImageAttachment } from '../../../../../shared/types/attachment'
 import { supportsImageInput } from '../../../../../shared/utils/imageCapabilities'
+import { createStreamUpdateBatcher } from './streamUpdateBatcher'
 
 export function buildChatStreamInput(
   message: string,
@@ -55,7 +56,6 @@ export function useSendMessage() {
   const createSession = useChatStore((s) => s.createSession)
   const startToolCall = useChatStore((s) => s.startToolCall)
   const finishToolCall = useChatStore((s) => s.finishToolCall)
-  const appendReasoningTimelineChunk = useChatStore((s) => s.appendReasoningTimelineChunk)
   const addPermissionRequest = useChatStore((s) => s.addPermissionRequest)
   const addAskUserRequest = useChatStore((s) => s.addAskUserRequest)
   const setDiffEntries = useChatStore((s) => s.setDiffEntries)
@@ -219,6 +219,15 @@ export function useSendMessage() {
       await useChatStore.getState().persistSession(sid)
       const agentId = startStreamingReply()
 
+      const streamUpdates = createStreamUpdateBatcher({
+        appendMain: (delta, reasoningDelta) => {
+          appendStreamChunk(agentId, delta, reasoningDelta)
+        },
+        appendSubAgent: (subAgentId, delta, reasoningDelta) => {
+          appendSubAgentChunk(agentId, subAgentId, delta, reasoningDelta)
+        }
+      })
+
       const streamInput = buildChatStreamInput(
         message,
         allSkills,
@@ -242,11 +251,11 @@ export function useSendMessage() {
               gotFirstByte = true
               if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
             }
-            appendStreamChunk(agentId, delta, reasoningDelta)
-            appendReasoningTimelineChunk(agentId, reasoningDelta || '')
+            streamUpdates.pushMain(delta, reasoningDelta)
           },
           onDone: async (fullContent: string, _stopReason?: string, txId?: string) => {
             if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
+            streamUpdates.flush()
             finishStreaming(agentId, txId)
             setMessageExecutionStatus(agentId, 'completed')
             if (txId) {
@@ -265,6 +274,7 @@ export function useSendMessage() {
           },
           onError: (error: string) => {
             if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
+            streamUpdates.flush()
             appendStreamChunk(agentId, `\n\n⚠️ 错误：${error}`)
             finishStreaming(agentId)
             setMessageExecutionStatus(agentId, 'error')
@@ -278,6 +288,7 @@ export function useSendMessage() {
             thoughtSignature?: string,
             batch?: ToolBatchMeta
           ) => {
+            streamUpdates.flush()
             startToolCall(agentId, {
               id: toolCallId || genId(),
               name,
@@ -321,13 +332,15 @@ export function useSendMessage() {
             })
           },
           onSubAgentStart: (subAgentId: string, meta: any) => {
+            streamUpdates.flush()
             startSubAgent(agentId, subAgentId, meta)
             useChatStore.getState().persistSession(sid)
           },
           onSubAgentChunk: (subAgentId: string, delta: string, reasoningDelta: string) => {
-            appendSubAgentChunk(agentId, subAgentId, delta, reasoningDelta)
+            streamUpdates.pushSubAgent(subAgentId, delta, reasoningDelta)
           },
           onSubAgentToolStart: (subAgentId: string, toolCallId: string, name: string, args: string, thoughtSignature?: string) => {
+            streamUpdates.flush()
             startSubAgentToolCall(agentId, subAgentId, {
               id: toolCallId || genId(),
               name,
@@ -339,6 +352,7 @@ export function useSendMessage() {
             finishSubAgentToolCall(agentId, subAgentId, toolCallId, result)
           },
           onSubAgentEnd: (subAgentId: string, result: any) => {
+            streamUpdates.flush()
             endSubAgent(agentId, subAgentId, result)
             useChatStore.getState().persistSession(sid)
           }
@@ -353,6 +367,7 @@ export function useSendMessage() {
 
       const wrappedCleanup = () => {
         if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
+        streamUpdates.flush()
         useChatStore.getState().markActiveRunUserAborted(sid)
         streamHandle.stop()
         finishStreaming(agentId)
@@ -366,6 +381,7 @@ export function useSendMessage() {
         await streamHandle.started
       } catch (error) {
         if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
+        streamUpdates.cancel()
         streamHandle.stop()
         if (internal) {
           appendStreamChunk(
@@ -407,7 +423,6 @@ export function useSendMessage() {
       createSession,
       startToolCall,
       finishToolCall,
-      appendReasoningTimelineChunk,
       addPermissionRequest,
       addAskUserRequest,
       setDiffEntries,

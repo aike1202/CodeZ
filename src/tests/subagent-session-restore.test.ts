@@ -39,10 +39,12 @@ describe('chat store sub-agent session restore', () => {
           streaming: true,
           subAgents: [
             {
-              id: 'subagent_tool_1',
+              id: 'subagent_Research_df42308184e13ef3_tool_1',
               type: 'Research',
               description: '分析项目进度',
               prompt: '请分析当前项目进度并汇总风险。',
+              context: '只分析当前实现，不考虑旧版目录。',
+              scope: { directories: ['src'], excludeGlobs: ['**/*.test.ts'] },
               parentToolCallId: 'tool_1',
               status: 'running',
               startedAt: 1000,
@@ -59,7 +61,7 @@ describe('chat store sub-agent session restore', () => {
     ;(window as any).api.chat.getRuntimeStatus.mockResolvedValue({
       sessionId: 's1',
       mainRunnerActive: true,
-      activeSubAgentIds: ['subagent_tool_1']
+      activeSubAgentIds: ['subagent_Research_df42308184e13ef3_tool_1']
     })
     useChatStore.setState({
       sessions: [session as any],
@@ -89,6 +91,34 @@ describe('chat store sub-agent session restore', () => {
     expect(useChatStore.getState().messages[0].interrupted).toBe(true)
     expect(useChatStore.getState().pendingPrompt).toBeNull()
     expect(useChatStore.getState().pendingInternalContinuation).toMatchObject({ sessionId: 's1' })
+    expect(useChatStore.getState().pendingInternalContinuation?.text).toContain(
+      '"resume_subagent_id":"subagent_Research_df42308184e13ef3_tool_1"'
+    )
+    expect(useChatStore.getState().pendingInternalContinuation?.text).toContain(
+      'Do not restart, re-plan, re-inspect completed work'
+    )
+    expect(useChatStore.getState().pendingInternalContinuation?.text).toContain(
+      '"context":"只分析当前实现，不考虑旧版目录。"'
+    )
+    expect(useChatStore.getState().pendingInternalContinuation?.text).toContain(
+      '"scope":{"directories":["src"],"excludeGlobs":["**/*.test.ts"]}'
+    )
     expect((window as any).api.session.save).toHaveBeenCalled()
+
+    const savedSession = (window as any).api.session.save.mock.calls.at(-1)[0]
+    useChatStore.getState().consumeInternalContinuation('s1')
+    ;(window as any).api.session.get.mockResolvedValue(savedSession)
+    useChatStore.setState({
+      activeSessionId: null,
+      messages: [],
+      sessions: [savedSession],
+      pendingInternalContinuation: null
+    })
+
+    await useChatStore.getState().selectSession('s1')
+
+    expect(useChatStore.getState().pendingInternalContinuation?.text).toContain(
+      '"resume_subagent_id":"subagent_Research_df42308184e13ef3_tool_1"'
+    )
   })
 })

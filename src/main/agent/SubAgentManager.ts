@@ -23,7 +23,10 @@ import {
   isRecoverableProviderError,
   shouldRetryAfterUserMaintenance,
 } from './AgentRunner/subagentRecoveryHelper'
-import { contextScopeForSubAgent } from '../../shared/types/context'
+import {
+  contextScopeForSubAgent,
+  type SessionRuntimeScopeSnapshot
+} from '../../shared/types/context'
 import type { ModelContextBuilder } from '../services/context/ModelContextBuilder'
 import type { SessionRuntimeCoordinator, RuntimeTurnHandle } from '../services/context/SessionRuntimeCoordinator'
 import { getContextCoreServices } from '../services/context/ContextRuntimeServices'
@@ -67,6 +70,9 @@ export interface SubAgentContext {
 
   /** SubAgent 调用标识 — 用于把事件路由到 SubAgentCard（由调用方 handleSubAgentRunnerSpawn 注入） */
   subAgentId?: string
+
+  /** 续接此前被中断的 SubAgent；复用其规范化账本作用域与历史。 */
+  resumeSubAgentId?: string
 
   /** 验收标准 — 子 Agent 必须逐条回答 */
   expectations?: {
@@ -347,6 +353,65 @@ function buildRecoverableStopOutput(
   return validateAgainstSpec(data, spec)
 }
 
+function replayCompletedSubAgentResult(
+  canonicalType: string,
+  def: SubAgentDefinition,
+  ctx: SubAgentContext,
+  scope: SessionRuntimeScopeSnapshot
+): SubAgentResult | undefined {
+  const completedTurnId = scope.lastCompletedTurnId
+  if (!completedTurnId) return undefined
+  const messages = scope.activeMessages.filter((message) => message.turnId === completedTurnId)
+  const assistantMessages = messages.filter((message) => message.role === 'assistant')
+  const toolCalls = assistantMessages.flatMap((message) => message.toolCalls || [])
+  const filesExamined = new Set<string>()
+
+  for (const toolCall of toolCalls) {
+    try {
+      const args = JSON.parse(toolCall.arguments || '{}')
+      if (toolCall.name === 'Read') {
+        for (const file of args.files || []) {
+          if (file?.file_path) filesExamined.add(file.file_path)
+        }
+      } else if (toolCall.name === 'list_files' && args.file_path) {
+        filesExamined.add(args.file_path)
+      }
+    } catch {}
+  }
+
+  let structuredOutput: SubAgentStructuredOutput | undefined
+  if (def.outputSpec) {
+    for (const toolCall of [...toolCalls].reverse()) {
+      if (toolCall.name !== 'submit_result') continue
+      try {
+        const candidate = validateAgainstSpec(JSON.parse(toolCall.arguments), def.outputSpec)
+        if (candidate && !def.validateStructuredOutput?.(candidate)) {
+          structuredOutput = candidate
+          break
+        }
+      } catch {}
+    }
+    if (!structuredOutput) return undefined
+  }
+
+  const output = structuredOutput?.report || assistantMessages.at(-1)?.content || ''
+  const result: SubAgentResult = {
+    type: canonicalType,
+    status: 'completed',
+    output,
+    structuredOutput,
+    toolCallCount: toolCalls.filter((toolCall) => toolCall.name !== 'submit_result').length,
+    filesExamined: Array.from(filesExamined)
+  }
+  if (structuredOutput) {
+    result.qualitySummary = computeQualitySummary(
+      ctx.expectations?.questions ?? [],
+      structuredOutput
+    )
+  }
+  return result
+}
+
 // ─── 系统提示扩展 ───────────────────────────────────────────
 
 async function buildExtendedSystemPrompt(def: SubAgentDefinition, ctx: SubAgentContext): Promise<string> {
@@ -561,6 +626,28 @@ export class SubAgentManager {
     if (ctx.parentSignal?.aborted) handle.cancel()
 
     const setup = await (async () => {
+      const core = ctx.runtimeCoordinator
+        ? { coordinator: ctx.runtimeCoordinator, ledger: ctx.runtimeCoordinator.ledger }
+        : getContextCoreServices()
+      const contextScopeId = contextScopeForSubAgent(ctx.resumeSubAgentId || subAgentId)
+      if (ctx.resumeSubAgentId) {
+        const previousScope = await core.coordinator.getScopeView(ctx.sessionId, contextScopeId)
+        const latestTurnId = previousScope?.activeMessages.at(-1)?.turnId
+        if (!previousScope || previousScope.activeMessages.length === 0) {
+          throw new Error(`Cannot resume SubAgent '${ctx.resumeSubAgentId}': context was not found.`)
+        }
+        if (latestTurnId && previousScope.lastCompletedTurnId === latestTurnId) {
+          const replayedResult = replayCompletedSubAgentResult(canonical, def, ctx, previousScope)
+          if (!replayedResult) {
+            throw new Error(`Cannot replay completed SubAgent '${ctx.resumeSubAgentId}': durable result was invalid.`)
+          }
+          return { replayedResult }
+        }
+        if (!latestTurnId || previousScope.lastInterruptedTurnId !== latestTurnId) {
+          throw new Error(`Cannot resume SubAgent '${ctx.resumeSubAgentId}': its latest run was not interrupted.`)
+        }
+      }
+
       if (def.onBeforeSpawn) await def.onBeforeSpawn(ctx)
 
       const toolManager = new ToolManager()
@@ -573,19 +660,22 @@ export class SubAgentManager {
 
       const systemPrompt = await buildExtendedSystemPrompt(def, ctx)
       const task = ctx.task || ctx.parentPrompt || ''
-      const core = ctx.runtimeCoordinator
-        ? { coordinator: ctx.runtimeCoordinator, ledger: ctx.runtimeCoordinator.ledger }
-        : getContextCoreServices()
       const contextBuilder = ctx.contextBuilder || new CanonicalModelContextBuilder(core.ledger)
       if (!ctx.contextCapabilities) {
         throw new Error('SubAgent requires resolved model context capabilities')
       }
       const contextCapabilities: ModelContextCapabilities = ctx.contextCapabilities
-      const contextScopeId = contextScopeForSubAgent(handleId)
+      const turnInput = ctx.resumeSubAgentId
+        ? [
+            'Continue the interrupted task from the existing SubAgent history.',
+            'Do not restart, re-plan, or repeat completed inspection and tool work.',
+            'Resume from the last durable state and finish the original task.'
+          ].join(' ')
+        : task
       const runtimeTurn = await core.coordinator.beginTurn({
         sessionId: ctx.sessionId,
         contextScopeId,
-        text: task,
+        text: turnInput,
         model: ctx.modelOverride || ctx.apiConfig.model
       })
       return {
@@ -605,6 +695,13 @@ export class SubAgentManager {
       handle.status = abortController.signal.aborted ? 'interrupted' : 'failed'
       throw error
     })
+    if ('replayedResult' in setup && setup.replayedResult) {
+      handle.status = 'completed'
+      handle.result = setup.replayedResult
+      ctx.parentSignal?.removeEventListener('abort', abortFromParent)
+      if (this.activeHandles.delete(handleId)) this.notifyActiveChange(ctx.sessionId)
+      return setup.replayedResult
+    }
     const {
       toolManager,
       availableTools,

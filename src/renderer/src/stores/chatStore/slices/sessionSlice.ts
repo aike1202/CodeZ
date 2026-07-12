@@ -27,11 +27,27 @@ function normalizeSession(session: ChatSession): ChatSession {
   }
 }
 
-const SUBAGENT_INTERRUPTED_CONTINUATION = [
-  'A previous SubAgentRunner call ended with EXECUTION_INTERRUPTED.',
-  'Treat it as a tool failure and continue the existing user request autonomously using another method.',
-  'Do not ask the user to resend or confirm the task.'
-].join(' ')
+function buildSubAgentInterruptedContinuation(subAgents: any[]): string {
+  const resumable = subAgents
+    .filter((sub) => sub?.status === 'interrupted' && typeof sub.id === 'string')
+    .map((sub) => ({
+      resume_subagent_id: sub.id,
+      subagent_type: sub.type,
+      description: sub.description,
+      prompt: sub.prompt,
+      context: sub.context,
+      scope: sub.scope,
+      depth: sub.depth,
+      expectations: sub.expectations
+    }))
+  return [
+    'The SubAgentRunner calls below were interrupted because their runtime disappeared.',
+    'Resume each one with SubAgentRunner using the exact resume_subagent_id, type, prompt, and other arguments shown.',
+    'Do not restart, re-plan, re-inspect completed work, or replace the SubAgent unless resume itself returns an error.',
+    'Continue the existing user request after the resumed SubAgent finishes.',
+    JSON.stringify(resumable)
+  ].join(' ')
+}
 
 export function interruptPendingRequests(
   messages: ChatMessage[],
@@ -60,9 +76,12 @@ export function interruptPendingRequests(
   return { messages: nextMessages, changed }
 }
 
-function healInterruptedSubAgents(messages: any[]): { messages: any[]; changed: boolean; shouldContinue: boolean } {
+function healInterruptedSubAgents(messages: any[]): {
+  messages: any[]
+  changed: boolean
+  continuationText?: string
+} {
   let changed = false
-  let shouldContinue = false
   const healedMessages = messages.map((message) => {
     const subAgents = message.subAgents
     if (!Array.isArray(subAgents) || !subAgents.some((sub: any) => sub.status === 'running')) {
@@ -72,7 +91,6 @@ function healInterruptedSubAgents(messages: any[]): { messages: any[]; changed: 
     }
 
     changed = true
-    shouldContinue = true
     const healedSubAgents = subAgents.map((sub: any) => {
       if (sub.status !== 'running') return sub
       return {
@@ -90,7 +108,23 @@ function healInterruptedSubAgents(messages: any[]): { messages: any[]; changed: 
     }
   })
 
-  return { messages: healedMessages, changed, shouldContinue }
+  const latestById = new Map<string, any>()
+  for (const message of healedMessages) {
+    for (const subAgent of message.subAgents || []) {
+      if (typeof subAgent?.id === 'string') latestById.set(subAgent.id, subAgent)
+    }
+  }
+  const resumableSubAgents = Array.from(latestById.values()).filter((subAgent) =>
+    subAgent.status === 'interrupted' && subAgent.interruptionReason === 'runtime_missing'
+  )
+
+  return {
+    messages: healedMessages,
+    changed,
+    continuationText: resumableSubAgents.length > 0
+      ? buildSubAgentInterruptedContinuation(resumableSubAgents)
+      : undefined
+  }
 }
 
 function hasNewerSettledSubAgent(messagesFromDisk: any[], messagesInMemory: any[]): boolean {
@@ -190,7 +224,7 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
           ? cachedMessages
           : freshMessages
         const healed = runtimeActive
-          ? { messages: sourceMessages, changed: false, shouldContinue: false }
+          ? { messages: sourceMessages, changed: false, continuationText: undefined }
           : healInterruptedSubAgents(sourceMessages)
         const interruptedRequests = interruptPendingRequests(healed.messages, runtimeStatus)
         const healedSession = {
@@ -218,11 +252,11 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
         if (healed.changed || interruptedRequests.changed) {
           await window.api.session.save(healedSession)
         }
-        if (healed.shouldContinue && seq === _selectSessionSeq && get().activeSessionId === sessionId) {
+        if (healed.continuationText && seq === _selectSessionSeq && get().activeSessionId === sessionId) {
           set({
             pendingInternalContinuation: {
               sessionId,
-              text: SUBAGENT_INTERRUPTED_CONTINUATION
+              text: healed.continuationText
             }
           })
         }

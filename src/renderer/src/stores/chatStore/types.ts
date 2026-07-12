@@ -78,6 +78,8 @@ export interface SubAgentRecord {
   prompt: string
   depth?: 'quick' | 'normal' | 'exhaustive'
   expectations?: { questions: string[]; outOfScope?: string[] }
+  context?: string
+  scope?: { directories?: string[]; excludeGlobs?: string[] }
   parentToolCallId: string
   status: 'running' | 'completed' | 'failed' | 'interrupted'
   interruptionReason?: 'runtime_missing' | 'user_aborted'
@@ -246,6 +248,8 @@ export interface ChatState {
       prompt: string
       depth?: 'quick' | 'normal' | 'exhaustive'
       expectations?: { questions: string[]; outOfScope?: string[] }
+      context?: string
+      scope?: { directories?: string[]; excludeGlobs?: string[] }
       parentToolCallId: string
     }
   ) => void

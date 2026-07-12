@@ -10,6 +10,7 @@ import type { ChatMessage, ExecutionTimelineItem } from '../../stores/chatStore'
 export interface AgentMessageContentProps {
   msg: ChatMessage
   lastStreamingMsgId: string | null
+  showParallelExecution?: boolean
   handleFileClick: (filePath: string, virtualContent?: string) => Promise<void>
   handleDiffClick: (
     filePath: string,
@@ -29,6 +30,7 @@ type TimelineChunk =
 export function AgentMessageContent({
   msg,
   lastStreamingMsgId,
+  showParallelExecution = false,
   handleFileClick,
   handleDiffClick
 }: AgentMessageContentProps): React.ReactElement {
@@ -79,6 +81,7 @@ export function AgentMessageContent({
 
   // Legacy fallback if no executionTimeline but has agentStates or reasoningContent
   const legacyExecution = (!msg.executionTimeline || msg.executionTimeline.length === 0) && (msg.reasoningContent || (msg.agentStates && msg.agentStates.length > 0))
+  const firstExecutionChunkIndex = chunks.findIndex((chunk) => chunk.type === 'execution')
 
   return (
     <div className="agent-message-content" style={{ minWidth: 0, width: '100%' }}>
@@ -127,6 +130,7 @@ export function AgentMessageContent({
             streaming={isStreaming && !msg.content}
             interrupted={msg.interrupted}
             subAgents={msg.subAgents}
+            showParallelExecution={showParallelExecution}
           />
         </div>
       )}
@@ -160,6 +164,7 @@ export function AgentMessageContent({
                 streaming={chunk.streaming}
                 interrupted={msg.interrupted}
                 subAgents={msg.subAgents}
+                showParallelExecution={showParallelExecution && idx === firstExecutionChunkIndex}
               />
             </div>
           )
