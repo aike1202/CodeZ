@@ -155,7 +155,7 @@ describe('SubAgentRunner result forwarding', () => {
     }
     const config = {
       workspaceRoot: process.cwd(), sessionId: 'session-1', baseUrl: 'https://example.invalid',
-      apiKey: 'test-key', apiFormat: 'openai', model: 'test-model'
+      apiKey: 'test-key', apiFormat: 'openai', model: 'test-model', providerId: 'provider-test'
     } as any
     const callbacks = { onChunk: vi.fn(), onDone: vi.fn(), onError: vi.fn() }
     const interrupted = await handleSubAgentRunnerSpawn(
@@ -181,6 +181,7 @@ describe('SubAgentRunner result forwarding', () => {
       expect.objectContaining({
         subAgentId: resumeSubAgentId,
         resumeSubAgentId,
+        providerId: 'provider-test',
         context: commonArgs.context,
         scope: commonArgs.scope
       }),

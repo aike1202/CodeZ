@@ -20,6 +20,7 @@ const callbacks = {
 const config = (workspaceRoot: string) => ({
   workspaceRoot,
   sessionId: 's1',
+  providerId: 'provider-test',
   baseUrl: '',
   apiKey: '',
   apiFormat: 'openai',
@@ -105,7 +106,12 @@ describe('ExecutionControl recovery', () => {
 
     expect(content.ok).toBe(true)
     expect(spawnedContext?.resumeSubAgentId).toBeUndefined()
+    expect(spawnedContext?.providerId).toBe('provider-test')
     expect(spawnedContext?.controlToken?.attemptId).toBeTruthy()
+    expect(spawnedContext?.permissionScope).toMatchObject({
+      allowedWriteFiles: ['src/a.ts'],
+      allowBash: false
+    })
     expect(setup.controller.getExecution(setup.execution.executionId)?.executors[0].attemptCount).toBe(2)
     expect(setup.controller.getExecution(setup.execution.executionId)?.status).toBe('completed')
   })
@@ -135,6 +141,7 @@ describe('ExecutionControl recovery', () => {
     expect(JSON.parse(response.content).ok).toBe(true)
     expect(spawnedContext?.resumeSubAgentId).toBe(setup.executorId)
     expect(spawnedContext?.subAgentId).toBe(setup.executorId)
+    expect(spawnedContext?.providerId).toBe('provider-test')
   })
 
   it('accepts ready artifacts without requiring an Executor id', async () => {

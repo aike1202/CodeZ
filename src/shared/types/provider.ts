@@ -14,7 +14,7 @@ export interface ThinkingConfig {
 export interface ModelConfig {
   id: string
   name: string
-  /** 最大上下文长度（tokens），0 表示不限制 */
+  /** 最大上下文长度（tokens）；必须为正数，不能用 0 表示未知或无限。 */
   maxContextTokens: number
   maxInputTokens?: number
   maxOutputTokens?: number

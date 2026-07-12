@@ -1,5 +1,5 @@
 // src/tests/edit-tool.test.ts
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import * as os from 'os'
@@ -10,8 +10,9 @@ import type { EditTransactionService } from '../main/services/EditTransactionSer
 
 class MemoryEditTransactionService implements Pick<EditTransactionService, 'backupFile' | 'getDiff'> {
   backedUp = new Set<string>()
-  async backupFile(_txId: string, abs: string): Promise<void> {
-    try { await fs.readFile(abs); this.backedUp.add(abs) } catch (e: any) { if (e.code === 'ENOENT') { this.backedUp.add(abs); return } throw e }
+  async backupFile(_txId: string, abs: string): Promise<boolean> {
+    try { await fs.readFile(abs); this.backedUp.add(abs) } catch (e: any) { if (e.code === 'ENOENT') { this.backedUp.add(abs); return true } throw e }
+    return true
   }
   async getDiff(_txId: string): Promise<Array<{ path: string; diff: string }>> { return [] }
 }
@@ -81,6 +82,34 @@ describe('EditTool', () => {
     expect(tx.backedUp.has(fp)).toBe(true)
   })
 
+  it('uses canonical path identity when attaching the transaction diff', async () => {
+    const nested = path.join(root, 'nested')
+    await fs.mkdir(nested)
+    const fp = path.join(root, 'diff.txt')
+    await fs.writeFile(fp, 'before')
+    await readFirst(fp)
+    const tx = {
+      backupFile: vi.fn(async () => true),
+      getDiff: vi.fn(async () => [{
+        path: path.join(nested, '..', 'diff.txt'),
+        diff: 'canonical diff'
+      }])
+    }
+
+    const result = await new EditTool().execute(JSON.stringify({
+      file_path: fp,
+      old_string: 'before',
+      new_string: 'after'
+    }), {
+      workspaceRoot: root,
+      sessionId: SESSION,
+      transactionId: 'tx-diff',
+      editTransactionService: tx as unknown as EditTransactionService
+    })
+
+    expect(JSON.parse(result).diff).toBe('canonical diff')
+  })
+
   it('不能借用另一个 Agent scope 的 Read 交付', async () => {
     const fp = path.join(root, 'scoped.txt')
     await fs.writeFile(fp, 'before')
@@ -114,6 +143,84 @@ describe('EditTool', () => {
     expect(await fs.readFile(fp, 'utf-8')).toBe('bar bar bar')
   })
 
+  it('serializes concurrent edits to the same delivered file without losing changes', async () => {
+    const fp = path.join(root, 'parallel.txt')
+    await fs.writeFile(fp, 'alpha beta')
+    await readFirst(fp)
+    const tool = new EditTool()
+
+    const [first, second] = await Promise.all([
+      tool.execute(JSON.stringify({ file_path: fp, old_string: 'alpha', new_string: 'ALPHA' }), {
+        workspaceRoot: root, sessionId: SESSION
+      }),
+      tool.execute(JSON.stringify({ file_path: fp, old_string: 'beta', new_string: 'BETA' }), {
+        workspaceRoot: root, sessionId: SESSION
+      })
+    ])
+
+    expect(first.startsWith('Error:')).toBe(false)
+    expect(second.startsWith('Error:')).toBe(false)
+    expect(await fs.readFile(fp, 'utf-8')).toBe('ALPHA BETA')
+  })
+
+  it('rejects an external modification during backup and discards the staged backup', async () => {
+    const fp = path.join(root, 'external.txt')
+    await fs.writeFile(fp, 'before')
+    await readFirst(fp)
+    const discardBackup = vi.fn(async () => true)
+    const tx = {
+      backupFile: async () => {
+        await fs.writeFile(fp, 'external')
+        return true
+      },
+      discardBackup,
+      getDiff: async () => []
+    }
+
+    const result = await new EditTool().execute(JSON.stringify({
+      file_path: fp, old_string: 'before', new_string: 'after'
+    }), {
+      workspaceRoot: root,
+      sessionId: SESSION,
+      transactionId: 'tx-stale',
+      editTransactionService: tx as unknown as EditTransactionService
+    })
+
+    expect(result).toContain('changed after validation')
+    expect(await fs.readFile(fp, 'utf-8')).toBe('external')
+    expect(discardBackup).toHaveBeenCalledWith('tx-stale', fp)
+  })
+
+  it('does not write after cancellation is observed at the final commit point', async () => {
+    const fp = path.join(root, 'aborted.txt')
+    await fs.writeFile(fp, 'before')
+    await readFirst(fp)
+    const controller = new AbortController()
+    const discardBackup = vi.fn(async () => true)
+    const tx = {
+      backupFile: async () => {
+        controller.abort('executor stopped')
+        return true
+      },
+      discardBackup,
+      getDiff: async () => []
+    }
+
+    const result = await new EditTool().execute(JSON.stringify({
+      file_path: fp, old_string: 'before', new_string: 'after'
+    }), {
+      workspaceRoot: root,
+      sessionId: SESSION,
+      transactionId: 'tx-aborted',
+      editTransactionService: tx as unknown as EditTransactionService,
+      abortSignal: controller.signal
+    })
+
+    expect(result).toContain('executor stopped')
+    expect(await fs.readFile(fp, 'utf-8')).toBe('before')
+    expect(discardBackup).toHaveBeenCalledWith('tx-aborted', fp)
+  })
+
   it('old_string 含 Read 行号前缀：自动剥除后仍能匹配', async () => {
     const fp = path.join(root, 'a.txt')
     await fs.writeFile(fp, 'alpha\nbeta\n')
@@ -136,5 +243,46 @@ describe('EditTool', () => {
     } finally {
       await fs.rm(outside, { force: true })
     }
+  })
+
+  it('拒绝通过 workspace 内链接修改外部文件', async () => {
+    const outside = path.join(os.tmpdir(), `outside-edit-link-${Date.now()}`)
+    await fs.mkdir(outside, { recursive: true })
+    const outsideFile = path.join(outside, 'target.txt')
+    await fs.writeFile(outsideFile, 'before')
+    try {
+      const link = path.join(root, 'external-link')
+      await fs.symlink(outside, link, process.platform === 'win32' ? 'junction' : 'dir')
+      const linkedFile = path.join(link, 'target.txt')
+      await readFirst(linkedFile)
+      const result = await new EditTool().execute(
+        JSON.stringify({ file_path: linkedFile, old_string: 'before', new_string: 'after' }),
+        { workspaceRoot: root, sessionId: SESSION }
+      )
+
+      expect(result).toContain('Access denied')
+      expect(await fs.readFile(outsideFile, 'utf-8')).toBe('before')
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true })
+    }
+  })
+
+  it('同一 workspace 内的路径别名共享 Read 授权并写入 canonical 文件', async () => {
+    const realDir = path.join(root, 'real')
+    const link = path.join(root, 'alias')
+    await fs.mkdir(realDir)
+    await fs.symlink(realDir, link, process.platform === 'win32' ? 'junction' : 'dir')
+    const realFile = path.join(realDir, 'target.txt')
+    const linkedFile = path.join(link, 'target.txt')
+    await fs.writeFile(realFile, 'before')
+    await readFirst(linkedFile)
+
+    const result = await new EditTool().execute(
+      JSON.stringify({ file_path: linkedFile, old_string: 'before', new_string: 'after' }),
+      { workspaceRoot: root, sessionId: SESSION }
+    )
+
+    expect(result.startsWith('Error:')).toBe(false)
+    expect(await fs.readFile(realFile, 'utf-8')).toBe('after')
   })
 })

@@ -84,6 +84,7 @@ describe('AgentRunner canonical ledger path', () => {
       'user', 'assistant', 'tool', 'assistant'
     ])
     expect(scope.lastCompletedTurnId).toBe(turn.turnId)
+    expect(scope.lastProviderUsageRequestFingerprint).toMatch(/^[0-9a-f]{64}$/)
     expect(order.indexOf('persist-tool')).toBeLessThan(order.indexOf('ui-tool-end'))
     expect(order.at(-1)).toBe('ui-done')
     expect(budgets.at(-1)?.estimateSource).toBe('provider')
@@ -169,5 +170,63 @@ describe('AgentRunner canonical ledger path', () => {
     const lastMessage = secondRequest.messages.at(-1)
     expect(lastMessage).toMatchObject({ role: 'tool', name: 'AskUserQuestion' })
     expect(lastMessage?.content).toContain('Windows 10/11')
+  })
+
+  it('keeps the durable scope busy until an aborted transaction finishes rollback', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codez-runner-abort-'))
+    dirs.push(root)
+    const ledger = new ModelLedgerStore(path.join(root, 'runtime'))
+    const runtime = new SessionRuntimeCoordinator(ledger)
+    const turn = await runtime.beginTurn({
+      sessionId: 's1', contextScopeId: 'main', text: 'wait', providerId: 'p1', model: 'm1'
+    })
+    let markProviderStarted!: () => void
+    const providerStarted = new Promise<void>((resolve) => { markProviderStarted = resolve })
+    const chatService = {
+      streamChat: vi.fn(async (_config: unknown, _callbacks: unknown, signal: AbortSignal) => {
+        markProviderStarted()
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) return resolve()
+          signal.addEventListener('abort', () => resolve(), { once: true })
+        })
+      }),
+      abort: vi.fn()
+    }
+    let markRollbackStarted!: () => void
+    let finishRollback!: () => void
+    const rollbackStarted = new Promise<void>((resolve) => { markRollbackStarted = resolve })
+    const rollbackGate = new Promise<void>((resolve) => { finishRollback = resolve })
+    const rollback = vi.fn(async () => {
+      markRollbackStarted()
+      await rollbackGate
+    })
+    const runner = new AgentRunner({
+      chatService: chatService as any,
+      toolManager: { getToolDefinitions: () => [] } as any,
+      editTransactionService: {
+        beginTransaction: async () => 'tx-abort', rollback
+      } as any
+    })
+    const run = runner.run({
+      baseUrl: 'https://example.test', apiKey: 'key', model: 'm1', workspaceRoot: root,
+      tools: [], providerId: 'p1', runtimeTurn: turn, runtimeCoordinator: runtime,
+      contextBuilder: new ModelContextBuilder(ledger),
+      contextCapabilities: { contextWindowTokens: 10_000, maxOutputTokens: 2_000 },
+      systemPrompt: 'system'
+    }, {
+      onChunk: () => undefined,
+      onDone: () => { throw new Error('aborted run must not be handed off') },
+      onError: () => undefined
+    })
+
+    await providerStarted
+    runner.abort()
+    await rollbackStarted
+    expect(runtime.isScopeBusy('s1', 'main')).toBe(true)
+    finishRollback()
+    await run
+
+    expect(rollback).toHaveBeenCalledWith('tx-abort')
+    expect(runtime.isScopeBusy('s1', 'main')).toBe(false)
   })
 })

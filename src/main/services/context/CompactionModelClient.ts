@@ -27,6 +27,7 @@ export interface ChatCompactionModelConfig {
   apiFormat?: ApiFormat
   model: string
   thinking?: ThinkingConfig
+  maxOutputTokens?: number
 }
 
 export class ChatCompactionModelClient implements CompactionModelClient {

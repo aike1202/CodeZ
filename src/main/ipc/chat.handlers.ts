@@ -5,6 +5,11 @@ import { getProviderService } from './provider.handlers'
 import { getWorkspaceService } from './workspace.handlers'
 import { MAIN_CONTEXT_SCOPE, type StreamRequestV2 } from '../../shared/types/context'
 import { mergeModelThinkingConfig } from '../../shared/utils/reasoningCapabilities'
+import type {
+  ApiFormat,
+  ModelContextCapabilities,
+  ThinkingConfig
+} from '../../shared/types/provider'
 import log from '../logger'
 import { getSessionStoreReady } from './session.handlers'
 import {
@@ -15,7 +20,8 @@ import {
   getContextCoreServices,
   parseAndValidateSummary,
   evaluateModelDownshiftCompaction,
-  readContextFeatureFlags
+  readContextFeatureFlags,
+  resolveModelContextCapabilities
 } from '../services/context'
 
 import type { AgentRunner } from '../agent/AgentRunner'
@@ -30,6 +36,33 @@ import type {
   PromptPredictionResponse
 } from '../../shared/types/promptPrediction'
 import type { ChatSteerInput, ChatSteerResult } from '../../shared/types/queuedPrompt'
+import {
+  buildThinkingPayload,
+  resolveEffectiveReasoningBudgetTokens
+} from '../services/chat/utils'
+import { ToolManager } from '../tools/ToolManager'
+
+function applyRequestReasoningReserve(
+  capabilities: ModelContextCapabilities,
+  input: {
+    apiFormat?: ApiFormat
+    baseUrl: string
+    model: string
+    thinking: ThinkingConfig
+  }
+): ModelContextCapabilities {
+  if (input.apiFormat !== 'anthropic' || !input.thinking.enabled) return capabilities
+  const payload = buildThinkingPayload(
+    input.thinking,
+    input.model,
+    input.baseUrl,
+    true,
+    'anthropic'
+  ) as { thinking?: { budget_tokens?: number } }
+  return payload.thinking?.budget_tokens
+    ? { ...capabilities, reasoningCountsAgainstContext: true }
+    : capabilities
+}
 
 const activeRunners = new ChatRuntimeRegistry<AgentRunner>()
 const stoppedBeforeRegistration = new Set<string>()
@@ -199,15 +232,20 @@ export function registerChatIpc(): void {
       if (hasImages && !supportsImageInput(modelConfig)) {
         throw new Error('当前模型未启用图片输入')
       }
-      const contextWindowTokens = modelConfig?.maxContextTokens || 32000
-      const contextCapabilities = {
-        contextWindowTokens,
-        maxInputTokens: modelConfig?.maxInputTokens,
-        maxOutputTokens: modelConfig?.maxOutputTokens,
-        reasoningCountsAgainstContext: modelConfig?.reasoningCountsAgainstContext
-      }
+      const apiFormat = modelConfig?.apiFormat || config.apiFormat
+      const thinking = mergeModelThinkingConfig(config.thinking, modelConfig)
+      const contextCapabilities = applyRequestReasoningReserve(
+        resolveModelContextCapabilities(modelConfig),
+        { apiFormat, baseUrl: config.baseUrl, model: request.model, thinking }
+      )
+      const reasoningBudgetTokens = thinking.enabled
+        ? resolveEffectiveReasoningBudgetTokens(thinking, request.model, config.baseUrl, apiFormat)
+        : 0
+      const { contextWindowTokens } = contextCapabilities
       const { AgentRunner } = await import('../agent/AgentRunner')
-      const runner = new AgentRunner()
+      const toolManager = new ToolManager()
+      const toolSchemas = toolManager.getToolDefinitions()
+      const runner = new AgentRunner({ toolManager })
       if (consumePendingStop(streamId)) return streamId
 
       const { SystemPromptService } = await import('../services/SystemPromptService')
@@ -227,9 +265,10 @@ export function registerChatIpc(): void {
       const compactionModel = new ChatCompactionModelClient({
         baseUrl: config.baseUrl,
         apiKey,
-        apiFormat: modelConfig?.apiFormat || config.apiFormat,
+        apiFormat,
         model: request.model,
-        thinking: mergeModelThinkingConfig(config.thinking, modelConfig)
+        thinking,
+        maxOutputTokens: contextCapabilities.maxOutputTokens
       })
       const migration = new LegacySessionMigrationService(sessionStore, core.ledger, {
         summarize: async ({ transcript }) => {
@@ -257,12 +296,26 @@ export function registerChatIpc(): void {
 
       const migratedState = await core.ledger.load(request.sessionId)
       const mainScope = migratedState.scopes[MAIN_CONTEXT_SCOPE]
-      const downshift = evaluateModelDownshiftCompaction({
+      const downshift = await evaluateModelDownshiftCompaction({
+        previousProviderId: mainScope?.lastProviderId,
+        nextProviderId: request.providerId,
         previousModel: mainScope?.lastModel,
         nextModel: request.model,
         scope: mainScope,
         capabilities: contextCapabilities,
-        systemPrompt: sysPrompt
+        systemPrompt: sysPrompt,
+        toolSchemas,
+        instructions: reminder ? [reminder] : [],
+        providerRequestProfile: {
+          providerId: request.providerId,
+          model: request.model,
+          apiFormat,
+          baseUrl: config.baseUrl,
+          thinking,
+          maxOutputTokens: contextCapabilities.maxOutputTokens
+        },
+        workspaceRoot: currentWorkspace,
+        reasoningBudgetTokens
       })
       if (downshift.required) {
         if (!compactionService) {
@@ -273,7 +326,11 @@ export function registerChatIpc(): void {
           contextScopeId: MAIN_CONTEXT_SCOPE,
           trigger: 'model_downshift',
           capabilities: contextCapabilities,
-          systemPrompt: sysPrompt
+          systemPrompt: sysPrompt,
+          toolSchemas,
+          instructions: reminder ? [reminder] : [],
+          workspaceRoot: currentWorkspace,
+          reasoningBudgetTokens
         })
         if (result.status !== 'completed') {
           throw new Error(`切换到 ${request.model} 前无法将历史压缩到新模型预算内：${result.message || result.errorCode}`)
@@ -302,11 +359,11 @@ export function registerChatIpc(): void {
       runner.run(
         {
           baseUrl: config.baseUrl,
-          apiFormat: modelConfig?.apiFormat || config.apiFormat,
+          apiFormat,
           apiKey,
           model: request.model,
           workspaceRoot: currentWorkspace,
-          thinking: mergeModelThinkingConfig(config.thinking, modelConfig),
+          thinking,
           sessionId: request.sessionId,
           providerId: request.providerId,
           runtimeTurn,
@@ -315,11 +372,12 @@ export function registerChatIpc(): void {
           compactionService,
           contextCapabilities,
           systemPrompt: sysPrompt,
+          tools: toolSchemas,
           contextInstructions: reminder ? [reminder] : [],
           prepareImages: (attachments) => getAttachmentService().prepareSessionImages(
             request.sessionId,
             attachments,
-            getProviderImagePolicy(modelConfig?.apiFormat || config.apiFormat)
+            getProviderImagePolicy(apiFormat)
           )
         },
         {
@@ -472,7 +530,16 @@ export function registerChatIpc(): void {
       if (!provider || !apiKey || !workspace) return { accepted: false, reason: 'PROVIDER_UNAVAILABLE' }
 
       const { SystemPromptService } = await import('../services/SystemPromptService')
-      const contextWindowTokens = modelConfig?.maxContextTokens || 32000
+      const apiFormat = modelConfig?.apiFormat || provider.apiFormat
+      const thinking = mergeModelThinkingConfig(provider.thinking, modelConfig)
+      const contextCapabilities = applyRequestReasoningReserve(
+        resolveModelContextCapabilities(modelConfig),
+        { apiFormat, baseUrl: provider.baseUrl, model: scope.lastModel, thinking }
+      )
+      const reasoningBudgetTokens = thinking.enabled
+        ? resolveEffectiveReasoningBudgetTokens(thinking, scope.lastModel, provider.baseUrl, apiFormat)
+        : 0
+      const { contextWindowTokens } = contextCapabilities
       const systemPrompt = await SystemPromptService.buildSystemPrompt({
         workspaceRoot: workspace,
         modelId: scope.lastModel,
@@ -480,12 +547,15 @@ export function registerChatIpc(): void {
         contextWindowTokens,
         sessionId: request.sessionId
       })
+      const reminder = await SystemPromptService.buildSystemReminder(workspace)
+      const toolSchemas = new ToolManager().getToolDefinitions()
       const modelClient = new ChatCompactionModelClient({
         baseUrl: provider.baseUrl,
         apiKey,
-        apiFormat: modelConfig?.apiFormat || provider.apiFormat,
+        apiFormat,
         model: scope.lastModel,
-        thinking: mergeModelThinkingConfig(provider.thinking, modelConfig)
+        thinking,
+        maxOutputTokens: contextCapabilities.maxOutputTokens
       })
       const service = new CompactionService(core.ledger, modelClient, undefined, {
         onStarted: (payload) => sender.send(IPC_CHANNELS.CHAT_COMPACTION_STARTED, streamId, request.sessionId, payload),
@@ -496,14 +566,13 @@ export function registerChatIpc(): void {
         sessionId: request.sessionId,
         contextScopeId: MAIN_CONTEXT_SCOPE,
         trigger: 'manual',
-        capabilities: {
-          contextWindowTokens,
-          maxInputTokens: modelConfig?.maxInputTokens,
-          maxOutputTokens: modelConfig?.maxOutputTokens,
-          reasoningCountsAgainstContext: modelConfig?.reasoningCountsAgainstContext
-        },
+        capabilities: contextCapabilities,
         systemPrompt,
-        manualInstructions: request.instructions
+        toolSchemas,
+        instructions: reminder ? [reminder] : [],
+        manualInstructions: request.instructions,
+        workspaceRoot: workspace,
+        reasoningBudgetTokens
       })
       return { accepted: result.status === 'completed', result }
     }
@@ -527,16 +596,86 @@ export function registerChatIpc(): void {
     return await svc.getDiff(txId)
   })
 
-  ipcMain.handle(IPC_CHANNELS.CHAT_REVERT_MESSAGES, async (_event, sessionId: string, txIds: string[]) => {
+  ipcMain.handle(IPC_CHANNELS.CHAT_REVERT_MESSAGES, async (
+    _event,
+    sessionId: string,
+    targetUiMessageId: string,
+    txIds: string[]
+  ) => {
     const { getEditTransactionService } = await import('../services/EditTransactionService')
     const svc = getEditTransactionService()
-    await svc.revertTransactions(sessionId, txIds)
+    const core = getContextCoreServices()
+    const status = buildRuntimeStatus(sessionId)
+    if (status.mainRunnerActive || status.activeSubAgentIds.length > 0) {
+      throw Object.assign(new Error('Cannot revert conversation history while a run is active.'), {
+        code: 'RUN_ACTIVE'
+      })
+    }
+    return core.coordinator.runIdleScopeMaintenance(
+      sessionId,
+      MAIN_CONTEXT_SCOPE,
+      async () => {
+        return core.ledger.runScopeExclusive(
+          sessionId,
+          MAIN_CONTEXT_SCOPE,
+          async () => {
+            const storedSession = (await getSessionStoreReady()).get(sessionId)
+            if (!storedSession) throw new Error(`Session not found: ${sessionId}`)
+            if (!storedSession.runtime) {
+              if (txIds.length > 0) await svc.revertTransactions(sessionId, txIds)
+              return { legacySession: true }
+            }
+            const plan = await core.ledger.planHistoryRevert(
+              sessionId,
+              MAIN_CONTEXT_SCOPE,
+              targetUiMessageId
+            )
+            if (txIds.length > 0) await svc.revertTransactions(sessionId, txIds)
+            const committed = await core.ledger.appendIfHistoryVersion(
+              sessionId,
+              MAIN_CONTEXT_SCOPE,
+              plan.expectedHistoryVersion,
+              'history_reverted',
+              plan.payload
+            )
+            if (!committed) {
+              throw Object.assign(new Error('Conversation history changed during revert.'), {
+                code: 'HISTORY_REVERT_STALE'
+              })
+            }
+            return { historyVersion: committed.historyVersion }
+          }
+        )
+      }
+    )
   })
 
-  ipcMain.handle(IPC_CHANNELS.CHAT_PREVIEW_REVERT_MESSAGES, async (_event, sessionId: string, txIds: string[]) => {
+  ipcMain.handle(IPC_CHANNELS.CHAT_PREVIEW_REVERT_MESSAGES, async (
+    _event,
+    sessionId: string,
+    targetUiMessageId: string,
+    txIds: string[]
+  ) => {
     const { getEditTransactionService } = await import('../services/EditTransactionService')
     const svc = getEditTransactionService()
-    return await svc.previewRevertTransactions(sessionId, txIds)
+    const status = buildRuntimeStatus(sessionId)
+    if (status.mainRunnerActive || status.activeSubAgentIds.length > 0) {
+      throw Object.assign(new Error('Cannot preview history revert while a run is active.'), {
+        code: 'RUN_ACTIVE'
+      })
+    }
+    const storedSession = (await getSessionStoreReady()).get(sessionId)
+    if (!storedSession) throw new Error(`Session not found: ${sessionId}`)
+    if (storedSession.runtime) {
+      await getContextCoreServices().ledger.planHistoryRevert(
+        sessionId,
+        MAIN_CONTEXT_SCOPE,
+        targetUiMessageId
+      )
+    }
+    return txIds.length > 0
+      ? svc.previewRevertTransactions(sessionId, txIds)
+      : { toDelete: [], toRestore: [] }
   })
 
   // Plan 审批 IPC（per-stream 决策）

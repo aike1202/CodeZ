@@ -4,6 +4,7 @@ import { WorktreeService } from '../../services/WorktreeService'
 import type { AgentRunConfig, AgentRunnerCallbacks } from './types'
 import type { ExecUnit, ExecutionGroupingResult, ExecutionWave, ParallelExecutionReport } from '../../../shared/types/parallel'
 import type { TaskItem, TaskStatus } from '../../../shared/types/task'
+import type { EditTransactionService } from '../../services/EditTransactionService'
 
 export function resolveDelegateIsolation(
   requestedIsolation: unknown,
@@ -67,7 +68,8 @@ export async function handleDelegateTasks(
   rawArgs: string,
   config: AgentRunConfig,
   callbacks: AgentRunnerCallbacks,
-  parentSignal?: AbortSignal
+  parentSignal?: AbortSignal,
+  parentTransaction?: { id: string; service: EditTransactionService }
 ): Promise<{ role: 'tool'; tool_call_id: string; name: string; content: string }> {
   const name = 'DelegateTasks'
 
@@ -242,6 +244,7 @@ export async function handleDelegateTasks(
       {
         workspaceRoot: config.workspaceRoot,
         sessionId,
+        providerId: config.providerId,
         parentToolCallId: toolCallId,
         apiConfig: {
           baseUrl: config.baseUrl || '',
@@ -257,7 +260,10 @@ export async function handleDelegateTasks(
         contextCapabilities: config.contextCapabilities,
         runtimeCoordinator: config.runtimeCoordinator,
         contextBuilder: config.contextBuilder,
+        compactionService: config.compactionService,
         parentSignal,
+        transactionId: parentTransaction?.id,
+        editTransactionService: parentTransaction?.service,
       },
       callbacks
     )

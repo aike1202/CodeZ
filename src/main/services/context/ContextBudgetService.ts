@@ -7,6 +7,7 @@ import type {
   ContextPressureLevel
 } from '../../../shared/types/context'
 import type { ImageAttachment } from '../../../shared/types/attachment'
+import { defaultMaxOutputTokens } from './ModelCapabilities'
 
 const CJK_REGEX = /[\u3400-\u9fff\u3000-\u303f\uff00-\uffef]/g
 
@@ -37,6 +38,7 @@ export interface MeasureRequestInput {
   currentAttachments?: Array<Pick<ImageAttachment, 'width' | 'height'>>
   historyVersion: number
   providerUsage?: ProviderTokenUsage
+  providerUsageAdditionalTokens?: number
   reasoningBudgetTokens?: number
   projectedAdditionalTokens?: number
 }
@@ -67,10 +69,7 @@ export class ContextBudgetService {
     reasoningBudgetTokens = 0
   ): ContextLimits {
     const contextWindowTokens = Math.max(1, Math.floor(capabilities.contextWindowTokens || 1))
-    const defaultReserve = Math.min(
-      clamp(Math.floor(contextWindowTokens * 0.2), 1024, 8192),
-      Math.max(1, Math.floor(contextWindowTokens * 0.5))
-    )
+    const defaultReserve = defaultMaxOutputTokens(contextWindowTokens)
     const ordinaryReserve = Math.max(1, Math.floor(capabilities.maxOutputTokens || defaultReserve))
     const reasoningReserve = capabilities.reasoningCountsAgainstContext
       ? Math.max(0, Math.floor(reasoningBudgetTokens))
@@ -102,6 +101,32 @@ export class ContextBudgetService {
     return 'normal'
   }
 
+  private pressureLevelForTokens(
+    totalInputTokens: number,
+    usableInputBudget: number,
+    projectedInputTokens = totalInputTokens
+  ): ContextPressureLevel {
+    const usable = Math.max(1, Math.floor(usableInputBudget))
+    if (totalInputTokens > usable) return 'overflow'
+
+    const autoCompactBuffer = Math.min(
+      13_000,
+      Math.max(1_000, Math.floor(usable * 0.1))
+    )
+    const earlierStageBuffer = Math.min(
+      20_000,
+      Math.max(1_000, Math.floor(usable * 0.05))
+    )
+    const compactAt = Math.max(1, usable - autoCompactBuffer)
+    const pruneAt = Math.max(1, compactAt - earlierStageBuffer)
+    const warningAt = Math.max(1, pruneAt - earlierStageBuffer)
+
+    if (projectedInputTokens >= compactAt || totalInputTokens >= compactAt) return 'compact'
+    if (totalInputTokens >= pruneAt) return 'prune'
+    if (totalInputTokens >= warningAt) return 'warning'
+    return 'normal'
+  }
+
   recentTailBudget(usableInputBudget: number): number {
     return Math.floor(Math.min(
       usableInputBudget * 0.35,
@@ -126,15 +151,30 @@ export class ContextBudgetService {
       (input.currentAttachments || []).reduce(
         (total, image) => total + this.estimateImageTokens(image), 0
       )
-    let protocolTokens = 4 * ((input.recentHistory?.length || 0) + 1)
-    let totalInputTokens = systemPromptTokens + toolSchemaTokens + instructionTokens +
+    const protocolTokens = 4 * ((input.recentHistory?.length || 0) + 1)
+    const localInputTokens = systemPromptTokens + toolSchemaTokens + instructionTokens +
       protocolTokens + summaryTokens + recentHistoryTokens + currentInputTokens
+    let totalInputTokens = localInputTokens
+    let providerAdjustmentTokens = 0
     let estimateSource: ContextBudgetSnapshot['estimateSource'] = 'heuristic'
 
-    if (input.providerUsage && input.providerUsage.inputTokens >= totalInputTokens) {
-      protocolTokens += input.providerUsage.inputTokens - totalInputTokens
-      totalInputTokens = input.providerUsage.inputTokens
-      estimateSource = 'provider'
+    if (input.providerUsage) {
+      const usage = input.providerUsage
+      const providerInputTokens = Number.isFinite(usage.inputTokens)
+        ? Math.max(0, Math.floor(usage.inputTokens))
+        : 0
+      const visibleOutputTokens = Number.isFinite(usage.outputTokens)
+        ? Math.max(0, Math.floor(usage.outputTokens))
+        : 0
+      const additionalTokens = Number.isFinite(input.providerUsageAdditionalTokens)
+        ? Math.max(0, Math.floor(input.providerUsageAdditionalTokens || 0))
+        : 0
+      if (providerInputTokens > 0) {
+        const providerBaseline = providerInputTokens + visibleOutputTokens + additionalTokens
+        totalInputTokens = providerBaseline
+        providerAdjustmentTokens = providerBaseline - localInputTokens
+        estimateSource = 'provider'
+      }
     }
 
     const projected = totalInputTokens + Math.max(0, input.projectedAdditionalTokens || 0)
@@ -149,10 +189,11 @@ export class ContextBudgetService {
       rawHistoryTokens: input.rawHistoryTokens ?? recentHistoryTokens,
       currentInputTokens,
       totalInputTokens,
-      providerAdjustmentTokens: 0,
-      pressureLevel: this.pressureLevel(
-        totalInputTokens / limits.usableInputBudget,
-        projected > limits.hardInputLimit
+      providerAdjustmentTokens,
+      pressureLevel: this.pressureLevelForTokens(
+        totalInputTokens,
+        limits.usableInputBudget,
+        projected
       ),
       estimateSource,
       historyVersion: input.historyVersion
@@ -173,7 +214,7 @@ export class ContextBudgetService {
       ...snapshot,
       totalInputTokens,
       providerAdjustmentTokens,
-      pressureLevel: this.pressureLevel(totalInputTokens / snapshot.usableInputBudget),
+      pressureLevel: this.pressureLevelForTokens(totalInputTokens, snapshot.usableInputBudget),
       estimateSource: 'provider'
     }
   }
@@ -181,12 +222,13 @@ export class ContextBudgetService {
   assertCurrentInputFits(
     currentInput: string,
     capabilities: ModelContextCapabilities,
-    attachments: Array<Pick<ImageAttachment, 'width' | 'height'>> = []
+    attachments: Array<Pick<ImageAttachment, 'width' | 'height'>> = [],
+    reasoningBudgetTokens = 0
   ): void {
     const tokens = this.estimateStringTokens(currentInput) + attachments.reduce(
       (total, image) => total + this.estimateImageTokens(image), 0
     )
-    const { hardInputLimit } = this.resolveLimits(capabilities)
+    const { hardInputLimit } = this.resolveLimits(capabilities, reasoningBudgetTokens)
     if (tokens > hardInputLimit) {
       throw Object.assign(new Error('Current input exceeds the model input limit'), {
         code: 'CURRENT_INPUT_TOO_LARGE',

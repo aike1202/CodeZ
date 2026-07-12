@@ -2,7 +2,9 @@ import type {
   ContextBudgetSnapshot,
   ContextScopeId,
   ModelContextItem,
-  NormalizedModelMessage
+  NormalizedModelMessage,
+  PostCompactionFileContext,
+  PostCompactionSkillContext
 } from '../../../shared/types/context'
 import type {
   ChatMessage,
@@ -13,10 +15,17 @@ import { ProviderMessageAdapter } from '../chat/ProviderMessageAdapter'
 import { CompactionService } from './CompactionService'
 import { renderCompactionSummary } from './CompactionSummary'
 import { ContextBudgetService } from './ContextBudgetService'
+import { FileContextProjector } from './FileContextProjector'
+import { FileContextRestorer } from './FileContextRestorer'
 import { ModelHistoryNormalizer } from './ModelHistoryNormalizer'
 import { ModelLedgerStore } from './ModelLedgerStore'
 import { ResumeStateManager } from './ResumeStateManager'
 import { ToolOutputPruner } from './ToolOutputPruner'
+import { SkillContextRestorer } from './SkillContextRestorer'
+import {
+  fingerprintProviderRequest,
+  type ProviderUsageRequestProfile
+} from './ProviderUsageRequestFingerprint'
 
 export interface BuildModelContextRequest {
   sessionId: string
@@ -27,10 +36,11 @@ export interface BuildModelContextRequest {
   systemPrompt: string
   toolSchemas: unknown[]
   instructions?: string[]
-  providerUsage?: ProviderTokenUsage
+  providerRequestProfile?: ProviderUsageRequestProfile
   reasoningBudgetTokens?: number
   projectedAdditionalTokens?: number
   allowCompaction?: boolean
+  workspaceRoot?: string
 }
 
 export interface BuiltModelContext {
@@ -38,6 +48,67 @@ export interface BuiltModelContext {
   messages: ChatMessage[]
   budget: ContextBudgetSnapshot
   historyVersion: number
+  providerUsageRequestFingerprint: string
+}
+
+export function buildModelContextItems(input: {
+  systemPrompt: string
+  instructions: readonly string[]
+  summary: string
+  resume: string
+  skillContext?: PostCompactionSkillContext
+  fileContext?: PostCompactionFileContext
+  currentInputMessageId: string
+  history: readonly NormalizedModelMessage[]
+}): ModelContextItem[] {
+  const items: ModelContextItem[] = [
+    { kind: 'system', message: { role: 'system', content: input.systemPrompt } }
+  ]
+  items.push(...input.instructions
+    .filter((instruction) => instruction.trim())
+    .map((instruction): ModelContextItem => ({
+      kind: 'system',
+      message: { role: 'system', content: instruction }
+    })))
+  if (input.summary) {
+    items.push({ kind: 'compaction_summary', message: { role: 'system', content: input.summary } })
+  }
+  if (input.resume) {
+    items.push({ kind: 'resume_state', message: { role: 'system', content: input.resume } })
+  }
+  for (const message of input.history) {
+    if (input.skillContext && message.id === input.currentInputMessageId) {
+      items.push({
+        kind: 'skill_context',
+        message: {
+          id: `skill-context:${input.skillContext.sourceSequence ?? input.skillContext.createdAt}`,
+          turnId: message.turnId,
+          role: 'assistant',
+          content: input.skillContext.content,
+          status: 'complete',
+          createdAt: input.skillContext.createdAt,
+          sourceSequence: input.skillContext.sourceSequence
+        }
+      })
+    }
+    if (input.fileContext && message.id === input.currentInputMessageId) {
+      items.push({
+        kind: 'file_context',
+        message: {
+          id: `file-context:${input.fileContext.sourceSequence ?? input.fileContext.createdAt}`,
+          turnId: message.turnId,
+          role: 'assistant',
+          content: input.fileContext.content,
+          fileReferences: input.fileContext.fileReferences.map((reference) => ({ ...reference })),
+          status: 'complete',
+          createdAt: input.fileContext.createdAt,
+          sourceSequence: input.fileContext.sourceSequence
+        }
+      })
+    }
+    items.push({ kind: message.role, message })
+  }
+  return items
 }
 
 export class ModelContextBuilder {
@@ -46,7 +117,10 @@ export class ModelContextBuilder {
     private readonly budgetService = new ContextBudgetService(),
     private readonly pruner = new ToolOutputPruner(budgetService),
     private readonly resumeStates = new ResumeStateManager(),
-    private readonly compaction?: CompactionService
+    private readonly compaction?: CompactionService,
+    private readonly fileProjector = new FileContextProjector(budgetService),
+    private readonly fileRestorer = new FileContextRestorer(budgetService),
+    private readonly skillRestorer = new SkillContextRestorer(budgetService)
   ) {}
 
   async build(request: BuildModelContextRequest): Promise<BuiltModelContext> {
@@ -59,21 +133,82 @@ export class ModelContextBuilder {
     this.budgetService.assertCurrentInputFits(
       request.currentInput,
       request.capabilities,
-      current.attachments
+      current.attachments,
+      request.reasoningBudgetTokens
     )
-    let activeMessages = scope.activeMessages
+    const rawHistoryTokens = scope.activeMessages
+      .filter((message) => message.id !== current.id)
+      .reduce((total, message) => total + this.budgetService.estimateValueTokens(message), 0)
+    const fileProjection = this.fileProjector.project(scope.activeMessages)
+    let activeMessages = fileProjection.messages
     let recentHistory = activeMessages.filter((message) => message.id !== current.id)
-    const rawHistoryTokens = recentHistory.reduce(
-      (total, message) => total + this.budgetService.estimateValueTokens(message),
-      0
-    )
     const summary = scope.latestCompaction ? renderCompactionSummary(scope.latestCompaction) : ''
     const resume = scope.resumeState && scope.resumeState.revision !== scope.latestCompactionResumeRevision
       ? this.resumeStates.renderBounded(scope.resumeState)
       : ''
+    const fileContext = await this.fileRestorer.reconcile({
+      context: scope.postCompactionFileContext,
+      messages: scope.activeMessages,
+      workspaceRoot: request.workspaceRoot
+    })
+    const skillContext = this.skillRestorer.reconcile({
+      context: scope.postCompactionSkillContext,
+      messages: scope.activeMessages
+    })
 
+    const fileContextChanged = Boolean(
+      scope.postCompactionFileContext &&
+      scope.postCompactionFileContext.content !== fileContext?.content
+    )
+    const skillContextChanged = Boolean(
+      scope.postCompactionSkillContext &&
+      scope.postCompactionSkillContext.content !== skillContext?.content
+    )
+    const resolveProviderBaseline = (
+      messages: readonly NormalizedModelMessage[]
+    ): { usage: ProviderTokenUsage; additionalTokens: number } | undefined => {
+      if (
+        fileContextChanged || skillContextChanged ||
+        !scope.lastProviderUsage ||
+        !scope.lastProviderUsageMessageId ||
+        !scope.lastProviderUsageRequestFingerprint
+      ) return undefined
+      const items = buildModelContextItems({
+        systemPrompt: request.systemPrompt,
+        instructions: request.instructions || [],
+        summary,
+        resume,
+        skillContext,
+        fileContext,
+        currentInputMessageId: current.id,
+        history: messages
+      })
+      const anchorItemIndex = items.findIndex((item) =>
+        'id' in item.message && item.message.id === scope.lastProviderUsageMessageId
+      )
+      const anchorMessageIndex = messages.findIndex((message) =>
+        message.id === scope.lastProviderUsageMessageId
+      )
+      if (anchorItemIndex < 0 || anchorMessageIndex < 0) return undefined
+      const prefixFingerprint = this.fingerprintRequest(
+        request,
+        items.slice(0, anchorItemIndex)
+      )
+      if (prefixFingerprint !== scope.lastProviderUsageRequestFingerprint) return undefined
+      return {
+        usage: scope.lastProviderUsage,
+        additionalTokens: messages.slice(anchorMessageIndex + 1).reduce(
+          (total, message) => total + this.budgetService.estimateValueTokens(message),
+          0
+        )
+      }
+    }
+    let providerBaseline = resolveProviderBaseline(activeMessages)
     let budget = this.measure(
-      request, recentHistory, summary, resume, scope.historyVersion, rawHistoryTokens, current.attachments
+      request, recentHistory, summary, resume, skillContext?.content || '', fileContext?.content || '',
+      scope.historyVersion, rawHistoryTokens,
+      current.attachments, providerBaseline?.usage,
+      providerBaseline?.additionalTokens
     )
     const maxSingleToolTokens = Math.min(
       8_000,
@@ -93,6 +228,7 @@ export class ModelContextBuilder {
         .filter((message) => message.turnId === current.turnId && message.role === 'tool')
         .map((message) => message.id)
     )
+    for (const id of fileProjection.protectedMessageIds) unconsumedToolResultIds.add(id)
     const emergencyPrune = this.pruner.prune(activeMessages, {
       targetTokens: Number.POSITIVE_INFINITY,
       protectedTailStart: activeMessages.length,
@@ -102,8 +238,13 @@ export class ModelContextBuilder {
     if (emergencyPrune.records.length > 0) {
       activeMessages = emergencyPrune.messages
       recentHistory = activeMessages.filter((message) => message.id !== current.id)
+      providerBaseline = resolveProviderBaseline(activeMessages)
       budget = this.measure(
-        request, recentHistory, summary, resume, scope.historyVersion, rawHistoryTokens, current.attachments
+        request, recentHistory, summary, resume, skillContext?.content || '', fileContext?.content || '',
+        scope.historyVersion, rawHistoryTokens,
+        current.attachments,
+        providerBaseline?.usage,
+        providerBaseline?.additionalTokens
       )
     }
     if (budget.pressureLevel === 'prune' || budget.pressureLevel === 'compact' || budget.pressureLevel === 'overflow') {
@@ -115,15 +256,21 @@ export class ModelContextBuilder {
       const protectedTailStart = protectedTail.length
         ? activeMessages.findIndex((message) => message.id === protectedTail[0].id)
         : activeMessages.length
-      activeMessages = this.pruner.prune(activeMessages, {
+      const pressurePrune = this.pruner.prune(activeMessages, {
         targetTokens: Math.floor(budget.usableInputBudget * 0.75),
         protectedTailStart: Math.max(0, protectedTailStart),
         maxSingleToolTokens,
         protectedMessageIds: unconsumedToolResultIds
-      }).messages
+      })
+      activeMessages = pressurePrune.messages
       recentHistory = activeMessages.filter((message) => message.id !== current.id)
+      providerBaseline = resolveProviderBaseline(activeMessages)
       budget = this.measure(
-        request, recentHistory, summary, resume, scope.historyVersion, rawHistoryTokens, current.attachments
+        request, recentHistory, summary, resume, skillContext?.content || '', fileContext?.content || '',
+        scope.historyVersion, rawHistoryTokens,
+        current.attachments,
+        providerBaseline?.usage,
+        providerBaseline?.additionalTokens
       )
     }
 
@@ -139,7 +286,10 @@ export class ModelContextBuilder {
         capabilities: request.capabilities,
         systemPrompt: request.systemPrompt,
         toolSchemas: request.toolSchemas,
-        instructions: request.instructions
+        instructions: request.instructions,
+        workspaceRoot: request.workspaceRoot,
+        reasoningBudgetTokens: request.reasoningBudgetTokens,
+        requiredMessageId: request.currentInputMessageId
       })
       if (result.status === 'completed') {
         return this.build({ ...request, allowCompaction: false })
@@ -153,18 +303,27 @@ export class ModelContextBuilder {
       })
     }
 
-    const items = this.buildItems(
-      request.systemPrompt,
-      request.instructions || [],
+    const items = buildModelContextItems({
+      systemPrompt: request.systemPrompt,
+      instructions: request.instructions || [],
       summary,
       resume,
-      activeMessages
-    )
+      skillContext,
+      fileContext,
+      currentInputMessageId: current.id,
+      history: activeMessages
+    })
+    const messages = ProviderMessageAdapter.toChatMessages(items)
     return {
       items,
-      messages: ProviderMessageAdapter.toChatMessages(items),
+      messages,
       budget,
-      historyVersion: scope.historyVersion
+      historyVersion: scope.historyVersion,
+      providerUsageRequestFingerprint: fingerprintProviderRequest({
+        messages,
+        toolSchemas: request.toolSchemas,
+        profile: this.requestProfile(request)
+      })
     }
   }
 
@@ -173,46 +332,52 @@ export class ModelContextBuilder {
     recentHistory: NormalizedModelMessage[],
     summary: string,
     resume: string,
+    skillContext: string,
+    fileContext: string,
     historyVersion: number,
     rawHistoryTokens: number,
-    currentAttachments: NormalizedModelMessage['attachments']
+    currentAttachments: NormalizedModelMessage['attachments'],
+    providerUsage?: ProviderTokenUsage,
+    providerUsageAdditionalTokens = 0
   ): ContextBudgetSnapshot {
     return this.budgetService.measureRequest({
       capabilities: request.capabilities,
       systemPrompt: request.systemPrompt,
       toolSchemas: request.toolSchemas,
-      instructions: [...(request.instructions || []), resume],
+      instructions: [
+        ...(request.instructions || []),
+        ...(resume ? [resume] : []),
+        ...(skillContext ? [skillContext] : []),
+        ...(fileContext ? [fileContext] : [])
+      ],
       summary,
       recentHistory,
       rawHistoryTokens,
       currentInput: request.currentInput,
       currentAttachments,
       historyVersion,
-      providerUsage: request.providerUsage,
+      providerUsage,
+      providerUsageAdditionalTokens,
       reasoningBudgetTokens: request.reasoningBudgetTokens,
       projectedAdditionalTokens: request.projectedAdditionalTokens
     })
   }
 
-  private buildItems(
-    systemPrompt: string,
-    instructions: string[],
-    summary: string,
-    resume: string,
-    history: NormalizedModelMessage[]
-  ): ModelContextItem[] {
-    const items: ModelContextItem[] = [
-      { kind: 'system', message: { role: 'system', content: systemPrompt } }
-    ]
-    items.push(...instructions
-      .filter((instruction) => instruction.trim())
-      .map((instruction): ModelContextItem => ({
-        kind: 'system',
-        message: { role: 'system', content: instruction }
-      })))
-    if (summary) items.push({ kind: 'compaction_summary', message: { role: 'system', content: summary } })
-    if (resume) items.push({ kind: 'resume_state', message: { role: 'system', content: resume } })
-    items.push(...history.map((message): ModelContextItem => ({ kind: message.role, message })))
-    return items
+  private requestProfile(request: BuildModelContextRequest): ProviderUsageRequestProfile {
+    return {
+      ...(request.providerRequestProfile || {}),
+      reasoningBudgetTokens: request.reasoningBudgetTokens
+    }
+  }
+
+  private fingerprintRequest(
+    request: BuildModelContextRequest,
+    items: readonly ModelContextItem[]
+  ): string {
+    return fingerprintProviderRequest({
+      messages: ProviderMessageAdapter.toChatMessages([...items]),
+      toolSchemas: request.toolSchemas,
+      profile: this.requestProfile(request)
+    })
   }
 }

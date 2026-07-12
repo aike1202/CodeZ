@@ -30,11 +30,37 @@ export async function resolveOpenAIMessages(
 }
 
 export function extractOpenAIUsage(value: any): ProviderTokenUsage {
+  const completionTokens = Number(value?.completion_tokens || 0)
+  const reasoningTokens = value?.completion_tokens_details?.reasoning_tokens !== undefined
+    ? Number(value.completion_tokens_details.reasoning_tokens)
+    : undefined
   return {
     inputTokens: Number(value?.prompt_tokens || 0),
-    outputTokens: Number(value?.completion_tokens || 0),
+    outputTokens: Math.max(0, completionTokens - (reasoningTokens || 0)),
+    ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
     ...(value?.total_tokens !== undefined ? { totalTokens: Number(value.total_tokens) } : {})
   }
+}
+
+export function openAIOutputLimitPayload(
+  model: string,
+  baseUrl: string,
+  maxOutputTokens?: number
+): Record<string, number> {
+  if (!maxOutputTokens) return {}
+  let supportsModernCompletionLimit = false
+  try {
+    const hostname = new URL(baseUrl).hostname.toLowerCase()
+    supportsModernCompletionLimit = hostname === 'openai.com' ||
+      hostname.endsWith('.openai.com') ||
+      hostname.endsWith('.openai.azure.com')
+  } catch {}
+  const normalizedModel = model.toLowerCase().split('/').pop() || model.toLowerCase()
+  const requiresCompletionLimit = normalizedModel.startsWith('gpt-5') ||
+    /^o[134](?:-|$)/.test(normalizedModel)
+  return supportsModernCompletionLimit && requiresCompletionLimit
+    ? { max_completion_tokens: maxOutputTokens }
+    : { max_tokens: maxOutputTokens }
 }
 
 export interface ThinkParserState {
@@ -120,7 +146,7 @@ export function processDeltaWithThinkTags(
 
 export class OpenAIProvider implements IChatProvider {
   async streamChat(config: ChatRequestConfig, callbacks: StreamCallbacks, signal: AbortSignal): Promise<void> {
-    const { baseUrl, apiKey, model, messages, tools, thinking, resolveImage } = config
+    const { baseUrl, apiKey, model, messages, tools, thinking, resolveImage, maxOutputTokens } = config
     const url = `${baseUrl}/chat/completions`
 
     let fullContent = ''
@@ -132,6 +158,7 @@ export class OpenAIProvider implements IChatProvider {
       tools: tools && tools.length > 0 ? tools : undefined,
       stream: true,
       stream_options: { include_usage: true },
+      ...openAIOutputLimitPayload(model, baseUrl, maxOutputTokens),
       ...buildThinkingPayload(thinking, model, baseUrl, !!(tools && tools.length > 0), 'openai')
     }
 

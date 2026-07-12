@@ -105,7 +105,7 @@ export interface MessageSlice {
   consumeInternalContinuation: (sessionId: string) => PendingInternalContinuation | null
   markActiveRunUserAborted: (sessionId: string) => void
   setTasks: (tasks: TaskItem[]) => void
-  revertToMessage: (msgId: string) => Promise<void>
+  revertToMessage: (msgId: string) => Promise<boolean>
   previewRevertMessage: (msgId: string) => Promise<{ toDelete: string[], toRestore: string[] } | null>
 }
 
@@ -415,12 +415,15 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
   },
 
   setEditStatus: (msgId: string, filePath: string, status: 'accepted' | 'rejected') => {
+    const ownerSessionId = get().sessions.find((session) =>
+      session.messages.some((message) => message.id === msgId)
+    )?.id
     set((s) => updateMessageInState(s, msgId, (m) => {
       const newStatuses = { ...(m.editStatuses || {}) }
       newStatuses[filePath] = status
       return { ...m, editStatuses: newStatuses }
     }))
-    get().persistCurrentSession()
+    if (ownerSessionId) void get().persistSession(ownerSessionId)
   },
 
   appendAgentState: (msgId: string, state: AgentState) => {
@@ -913,51 +916,72 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
   })),
 
   revertToMessage: async (msgId: string) => {
-    const s = get()
-    const activeSession = s.sessions.find(ses => ses.id === s.activeSessionId)
-    if (!activeSession) return
+    const initial = get()
+    const activeSession = initial.sessions.find((session) => session.id === initial.activeSessionId)
+    if (!activeSession) return false
 
-    const msgIndex = activeSession.messages.findIndex(m => m.id === msgId)
-    if (msgIndex === -1) return
+    const originalSessionId = activeSession.id
+    const originalMessages = activeSession.messages
+    const msgIndex = originalMessages.findIndex((message) => message.id === msgId)
+    if (msgIndex === -1) return false
 
-    const targetMessage = activeSession.messages[msgIndex]
+    const targetMessage = originalMessages[msgIndex]
     
     // Gather txIds from this message and all subsequent messages in reverse chronological order
     const txIds: string[] = []
-    for (let i = activeSession.messages.length - 1; i >= msgIndex; i--) {
-      const m = activeSession.messages[i]
+    for (let i = originalMessages.length - 1; i >= msgIndex; i--) {
+      const m = originalMessages[i]
       if (m.txId) {
         txIds.push(m.txId)
       }
     }
 
-    if (txIds.length > 0) {
-      const win = window as any
-      const ipc = win?.electron?.ipcRenderer
-      if (ipc) {
-        // Run IPC call asynchronously, but don't wait for it to block UI responsiveness
-        ipc.invoke(IPC_CHANNELS.CHAT_REVERT_MESSAGES, activeSession.id, txIds).catch(console.error)
-      }
+    const ipc = (window as any)?.electron?.ipcRenderer
+    if (!ipc) return false
+    try {
+      await ipc.invoke(
+        IPC_CHANNELS.CHAT_REVERT_MESSAGES,
+        originalSessionId,
+        msgId,
+        txIds
+      )
+    } catch (error) {
+      console.error('[messageSlice.revertToMessage] Durable history revert failed:', error)
+      return false
     }
 
-    // Slice messages to remove this message and everything after
-    const newMessages = activeSession.messages.slice(0, msgIndex)
-    
+    let applied = false
     set((state) => {
-      const nextSessions = state.sessions.map(ses => 
-        ses.id === state.activeSessionId ? { ...ses, messages: newMessages } : ses
-      )
-      return { 
-        messages: newMessages, 
-        sessions: nextSessions,
-        pendingPrompt: {
-          text: targetMessage.content || '',
-          attachments: targetMessage.attachments?.map((attachment) => ({ ...attachment })) || []
-        }
+      const currentSession = state.sessions.find((session) => session.id === originalSessionId)
+      if (!currentSession || currentSession.messages !== originalMessages) {
+        console.error(
+          '[messageSlice.revertToMessage] Session messages changed during durable revert; refusing stale UI overwrite.'
+        )
+        return {}
       }
+      const newMessages = currentSession.messages.slice(0, msgIndex)
+      const draft = {
+        text: targetMessage.content || '',
+        attachments: targetMessage.attachments?.map((attachment) => ({ ...attachment })) || []
+      }
+      const sessions = state.sessions.map((session) =>
+        session.id === originalSessionId ? { ...session, messages: newMessages } : session
+      )
+      applied = true
+      return state.activeSessionId === originalSessionId
+        ? { sessions, messages: newMessages, pendingPrompt: draft }
+        : {
+            sessions,
+            composerDrafts: setSessionComposerDraft(
+              state.composerDrafts,
+              originalSessionId,
+              draft
+            )
+          }
     })
-    
-    await get().persistCurrentSession()
+
+    if (applied) await get().persistSession(originalSessionId)
+    return applied
   },
 
   previewRevertMessage: async (msgId: string) => {
@@ -976,15 +1000,23 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       }
     }
 
-    if (txIds.length === 0) {
-      return { toDelete: [], toRestore: [] }
-    }
-
     const win = window as any
     const ipc = win?.electron?.ipcRenderer
     if (ipc) {
       try {
-        const preview = await ipc.invoke(IPC_CHANNELS.CHAT_PREVIEW_REVERT_MESSAGES, activeSession.id, txIds)
+        const originalMessages = activeSession.messages
+        const preview = await ipc.invoke(
+          IPC_CHANNELS.CHAT_PREVIEW_REVERT_MESSAGES,
+          activeSession.id,
+          msgId,
+          txIds
+        )
+        const latest = get()
+        const latestSession = latest.sessions.find((session) => session.id === activeSession.id)
+        if (
+          latest.activeSessionId !== activeSession.id ||
+          latestSession?.messages !== originalMessages
+        ) return null
         return preview
       } catch (err) {
         console.error('Failed to preview revert:', err)

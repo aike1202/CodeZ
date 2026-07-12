@@ -25,6 +25,7 @@ describe('SkillTool', () => {
   it('命中 skill：返回正文', async () => {
     const tool = new SkillTool()
     const result = await tool.execute(JSON.stringify({ skill: SKILL_NAME }), { workspaceRoot: root })
+    expect(result).toContain(`<command-name>${SKILL_NAME}</command-name>`)
     expect(result).toContain('This is the skill body.')
   })
 

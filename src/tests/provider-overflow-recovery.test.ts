@@ -43,20 +43,31 @@ describe('AgentRunner provider overflow recovery', () => {
     const runner = new AgentRunner({
       chatService: chatService as any,
       toolManager: { getToolDefinitions: () => [] } as any,
-      editTransactionService: { beginTransaction: async () => 'tx1' } as any
+      editTransactionService: {
+        beginTransaction: async () => 'tx1', rollback: vi.fn()
+      } as any
     })
 
     await runner.run({
-      baseUrl: 'https://example.invalid', apiKey: 'key', model: 'm1', workspaceRoot: f.root,
+      baseUrl: 'https://example.invalid', apiKey: 'key', apiFormat: 'anthropic',
+      model: 'claude-3-7-sonnet', workspaceRoot: f.root,
+      thinking: { enabled: true, mode: 'anthropic', effort: 'custom', budgetTokens: 1 },
       runtimeTurn: f.turn, runtimeCoordinator: f.coordinator, contextBuilder: f.builder,
       compactionService: { compact } as any,
-      contextCapabilities: { contextWindowTokens: 10_000, maxOutputTokens: 2_000 },
+      contextCapabilities: {
+        contextWindowTokens: 10_000,
+        maxOutputTokens: 2_000,
+        reasoningCountsAgainstContext: true
+      },
       systemPrompt: 'system'
     }, { onChunk: vi.fn(), onDone: vi.fn(), onError })
 
     expect(chatService.streamChat).toHaveBeenCalledTimes(2)
     expect(compact).toHaveBeenCalledTimes(1)
-    expect(compact).toHaveBeenCalledWith(expect.objectContaining({ trigger: 'provider_overflow' }))
+    expect(compact).toHaveBeenCalledWith(expect.objectContaining({
+      trigger: 'provider_overflow',
+      reasoningBudgetTokens: 1024
+    }))
     expect(onError).not.toHaveBeenCalled()
     expect((await f.ledger.load('s1')).scopes.main.lastCompletedTurnId).toBe(f.turn.turnId)
   })
@@ -74,7 +85,9 @@ describe('AgentRunner provider overflow recovery', () => {
     const runner = new AgentRunner({
       chatService: chatService as any,
       toolManager: { getToolDefinitions: () => [] } as any,
-      editTransactionService: { beginTransaction: async () => 'tx1' } as any
+      editTransactionService: {
+        beginTransaction: async () => 'tx1', rollback: vi.fn()
+      } as any
     })
 
     await runner.run({

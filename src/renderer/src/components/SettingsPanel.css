@@ -156,6 +156,37 @@
   padding: 12px;
 }
 
+.settings-model-limits {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
+  gap: 12px;
+  padding: 0 12px 10px;
+}
+
+.settings-model-limit-field {
+  display: grid;
+  grid-template-columns: auto minmax(56px, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.settings-model-limit-input {
+  min-width: 0;
+  font-size: 12px;
+  text-align: right;
+}
+
+.settings-model-reasoning-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .settings-model-vision-toggle {
   display: flex;
   align-items: center;

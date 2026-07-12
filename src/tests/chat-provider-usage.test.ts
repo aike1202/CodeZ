@@ -3,6 +3,7 @@ import { extractOpenAIUsage } from '../main/services/chat/OpenAIProvider'
 import { extractAnthropicUsage } from '../main/services/chat/AnthropicProvider'
 import { extractGeminiUsage } from '../main/services/chat/GeminiProvider'
 import { classifyProviderError } from '../main/services/chat/errors'
+import { mergeProviderUsage } from '../main/services/chat/usage'
 
 describe('provider usage normalization', () => {
   it('maps OpenAI, Anthropic, and Gemini usage fields', () => {
@@ -18,5 +19,22 @@ describe('provider usage normalization', () => {
     expect(classifyProviderError(400, '{"error":{"code":"context_length_exceeded"}}')).toBe('CONTEXT_OVERFLOW')
     expect(classifyProviderError(400, 'maximum context length is 8192 tokens')).toBe('CONTEXT_OVERFLOW')
     expect(classifyProviderError(401, 'invalid key')).toBe('AUTHENTICATION')
+  })
+
+  it('counts Anthropic cache tokens as input and merges segmented usage events', () => {
+    const start = extractAnthropicUsage({
+      input_tokens: 10,
+      cache_creation_input_tokens: 20,
+      cache_read_input_tokens: 30,
+      output_tokens: 0
+    })
+    const end = extractAnthropicUsage({ output_tokens: 7 })
+
+    expect(start.inputTokens).toBe(60)
+    expect(mergeProviderUsage(start, end)).toMatchObject({
+      inputTokens: 60,
+      outputTokens: 7,
+      totalTokens: 67
+    })
   })
 })

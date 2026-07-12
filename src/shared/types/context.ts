@@ -15,11 +15,13 @@ export type LedgerEventType =
   | 'compaction_started'
   | 'compaction_completed'
   | 'compaction_failed'
+  | 'history_reverted'
   | 'legacy_import_completed'
 
 const HISTORY_EVENT_TYPES = new Set<LedgerEventType>([
   'user_message', 'assistant_message', 'tool_result', 'turn_interrupted',
-  'resume_state_updated', 'compaction_completed', 'legacy_import_completed'
+  'resume_state_updated', 'compaction_completed', 'legacy_import_completed',
+  'history_reverted'
 ])
 
 export function contextScopeForSubAgent(runId: string): ContextScopeId {
@@ -86,8 +88,60 @@ export interface NormalizedToolCall {
   thoughtSignature?: string
 }
 
+export interface FileContextReference {
+  path: string
+  sha256: string
+  operation: 'read' | 'edit' | 'write'
+  /** True only when this message contains the file contents visible to the model. */
+  contentIncluded: boolean
+  /** Hash of the exact rendered content, used to deduplicate identical Read ranges. */
+  contentSha256?: string
+  offset?: number
+  limit?: number
+  /** 1-indexed character offset within a single requested line. */
+  characterOffset?: number
+  /** Durable ledger ordering used to restore the most recently accessed files. */
+  accessSequence?: number
+  /** Exact block boundaries inside a Read tool result, enabling per-file projection. */
+  resultBlockStart?: number
+  resultBlockEnd?: number
+}
+
+export interface PostCompactionFileBlock {
+  reference: FileContextReference
+  /** Numbered file text. It is JSON-escaped before entering a provider request. */
+  content: string
+  /** Filesystem version used to invalidate restored text after external changes. */
+  statSignature: string
+  realPath?: string
+}
+
+export interface PostCompactionFileContext {
+  /** Safe JSON data projection; legacy snapshots may contain the old XML rendering here. */
+  content: string
+  fileReferences: FileContextReference[]
+  blocks?: PostCompactionFileBlock[]
+  createdAt: string
+  sourceSequence?: number
+}
+
+export interface InvokedSkillContextEntry {
+  name: string
+  content: string
+  invokedSequence: number
+}
+
+export interface PostCompactionSkillContext {
+  content: string
+  skills: InvokedSkillContextEntry[]
+  createdAt: string
+  sourceSequence?: number
+}
+
 export interface NormalizedModelMessage {
   id: string
+  /** Renderer message identity used for durable conversation history operations. */
+  clientMessageId?: string
   turnId: string
   role: 'user' | 'assistant' | 'tool'
   content: string
@@ -98,11 +152,18 @@ export interface NormalizedModelMessage {
   createdAt: string
   sourceSequence?: number
   attachments?: ImageAttachment[]
+  /** Client-side file working-set metadata. Provider adapters do not serialize it. */
+  fileReferences?: FileContextReference[]
 }
 
 export interface ModelContextItem {
-  kind: 'system' | 'compaction_summary' | 'resume_state' | 'user' | 'assistant' | 'tool'
-  message: NormalizedModelMessage | { role: 'system'; content: string }
+  kind: 'system' | 'compaction_summary' | 'resume_state' | 'skill_context' | 'file_context' | 'user' | 'assistant' | 'tool'
+  message: NormalizedModelMessage | {
+    role: 'system'
+    content: string
+    fileReferences?: FileContextReference[]
+    sourceSequence?: number
+  }
 }
 
 export interface CompactionSummaryV1 {
@@ -190,6 +251,8 @@ export interface UserMessagePayload {
 export interface AssistantMessagePayload {
   message: NormalizedModelMessage
   usage?: ProviderTokenUsage
+  /** Fingerprint of the exact Provider request measured by usage. */
+  requestFingerprint?: string
 }
 
 export interface ToolResultPayload {
@@ -227,6 +290,8 @@ export interface CompactionCompletedPayload {
   summary: CompactionSummaryV1
   resumeState?: VersionedResumeState
   activeMessages: NormalizedModelMessage[]
+  postCompactionFileContext?: PostCompactionFileContext
+  postCompactionSkillContext?: PostCompactionSkillContext
 }
 
 export interface CompactionFailedPayload {
@@ -235,6 +300,13 @@ export interface CompactionFailedPayload {
   code: ContextErrorCode
   message: string
   retryable: boolean
+}
+
+export interface HistoryRevertedPayload {
+  sourceHistoryVersion: number
+  targetUiMessageId: string
+  targetMessageId: string
+  activeMessages: NormalizedModelMessage[]
 }
 
 export interface LegacyImportCompletedPayload {
@@ -254,6 +326,7 @@ export interface LedgerPayloadByType {
   compaction_started: CompactionStartedPayload
   compaction_completed: CompactionCompletedPayload
   compaction_failed: CompactionFailedPayload
+  history_reverted: HistoryRevertedPayload
   legacy_import_completed: LegacyImportCompletedPayload
 }
 
@@ -292,6 +365,13 @@ export interface SessionRuntimeScopeSnapshot {
   latestCompactionResumeRevision?: number
   lastProviderId?: string
   lastModel?: string
+  lastProviderUsage?: ProviderTokenUsage
+  lastProviderUsageMessageId?: string
+  lastProviderUsageProviderId?: string
+  lastProviderUsageModel?: string
+  lastProviderUsageRequestFingerprint?: string
+  postCompactionFileContext?: PostCompactionFileContext
+  postCompactionSkillContext?: PostCompactionSkillContext
 }
 
 export interface SessionRuntimeSnapshot {

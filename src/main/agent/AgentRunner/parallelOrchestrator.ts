@@ -1,4 +1,6 @@
 import { execFileSync } from 'child_process'
+import * as fs from 'fs'
+import * as path from 'path'
 import { BrowserWindow } from 'electron'
 import { IPC_CHANNELS } from '../../../shared/ipc/channels'
 import { WorktreeService } from '../../services/WorktreeService'
@@ -7,6 +9,13 @@ import type { AgentRunnerCallbacks } from './types'
 import type { ModelContextCapabilities, ThinkingConfig } from '../../../shared/types/provider'
 import type { SessionRuntimeCoordinator } from '../../services/context/SessionRuntimeCoordinator'
 import type { ModelContextBuilder } from '../../services/context/ModelContextBuilder'
+import type { CompactionService } from '../../services/context/CompactionService'
+import type { EditTransactionService } from '../../services/EditTransactionService'
+import { analyzePathImpactSync } from '../../services/permission/PathImpactAnalyzer'
+import {
+  canonicalMutationPath,
+  getFileMutationCoordinator
+} from '../../tools/FileMutationCoordinator'
 import { getExecutionController } from '../../services/execution/ExecutionController'
 import type {
   ExecUnit,
@@ -24,6 +33,8 @@ import type {
 export interface ParallelOrchestratorConfig {
   workspaceRoot: string
   sessionId: string
+  /** Provider identity used by durable SubAgent scopes to invalidate stale usage anchors. */
+  providerId?: string
   /** 父工具调用 ID — Worker 的 parentToolCallId 设置为这个值，前端据此把 SubAgentCard 关联到 DelegateTasks */
   parentToolCallId?: string
   apiConfig: {
@@ -40,6 +51,10 @@ export interface ParallelOrchestratorConfig {
   contextCapabilities?: ModelContextCapabilities
   runtimeCoordinator?: SessionRuntimeCoordinator
   contextBuilder?: ModelContextBuilder
+  compactionService?: CompactionService
+  /** Parent transaction used only by shared-workspace workers. */
+  transactionId?: string
+  editTransactionService?: EditTransactionService
   /** 父 Agent 停止时撤销本次 execution 及其所有 Executor 租约。 */
   parentSignal?: AbortSignal
 }
@@ -253,14 +268,37 @@ export function prepareWorktreeArtifact(
   }
 }
 
-export function mergePreparedWorktree(workspaceRoot: string, branch: string): string | null {
+export interface PreparedWorktreeMergeResult {
+  mergeError: string | null
+  abortError: string | null
+}
+
+export function mergePreparedWorktree(
+  workspaceRoot: string,
+  branch: string
+): PreparedWorktreeMergeResult {
   try {
     gitInWorktree(workspaceRoot, ['merge', '--no-edit', branch])
-    return null
+    return { mergeError: null, abortError: null }
   } catch (err: any) {
-    try { gitInWorktree(workspaceRoot, ['merge', '--abort']) } catch {}
-    return formatGitError(err) || 'worktree merge failed'
+    let abortError: string | null = null
+    try {
+      gitInWorktree(workspaceRoot, ['merge', '--abort'])
+    } catch (abortFailure) {
+      abortError = formatGitError(abortFailure)
+    }
+    return {
+      mergeError: formatGitError(err) || 'worktree merge failed',
+      abortError
+    }
   }
+}
+
+function formatPreparedMergeError(result: PreparedWorktreeMergeResult): string | null {
+  if (!result.mergeError) return null
+  return result.abortError
+    ? `${result.mergeError}; git merge --abort also failed: ${result.abortError}`
+    : result.mergeError
 }
 
 /**
@@ -275,7 +313,154 @@ export function mergeWorktree(
 ): string | null {
   const artifact = prepareWorktreeArtifact(wtName, wtPath)
   if (artifact.error) return artifact.error
-  return mergePreparedWorktree(workspaceRoot, branch)
+  return formatPreparedMergeError(mergePreparedWorktree(workspaceRoot, branch))
+}
+
+interface RawDiffPath {
+  relativePath: string
+  oldMode: string
+  newMode: string
+}
+
+function rawDiffPaths(workspaceRoot: string, from: string, to: string): RawDiffPath[] {
+  const raw = execFileSync(
+    'git',
+    ['diff', '--raw', '-z', '--no-renames', '--abbrev=40', from, to],
+    { cwd: workspaceRoot, timeout: 30_000, stdio: 'pipe', encoding: 'utf8' }
+  )
+  const fields = raw.split('\0')
+  const entries: RawDiffPath[] = []
+  for (let index = 0; index < fields.length;) {
+    const header = fields[index++]
+    if (!header) continue
+    const match = header.match(
+      /^:(\d{6}) (\d{6}) [0-9a-f]+ [0-9a-f]+ [A-Z](?:\d+)?(?:\t([\s\S]*))?$/i
+    )
+    if (!match) throw new Error(`Cannot parse Git raw diff entry: ${header}`)
+    const relativePath = match[3] ?? fields[index++]
+    if (!relativePath) throw new Error('Git raw diff entry is missing its path')
+    entries.push({ relativePath, oldMode: match[1], newMode: match[2] })
+  }
+  return entries
+}
+
+function assertSupportedMergeEntry(entry: RawDiffPath): void {
+  const supported = new Set(['000000', '100644', '100755'])
+  if (!supported.has(entry.oldMode) || !supported.has(entry.newMode)) {
+    throw new Error(
+      `Worktree merge refuses symlink, submodule, or special entry ${entry.relativePath} ` +
+      `(${entry.oldMode} -> ${entry.newMode})`
+    )
+  }
+}
+
+function changedWorkspacePaths(workspaceRoot: string, branch: string): string[] {
+  const mergeBase = execFileSync('git', ['merge-base', 'HEAD', branch], {
+    cwd: workspaceRoot,
+    timeout: 30_000,
+    stdio: 'pipe',
+    encoding: 'utf8'
+  }).trim()
+  const entries = [
+    ...rawDiffPaths(workspaceRoot, mergeBase, 'HEAD'),
+    ...rawDiffPaths(workspaceRoot, mergeBase, branch)
+  ]
+  for (const entry of entries) assertSupportedMergeEntry(entry)
+  let realWorkspaceRoot = path.resolve(workspaceRoot)
+  try {
+    realWorkspaceRoot = fs.realpathSync.native(workspaceRoot)
+  } catch {}
+  return [...new Set(entries.map(({ relativePath }) => {
+    const requestedPath = path.resolve(workspaceRoot, relativePath)
+    const relative = path.relative(workspaceRoot, requestedPath)
+    const impact = analyzePathImpactSync(requestedPath, workspaceRoot)
+    const expectedPhysicalPath = path.resolve(realWorkspaceRoot, relativePath)
+    if (
+      !impact.insideWorkspace ||
+      canonicalMutationPath(impact.resolvedPath) !== canonicalMutationPath(expectedPhysicalPath) ||
+      relative === '' || relative === '..' ||
+      relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)
+    ) {
+      throw new Error(`Worktree merge path escapes the workspace: ${relativePath}`)
+    }
+    return impact.resolvedPath
+  }))].sort()
+}
+
+function gitCommonDirectory(workspaceRoot: string): string {
+  let commonDir: string
+  try {
+    commonDir = execFileSync(
+      'git',
+      ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+      { cwd: workspaceRoot, timeout: 30_000, stdio: 'pipe', encoding: 'utf8' }
+    ).trim()
+  } catch {
+    const legacy = execFileSync('git', ['rev-parse', '--git-common-dir'], {
+      cwd: workspaceRoot,
+      timeout: 30_000,
+      stdio: 'pipe',
+      encoding: 'utf8'
+    }).trim()
+    commonDir = path.isAbsolute(legacy) ? legacy : path.resolve(workspaceRoot, legacy)
+  }
+  if (!commonDir) throw new Error('Git common directory could not be resolved')
+  return canonicalMutationPath(commonDir)
+}
+
+export interface ParentEditTransaction {
+  id: string
+  service: EditTransactionService
+}
+
+/** Merges a prepared branch while registering all workspace effects in the parent transaction. */
+export async function mergePreparedWorktreeTracked(
+  workspaceRoot: string,
+  branch: string,
+  parentTransaction?: ParentEditTransaction,
+  abortSignal?: AbortSignal
+): Promise<string | null> {
+  try {
+    const repoIdentity = gitCommonDirectory(workspaceRoot)
+    await getFileMutationCoordinator().run(repoIdentity, async () => {
+      const changedPaths = changedWorkspacePaths(workspaceRoot, branch)
+      const merge = () => {
+        const error = formatPreparedMergeError(mergePreparedWorktree(workspaceRoot, branch))
+        if (error) throw new Error(error)
+      }
+      if (parentTransaction && changedPaths.length > 0) {
+        await parentTransaction.service.runExternalMutation(
+          parentTransaction.id,
+          changedPaths,
+          merge,
+          abortSignal
+        )
+      } else {
+        merge()
+      }
+    }, abortSignal)
+    return null
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
+}
+
+export async function mergeWorktreeTracked(
+  workspaceRoot: string,
+  wtName: string,
+  wtPath: string,
+  branch: string,
+  parentTransaction?: ParentEditTransaction,
+  abortSignal?: AbortSignal
+): Promise<string | null> {
+  const artifact = prepareWorktreeArtifact(wtName, wtPath)
+  if (artifact.error) return artifact.error
+  return mergePreparedWorktreeTracked(
+    workspaceRoot,
+    branch,
+    parentTransaction,
+    abortSignal
+  )
 }
 
 // ─── 事件广播 ──────────────────────────────────────────────
@@ -452,7 +637,14 @@ export async function orchestrateParallelExecution(
                 ?.executorId
               if (executorId) {
                 executionController.registerArtifact(executionId, executorId, async () => {
-                  const mergeErr = mergePreparedWorktree(config.workspaceRoot, wt.branch)
+                  const mergeErr = await mergePreparedWorktreeTracked(
+                    config.workspaceRoot,
+                    wt.branch,
+                    config.transactionId && config.editTransactionService
+                      ? { id: config.transactionId, service: config.editTransactionService }
+                      : undefined,
+                    config.parentSignal
+                  )
                   if (mergeErr) return `merge conflict: ${mergeErr}`
                   try { WorktreeService.remove(config.workspaceRoot, wt.name, true) } catch {}
                   await hooks.onStatusChange(r.stepId, 'completed')
@@ -462,7 +654,16 @@ export async function orchestrateParallelExecution(
               }
             }
           } else {
-            const mergeErr = mergeWorktree(config.workspaceRoot, wt.name, wt.path, wt.branch)
+            const mergeErr = await mergeWorktreeTracked(
+              config.workspaceRoot,
+              wt.name,
+              wt.path,
+              wt.branch,
+              config.transactionId && config.editTransactionService
+                ? { id: config.transactionId, service: config.editTransactionService }
+                : undefined,
+              config.parentSignal
+            )
             if (mergeErr) {
               // 合并失败 → 标该 unit 失败，保留 worktree 供排查
               r.status = 'failed'
@@ -590,6 +791,7 @@ async function spawnWorker(
       {
         workspaceRoot,
         sessionId: config.sessionId,
+        providerId: config.providerId,
         task,
         parentPrompt: task,
         context: suppliedContext || undefined,
@@ -597,12 +799,15 @@ async function spawnWorker(
         contextCapabilities: config.contextCapabilities,
         runtimeCoordinator: config.runtimeCoordinator,
         contextBuilder: config.contextBuilder,
+        compactionService: config.compactionService,
         parentSignal: attempt.signal,
         controlToken: attempt.token,
         permissionScope:
           isolation === 'worktree'
             ? { allowAllWritesInWorkspace: true, allowBash: true }
-            : { allowedWriteFiles: step.files ?? [], allowBash: true },
+            : { allowedWriteFiles: step.files ?? [], allowBash: false },
+        transactionId: isolation === 'shared' ? config.transactionId : undefined,
+        editTransactionService: isolation === 'shared' ? config.editTransactionService : undefined,
         apiConfig: config.apiConfig,
       },
       callbacks

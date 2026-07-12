@@ -11,6 +11,7 @@ import './EditApprovalWidget.css'
 
 interface EditItem {
   filePath: string
+  transactionPath?: string
   additions: string
   deletions: string
 }
@@ -49,13 +50,15 @@ export default function EditApprovalWidget({ msgId, txId, edits, editStatuses = 
 
   const handleAccept = async (filePath: string) => {
     if (editStatuses[filePath]) return
+    const edit = uniqueEdits.find((item) => item.filePath === filePath)
+    if (!edit?.transactionPath) return
     setLoadingFile(filePath)
     try {
-      await window.api.chat.acceptFile(txId, filePath)
+      const accepted = await window.api.chat.acceptFile(txId, edit.transactionPath)
+      if (!accepted) return
       setEditStatus(msgId, filePath, 'accepted')
     } catch (err) {
       console.error('Accept error:', err)
-      setEditStatus(msgId, filePath, 'accepted') // fallback to local update
     } finally {
       setLoadingFile(null)
     }
@@ -63,13 +66,18 @@ export default function EditApprovalWidget({ msgId, txId, edits, editStatuses = 
 
   const handleReject = async (filePath: string) => {
     if (editStatuses[filePath]) return
+    const edit = uniqueEdits.find((item) => item.filePath === filePath)
+    if (!edit?.transactionPath) return
     setLoadingFile(filePath)
     try {
-      await window.api.chat.rejectFile(txId, filePath)
+      const rejected = await window.api.chat.rejectFile(txId, edit.transactionPath)
+      if (!rejected) {
+        console.error('Reject refused because the file no longer matches the CodeZ mutation.')
+        return
+      }
       setEditStatus(msgId, filePath, 'rejected')
     } catch (err) {
       console.error('Reject error:', err)
-      setEditStatus(msgId, filePath, 'rejected')
     } finally {
       setLoadingFile(null)
     }
@@ -148,6 +156,7 @@ export default function EditApprovalWidget({ msgId, txId, edits, editStatuses = 
               const isAccepted = status === 'accepted'
               const isRejected = status === 'rejected'
               const isLoading = loadingFile === edit.filePath
+              const hasTransactionPath = Boolean(edit.transactionPath)
               const fileName = edit.filePath.split(/[/\\]/).pop()
 
               return (
@@ -192,10 +201,10 @@ export default function EditApprovalWidget({ msgId, txId, edits, editStatuses = 
                     
                     {!allProcessed && !status && !isLoading && (
                       <Flex align="center" gap={1} className="edit-approval-item-actions">
-                        <button className="edit-approval-btn-reject" onClick={(e) => { e.stopPropagation(); handleReject(edit.filePath); }} title="Reject">
+                        <button className="edit-approval-btn-reject" disabled={!hasTransactionPath} onClick={(e) => { e.stopPropagation(); handleReject(edit.filePath); }} title={hasTransactionPath ? 'Reject' : '无法唯一定位事务文件'}>
                           <IconClose width={14} height={14} />
                         </button>
-                        <button className="edit-approval-btn-accept" onClick={(e) => { e.stopPropagation(); handleAccept(edit.filePath); }} title="Accept">
+                        <button className="edit-approval-btn-accept" disabled={!hasTransactionPath} onClick={(e) => { e.stopPropagation(); handleAccept(edit.filePath); }} title={hasTransactionPath ? 'Accept' : '无法唯一定位事务文件'}>
                           <IconCheck width={14} height={14} />
                         </button>
                       </Flex>

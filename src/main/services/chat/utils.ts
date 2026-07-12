@@ -96,3 +96,26 @@ export function buildThinkingPayload(
       return effort ? { reasoning_effort: effort } : {}
   }
 }
+
+/** Returns the budget actually sent to the provider when it has a numeric limit. */
+export function resolveEffectiveReasoningBudgetTokens(
+  thinking: ThinkingConfig | undefined,
+  model: string,
+  baseUrl: string,
+  apiFormat: ApiFormat | string = 'openai'
+): number | undefined {
+  if (!thinking?.enabled) return 0
+  const configured = resolveReasoningBudgetTokens(thinking)
+  if (apiFormat !== 'anthropic') return configured
+  const payload = buildThinkingPayload(
+    thinking,
+    model,
+    baseUrl,
+    true,
+    'anthropic'
+  ) as { thinking?: { budget_tokens?: number } }
+  const effective = Number(payload.thinking?.budget_tokens)
+  return Number.isFinite(effective) && effective > 0
+    ? Math.floor(effective)
+    : configured
+}

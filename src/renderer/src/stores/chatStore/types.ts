@@ -248,7 +248,7 @@ export interface ChatState {
   archiveSession: (sessionId: string, archive: boolean) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
   restoreSession: (sessionId: string) => Promise<void>
-  revertToMessage: (msgId: string) => Promise<void>
+  revertToMessage: (msgId: string) => Promise<boolean>
   previewRevertMessage: (msgId: string) => Promise<{ toDelete: string[], toRestore: string[] } | null>
 
   appendAgentState: (msgId: string, state: AgentState) => void

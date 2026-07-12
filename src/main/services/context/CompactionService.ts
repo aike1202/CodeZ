@@ -7,11 +7,14 @@ import type {
 } from '../../../shared/types/context'
 import type { ModelContextCapabilities } from '../../../shared/types/provider'
 import { ContextBudgetService } from './ContextBudgetService'
+import { FileContextProjector } from './FileContextProjector'
+import { FileContextRestorer } from './FileContextRestorer'
 import type { CompactionModelClient } from './CompactionModelClient'
 import { parseAndValidateSummary, renderCompactionSummary } from './CompactionSummary'
 import { ModelHistoryNormalizer } from './ModelHistoryNormalizer'
 import { ModelLedgerStore } from './ModelLedgerStore'
 import { ToolOutputPruner } from './ToolOutputPruner'
+import { SkillContextRestorer } from './SkillContextRestorer'
 
 export interface CompactionRequest {
   sessionId: string
@@ -22,6 +25,10 @@ export interface CompactionRequest {
   toolSchemas?: unknown[]
   instructions?: string[]
   manualInstructions?: string
+  workspaceRoot?: string
+  reasoningBudgetTokens?: number
+  /** Durable user input that must remain addressable while its turn is active. */
+  requiredMessageId?: string
 }
 
 export interface CompactionResult {
@@ -46,17 +53,25 @@ export interface CompactionObserver {
 }
 
 export class CompactionService {
-  private terminalFailure?: CompactionResult
-
   constructor(
     private readonly ledger: ModelLedgerStore,
     private readonly model: CompactionModelClient,
     private readonly budget = new ContextBudgetService(),
-    private readonly observer: CompactionObserver = {}
+    private readonly observer: CompactionObserver = {},
+    private readonly fileRestorer = new FileContextRestorer(budget),
+    private readonly fileProjector = new FileContextProjector(budget),
+    private readonly skillRestorer = new SkillContextRestorer(budget)
   ) {}
 
   async compact(request: CompactionRequest): Promise<CompactionResult> {
-    if (this.terminalFailure) return this.terminalFailure
+    return this.ledger.runScopeExclusive(
+      request.sessionId,
+      request.contextScopeId,
+      () => this.compactExclusive(request)
+    )
+  }
+
+  private async compactExclusive(request: CompactionRequest): Promise<CompactionResult> {
     let lastFailure: { code: ContextErrorCode; message: string } = {
       code: 'COMPACTION_INSUFFICIENT_REDUCTION',
       message: 'Compaction did not produce a usable reduction'
@@ -70,14 +85,23 @@ export class CompactionService {
       }
 
       const sourceHistoryVersion = scope.historyVersion
+      const currentSkillContext = this.skillRestorer.reconcile({
+        context: scope.postCompactionSkillContext,
+        messages: scope.activeMessages
+      })
       const tokensBefore = this.measure(
         request,
         scope.activeMessages,
         scope.latestCompaction ? renderCompactionSummary(scope.latestCompaction) : '',
-        sourceHistoryVersion
+        sourceHistoryVersion,
+        currentSkillContext?.content,
+        scope.postCompactionFileContext?.content
       ).totalInputTokens
       const baseTailBudget = this.budget.recentTailBudget(
-        this.budget.resolveLimits(request.capabilities).usableInputBudget
+        this.budget.resolveLimits(
+          request.capabilities,
+          request.reasoningBudgetTokens
+        ).usableInputBudget
       )
       const tailBudget = Math.max(1, Math.floor(baseTailBudget / (attempt + 1)))
       let tail = ModelHistoryNormalizer.selectProtocolSafeTail(
@@ -89,8 +113,10 @@ export class CompactionService {
       if (tailStart > 0 && tail[0].role !== 'user') {
         for (let index = tailStart - 1; index >= 0; index--) {
           if (scope.activeMessages[index].role === 'user') {
-            tailStart = index
-            tail = scope.activeMessages.slice(index)
+            if (index > 0) {
+              tailStart = index
+              tail = scope.activeMessages.slice(index)
+            }
             break
           }
         }
@@ -99,6 +125,28 @@ export class CompactionService {
       if (head.length === 0) {
         return this.fail(request, 'COMPACTION_INSUFFICIENT_REDUCTION', 'No protocol-safe history prefix can be compacted')
       }
+
+      const retainedPrefixIndexes = new Set<number>()
+      if (tail[0]?.role !== 'user') {
+        for (let index = tailStart - 1; index >= 0; index--) {
+          if (scope.activeMessages[index].role === 'user') {
+            retainedPrefixIndexes.add(index)
+            break
+          }
+        }
+      }
+      if (request.requiredMessageId) {
+        const requiredIndex = scope.activeMessages.findIndex(
+          (message) => message.id === request.requiredMessageId
+        )
+        if (requiredIndex >= 0 && requiredIndex < tailStart) retainedPrefixIndexes.add(requiredIndex)
+      }
+      const retainedMessages = [
+        ...[...retainedPrefixIndexes]
+          .sort((left, right) => left - right)
+          .map((index) => scope.activeMessages[index]),
+        ...tail
+      ]
 
       const coveredThroughSequence = head.at(-1)?.sourceSequence
       if (!coveredThroughSequence) {
@@ -118,10 +166,14 @@ export class CompactionService {
         tokensBefore
       })
 
-      const usable = this.budget.resolveLimits(request.capabilities).usableInputBudget
-      const summaryMessages = new ToolOutputPruner(this.budget).prune(head, {
-        targetTokens: Number.POSITIVE_INFINITY,
-        protectedTailStart: 0,
+      const usable = this.budget.resolveLimits(
+        request.capabilities,
+        request.reasoningBudgetTokens
+      ).usableInputBudget
+      const projectedHead = this.fileProjector.project(head).messages
+      const summaryMessages = new ToolOutputPruner(this.budget).prune(projectedHead, {
+        targetTokens: Math.floor(usable * 0.6),
+        protectedTailStart: projectedHead.length,
         maxSingleToolTokens: Math.min(8_000, Math.floor(usable * 0.1))
       }).messages
       let summary: ReturnType<typeof parseAndValidateSummary> | undefined
@@ -162,7 +214,6 @@ export class CompactionService {
             code,
             error instanceof Error ? error.message : String(error)
           )
-          if (code === 'COMPACTION_SCHEMA_INVALID') this.terminalFailure = failure
           return failure
         }
       }
@@ -178,12 +229,56 @@ export class CompactionService {
       }
 
       const renderedSummary = renderCompactionSummary(summary)
-      const tokensAfter = this.measure(
+      const limits = this.budget.resolveLimits(
+        request.capabilities,
+        request.reasoningBudgetTokens
+      )
+      const restoreTarget = Math.min(
+        limits.hardInputLimit,
+        Math.floor(limits.usableInputBudget * 0.55)
+      )
+      const bareTokensAfter = this.measure(
         request,
-        tail,
+        retainedMessages,
         renderedSummary,
         sourceHistoryVersion
       ).totalInputTokens
+      const restoredSkillContext = this.skillRestorer.restore({
+        messages: scope.activeMessages,
+        retainedTail: retainedMessages,
+        existing: scope.postCompactionSkillContext,
+        maxTotalTokens: Math.max(0, restoreTarget - bareTokensAfter)
+      })
+      const baseTokensAfter = this.measure(
+        request,
+        retainedMessages,
+        renderedSummary,
+        sourceHistoryVersion,
+        restoredSkillContext?.content
+      ).totalInputTokens
+      const restoredFileContext = await this.fileRestorer.restore({
+        messages: scope.activeMessages,
+        retainedTail: retainedMessages,
+        existingReferences: scope.postCompactionFileContext?.fileReferences,
+        workspaceRoot: request.workspaceRoot,
+        maxTotalTokens: Math.max(0, restoreTarget - baseTokensAfter),
+        maxVisibleToolTokens: Math.min(8_000, Math.floor(usable * 0.1))
+      })
+      const tokensAfter = this.measure(
+        request,
+        retainedMessages,
+        renderedSummary,
+        sourceHistoryVersion,
+        restoredSkillContext?.content,
+        restoredFileContext?.content
+      ).totalInputTokens
+      if (tokensAfter > limits.hardInputLimit) {
+        lastFailure = {
+          code: 'COMPACTION_INSUFFICIENT_REDUCTION',
+          message: 'Compaction candidate still exceeds the model hard input limit'
+        }
+        continue
+      }
       if (tokensAfter > usable * 0.55 && tokensAfter > tokensBefore * 0.8) {
         lastFailure = {
           code: 'COMPACTION_INSUFFICIENT_REDUCTION',
@@ -193,18 +288,33 @@ export class CompactionService {
       }
 
       const sourceHash = createHash('sha256').update(JSON.stringify(head)).digest('hex')
-      const completed = await this.ledger.append(request.sessionId, request.contextScopeId, 'compaction_completed', {
-        trigger: request.trigger,
+      const completed = await this.ledger.appendIfHistoryVersion(
+        request.sessionId,
+        request.contextScopeId,
         sourceHistoryVersion,
-        coveredThroughSequence,
-        retainedFromSequence: tail[0]?.sourceSequence,
-        tokensBefore,
-        tokensAfter,
-        sourceHash,
-        summary,
-        resumeState: scope.resumeState,
-        activeMessages: tail
-      })
+        'compaction_completed',
+        {
+          trigger: request.trigger,
+          sourceHistoryVersion,
+          coveredThroughSequence,
+          retainedFromSequence: retainedMessages[0]?.sourceSequence,
+          tokensBefore,
+          tokensAfter,
+          sourceHash,
+          summary,
+          resumeState: scope.resumeState,
+          activeMessages: retainedMessages,
+          postCompactionFileContext: restoredFileContext,
+          postCompactionSkillContext: restoredSkillContext
+        }
+      )
+      if (!completed) {
+        lastFailure = {
+          code: 'COMPACTION_STALE_VERSION',
+          message: 'History changed before the compaction candidate could be committed'
+        }
+        continue
+      }
 
       let snapshotStatus: CompactionResult['snapshotStatus'] = 'committed'
       try {
@@ -236,17 +346,24 @@ export class CompactionService {
     request: CompactionRequest,
     messages: NormalizedModelMessage[],
     summary: string,
-    historyVersion: number
+    historyVersion: number,
+    skillContext?: string,
+    fileContext?: string
   ) {
     return this.budget.measureRequest({
       capabilities: request.capabilities,
       systemPrompt: request.systemPrompt,
       toolSchemas: request.toolSchemas,
-      instructions: request.instructions,
+      instructions: [
+        ...(request.instructions || []),
+        ...(skillContext ? [skillContext] : []),
+        ...(fileContext ? [fileContext] : [])
+      ],
       summary,
       recentHistory: messages,
       currentInput: '',
-      historyVersion
+      historyVersion,
+      reasoningBudgetTokens: request.reasoningBudgetTokens
     })
   }
 
@@ -260,7 +377,9 @@ export class CompactionService {
       stage: 'compaction',
       code,
       message,
-      retryable: code === 'COMPACTION_STALE_VERSION' || code === 'COMPACTION_SUMMARY_FAILED'
+      retryable: code === 'COMPACTION_STALE_VERSION' ||
+        code === 'COMPACTION_SUMMARY_FAILED' ||
+        code === 'COMPACTION_SCHEMA_INVALID'
     })
     const result: CompactionResult = { status: 'failed', errorCode: code, message }
     this.observer.onFailed?.({

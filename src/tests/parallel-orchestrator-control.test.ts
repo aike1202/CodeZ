@@ -25,10 +25,13 @@ describe('parallel orchestrator control authority', () => {
     const root = mkdtempSync(path.join(os.tmpdir(), 'codez-orchestrator-stop-'))
     roots.push(root)
     const parent = new AbortController()
+    const editTransactionService = {} as any
+    let spawnedContext: Parameters<typeof SubAgentManager.spawn>[1] | undefined
     let startedResolve!: () => void
     const started = new Promise<void>((resolve) => { startedResolve = resolve })
 
     vi.spyOn(SubAgentManager, 'spawn').mockImplementation(async (_type, ctx) => {
+      spawnedContext = ctx
       startedResolve()
       if (!ctx.parentSignal?.aborted) {
         await new Promise<void>((resolve) => ctx.parentSignal?.addEventListener('abort', () => resolve(), { once: true }))
@@ -62,7 +65,10 @@ describe('parallel orchestrator control authority', () => {
       {
         workspaceRoot: root,
         sessionId: 's1',
+        providerId: 'provider-test',
         parentSignal: parent.signal,
+        transactionId: 'tx-shared',
+        editTransactionService,
         apiConfig: { baseUrl: '', apiKey: '', apiFormat: 'openai', model: 'test' },
         contextCapabilities: {
           contextWindowTokens: 10000,
@@ -85,6 +91,13 @@ describe('parallel orchestrator control authority', () => {
     expect(report.status).toBe('stopped')
     expect(report.waves[0].results[0].status).toBe('interrupted')
     expect(getExecutionController().getExecution(report.executionId!)?.status).toBe('stopped')
+    expect(spawnedContext?.transactionId).toBe('tx-shared')
+    expect(spawnedContext?.providerId).toBe('provider-test')
+    expect(spawnedContext?.editTransactionService).toBe(editTransactionService)
+    expect(spawnedContext?.permissionScope).toMatchObject({
+      allowedWriteFiles: ['src/a.ts'],
+      allowBash: false
+    })
   })
 
   it('preserves successful siblings as ready artifacts when their wave partially fails', async () => {
@@ -98,8 +111,13 @@ describe('parallel orchestrator control authority', () => {
     git(['add', '-A'])
     git(['commit', '-m', 'base'])
     const statusChanges: Array<{ id: string; status: string }> = []
+    const spawnedContexts: Array<Parameters<typeof SubAgentManager.spawn>[1]> = []
+    const parentEditTransactionService = {
+      runExternalMutation: vi.fn(async (_txId: string, _paths: string[], operation: () => unknown) => operation())
+    }
 
     vi.spyOn(SubAgentManager, 'spawn').mockImplementation(async (_type, ctx) => {
+      spawnedContexts.push(ctx)
       const stepId = /^Step ([^:]+):/.exec(ctx.task)?.[1] || 'unknown'
       if (stepId !== 't3') {
         writeFileSync(path.join(ctx.workspaceRoot, `${stepId}.txt`), `${stepId}\n`, 'utf8')
@@ -143,6 +161,9 @@ describe('parallel orchestrator control authority', () => {
       {
         workspaceRoot: root,
         sessionId: 's1',
+        providerId: 'provider-worktree',
+        transactionId: 'tx-parent-must-not-enter-worktree',
+        editTransactionService: parentEditTransactionService as any,
         apiConfig: { baseUrl: '', apiKey: '', apiFormat: 'openai', model: 'test' }
       },
       { onChunk: () => undefined, onDone: () => undefined, onError: () => undefined }
@@ -167,6 +188,12 @@ describe('parallel orchestrator control authority', () => {
       { id: 't2', status: 'completed' },
       { id: 't3', status: 'pending' }
     ]))
+    expect(spawnedContexts.every((ctx) => (
+      ctx.transactionId === undefined && ctx.editTransactionService === undefined
+    ))).toBe(true)
+    expect(spawnedContexts.every((ctx) => ctx.permissionScope?.allowBash === true)).toBe(true)
+    expect(spawnedContexts.every((ctx) => ctx.providerId === 'provider-worktree')).toBe(true)
+    expect(parentEditTransactionService.runExternalMutation).toHaveBeenCalledTimes(2)
 
     const failedExecutor = accepted.executors.find((executor) => executor.stepId === 't3')!
     const retry = controller.startExecutor(report.executionId!, failedExecutor.stepId)

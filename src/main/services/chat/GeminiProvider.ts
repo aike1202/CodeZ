@@ -143,6 +143,12 @@ export class GeminiProvider implements IChatProvider {
         requestPayload.generationConfig = { thinkingConfig: thinkingConfig.thinking_config }
       }
     }
+    if (config.maxOutputTokens) {
+      requestPayload.generationConfig = {
+        ...(requestPayload.generationConfig || {}),
+        maxOutputTokens: config.maxOutputTokens
+      }
+    }
 
     log.info(`[GeminiProvider] Invoking model: ${model}`);
     log.debug(`[GeminiProvider] Request Payload:`, JSON.stringify({ ...requestPayload, contents: `[Array of ${contents.length} contents]` }));

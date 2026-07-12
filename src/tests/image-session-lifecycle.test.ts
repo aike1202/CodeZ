@@ -10,11 +10,11 @@ describe('image session lifecycle', () => {
     }
     const attachments = { deleteSession: vi.fn(async () => undefined) }
 
-    await deleteSessionWithAttachments(store, attachments, 's1')
+    await expect(deleteSessionWithAttachments(store, attachments, 's1')).resolves.toBe(false)
     expect(attachments.deleteSession).not.toHaveBeenCalled()
 
     store.get.mockReturnValue({ id: 's1', isDeleted: true })
-    await deleteSessionWithAttachments(store, attachments, 's1')
+    await expect(deleteSessionWithAttachments(store, attachments, 's1')).resolves.toBe(true)
     expect(attachments.deleteSession).toHaveBeenCalledWith('s1')
   })
 })

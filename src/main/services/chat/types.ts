@@ -16,6 +16,7 @@ export interface ChatRequestConfig {
   messages: ChatMessage[]
   tools?: ToolDefinition[]
   thinking?: ThinkingConfig
+  maxOutputTokens?: number
   resolveImage?: ResolveImageAttachment
 }
 

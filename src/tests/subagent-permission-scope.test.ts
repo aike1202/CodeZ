@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import * as path from 'path'
+import * as fs from 'fs/promises'
+import * as os from 'os'
 import { authorizeSubAgentToolCall, checkSubAgentToolPermission } from '../main/agent/SubAgentManager'
 import type { SubAgentPermissionScope } from '../main/agent/SubAgentManager'
 
@@ -25,12 +27,31 @@ describe('checkSubAgentToolPermission', () => {
     it('allows writes to assigned files', () => {
       expect(checkSubAgentToolPermission('Write', { file_path: 'src/a.ts' }, WS, scope)).toBeNull()
       expect(checkSubAgentToolPermission('Edit', { file_path: path.resolve(WS, 'src/b.ts') }, WS, scope)).toBeNull()
+      expect(checkSubAgentToolPermission('NotebookEdit', { notebook_path: 'src/a.ts' }, WS, scope)).toBeNull()
     })
     it('denies writes outside assigned files', () => {
       expect(checkSubAgentToolPermission('Write', { file_path: 'src/c.ts' }, WS, scope)).toMatch(/outside your assigned/)
     })
     it('denies workspace-escaping writes', () => {
       expect(checkSubAgentToolPermission('Write', { file_path: path.resolve('/tmp/evil.ts') }, WS, scope)).toMatch(/escapes the workspace/)
+    })
+    it('denies writes through an in-workspace link to an external directory', async () => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), 'codez-subagent-scope-'))
+      const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'codez-subagent-outside-'))
+      try {
+        const link = path.join(root, 'external-link')
+        await fs.symlink(outside, link, process.platform === 'win32' ? 'junction' : 'dir')
+        const linkedTarget = path.join(link, 'new.ts')
+        expect(checkSubAgentToolPermission(
+          'Write',
+          { file_path: linkedTarget },
+          root,
+          { allowedWriteFiles: [linkedTarget] }
+        )).toMatch(/escapes the workspace/)
+      } finally {
+        await fs.rm(root, { recursive: true, force: true })
+        await fs.rm(outside, { recursive: true, force: true })
+      }
     })
     it('delegates allowed shell commands to the runtime permission policy', () => {
       expect(checkSubAgentToolPermission('Bash', { command: 'npm test' }, WS, scope)).toBeNull()

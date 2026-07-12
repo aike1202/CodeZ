@@ -111,4 +111,43 @@ describe('streamWithTimeoutRetry', () => {
 
     vi.useRealTimers()
   })
+
+  it('treats a usage-only provider event as the first response byte', async () => {
+    vi.useFakeTimers()
+
+    const usages: number[] = []
+    const errors: string[] = []
+    let attempts = 0
+    const runPromise = streamWithTimeoutRetry(
+      async (attemptCallbacks, signal) => {
+        attempts++
+        attemptCallbacks.onUsage?.({ inputTokens: 10, outputTokens: 0, totalTokens: 10 })
+        await new Promise<void>((resolve) => {
+          signal.addEventListener('abort', () => resolve(), { once: true })
+        })
+      },
+      {
+        onChunk: () => undefined,
+        onDone: () => undefined,
+        onError: (error) => errors.push(error),
+        onUsage: (usage) => usages.push(usage.inputTokens)
+      },
+      new AbortController().signal,
+      {
+        firstByteTimeoutMs: 5,
+        idleTimeoutMs: 10,
+        maxRetries: 1,
+        retryDelayMs: 1
+      }
+    )
+
+    await vi.advanceTimersByTimeAsync(10)
+    await runPromise
+
+    expect(attempts).toBe(1)
+    expect(usages).toEqual([10])
+    expect(errors).toEqual(['响应流已超时中断（10ms 无新数据），已自动停止。请检查网络连接后重试。'])
+
+    vi.useRealTimers()
+  })
 })

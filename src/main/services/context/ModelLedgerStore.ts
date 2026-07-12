@@ -25,6 +25,14 @@ function emptyScope(): SessionRuntimeScopeSnapshot {
   return { historyVersion: 0, activeMessages: [] }
 }
 
+function clearProviderUsage(scope: SessionRuntimeScopeSnapshot): void {
+  delete scope.lastProviderUsage
+  delete scope.lastProviderUsageMessageId
+  delete scope.lastProviderUsageProviderId
+  delete scope.lastProviderUsageModel
+  delete scope.lastProviderUsageRequestFingerprint
+}
+
 function applyEvent(state: LoadedSessionRuntime, event: AnyLedgerEvent): void {
   const scope = state.scopes[event.contextScopeId] || emptyScope()
   state.scopes[event.contextScopeId] = scope
@@ -32,11 +40,39 @@ function applyEvent(state: LoadedSessionRuntime, event: AnyLedgerEvent): void {
 
   switch (event.type) {
     case 'user_message':
+      if (
+        (event.payload.providerId && scope.lastProviderId && event.payload.providerId !== scope.lastProviderId) ||
+        (event.payload.model && scope.lastModel && event.payload.model !== scope.lastModel) ||
+        (
+          Boolean(scope.lastProviderUsage) &&
+          Boolean(event.payload.providerId) &&
+          scope.lastProviderUsageProviderId !== event.payload.providerId
+        ) ||
+        (
+          Boolean(scope.lastProviderUsage) &&
+          Boolean(event.payload.model) &&
+          scope.lastProviderUsageModel !== event.payload.model
+        )
+      ) {
+        clearProviderUsage(scope)
+      }
       scope.lastProviderId = event.payload.providerId || scope.lastProviderId
       scope.lastModel = event.payload.model || scope.lastModel
       scope.activeMessages.push({ ...event.payload.message, sourceSequence: event.sequence })
       break
     case 'assistant_message':
+      scope.activeMessages.push({ ...event.payload.message, sourceSequence: event.sequence })
+      if (event.payload.usage?.inputTokens && event.payload.requestFingerprint) {
+        scope.lastProviderUsage = { ...event.payload.usage }
+        scope.lastProviderUsageMessageId = event.payload.message.id
+        scope.lastProviderUsageProviderId = scope.lastProviderId
+        scope.lastProviderUsageModel = scope.lastModel
+        scope.lastProviderUsageRequestFingerprint = event.payload.requestFingerprint
+      } else if (event.payload.usage?.inputTokens) {
+        // Old or partially upgraded writers cannot safely bind this count to a request.
+        clearProviderUsage(scope)
+      }
+      break
     case 'tool_result':
       scope.activeMessages.push({ ...event.payload.message, sourceSequence: event.sequence })
       break
@@ -52,12 +88,30 @@ function applyEvent(state: LoadedSessionRuntime, event: AnyLedgerEvent): void {
       break
     case 'resume_state_updated':
       scope.resumeState = event.payload.resumeState
+      clearProviderUsage(scope)
       break
     case 'compaction_completed':
-      scope.activeMessages = event.payload.activeMessages.map((message) => ({ ...message }))
+      scope.activeMessages = event.payload.activeMessages.map((message) => ({
+        ...message,
+        sourceSequence: message.sourceSequence ?? event.sequence
+      }))
       scope.latestCompaction = event.payload.summary
+      scope.postCompactionFileContext = event.payload.postCompactionFileContext
+        ? {
+            ...event.payload.postCompactionFileContext,
+            sourceSequence: event.payload.postCompactionFileContext.sourceSequence ?? event.sequence
+        }
+        : undefined
+      scope.postCompactionSkillContext = event.payload.postCompactionSkillContext
+        ? {
+            ...event.payload.postCompactionSkillContext,
+            skills: event.payload.postCompactionSkillContext.skills.map((skill) => ({ ...skill })),
+            sourceSequence: event.sequence
+          }
+        : undefined
       scope.resumeState = event.payload.resumeState || scope.resumeState
       scope.latestCompactionResumeRevision = event.payload.resumeState?.revision
+      clearProviderUsage(scope)
       break
     case 'legacy_import_completed':
       scope.activeMessages = event.payload.activeMessages.map((message) => ({
@@ -65,12 +119,27 @@ function applyEvent(state: LoadedSessionRuntime, event: AnyLedgerEvent): void {
         sourceSequence: message.sourceSequence ?? event.sequence
       }))
       scope.latestCompaction = event.payload.summary
+      delete scope.postCompactionFileContext
+      delete scope.postCompactionSkillContext
       scope.legacyImport = {
         sourceHash: event.payload.sourceHash,
         mode: event.payload.mode,
         eventId: event.eventId
       }
+      clearProviderUsage(scope)
       break
+    case 'history_reverted': {
+      scope.activeMessages = event.payload.activeMessages.map((message) => ({ ...message }))
+      const latest = scope.activeMessages.at(-1)
+      scope.lastCompletedTurnId = latest?.turnId
+      delete scope.lastInterruptedTurnId
+      delete scope.resumeState
+      delete scope.latestCompactionResumeRevision
+      delete scope.lastProviderId
+      delete scope.lastModel
+      clearProviderUsage(scope)
+      break
+    }
   }
 
   state.throughSequence = event.sequence
@@ -89,6 +158,7 @@ async function appendDurable(filePath: string, line: string): Promise<void> {
 
 export class ModelLedgerStore {
   private readonly queues = new Map<string, Promise<void>>()
+  private readonly scopeOperationQueues = new Map<string, Promise<void>>()
   private readonly cache = new Map<string, LoadedSessionRuntime>()
 
   constructor(public readonly runtimeRoot: string) {}
@@ -109,6 +179,31 @@ export class ModelLedgerStore {
     return this.enqueue(sessionId, () => this.loadUnlocked(sessionId, true))
   }
 
+  /** Serializes long-running maintenance that must not interleave within one scope. */
+  async runScopeExclusive<T>(
+    sessionId: string,
+    contextScopeId: ContextScopeId,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const key = `${sessionId}:${contextScopeId}`
+    const previous = this.scopeOperationQueues.get(key) ?? Promise.resolve()
+    let release!: () => void
+    const current = new Promise<void>((resolve) => { release = resolve })
+    const queued = previous.catch(() => undefined).then(() => current)
+    this.scopeOperationQueues.set(key, queued)
+    try {
+      await previous.catch(() => undefined)
+      return await operation()
+    } finally {
+      release()
+      void queued.then(() => {
+        if (this.scopeOperationQueues.get(key) === queued) {
+          this.scopeOperationQueues.delete(key)
+        }
+      })
+    }
+  }
+
   async append<TType extends LedgerEventType>(
     sessionId: string,
     contextScopeId: ContextScopeId,
@@ -118,24 +213,92 @@ export class ModelLedgerStore {
   ): Promise<LedgerEvent<TType>> {
     return this.enqueue(sessionId, async () => {
       const state = await this.loadUnlocked(sessionId)
+      return this.appendUnlocked(state, sessionId, contextScopeId, type, payload, turnId)
+    })
+  }
+
+  /** Atomically appends only when the scope still has the expected model history. */
+  async appendIfHistoryVersion<TType extends LedgerEventType>(
+    sessionId: string,
+    contextScopeId: ContextScopeId,
+    expectedHistoryVersion: number,
+    type: TType,
+    payload: LedgerPayloadByType[TType],
+    turnId?: string
+  ): Promise<LedgerEvent<TType> | null> {
+    return this.enqueue(sessionId, async () => {
+      const state = await this.loadUnlocked(sessionId)
       const scope = state.scopes[contextScopeId] || emptyScope()
       state.scopes[contextScopeId] = scope
-      const event: LedgerEvent<TType> = {
-        schemaVersion: CONTEXT_SCHEMA_VERSION,
-        eventId: `${sessionId}:${state.throughSequence + 1}:${Math.random().toString(36).slice(2, 10)}`,
-        sessionId,
-        contextScopeId,
-        sequence: state.throughSequence + 1,
-        historyVersion: scope.historyVersion + (eventChangesHistory(type) ? 1 : 0),
-        turnId,
-        createdAt: new Date().toISOString(),
-        type,
-        payload
-      }
+      if (scope.historyVersion !== expectedHistoryVersion) return null
+      return this.appendUnlocked(state, sessionId, contextScopeId, type, payload, turnId)
+    })
+  }
 
-      await appendDurable(this.ledgerPath(sessionId), `${JSON.stringify(event)}\n`)
-      applyEvent(state, event as AnyLedgerEvent)
-      return event
+  async planHistoryRevert(
+    sessionId: string,
+    contextScopeId: ContextScopeId,
+    targetUiMessageId: string
+  ): Promise<{
+    expectedHistoryVersion: number
+    payload: LedgerPayloadByType['history_reverted']
+  }> {
+    if (!targetUiMessageId.trim()) throw new Error('History revert target is empty')
+    return this.enqueue(sessionId, async () => {
+      const state = await this.loadUnlocked(sessionId)
+      const scope = state.scopes[contextScopeId]
+      if (!scope) throw new Error(`Context scope not found: ${contextScopeId}`)
+
+      let targetMessageId = scope.activeMessages.find((message) =>
+        message.role === 'user' && message.clientMessageId === targetUiMessageId
+      )?.id
+      if (!targetMessageId) {
+        const events = await this.readEvents(sessionId, [])
+        const targetEvent = [...events].reverse().find((event) =>
+          event.contextScopeId === contextScopeId &&
+          event.type === 'user_message' &&
+          (event.payload.commandMetadata as { uiMessageId?: unknown } | undefined)?.uiMessageId ===
+            targetUiMessageId
+        )
+        if (targetEvent?.type === 'user_message') targetMessageId = targetEvent.payload.message.id
+      }
+      const targetIndex = targetMessageId
+        ? scope.activeMessages.findIndex((message) => message.id === targetMessageId)
+        : -1
+      if (targetIndex < 0 || scope.activeMessages[targetIndex]?.role !== 'user') {
+        throw Object.assign(
+          new Error('The requested history point is no longer present after compaction.'),
+          { code: 'HISTORY_REVERT_TARGET_COMPACTED' }
+        )
+      }
+      const targetMessage = scope.activeMessages[targetIndex]
+      if (
+        targetMessage.id.startsWith('legacy:') ||
+        (
+          scope.latestCompaction &&
+          targetMessage.sourceSequence !== undefined &&
+          targetMessage.sourceSequence <= scope.latestCompaction.coveredThroughSequence
+        )
+      ) {
+        throw Object.assign(
+          new Error('The requested history point is represented inside a compacted summary.'),
+          { code: 'HISTORY_REVERT_TARGET_COMPACTED' }
+        )
+      }
+      return {
+        expectedHistoryVersion: scope.historyVersion,
+        payload: {
+          sourceHistoryVersion: scope.historyVersion,
+          targetUiMessageId,
+          targetMessageId: targetMessageId!,
+          activeMessages: scope.activeMessages.slice(0, targetIndex).map((message) => ({
+            ...message,
+            toolCalls: message.toolCalls?.map((call) => ({ ...call })),
+            attachments: message.attachments?.map((attachment) => ({ ...attachment })),
+            fileReferences: message.fileReferences?.map((reference) => ({ ...reference }))
+          }))
+        }
+      }
     })
   }
 
@@ -247,6 +410,34 @@ export class ModelLedgerStore {
       }
     }
     return events
+  }
+
+  private async appendUnlocked<TType extends LedgerEventType>(
+    state: LoadedSessionRuntime,
+    sessionId: string,
+    contextScopeId: ContextScopeId,
+    type: TType,
+    payload: LedgerPayloadByType[TType],
+    turnId?: string
+  ): Promise<LedgerEvent<TType>> {
+    const scope = state.scopes[contextScopeId] || emptyScope()
+    state.scopes[contextScopeId] = scope
+    const event: LedgerEvent<TType> = {
+      schemaVersion: CONTEXT_SCHEMA_VERSION,
+      eventId: `${sessionId}:${state.throughSequence + 1}:${Math.random().toString(36).slice(2, 10)}`,
+      sessionId,
+      contextScopeId,
+      sequence: state.throughSequence + 1,
+      historyVersion: scope.historyVersion + (eventChangesHistory(type) ? 1 : 0),
+      turnId,
+      createdAt: new Date().toISOString(),
+      type,
+      payload
+    }
+
+    await appendDurable(this.ledgerPath(sessionId), `${JSON.stringify(event)}\n`)
+    applyEvent(state, event as AnyLedgerEvent)
+    return event
   }
 
   private enqueue<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {

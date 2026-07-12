@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'crypto'
 import type {
   ContextScopeId,
+  FileContextReference,
   NormalizedModelMessage,
   NormalizedToolCall,
   VersionedResumeState
@@ -38,6 +39,7 @@ export interface AssistantRecord {
   content: string
   toolCalls?: NormalizedToolCall[]
   usage?: ProviderTokenUsage
+  requestFingerprint?: string
 }
 
 export interface ToolResultRecord {
@@ -45,6 +47,7 @@ export interface ToolResultRecord {
   name: string
   content: string
   status: 'success' | 'error' | 'interrupted'
+  fileReferences?: FileContextReference[]
 }
 
 export interface SessionRecoveryResult {
@@ -59,17 +62,20 @@ export interface SessionRecoveryResult {
 
 export class SessionRuntimeCoordinator {
   private readonly activeTurns = new Map<string, ActiveTurn>()
+  private readonly maintenanceScopes = new Set<string>()
 
   constructor(readonly ledger: ModelLedgerStore) {}
 
   async beginTurn(input: BeginTurnInput): Promise<RuntimeTurnHandle> {
     if (!input.text.trim() && !input.attachments?.length) throw new Error('Turn input is empty')
     const key = this.scopeKey(input.sessionId, input.contextScopeId)
+    if (this.maintenanceScopes.has(key)) throw new Error(`${key} is under context maintenance`)
     if (this.activeTurns.has(key)) throw new Error(`${key} already has an active turn`)
 
     const turnId = randomUUID()
     const message: NormalizedModelMessage = {
       id: randomUUID(),
+      clientMessageId: this.uiMessageId(input.commandMetadata),
       turnId,
       role: 'user',
       content: input.text,
@@ -115,7 +121,8 @@ export class SessionRuntimeCoordinator {
     }
     await this.ledger.append(turn.sessionId, turn.contextScopeId, 'assistant_message', {
       message,
-      usage: record.usage
+      usage: record.usage,
+      requestFingerprint: record.requestFingerprint
     }, turn.turnId)
     for (const call of record.toolCalls || []) turn.pendingCalls.set(call.id, { ...call })
     return message
@@ -131,6 +138,7 @@ export class SessionRuntimeCoordinator {
       content: record.content,
       toolCallId: record.callId,
       name: record.name,
+      fileReferences: record.fileReferences?.map((reference) => ({ ...reference })),
       status: record.status === 'interrupted' ? 'interrupted' : 'complete',
       createdAt: new Date().toISOString()
     }
@@ -206,7 +214,25 @@ export class SessionRuntimeCoordinator {
   }
 
   isScopeBusy(sessionId: string, contextScopeId: ContextScopeId): boolean {
-    return this.activeTurns.has(this.scopeKey(sessionId, contextScopeId))
+    const key = this.scopeKey(sessionId, contextScopeId)
+    return this.activeTurns.has(key) || this.maintenanceScopes.has(key)
+  }
+
+  async runIdleScopeMaintenance<T>(
+    sessionId: string,
+    contextScopeId: ContextScopeId,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const key = this.scopeKey(sessionId, contextScopeId)
+    if (this.activeTurns.has(key) || this.maintenanceScopes.has(key)) {
+      throw Object.assign(new Error(`Context scope is active: ${key}`), { code: 'RUN_ACTIVE' })
+    }
+    this.maintenanceScopes.add(key)
+    try {
+      return await operation()
+    } finally {
+      this.maintenanceScopes.delete(key)
+    }
   }
 
   async getScopeView(sessionId: string, contextScopeId: ContextScopeId) {
@@ -263,6 +289,12 @@ export class SessionRuntimeCoordinator {
 
   private scopeKey(sessionId: string, contextScopeId: ContextScopeId): string {
     return `${sessionId}:${contextScopeId}`
+  }
+
+  private uiMessageId(commandMetadata: unknown): string | undefined {
+    if (!commandMetadata || typeof commandMetadata !== 'object') return undefined
+    const value = (commandMetadata as { uiMessageId?: unknown }).uiMessageId
+    return typeof value === 'string' && value.trim() ? value : undefined
   }
 
   private publicHandle(turn: ActiveTurn): RuntimeTurnHandle {

@@ -41,19 +41,19 @@ export function extractMessageEdits(msg: ChatMessage) {
 
   if (editTools.length === 0) return { edits: [], tools: [] }
 
-  let diffByPath: Record<string, string> = {}
+  let diffEntries: Array<{ path: string; diff: string }> = []
   try {
-    diffByPath = (msg.diffEntries || []).reduce((acc: Record<string, string>, item: any) => {
-      if (item?.path && item?.diff) acc[item.path] = item.diff
-      return acc
-    }, {})
+    diffEntries = (msg.diffEntries || []).filter((item): item is { path: string; diff: string } =>
+      typeof item?.path === 'string' && typeof item?.diff === 'string'
+    )
   } catch {
-    diffByPath = {}
+    diffEntries = []
   }
 
   const edits = editTools
     .map((tc: any) => {
       let filePath = ''
+      let transactionPath: string | undefined
       let additions = '+0'
       let deletions = '-0'
       try {
@@ -66,19 +66,22 @@ export function extractMessageEdits(msg: ChatMessage) {
           argsObj.path ||
           ''
 
-        const matchingDiff = Object.entries(diffByPath).find(([diffPath]) => {
-          if (!filePath) return false
-          const normalize = (p: string) => p.replace(/\\/g, '/').toLowerCase()
-          const fileNorm = normalize(filePath)
-          const diffNorm = normalize(diffPath)
-          return fileNorm === diffNorm || diffNorm.endsWith(fileNorm) || fileNorm.endsWith(diffNorm)
-        })?.[1]
+        const normalize = (value: string) => value.replace(/\\/g, '/').toLowerCase()
+        const fileNorm = normalize(filePath)
+        const absolute = /^\/?[a-z]:\//i.test(fileNorm) || fileNorm.startsWith('/')
+        const relativeSuffix = `/${fileNorm.replace(/^\.\//, '').replace(/^\/+/, '')}`
+        const candidates = diffEntries.filter((entry) => {
+          const diffNorm = normalize(entry.path)
+          return absolute ? diffNorm === fileNorm : diffNorm.endsWith(relativeSuffix)
+        })
+        const matchingDiff = candidates.length === 1 ? candidates[0] : undefined
+        transactionPath = matchingDiff?.path
 
         if (matchingDiff) {
-          const added = matchingDiff
+          const added = matchingDiff.diff
             .split('\n')
             .filter((line) => line.startsWith('+') && !line.startsWith('+++')).length
-          const removed = matchingDiff
+          const removed = matchingDiff.diff
             .split('\n')
             .filter((line) => line.startsWith('-') && !line.startsWith('---')).length
           additions = `+${added}`
@@ -91,7 +94,7 @@ export function extractMessageEdits(msg: ChatMessage) {
       } catch (err) {
         console.error('Failed to parse edit args in ChatArea:', err)
       }
-      return { filePath, additions, deletions }
+      return { filePath, transactionPath, additions, deletions }
     })
     .filter((e: any) => e.filePath)
 

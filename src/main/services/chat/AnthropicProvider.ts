@@ -7,7 +7,9 @@ import type { ProviderTokenUsage } from '../../../shared/types/provider'
 import { classifyProviderError } from './errors'
 
 export function extractAnthropicUsage(value: any): ProviderTokenUsage {
-  const inputTokens = Number(value?.input_tokens || 0)
+  const inputTokens = Number(value?.input_tokens || 0) +
+    Number(value?.cache_creation_input_tokens || 0) +
+    Number(value?.cache_read_input_tokens || 0)
   const outputTokens = Number(value?.output_tokens || 0)
   return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens }
 }
@@ -145,16 +147,14 @@ export class AnthropicProvider implements IChatProvider {
     }))
 
     const thinkingPayload = await import('./utils').then(m => m.buildThinkingPayload(thinking, model, baseUrl, !!(tools && tools.length > 0), 'anthropic'))
+    const visibleOutputTokens = config.maxOutputTokens || 8192
+    const reasoningTokens = Math.max(0, Number((thinkingPayload as any).thinking?.budget_tokens || 0))
     const requestPayload: any = {
       model,
       messages: anthropicMessages,
-      max_tokens: 8192,
+      max_tokens: visibleOutputTokens + reasoningTokens,
       stream: true,
       ...thinkingPayload
-    }
-    
-    if ((thinkingPayload as any).thinking?.budget_tokens) {
-      requestPayload.max_tokens = Math.max(8192, (thinkingPayload as any).thinking.budget_tokens + 4096)
     }
     
     if (systemPrompt) {

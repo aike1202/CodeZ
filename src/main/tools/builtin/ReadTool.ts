@@ -1,5 +1,5 @@
 // src/main/tools/builtin/ReadTool.ts
-import { Tool, ToolContext } from '../Tool'
+import { Tool, ToolContext, type ToolExecutionOutput } from '../Tool'
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import { createHash } from 'crypto'
@@ -9,16 +9,26 @@ import {
   type ReadSnapshotSource
 } from '../ReadFingerprintStore'
 import { parseNotebook, renderNotebook } from './NotebookUtils'
+import {
+  analyzePathImpactSync,
+  assertStableWorkspacePathSync
+} from '../../services/permission/PathImpactAnalyzer'
 
 interface ReadFileArgs {
   file_path: string
   offset?: number
   limit?: number
+  character_offset?: number
   pages?: string
 }
 
 interface ReadArgs {
   files?: ReadFileArgs[]
+}
+
+interface ReadOneResult {
+  content: string
+  reference?: NonNullable<ToolExecutionOutput['fileReferences']>[number]
 }
 
 const MAX_TOTAL_LINES = 1200
@@ -63,6 +73,7 @@ export class ReadTool extends Tool {
               file_path: { type: 'string', description: 'Absolute or workspace-relative file path.' },
               offset: { type: 'number', description: '1-indexed line to start reading from. Omit for an initial read without an evidence-based relevant range; use only for such a range, a marked truncation or documented budget boundary, or context recovery.' },
               limit: { type: 'number', description: 'Maximum number of lines to return. Omit for an initial read without an evidence-based relevant range; use only for such a range, a marked truncation or documented budget boundary, or context recovery.' },
+              character_offset: { type: 'number', description: '1-indexed character offset within one line. Use with limit: 1 only when Read reports that a very long line continues at a character offset.' },
               pages: { type: 'string', description: 'Reserved for PDF pages; currently ignored.' }
             },
             required: ['file_path'],
@@ -76,19 +87,32 @@ export class ReadTool extends Tool {
   }
 
   async execute(args: string, context: ToolContext): Promise<string> {
+    return (await this.executeRead(args, context)).content
+  }
+
+  override async executeWithMetadata(
+    args: string,
+    context: ToolContext
+  ): Promise<ToolExecutionOutput> {
+    return this.executeRead(args, context)
+  }
+
+  private async executeRead(args: string, context: ToolContext): Promise<ToolExecutionOutput> {
     try {
       const parsed = JSON.parse(args) as ReadArgs
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !Array.isArray(parsed.files)) {
-        return 'Error: files is required.'
+        return { content: 'Error: files is required.' }
       }
       if (Object.keys(parsed).some((key) => key !== 'files')) {
-        return 'Error: Read only accepts the files parameter.'
+        return { content: 'Error: Read only accepts the files parameter.' }
       }
       if (parsed.files.length < 1 || parsed.files.length > MAX_FILES_PER_READ) {
-        return `Error: files must contain between 1 and ${MAX_FILES_PER_READ} items.`
+        return { content: `Error: files must contain between 1 and ${MAX_FILES_PER_READ} items.` }
       }
       const invalidIndex = parsed.files.findIndex((file) => !file || typeof file.file_path !== 'string' || !file.file_path)
-      if (invalidIndex >= 0) return `Error: files[${invalidIndex}].file_path is required.`
+      if (invalidIndex >= 0) {
+        return { content: `Error: files[${invalidIndex}].file_path is required.` }
+      }
 
       const perFileCharBudget = Math.max(
         2000,
@@ -97,13 +121,29 @@ export class ReadTool extends Tool {
       const results = await Promise.all(
         parsed.files.map((file) => this.readOneFile(file, context, perFileCharBudget))
       )
-      return results
-        .map((result, index) =>
-          `<file path="${escapeAttribute(parsed.files![index].file_path)}">\n${result}\n</file>`
-        )
-        .join('\n\n')
+      const blocks = results.map((result, index) =>
+        `<file path="${escapeAttribute(parsed.files![index].file_path)}">\n${result.content}\n</file>`
+      )
+      const fileReferences: NonNullable<ToolExecutionOutput['fileReferences']> = []
+      let cursor = 0
+      for (let index = 0; index < results.length; index++) {
+        const reference = results[index].reference
+        if (reference) {
+          fileReferences.push({
+            ...reference,
+            resultBlockStart: cursor,
+            resultBlockEnd: cursor + blocks[index].length
+          })
+        }
+        cursor += blocks[index].length + (index < blocks.length - 1 ? 2 : 0)
+      }
+      const content = blocks.join('\n\n')
+      return {
+        content,
+        fileReferences
+      }
     } catch (err: any) {
-      return `Error: ${err.message}`
+      return { content: `Error: ${err.message}` }
     }
   }
 
@@ -111,22 +151,23 @@ export class ReadTool extends Tool {
     parsed: ReadFileArgs,
     context: ToolContext,
     charBudget: number
-  ): Promise<string> {
+  ): Promise<ReadOneResult> {
     try {
 
-      const absolutePath = path.isAbsolute(parsed.file_path)
+      const requestedPath = path.isAbsolute(parsed.file_path)
         ? parsed.file_path
         : path.resolve(context.workspaceRoot, parsed.file_path)
-      const normalizedTarget = absolutePath.replace(/\\/g, '/').toLowerCase()
-      const normalizedRoot = context.workspaceRoot.replace(/\\/g, '/').toLowerCase()
-      if (!normalizedTarget.startsWith(normalizedRoot)) {
-        return 'Error: Access denied. Cannot read file outside of workspace.'
+      const pathImpact = analyzePathImpactSync(requestedPath, context.workspaceRoot)
+      if (!pathImpact.insideWorkspace) {
+        return { content: 'Error: Access denied. Cannot read file outside of workspace.' }
       }
+      const absolutePath = pathImpact.resolvedPath
+      assertStableWorkspacePathSync(requestedPath, context.workspaceRoot, absolutePath)
 
       const stat = await fs.stat(absolutePath).catch((e: any) => { throw e })
-      if (!stat.isFile()) return 'Error: Not a file.'
+      if (!stat.isFile()) return { content: 'Error: Not a file.' }
       if (stat.size > MAX_FILE_BYTES) {
-        return `Error: File too large (${(stat.size / 1024 / 1024).toFixed(1)}MB). Max 5MB.`
+        return { content: `Error: File too large (${(stat.size / 1024 / 1024).toFixed(1)}MB). Max 5MB.` }
       }
 
       const sessionId = context.sessionId
@@ -139,28 +180,44 @@ export class ReadTool extends Tool {
           absolutePath,
           readStatSignature(stat),
           async () => {
-            const nextBuffer = await fs.readFile(absolutePath)
-            const nextStat = await fs.stat(absolutePath)
-            return {
-              buffer: nextBuffer,
-              sha256: createHash('sha256').update(nextBuffer).digest('hex'),
-              statSignature: readStatSignature(nextStat)
+            let before = stat
+            for (let attempt = 0; attempt < 2; attempt++) {
+              assertStableWorkspacePathSync(requestedPath, context.workspaceRoot, absolutePath)
+              const beforeSignature = readStatSignature(before)
+              const nextBuffer = await fs.readFile(absolutePath)
+              const nextStat = await fs.stat(absolutePath)
+              assertStableWorkspacePathSync(requestedPath, context.workspaceRoot, absolutePath)
+              const nextSignature = readStatSignature(nextStat)
+              if (beforeSignature === nextSignature) {
+                return {
+                  buffer: nextBuffer,
+                  sha256: createHash('sha256').update(nextBuffer).digest('hex'),
+                  statSignature: nextSignature
+                }
+              }
+              before = nextStat
             }
+            throw new Error('File changed while it was being read. Retry Read for a stable snapshot.')
           }
         )
         buffer = loaded.snapshot.buffer
         sha = loaded.snapshot.sha256
         source = loaded.source
       } else {
+        assertStableWorkspacePathSync(requestedPath, context.workspaceRoot, absolutePath)
         buffer = await fs.readFile(absolutePath)
+        assertStableWorkspacePathSync(requestedPath, context.workspaceRoot, absolutePath)
         sha = createHash('sha256').update(buffer).digest('hex')
       }
+      assertStableWorkspacePathSync(requestedPath, context.workspaceRoot, absolutePath)
       if (buffer.subarray(0, 512).includes(0)) {
-        return 'Cannot read binary file.'
+        return { content: 'Cannot read binary file.' }
       }
 
       const contextScopeId = context.contextScopeId ?? context.runtimeTurn?.contextScopeId ?? 'main'
-      if (sessionId) {
+      // Ledger-backed Agent runtimes grant delivery only after the result is
+      // durably recorded and projected into the next provider request.
+      if (sessionId && !context.runtimeCoordinator) {
         getReadFingerprintStore().recordDelivery(sessionId, contextScopeId, absolutePath, sha)
       }
 
@@ -168,7 +225,21 @@ export class ReadTool extends Tool {
       if (absolutePath.toLowerCase().endsWith('.ipynb')) {
         try {
           const nb = parseNotebook(buffer.toString('utf-8'))
-          return `${renderNotebook(nb)}\n\nSource: ${source}\nSHA256: ${sha}`
+          const renderedNotebook = renderNotebook(nb)
+          const deliveredNotebook = renderedNotebook.length > charBudget
+            ? `${renderedNotebook.slice(0, charBudget)}\n\n[System Note: Notebook content truncated due to the shared Read batch budget. Read a targeted source file or reduce the requested batch.]`
+            : renderedNotebook
+          const content = `${deliveredNotebook}\n\nSource: ${source}\nSHA256: ${sha}`
+          return {
+            content,
+            reference: {
+              path: absolutePath,
+              sha256: sha,
+              operation: 'read',
+              contentIncluded: true,
+              contentSha256: createHash('sha256').update(deliveredNotebook).digest('hex')
+            }
+          }
         } catch (e: any) {
           // 解析失败则按普通文本回退（下方逻辑继续）
         }
@@ -181,6 +252,41 @@ export class ReadTool extends Tool {
       const offset = parsed.offset && parsed.offset > 0 ? parsed.offset : 1
       const sliceStart = offset - 1
       let limit = parsed.limit && parsed.limit > 0 ? parsed.limit : MAX_TOTAL_LINES
+      const characterOffset = parsed.character_offset && parsed.character_offset > 0
+        ? Math.floor(parsed.character_offset)
+        : undefined
+      if (characterOffset !== undefined) {
+        if (parsed.limit !== 1) {
+          return { content: 'Error: character_offset requires limit: 1.' }
+        }
+        const line = lines[sliceStart]
+        if (line === undefined) return { content: `Error: Line ${offset} does not exist.` }
+        const characterStart = characterOffset - 1
+        if (characterStart >= line.length) {
+          return { content: `Error: character_offset exceeds line ${offset} length (${line.length}).` }
+        }
+        const chunkBudget = Math.max(1, charBudget - `${offset}\t`.length)
+        const chunk = line.slice(characterStart, characterStart + chunkBudget)
+        const characterEnd = characterStart + chunk.length
+        const continuation = characterEnd < line.length
+          ? `\n[character range ${characterOffset}-${characterEnd} of line ${offset} (${line.length} chars); continue with offset: ${offset}, limit: 1, character_offset: ${characterEnd + 1}]`
+          : `\n[character range ${characterOffset}-${characterEnd} of line ${offset} (${line.length} chars); end of line]`
+        const renderedRange = `${offset}\t${chunk}${continuation}`
+        const content = `${renderedRange}\n\nSource: ${source}\nSHA256: ${sha}`
+        return {
+          content,
+          reference: {
+            path: absolutePath,
+            sha256: sha,
+            operation: 'read',
+            contentIncluded: true,
+            contentSha256: createHash('sha256').update(renderedRange).digest('hex'),
+            offset,
+            limit: 1,
+            characterOffset
+          }
+        }
+      }
       let selected = lines.slice(sliceStart, sliceStart + limit)
 
       let truncated = false
@@ -191,18 +297,39 @@ export class ReadTool extends Tool {
 
       const numbered = selected.map((line, i) => `${offset + i}\t${line}`)
       let text = numbered.join('\n')
+      let deliveredLineCount = selected.length
 
       if (text.length > charBudget) {
-        text = text.slice(0, charBudget) +
-          '\n\n[System Note: Content truncated due to the shared Read batch budget. Use a targeted offset/limit range to continue.]'
+        const truncatedText = text.slice(0, charBudget)
+        deliveredLineCount = Math.max(1, truncatedText.split('\n').length)
+        const firstLinePrefix = `${offset}\t`
+        const singleLongLine = selected.length === 1 && numbered[0].length > charBudget
+        const continuation = singleLongLine
+          ? ` Continue with offset: ${offset}, limit: 1, character_offset: ${Math.max(1, charBudget - firstLinePrefix.length + 1)}.`
+          : ' Use a targeted offset/limit range to continue.'
+        text = truncatedText +
+          `\n\n[System Note: Content truncated due to the shared Read batch budget.${continuation}]`
         truncated = true
       }
 
       const note = truncated ? `\n[truncated: ${totalLines} total lines]` : ''
-      return `${text}${note}\n\nSource: ${source}\nSHA256: ${sha}`
+      const renderedRange = `${text}${note}`
+      const content = `${renderedRange}\n\nSource: ${source}\nSHA256: ${sha}`
+      return {
+        content,
+        reference: {
+          path: absolutePath,
+          sha256: sha,
+          operation: 'read',
+          contentIncluded: true,
+          contentSha256: createHash('sha256').update(renderedRange).digest('hex'),
+          offset,
+          limit: deliveredLineCount
+        }
+      }
     } catch (err: any) {
-      if (err.code === 'ENOENT') return 'Error: File not found.'
-      return `Error: ${err.message}`
+      if (err.code === 'ENOENT') return { content: 'Error: File not found.' }
+      return { content: `Error: ${err.message}` }
     }
   }
 }

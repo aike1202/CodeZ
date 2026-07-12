@@ -1,9 +1,12 @@
 import { ChatService } from '../services/ChatService'
 import { streamWithTimeoutRetry } from '../services/chat/retry'
+import { mergeProviderUsage } from '../services/chat/usage'
 import { ToolManager } from '../tools/ToolManager'
+import { getReadFingerprintStore } from '../tools/ReadFingerprintStore'
 import * as path from 'path'
 import type {
   ChatMessage,
+  ChatProviderErrorCode,
   ModelContextCapabilities,
   ProviderTokenUsage,
   ThinkingConfig,
@@ -38,6 +41,10 @@ import { ModelContextBuilder as CanonicalModelContextBuilder } from '../services
 import { authorizePermissionToolCall } from '../services/PermissionManager'
 import type { ExecutorControlToken } from '../../shared/types/parallel'
 import { getExecutionController } from '../services/execution/ExecutionController'
+import { resolveEffectiveReasoningBudgetTokens } from '../services/chat/utils'
+import type { EditTransactionService } from '../services/EditTransactionService'
+import type { CompactionService } from '../services/context/CompactionService'
+import { analyzePathImpactSync } from '../services/permission/PathImpactAnalyzer'
 
 // ─── 子 Agent 写权限范围（并行 Worker 用） ──────────────────
 
@@ -68,6 +75,8 @@ export interface SubAgentPermissionScope {
 export interface SubAgentContext {
   workspaceRoot: string
   sessionId: string
+  /** Provider identity used to invalidate usage anchors when a resumed scope switches providers. */
+  providerId?: string
 
   /** 要回答的核心问题 */
   task: string
@@ -104,6 +113,7 @@ export interface SubAgentContext {
   contextCapabilities?: ModelContextCapabilities
   runtimeCoordinator?: SessionRuntimeCoordinator
   contextBuilder?: ModelContextBuilder
+  compactionService?: CompactionService
   /** 父 Agent 的取消信号；触发时必须停止当前子智能体。 */
   parentSignal?: AbortSignal
 
@@ -115,6 +125,10 @@ export interface SubAgentContext {
    * 只读子 Agent 不传，保持现有零权限门行为。
    */
   permissionScope?: SubAgentPermissionScope
+
+  /** Shared-workspace workers participate in the parent Agent's edit transaction. */
+  transactionId?: string
+  editTransactionService?: EditTransactionService
 
   /** 主 Agent 的 API 配置（baseUrl / apiKey / model 等） */
   apiConfig: {
@@ -265,16 +279,15 @@ export function checkSubAgentToolPermission(
   // 文件写入
   if (WRITE_TOOL_NAMES.has(toolName)) {
     let targetPath: string | undefined =
-      parsedArgs?.file_path || parsedArgs?.filePath || parsedArgs?.TargetFile || parsedArgs?.path
+      parsedArgs?.file_path || parsedArgs?.notebook_path || parsedArgs?.filePath ||
+      parsedArgs?.TargetFile || parsedArgs?.path
     if (!targetPath) {
       return `Write tool called without a file path.`
     }
-    if (!path.isAbsolute(targetPath)) {
-      targetPath = path.resolve(workspaceRoot, targetPath)
-    }
-    // 边界检查：不得逃逸 workspaceRoot
+    const targetImpact = analyzePathImpactSync(targetPath, workspaceRoot)
+    targetPath = targetImpact.resolvedPath
     const rel = path.relative(workspaceRoot, targetPath)
-    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    if (!targetImpact.insideWorkspace) {
       return `Write denied: path '${targetPath}' escapes the workspace.`
     }
 
@@ -284,11 +297,11 @@ export function checkSubAgentToolPermission(
     }
 
     // shared 档：必须命中 allowedWriteFiles
-    const allowed = (scope.allowedWriteFiles || []).map(f =>
-      path.isAbsolute(f) ? path.resolve(f) : path.resolve(workspaceRoot, f)
-    )
-    const resolvedTarget = path.resolve(targetPath)
-    if (!allowed.some(a => a === resolvedTarget)) {
+    const allowed = (scope.allowedWriteFiles || [])
+      .map((file) => analyzePathImpactSync(file, workspaceRoot))
+      .filter((impact) => impact.insideWorkspace)
+      .map((impact) => impact.resolvedPath)
+    if (!allowed.some((allowedPath) => path.relative(allowedPath, targetPath) === '')) {
       return `Write denied: '${rel}' is outside your assigned file set. A sibling worker may be editing it — stop and report a blocker.`
     }
     return null
@@ -756,6 +769,7 @@ export class SubAgentManager {
         sessionId: ctx.sessionId,
         contextScopeId,
         text: turnInput,
+        providerId: ctx.providerId,
         model: ctx.modelOverride || ctx.apiConfig.model
       })
       return {
@@ -810,6 +824,17 @@ export class SubAgentManager {
     const effectiveMaxLoops = resolveMaxLoops(def, ctx)
     const finalizationReserveLoops = resolveFinalizationReserveLoops(def, effectiveMaxLoops)
     let finalizationNoticeRecorded = false
+    let overflowRetried = false
+    const reasoningBudgetTokens = ctx.apiConfig.thinking?.enabled === false
+      ? 0
+      : ctx.apiConfig.thinking
+        ? resolveEffectiveReasoningBudgetTokens(
+            ctx.apiConfig.thinking,
+            ctx.modelOverride || ctx.apiConfig.model,
+            ctx.apiConfig.baseUrl,
+            ctx.apiConfig.apiFormat
+          )
+        : undefined
     const buildHandoff = (
       reasonCode: SubAgentHandoff['reasonCode'],
       reason: string,
@@ -890,13 +915,29 @@ export class SubAgentManager {
           currentInput: runtimeTurn.inputText,
           capabilities: contextCapabilities,
           systemPrompt,
-          toolSchemas: activeTools
+          toolSchemas: activeTools,
+          providerRequestProfile: {
+            providerId: ctx.providerId,
+            model: ctx.modelOverride || ctx.apiConfig.model,
+            apiFormat: ctx.apiConfig.apiFormat,
+            baseUrl: ctx.apiConfig.baseUrl,
+            thinking: ctx.apiConfig.thinking,
+            maxOutputTokens: ctx.apiConfig.maxOutputTokens
+          },
+          reasoningBudgetTokens,
+          workspaceRoot: ctx.workspaceRoot
         })
+        getReadFingerprintStore().replaceScopeDeliveries(
+          ctx.sessionId,
+          contextScopeId,
+          builtContext.items.map((item) => item.message)
+        )
 
         let currentContent = ''
         let toolCallsAcc: Record<number, { id: string; type: 'function'; function: { name: string; arguments: string }; thought_signature?: string }> = {}
         let gotError = false
         let lastError = ''
+        let providerErrorCode: ChatProviderErrorCode | undefined
         let thoughtSig: string | undefined
         let currentUsage: ProviderTokenUsage | undefined
 
@@ -911,7 +952,8 @@ export class SubAgentManager {
                   model: ctx.modelOverride || ctx.apiConfig.model,
                   messages: builtContext.messages,
                   tools: activeTools,
-                  thinking: ctx.apiConfig.thinking
+                  thinking: ctx.apiConfig.thinking,
+                  maxOutputTokens: ctx.apiConfig.maxOutputTokens
                 },
                 attemptCallbacks,
                 signal
@@ -944,10 +986,11 @@ export class SubAgentManager {
                 }
               },
               onDone: () => resolve(),
-              onUsage: (usage) => { currentUsage = usage },
-              onError: (err) => {
+              onUsage: (usage) => { currentUsage = mergeProviderUsage(currentUsage, usage) },
+              onError: (err, code) => {
                 gotError = true
                 lastError = err
+                providerErrorCode = code
                 resolve()
               }
             },
@@ -963,6 +1006,31 @@ export class SubAgentManager {
             }
           )
         })
+
+        if (
+          gotError &&
+          providerErrorCode === 'CONTEXT_OVERFLOW' &&
+          !overflowRetried &&
+          ctx.compactionService &&
+          !abortController.signal.aborted
+        ) {
+          overflowRetried = true
+          const compacted = await ctx.compactionService.compact({
+            sessionId: ctx.sessionId,
+            contextScopeId,
+            trigger: 'provider_overflow',
+            capabilities: contextCapabilities,
+            systemPrompt,
+            toolSchemas: activeTools,
+            workspaceRoot: ctx.workspaceRoot,
+            reasoningBudgetTokens,
+            requiredMessageId: runtimeTurn.userMessageId
+          })
+          if (compacted.status === 'completed') {
+            loopCount = Math.max(0, loopCount - 1)
+            continue
+          }
+        }
 
         if (gotError || abortController.signal.aborted) {
           if (gotError && !abortController.signal.aborted && !isRecoverableProviderError(lastError)) {
@@ -1039,7 +1107,8 @@ export class SubAgentManager {
             arguments: toolCall.function.arguments,
             thoughtSignature: toolCall.thought_signature
           })),
-          usage: currentUsage
+          usage: currentUsage,
+          requestFingerprint: builtContext.providerUsageRequestFingerprint
         })
         for (const toolCall of toolCallsArray) {
           callbacks.onSubAgentToolStart?.(
@@ -1158,6 +1227,8 @@ export class SubAgentManager {
 
               const toolInstance = toolManager.getTool(name)
               let result = ''
+              let uiResult: string | undefined
+              let fileReferences: import('../../shared/types/context').FileContextReference[] | undefined
               if (!toolInstance) {
                 result = JSON.stringify({ ok: false, error: { code: 'NOT_FOUND', message: `Tool '${name}' not found` } })
               } else {
@@ -1209,15 +1280,22 @@ export class SubAgentManager {
                   }
                 }
                 try {
-                  const raw = await toolInstance.execute(args, {
+                  const toolContext = {
                     workspaceRoot: ctx.workspaceRoot,
                     sessionId: ctx.sessionId,
                     contextScopeId,
                     runtimeCoordinator: core.coordinator,
                     runtimeTurn,
+                    transactionId: ctx.transactionId,
+                    editTransactionService: ctx.editTransactionService,
                     abortSignal: abortController.signal
-                  })
-                  result = JSON.stringify({ ok: true, data: raw })
+                  }
+                  const executed = typeof toolInstance.executeWithMetadata === 'function'
+                    ? await toolInstance.executeWithMetadata(args, toolContext)
+                    : { content: await toolInstance.execute(args, toolContext) }
+                  result = JSON.stringify({ ok: true, data: executed.content })
+                  uiResult = executed.uiContent
+                  fileReferences = executed.fileReferences
 
                 } catch (err: any) {
                   result = JSON.stringify({ ok: false, error: { code: 'EXECUTION_ERROR', message: err.message } })
@@ -1261,10 +1339,20 @@ export class SubAgentManager {
                 filesExamined.add(target)
               }
               await core.coordinator.recordToolResult(runtimeTurn, {
-                callId: tc.id, name, content: result, status: resultStatus
+                callId: tc.id,
+                name,
+                content: result,
+                status: resultStatus,
+                fileReferences
               })
-              callbacks.onSubAgentToolEnd?.(subAgentId, tc.id, result)
-              return { role: 'tool' as const, tool_call_id: tc.id, name, content: result }
+              callbacks.onSubAgentToolEnd?.(subAgentId, tc.id, uiResult || result)
+              return {
+                role: 'tool' as const,
+                tool_call_id: tc.id,
+                name,
+                content: result,
+                _fileReferences: fileReferences
+              }
             })
           )
 

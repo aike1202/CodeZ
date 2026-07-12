@@ -2,9 +2,11 @@ import * as fs from 'fs/promises'
 import * as path from 'path'
 import { app, safeStorage } from 'electron'
 import type { ProviderConfig, ProviderInfo, ProviderFormData, ModelConfig, ConnectionTestResult, ModelInfo, ThinkingConfig } from '../../shared/types/provider'
+import { resolveModelContextCapabilities } from './context/ModelCapabilities'
 
 const PROVIDERS_FILE = 'providers.json'
 const MAX_PROVIDERS = 20
+const LEGACY_DEFAULT_CONTEXT_TOKENS = 8192
 
 function genId(): string {
   return `pv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -44,11 +46,19 @@ export class ProviderService {
     try {
       const data = await fs.readFile(this.filePath, 'utf-8')
       const parsed = JSON.parse(data)
+      let providersMigrated = false
       if (Array.isArray(parsed?.providers)) {
+        const originalProviders = JSON.stringify(parsed.providers)
         this.cache = parsed.providers.map(this.migrateConfig)
+        providersMigrated = JSON.stringify(this.cache) !== originalProviders
       }
       if (typeof parsed?.activeProviderId === 'string') {
         this.activeProviderId = parsed.activeProviderId
+      }
+      if (providersMigrated) {
+        await this.save().catch((error) => {
+          console.error('ProviderService migration save error:', error)
+        })
       }
     } catch {
       this.cache = []
@@ -64,6 +74,12 @@ export class ProviderService {
         : []
       delete c.defaultModel
     }
+    c.models = c.models.map((model: any) => ({
+      ...model,
+      maxContextTokens: Number.isFinite(model?.maxContextTokens) && model.maxContextTokens > 0
+        ? Math.floor(model.maxContextTokens)
+        : LEGACY_DEFAULT_CONTEXT_TOKENS
+    }))
     c.thinking = normalizeThinkingConfig(c.thinking)
     return c as ProviderConfig
   }
@@ -127,6 +143,7 @@ export class ProviderService {
     if (this.cache.length >= MAX_PROVIDERS) {
       throw new Error(`最多支持 ${MAX_PROVIDERS} 个 Provider`)
     }
+    this.validateModels(form.models || [])
 
     const { encrypted, method } = this.encryptApiKey(form.apiKey)
     const now = new Date().toISOString()
@@ -161,6 +178,7 @@ export class ProviderService {
   async update(id: string, form: Partial<ProviderFormData>): Promise<ProviderConfig | null> {
     const idx = this.cache.findIndex((c) => c.id === id)
     if (idx === -1) return null
+    if (form.models !== undefined) this.validateModels(form.models)
 
     const existing = this.cache[idx]
 
@@ -185,6 +203,14 @@ export class ProviderService {
     existing.updatedAt = new Date().toISOString()
     await this.save()
     return existing
+  }
+
+  private validateModels(models: ModelConfig[]): void {
+    if (models.length === 0) throw new Error('At least one model configuration is required')
+    for (const model of models) {
+      if (!model.name?.trim()) throw new Error('Every model configuration requires a name')
+      resolveModelContextCapabilities(model)
+    }
   }
 
   async remove(id: string): Promise<boolean> {

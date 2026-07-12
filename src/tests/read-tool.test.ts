@@ -12,7 +12,12 @@ async function setupWorkspace(): Promise<string> {
   return root
 }
 
-const readArgs = (...files: Array<{ file_path: string; offset?: number; limit?: number }>): string =>
+const readArgs = (...files: Array<{
+  file_path: string
+  offset?: number
+  limit?: number
+  character_offset?: number
+}>): string =>
   JSON.stringify({ files })
 
 describe('ReadTool', () => {
@@ -119,6 +124,45 @@ describe('ReadTool', () => {
     }
   })
 
+  it('拒绝通过 workspace 内链接读取外部文件', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'codez-read-outside-link-'))
+    try {
+      const outsideFile = path.join(outside, 'secret.txt')
+      await fs.writeFile(outsideFile, 'external secret')
+      const link = path.join(root, 'external-link')
+      await fs.symlink(outside, link, process.platform === 'win32' ? 'junction' : 'dir')
+
+      const result = await new ReadTool().execute(
+        readArgs({ file_path: path.join(link, 'secret.txt') }),
+        { workspaceRoot: root, sessionId: SESSION }
+      )
+
+      expect(result).toContain('Access denied')
+      expect(result).not.toContain('external secret')
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true })
+    }
+  })
+
+  it('does not grant an in-flight Agent Read to a same-batch mutation', async () => {
+    const result = await new ReadTool().executeWithMetadata(
+      readArgs({ file_path: fp }),
+      {
+        workspaceRoot: root,
+        sessionId: SESSION,
+        runtimeCoordinator: {} as any
+      }
+    )
+
+    expect(result.fileReferences).toHaveLength(1)
+    expect(getReadFingerprintStore().hasDelivery(
+      SESSION,
+      'main',
+      fp,
+      result.fileReferences![0].sha256
+    )).toBe(false)
+  })
+
   it('缺 files：返错', async () => {
     const tool = new ReadTool()
     const result = await tool.execute(JSON.stringify({}), { workspaceRoot: root, sessionId: SESSION })
@@ -168,6 +212,25 @@ describe('ReadTool', () => {
     expect(result).toContain('line one')
   })
 
+  it('为每个成功文件记录精确的结果块边界', async () => {
+    const second = path.join(root, 'b.txt')
+    await fs.writeFile(second, 'second file\n')
+
+    const result = await new ReadTool().executeWithMetadata(
+      readArgs({ file_path: second }, { file_path: fp }),
+      { workspaceRoot: root, sessionId: SESSION }
+    )
+
+    expect(result.fileReferences).toHaveLength(2)
+    const [secondRef, firstRef] = result.fileReferences!
+    const secondBlock = result.content.slice(secondRef.resultBlockStart, secondRef.resultBlockEnd)
+    const firstBlock = result.content.slice(firstRef.resultBlockStart, firstRef.resultBlockEnd)
+    expect(secondBlock).toContain('second file')
+    expect(secondBlock).not.toContain('line one')
+    expect(firstBlock).toContain('line one')
+    expect(firstBlock).not.toContain('second file')
+  })
+
   it('整批读取共享总字符预算', async () => {
     const files = await Promise.all(Array.from({ length: 6 }, async (_, index) => {
       const filePath = path.join(root, `large-${index}.txt`)
@@ -203,6 +266,27 @@ describe('ReadTool', () => {
     expect(result).toContain('2\tline two')
     expect(result).not.toContain('line one')
     expect(result).not.toContain('line three')
+  })
+
+  it('continues through a very long single line with character_offset', async () => {
+    const longFile = path.join(root, 'minified.js')
+    await fs.writeFile(longFile, `${'a'.repeat(25_000)}SECOND_HALF_MARKER${'b'.repeat(5_000)}`)
+    const tool = new ReadTool()
+    const first = await tool.execute(readArgs({ file_path: longFile }), {
+      workspaceRoot: root, sessionId: SESSION
+    })
+    const nextOffset = Number(first.match(/character_offset: (\d+)/)?.[1])
+    expect(nextOffset).toBeGreaterThan(1)
+    expect(first).not.toContain('SECOND_HALF_MARKER')
+
+    const second = await tool.execute(readArgs({
+      file_path: longFile,
+      offset: 1,
+      limit: 1,
+      character_offset: nextOffset
+    }), { workspaceRoot: root, sessionId: SESSION })
+
+    expect(second).toContain('SECOND_HALF_MARKER')
   })
 
   afterEach(async () => {

@@ -1,5 +1,5 @@
 import type { EditTransactionService } from '../services/EditTransactionService'
-import type { ContextScopeId } from '../../shared/types/context'
+import type { ContextScopeId, FileContextReference } from '../../shared/types/context'
 
 export interface ToolContext {
   workspaceRoot: string
@@ -15,6 +15,67 @@ export interface ToolContext {
   editTransactionService?: EditTransactionService
   /** 取消当前 Agent/子智能体时终止仍在运行的工具。 */
   abortSignal?: AbortSignal
+}
+
+export interface ToolExecutionOutput {
+  /** Content persisted in the model ledger and sent to the provider. */
+  content: string
+  /** Optional richer payload for the renderer; never enters model context. */
+  uiContent?: string
+  fileReferences?: FileContextReference[]
+}
+
+export function throwIfToolAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return
+  const reason = signal.reason
+  if (reason instanceof Error) throw reason
+  throw new Error(
+    typeof reason === 'string' && reason.trim()
+      ? reason
+      : 'Tool execution was aborted before the mutation could run.'
+  )
+}
+
+export async function discardStagedBackup(
+  context: ToolContext,
+  absolutePath: string,
+  staged: boolean
+): Promise<void> {
+  if (!staged || !context.editTransactionService || !context.transactionId) return
+  const discard = (context.editTransactionService as any).discardBackup
+  if (typeof discard !== 'function') return
+  await discard.call(context.editTransactionService, context.transactionId, absolutePath)
+}
+
+export async function recordTransactionMutation(
+  context: ToolContext,
+  absolutePath: string,
+  sha256: string | null
+): Promise<void> {
+  if (!context.editTransactionService || !context.transactionId) return
+  const record = (context.editTransactionService as any).recordMutationResult
+  if (typeof record !== 'function') return
+  await record.call(context.editTransactionService, context.transactionId, absolutePath, sha256)
+}
+
+/** Serializes every mutation that belongs to the same edit transaction. */
+export async function runWithTransactionLock<T>(
+  context: ToolContext,
+  operation: () => Promise<T>
+): Promise<T> {
+  const guardedOperation = () => {
+    throwIfToolAborted(context.abortSignal)
+    return operation()
+  }
+  if (!context.editTransactionService || !context.transactionId) return guardedOperation()
+  const runExclusive = (context.editTransactionService as any).runExclusive
+  if (typeof runExclusive !== 'function') return guardedOperation()
+  return runExclusive.call(
+    context.editTransactionService,
+    context.transactionId,
+    guardedOperation,
+    context.abortSignal
+  )
 }
 
 export abstract class Tool {
@@ -34,4 +95,12 @@ export abstract class Tool {
    * @returns 被转为 string 的响应体给模型
    */
   abstract execute(args: string, context: ToolContext): Promise<string>
+
+  /**
+   * Executes a tool while preserving client-only metadata that must not be sent
+   * inside the model-visible tool result. Tools without metadata use this default.
+   */
+  async executeWithMetadata(args: string, context: ToolContext): Promise<ToolExecutionOutput> {
+    return { content: await this.execute(args, context) }
+  }
 }

@@ -9,6 +9,7 @@ import {
   validateGrouping,
   computeConcurrencyLimit,
   mergeWorktree,
+  mergePreparedWorktreeTracked,
   normalizeWorkerResult,
   runWithConcurrencyLimit,
 } from '../main/agent/AgentRunner/parallelOrchestrator'
@@ -136,6 +137,106 @@ describe('mergeWorktree', () => {
       const result = mergeWorktree(repo, 'wt', wt, 'feature')
 
       expect(result).toMatch(/commit failed/i)
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a symlink tree entry before changing HEAD or the worktree', async () => {
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'codez-merge-symlink-'))
+    const repo = path.join(tmp, 'repo')
+    try {
+      mkdirSync(repo)
+      git(repo, ['init'])
+      git(repo, ['config', 'user.email', 'test@example.com'])
+      git(repo, ['config', 'user.name', 'Test User'])
+      writeFileSync(path.join(repo, 'base.txt'), 'base\n')
+      git(repo, ['add', '-A'])
+      git(repo, ['commit', '-m', 'base'])
+      const baseBranch = execFileSync('git', ['branch', '--show-current'], {
+        cwd: repo, encoding: 'utf8'
+      }).trim()
+      const baseHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: repo, encoding: 'utf8'
+      }).trim()
+      git(repo, ['checkout', '-b', 'feature-link'])
+      const blobSource = path.join(tmp, 'link-target.txt')
+      writeFileSync(blobSource, 'base.txt')
+      const blob = execFileSync('git', ['hash-object', '-w', blobSource], {
+        cwd: repo, encoding: 'utf8'
+      }).trim()
+      git(repo, ['update-index', '--add', '--cacheinfo', `120000,${blob},link.txt`])
+      git(repo, ['commit', '-m', 'add link'])
+      git(repo, ['checkout', baseBranch])
+
+      const result = await mergePreparedWorktreeTracked(repo, 'feature-link')
+
+      expect(result).toMatch(/refuses symlink, submodule, or special entry/i)
+      expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim())
+        .toBe(baseHead)
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('serializes disjoint merges that share one Git common directory', async () => {
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'codez-merge-lock-'))
+    const repo = path.join(tmp, 'repo')
+    try {
+      mkdirSync(repo)
+      git(repo, ['init'])
+      git(repo, ['config', 'user.email', 'test@example.com'])
+      git(repo, ['config', 'user.name', 'Test User'])
+      writeFileSync(path.join(repo, 'base.txt'), 'base\n')
+      git(repo, ['add', '-A'])
+      git(repo, ['commit', '-m', 'base'])
+      const baseBranch = execFileSync('git', ['branch', '--show-current'], {
+        cwd: repo, encoding: 'utf8'
+      }).trim()
+      git(repo, ['checkout', '-b', 'feature-one'])
+      writeFileSync(path.join(repo, 'one.txt'), 'one\n')
+      git(repo, ['add', '-A'])
+      git(repo, ['commit', '-m', 'one'])
+      git(repo, ['checkout', baseBranch])
+      git(repo, ['checkout', '-b', 'feature-two'])
+      writeFileSync(path.join(repo, 'two.txt'), 'two\n')
+      git(repo, ['add', '-A'])
+      git(repo, ['commit', '-m', 'two'])
+      git(repo, ['checkout', baseBranch])
+
+      let releaseFirst!: () => void
+      let markFirstEntered!: () => void
+      const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve })
+      const firstEntered = new Promise<void>((resolve) => { markFirstEntered = resolve })
+      let secondEntered = false
+      const firstService = {
+        runExternalMutation: async (_id: string, _paths: string[], operation: () => void) => {
+          markFirstEntered()
+          await firstGate
+          return operation()
+        }
+      }
+      const secondService = {
+        runExternalMutation: async (_id: string, _paths: string[], operation: () => void) => {
+          secondEntered = true
+          return operation()
+        }
+      }
+
+      const first = mergePreparedWorktreeTracked(
+        repo, 'feature-one', { id: 'tx-one', service: firstService as any }
+      )
+      await firstEntered
+      const second = mergePreparedWorktreeTracked(
+        repo, 'feature-two', { id: 'tx-two', service: secondService as any }
+      )
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      expect(secondEntered).toBe(false)
+      releaseFirst()
+
+      await expect(first).resolves.toBeNull()
+      await expect(second).resolves.toBeNull()
+      expect(secondEntered).toBe(true)
     } finally {
       rmSync(tmp, { recursive: true, force: true })
     }

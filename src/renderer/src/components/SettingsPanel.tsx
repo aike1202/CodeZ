@@ -12,6 +12,9 @@ export interface ModelFormData {
   id: string
   name: string
   maxContextTokens: number
+  maxInputTokens?: number
+  maxOutputTokens?: number
+  reasoningCountsAgainstContext?: boolean
   apiFormat?: ApiFormat
   thinkingMode?: ThinkingMode
   thinkingEffort?: ThinkingEffort
@@ -41,6 +44,11 @@ function genModelId(): string {
   return `m_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
 }
 
+function optionalTokenValue(value: string, multiplier = 1): number | undefined {
+  const parsed = Number.parseFloat(value)
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed * multiplier) : undefined
+}
+
 function getDefaultThinking(): ThinkingConfig {
   return { enabled: true, mode: 'auto', effort: 'auto' }
 }
@@ -67,10 +75,16 @@ export default function SettingsPanel({
 
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
 
+  const modelsValid = models.length > 0 && models.every((model) =>
+    (model?.name || '').trim() !== '' &&
+    model.maxContextTokens > 0 &&
+    (!model.maxInputTokens || model.maxInputTokens <= model.maxContextTokens) &&
+    (!model.maxOutputTokens || model.maxOutputTokens < model.maxContextTokens)
+  )
   const canSave =
     (name || '').trim() !== '' &&
     (baseUrl || '').trim() !== '' &&
-    models.some((m) => (m?.name || '').trim() !== '')
+    modelsValid
   const supportsBudgetControl = models.some((model) =>
     model?.name?.trim() && getReasoningCapabilities({
       model: model.name,
@@ -259,6 +273,54 @@ export default function SettingsPanel({
                           <IconClose />
                         </Button>
                       </div>
+                    </div>
+                    <div className="settings-model-limits">
+                      <label className="settings-model-limit-field">
+                        <span>输入上限</span>
+                        <Input
+                          variant="borderless"
+                          className="settings-model-limit-input"
+                          type="number"
+                          step="0.1"
+                          placeholder="自动"
+                          value={m.maxInputTokens ? m.maxInputTokens / 10000 : ''}
+                          onChange={(event) => updateModel(
+                            idx,
+                            'maxInputTokens',
+                            optionalTokenValue(event.target.value, 10000)
+                          )}
+                        />
+                        <span>万</span>
+                      </label>
+                      <label className="settings-model-limit-field">
+                        <span>输出上限</span>
+                        <Input
+                          variant="borderless"
+                          className="settings-model-limit-input"
+                          type="number"
+                          step="1000"
+                          placeholder="自动"
+                          value={m.maxOutputTokens || ''}
+                          onChange={(event) => updateModel(
+                            idx,
+                            'maxOutputTokens',
+                            optionalTokenValue(event.target.value)
+                          )}
+                        />
+                        <span>Tokens</span>
+                      </label>
+                      <label className="settings-model-reasoning-toggle">
+                        <input
+                          type="checkbox"
+                          checked={m.reasoningCountsAgainstContext === true}
+                          onChange={(event) => updateModel(
+                            idx,
+                            'reasoningCountsAgainstContext',
+                            event.target.checked
+                          )}
+                        />
+                        推理计入窗口
+                      </label>
                     </div>
                     <label className="settings-model-vision-toggle">
                       <input

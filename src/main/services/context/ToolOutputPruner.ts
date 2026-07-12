@@ -44,7 +44,8 @@ export class ToolOutputPruner {
   ): ToolOutputPruneResult {
     const messages = source.map((message) => ({
       ...message,
-      toolCalls: message.toolCalls?.map((call) => ({ ...call }))
+      toolCalls: message.toolCalls?.map((call) => ({ ...call })),
+      fileReferences: message.fileReferences?.map((reference) => ({ ...reference }))
     }))
     const estimateTotal = () => messages.reduce(
       (total, message) => total + this.budget.estimateValueTokens(message), 0
@@ -85,6 +86,10 @@ export class ToolOutputPruner {
         head: content.slice(0, headLength),
         tail: tailLength ? content.slice(-tailLength) : ''
       })
+      candidate.message.fileReferences = candidate.message.fileReferences?.map((reference) => ({
+        ...reference,
+        contentIncluded: false
+      }))
       currentTokens -= Math.max(0, before - this.budget.estimateValueTokens(candidate.message))
       prunedIds.add(candidate.message.id)
       records.push(record)

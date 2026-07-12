@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { buildThinkingPayload } from '../main/services/chat/utils'
+import {
+  buildThinkingPayload,
+  resolveEffectiveReasoningBudgetTokens
+} from '../main/services/chat/utils'
 import { processDeltaWithThinkTags, ThinkParserState } from '../main/services/chat/OpenAIProvider'
 import { mapAnthropicStopReason, extractAnthropicDelta } from '../main/services/chat/AnthropicProvider'
 
@@ -281,6 +284,15 @@ describe('ChatService - buildThinkingPayload (自动适配与推导)', () => {
       'https://dashscope.aliyuncs.com/api/v1'
     )
     expect(payloadHigh).toEqual({ enable_thinking: true, thinking_budget: 16384 })
+  })
+
+  it('budgets the Anthropic minimum actually sent to the API', () => {
+    expect(resolveEffectiveReasoningBudgetTokens(
+      { enabled: true, mode: 'anthropic', effort: 'custom', budgetTokens: 1 },
+      'claude-3-7-sonnet',
+      'https://api.anthropic.com/v1',
+      'anthropic'
+    )).toBe(1024)
   })
 
   it('uses native and OpenAI-compatible Gemini reasoning fields', () => {

@@ -44,7 +44,8 @@ describe('ReadFingerprintStore', () => {
   it('路径归一化：反斜杠/大小写等价', () => {
     const backslash = ABS.replace(/\//g, '\\')
     store.record(SESSION, backslash, 'sha-aaa')
-    expect(store.isUnchanged(SESSION, ABS.toUpperCase(), 'sha-aaa')).toBe(true)
+    expect(store.isUnchanged(SESSION, ABS.toUpperCase(), 'sha-aaa'))
+      .toBe(process.platform === 'win32')
   })
 
   it('getReadFingerprintStore 返回同一单例', () => {
@@ -80,5 +81,71 @@ describe('ReadFingerprintStore', () => {
     expect(store.hasDelivery(SESSION, 'subagent:a', ABS, 'sha-aaa')).toBe(true)
     expect(store.hasDelivery(SESSION, 'subagent:b', ABS, 'sha-aaa')).toBe(false)
     expect(store.hasDelivery(SESSION, 'subagent:a', ABS, 'sha-bbb')).toBe(false)
+  })
+
+  it('replaces stale scope authorization from the actual model projection', () => {
+    store.recordDelivery(SESSION, 'main', ABS, 'old')
+    store.replaceScopeDeliveries(SESSION, 'main', [{
+      fileReferences: [{
+        path: ABS,
+        sha256: 'visible',
+        operation: 'read',
+        contentIncluded: true
+      }]
+    }])
+    expect(store.hasDelivery(SESSION, 'main', ABS, 'old')).toBe(false)
+    expect(store.hasDelivery(SESSION, 'main', ABS, 'visible')).toBe(true)
+
+    store.replaceScopeDeliveries(SESSION, 'main', [{
+      fileReferences: [{
+        path: ABS,
+        sha256: 'pruned',
+        operation: 'read',
+        contentIncluded: false
+      }]
+    }])
+    expect(store.hasDelivery(SESSION, 'main', ABS, 'visible')).toBe(false)
+    expect(store.hasDelivery(SESSION, 'main', ABS, 'pruned')).toBe(false)
+  })
+
+  it('orders restored context and retained tail references by ledger sequence', () => {
+    store.replaceScopeDeliveries(SESSION, 'main', [
+      {
+        sourceSequence: 10,
+        fileReferences: [{
+          path: ABS, sha256: 'restored-current', operation: 'read', contentIncluded: true
+        }]
+      },
+      {
+        sourceSequence: 5,
+        fileReferences: [{
+          path: ABS, sha256: 'retained-old', operation: 'read', contentIncluded: true
+        }]
+      }
+    ])
+
+    expect(store.hasDelivery(SESSION, 'main', ABS, 'restored-current')).toBe(true)
+    expect(store.hasDelivery(SESSION, 'main', ABS, 'retained-old')).toBe(false)
+  })
+
+  it('evicts snapshot buffers by LRU entry and byte limits', () => {
+    const limited = new ReadFingerprintStore(2, 8)
+    const signature = (value: string) => `${value.length}:1:1`
+    const record = (filePath: string, value: string) => limited.recordSnapshot(SESSION, filePath, {
+      sha256: value,
+      buffer: Buffer.from(value),
+      statSignature: signature(value)
+    })
+    const b = ABS.replace('a.ts', 'b.ts')
+    const c = ABS.replace('a.ts', 'c.ts')
+
+    record(ABS, 'aaaa')
+    record(b, 'bbbb')
+    expect(limited.getSnapshot(SESSION, ABS, signature('aaaa'))).toBeTruthy()
+    record(c, 'cccc')
+
+    expect(limited.getSnapshot(SESSION, ABS, signature('aaaa'))).toBeTruthy()
+    expect(limited.getSnapshot(SESSION, b, signature('bbbb'))).toBeUndefined()
+    expect(limited.getSnapshot(SESSION, c, signature('cccc'))).toBeTruthy()
   })
 })

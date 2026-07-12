@@ -5,9 +5,10 @@ import { TaskStore } from '../../services/TaskStore'
 import { WorktreeService } from '../../services/WorktreeService'
 import type { AgentRunConfig, AgentRunnerCallbacks } from './types'
 import type { StepResult } from '../../../shared/types/parallel'
+import type { EditTransactionService } from '../../services/EditTransactionService'
 import {
   failureReasonFromResult,
-  mergeWorktree,
+  mergeWorktreeTracked,
   normalizeWorkerResult
 } from './parallelOrchestrator'
 
@@ -35,7 +36,8 @@ export async function handleExecutionControl(
   rawArgs: string,
   config: AgentRunConfig,
   callbacks: AgentRunnerCallbacks,
-  parentSignal?: AbortSignal
+  parentSignal?: AbortSignal,
+  parentTransaction?: { id: string; service: EditTransactionService }
 ) {
   let parsed: ControlArgs
   try {
@@ -118,6 +120,7 @@ export async function handleExecutionControl(
     const result = await SubAgentManager.spawn('Executor', {
       workspaceRoot: executor.worktreePath || config.workspaceRoot,
       sessionId,
+      providerId: config.providerId,
       task: executor.originalTask,
       parentPrompt: executor.originalTask,
       context: executor.suppliedContext,
@@ -128,9 +131,12 @@ export async function handleExecutionControl(
       contextCapabilities: config.contextCapabilities,
       runtimeCoordinator: config.runtimeCoordinator,
       contextBuilder: config.contextBuilder,
+      compactionService: config.compactionService,
       permissionScope: execution.isolation === 'worktree'
         ? { allowAllWritesInWorkspace: true, allowBash: true }
-        : { allowedWriteFiles: executor.assignedFiles || [], allowBash: true },
+        : { allowedWriteFiles: executor.assignedFiles || [], allowBash: false },
+      transactionId: execution.isolation === 'shared' ? parentTransaction?.id : undefined,
+      editTransactionService: execution.isolation === 'shared' ? parentTransaction?.service : undefined,
       apiConfig: {
         baseUrl: config.baseUrl || '',
         apiKey: config.apiKey || '',
@@ -165,7 +171,14 @@ export async function handleExecutionControl(
       )
       const name = path.basename(executor.worktreePath)
       const mergeError = metadata?.branch
-        ? mergeWorktree(config.workspaceRoot, name, executor.worktreePath, metadata.branch)
+        ? await mergeWorktreeTracked(
+            config.workspaceRoot,
+            name,
+            executor.worktreePath,
+            metadata.branch,
+            parentTransaction,
+            parentSignal
+          )
         : 'worktree metadata was not found'
       if (mergeError) {
         stepResult.status = 'failed'

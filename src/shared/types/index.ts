@@ -67,6 +67,8 @@ export type {
   ResumeState,
   VersionedResumeState,
   NormalizedToolCall,
+  FileContextReference,
+  PostCompactionFileContext,
   NormalizedModelMessage,
   ModelContextItem,
   CompactionSummaryV1,

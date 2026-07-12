@@ -100,6 +100,7 @@ export class ResumeStateManager {
       `Blocked by: ${state.blockedBy.join('; ') || 'none'}`,
       `Files touched: ${state.filesTouched.join('; ') || 'none'}`,
       `Files to inspect: ${state.filesToInspectNext.join('; ') || 'none'}`,
+      `Context files: ${(state.contextFiles || []).join('; ') || 'none'}`,
       `Validation pending: ${state.validationPending.join('; ') || 'none'}`,
       '</resume_state>'
     ]

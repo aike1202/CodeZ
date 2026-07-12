@@ -24,10 +24,11 @@ export async function deleteSessionWithAttachments(
   },
   attachments: Pick<AttachmentService, 'deleteSession'>,
   sessionId: string
-): Promise<void> {
+): Promise<boolean> {
   const wasDeleted = store.get(sessionId)?.isDeleted === true
   await store.delete(sessionId)
   if (wasDeleted) await attachments.deleteSession(sessionId)
+  return wasDeleted
 }
 
 export function registerAttachmentIpc(): void {

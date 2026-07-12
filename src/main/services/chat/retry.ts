@@ -128,6 +128,8 @@ export async function streamWithTimeoutRetry(
       },
       onUsage: (usage) => {
         if (suppressCallbacks || externalSignal.aborted) return
+        markFirstByte()
+        resetIdleTimer()
         callbacks.onUsage?.(usage)
       }
     }

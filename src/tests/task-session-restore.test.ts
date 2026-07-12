@@ -31,6 +31,11 @@ describe('chat store task session restore', () => {
   beforeEach(async () => {
     vi.resetModules()
     ;(globalThis as any).window = {
+      electron: {
+        ipcRenderer: {
+          invoke: vi.fn().mockResolvedValue({ historyVersion: 1 })
+        }
+      },
       api: {
         session: {
           list: vi.fn(),
@@ -265,5 +270,70 @@ describe('chat store task session restore', () => {
     })
     expect(useChatStore.getState().messages).toEqual([])
     expect(useChatStore.getState().sessions[0].messages).toEqual([])
+    expect((window as any).electron.ipcRenderer.invoke).toHaveBeenCalledWith(
+      'chat:revert-messages', 's1', 'u1', []
+    )
+  })
+
+  it('finishes a pending revert against its original session after switching sessions', async () => {
+    const { useChatStore } = await import('../renderer/src/stores/chatStore')
+    let resolveRevert: ((value: unknown) => void) | undefined
+    ;(window as any).electron.ipcRenderer.invoke.mockReturnValue(new Promise((resolve) => {
+      resolveRevert = resolve
+    }))
+    const aMessages = [
+      { id: 'a-user', role: 'user' as const, content: 'retry me' },
+      { id: 'a-agent', role: 'agent' as const, content: 'answer', txId: 'tx-a' }
+    ]
+    const bMessages = [{ id: 'b-user', role: 'user' as const, content: 'keep B' }]
+    useChatStore.setState({
+      sessions: [
+        { id: 'a', projectId: 'p', summary: 'A', relativeTime: 'now', messages: aMessages },
+        { id: 'b', projectId: 'p', summary: 'B', relativeTime: 'now', messages: bMessages }
+      ],
+      activeSessionId: 'a', messages: aMessages, pendingPrompt: null, composerDrafts: {}
+    } as any)
+
+    const pending = useChatStore.getState().revertToMessage('a-user')
+    useChatStore.setState({ activeSessionId: 'b', messages: bMessages })
+    resolveRevert?.({ historyVersion: 3 })
+    await pending
+
+    const state = useChatStore.getState()
+    expect(state.sessions.find((session) => session.id === 'a')?.messages).toEqual([])
+    expect(state.sessions.find((session) => session.id === 'b')?.messages).toEqual(bMessages)
+    expect(state.messages).toEqual(bMessages)
+    expect(state.composerDrafts.a).toEqual({ text: 'retry me', attachments: [] })
+    expect((window as any).api.session.save).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'a', messages: [] })
+    )
+  })
+
+  it('does not overwrite a session whose message revision changed while revert was pending', async () => {
+    const { useChatStore } = await import('../renderer/src/stores/chatStore')
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    let resolveRevert: ((value: unknown) => void) | undefined
+    ;(window as any).electron.ipcRenderer.invoke.mockReturnValue(new Promise((resolve) => {
+      resolveRevert = resolve
+    }))
+    const messages = [{ id: 'u1', role: 'user' as const, content: 'original' }]
+    useChatStore.setState({
+      sessions: [{ id: 's1', projectId: 'p', summary: 'S', relativeTime: 'now', messages }],
+      activeSessionId: 's1', messages, pendingPrompt: null
+    } as any)
+
+    const pending = useChatStore.getState().revertToMessage('u1')
+    const changed = [...messages, { id: 'new', role: 'system' as const, content: 'new event' }]
+    useChatStore.setState({
+      sessions: [{ id: 's1', projectId: 'p', summary: 'S', relativeTime: 'now', messages: changed }],
+      messages: changed
+    } as any)
+    resolveRevert?.({ historyVersion: 2 })
+    await pending
+
+    expect(useChatStore.getState().messages).toEqual(changed)
+    expect((window as any).api.session.save).not.toHaveBeenCalled()
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('refusing stale UI overwrite'))
+    errorSpy.mockRestore()
   })
 })

@@ -37,10 +37,25 @@ export class SkillTool extends Tool {
       if (!parsed.skill) return 'Error: skill is required.'
 
       const sm = SkillManager.getInstance()
-      const content = await sm.getSkillContent(context.workspaceRoot, parsed.skill)
-      if (content) return content
-
       const skills = await sm.getSkills(context.workspaceRoot)
+      const matched = skills.find((skill) =>
+        skill.name === parsed.skill || skill.id === parsed.skill
+      )
+      const content = matched
+        ? await sm.getSkillContent(context.workspaceRoot, matched.name)
+        : null
+      if (content) {
+        const escapeTag = (value: string) => value
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+        return [
+          `<command-name>${escapeTag(matched!.name)}</command-name>`,
+          `<command-args>${escapeTag(parsed.args || '')}</command-args>`,
+          content
+        ].join('\n')
+      }
+
       const list = skills.slice(0, 30).map((s) => `- ${s.name} (${s.id})`).join('\n')
       return `Error: skill "${parsed.skill}" not found. Available:\n${list || '(none)'}`
     } catch (err: any) {

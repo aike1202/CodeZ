@@ -37,7 +37,11 @@ export class ModelHistoryNormalizer {
     }
 
     for (const original of messages) {
-      const message = { ...original, toolCalls: original.toolCalls?.map((call) => ({ ...call })) }
+      const message = {
+        ...original,
+        toolCalls: original.toolCalls?.map((call) => ({ ...call })),
+        fileReferences: original.fileReferences?.map((reference) => ({ ...reference }))
+      }
       if (message.role !== 'tool' && pending.size > 0) flushInterrupted()
       result.push(message)
 
@@ -118,7 +122,8 @@ export class ModelHistoryNormalizer {
 
     return messages.slice(start).map((message) => ({
       ...message,
-      toolCalls: message.toolCalls?.map((call) => ({ ...call }))
+      toolCalls: message.toolCalls?.map((call) => ({ ...call })),
+      fileReferences: message.fileReferences?.map((reference) => ({ ...reference }))
     }))
   }
 }

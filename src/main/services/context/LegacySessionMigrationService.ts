@@ -127,6 +127,7 @@ export class LegacySessionMigrationService {
     const createdAt = new Date().toISOString()
     return selected.map((message) => ({
       id: `legacy:${message.id || randomUUID()}`,
+      clientMessageId: message.role === 'user' ? message.id : undefined,
       turnId: `legacy:${message.id || randomUUID()}`,
       role: message.role === 'agent' || message.role === 'assistant' ? 'assistant' : 'user',
       content: message.role === 'system' ? `[System note] ${message.content}` : message.content,

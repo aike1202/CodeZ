@@ -32,6 +32,7 @@ interface ChatMessageRowProps extends Omit<ChatMessageListProps, 'messages'> {
   showParallelExecution: boolean
   onOpenImages: (attachments: ImageAttachment[], index: number) => void
   onPreviewRevert: (msgId: string) => void
+  revertDisabled: boolean
 }
 
 const ChatMessageRow = React.memo(function ChatMessageRow({
@@ -41,7 +42,8 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
   handleFileClick,
   handleDiffClick,
   onOpenImages,
-  onPreviewRevert
+  onPreviewRevert,
+  revertDisabled
 }: ChatMessageRowProps): React.ReactElement {
   if (msg.role === 'system') {
     return (
@@ -77,6 +79,7 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
         </div>
         <div className="revert-btn-container">
           <button
+            disabled={revertDisabled}
             onClick={() => {
               onPreviewRevert(msg.id)
             }}
@@ -151,6 +154,7 @@ export function ChatMessageList({
             handleDiffClick={handleDiffClick}
             onOpenImages={handleOpenImages}
             onPreviewRevert={handlePreviewRevert}
+            revertDisabled={Boolean(lastStreamingMsgId)}
           />
         )
       })}
@@ -168,9 +172,9 @@ export function ChatMessageList({
           toDelete={previewData.toDelete}
           toRestore={previewData.toRestore}
           unknownStatus={previewData.unknownStatus}
-          onConfirm={() => {
-            useChatStore.getState().revertToMessage(previewData.msgId)
-            setPreviewData(null)
+          onConfirm={async () => {
+            const reverted = await useChatStore.getState().revertToMessage(previewData.msgId)
+            if (reverted) setPreviewData(null)
           }}
           onCancel={() => setPreviewData(null)}
         />

@@ -20,10 +20,13 @@ import { handleExecutionControl } from './executionControlHelper'
 import { getSessionStore } from '../../ipc/session.handlers'
 import { LoopStateMachine, AgentState, TransitionEvent, TerminationReason } from './LoopStateMachine'
 import { streamWithTimeoutRetry } from '../../services/chat/retry'
+import { mergeProviderUsage } from '../../services/chat/usage'
 import type { SmartApprovalClient } from '../../services/permission/SmartApprovalService'
 import { ChatSmartApprovalClient } from '../../services/permission/ChatSmartApprovalClient'
 import { ContextBudgetService } from '../../services/context/ContextBudgetService'
+import { getReadFingerprintStore } from '../../tools/ReadFingerprintStore'
 import type { ChatSteerInput } from '../../../shared/types/queuedPrompt'
+import { resolveEffectiveReasoningBudgetTokens } from '../../services/chat/utils'
 
 export enum NormalizedStopReason {
   Truncated = 'Truncated',
@@ -146,6 +149,16 @@ export class AgentRunner {
     let overflowRetried = false
     let allMessages: import('../../../shared/types/provider').ChatMessage[] = []
     const runtimeInstructions: string[] = [...(config.contextInstructions || [])]
+    const reasoningBudgetTokens = config.thinking?.enabled === false
+      ? 0
+      : config.thinking
+        ? resolveEffectiveReasoningBudgetTokens(
+            config.thinking,
+            config.model || '',
+            config.baseUrl || '',
+            config.apiFormat || 'openai'
+          )
+        : undefined
     const MAX_LOOPS = 30
     let loopCount = 0
     let consecutiveFailures = 0
@@ -199,10 +212,25 @@ export class AgentRunner {
     }
 
     let txId: string | null = null
+    let transactionHandedOff = false
+    let transactionSettled = false
     try {
       txId = await this.editTransactionService.beginTransaction(sessionId)
     } catch (err: any) {
       console.error('[AgentRunner] Failed to begin transaction:', err.message)
+    }
+    const rollbackUnhandedTransaction = async (): Promise<void> => {
+      if (!txId || transactionHandedOff || transactionSettled) return
+      transactionSettled = true
+      try {
+        await this.editTransactionService.rollback(txId)
+      } catch (error) {
+        log.error('[AgentRunner] failed to rollback an unhanded transaction', {
+          sessionId,
+          txId,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      }
     }
 
     let consecutiveIdleTurns = 0
@@ -226,9 +254,23 @@ export class AgentRunner {
           systemPrompt: config.systemPrompt!,
           toolSchemas: availableTools,
           instructions: runtimeInstructions,
-          reasoningBudgetTokens: config.thinking?.budgetTokens
+          providerRequestProfile: {
+            providerId: config.providerId,
+            model: config.model,
+            apiFormat: config.apiFormat,
+            baseUrl: config.baseUrl,
+            thinking: config.thinking,
+            maxOutputTokens: config.contextCapabilities?.maxOutputTokens
+          },
+          reasoningBudgetTokens,
+          workspaceRoot: config.workspaceRoot
         })
         allMessages = built.messages
+        getReadFingerprintStore().replaceScopeDeliveries(
+          sessionId,
+          runtimeTurn!.contextScopeId,
+          built.items.map((item) => item.message)
+        )
         callbacks.onContextBudget?.(built.budget)
 
         let currentFullContent = ''
@@ -271,6 +313,7 @@ export class AgentRunner {
               messages: allMessages,
               tools: availableTools,
               thinking: config.thinking,
+              maxOutputTokens: config.contextCapabilities?.maxOutputTokens,
               resolveImage
             },
             attemptCallbacks,
@@ -333,12 +376,7 @@ export class AgentRunner {
               }
             },
             onUsage: (usage) => {
-              currentUsage = {
-                inputTokens: Math.max(currentUsage?.inputTokens || 0, usage.inputTokens),
-                outputTokens: Math.max(currentUsage?.outputTokens || 0, usage.outputTokens),
-                reasoningTokens: Math.max(currentUsage?.reasoningTokens || 0, usage.reasoningTokens || 0),
-                totalTokens: Math.max(currentUsage?.totalTokens || 0, usage.totalTokens || 0)
-              }
+              currentUsage = mergeProviderUsage(currentUsage, usage)
             }
           },
           this.abortController!.signal,
@@ -370,7 +408,10 @@ export class AgentRunner {
             capabilities: config.contextCapabilities!,
             systemPrompt: config.systemPrompt!,
             toolSchemas: availableTools,
-            instructions: runtimeInstructions
+            instructions: runtimeInstructions,
+            workspaceRoot: config.workspaceRoot,
+            reasoningBudgetTokens,
+            requiredMessageId: runtimeTurn!.userMessageId
           })
           if (compacted.status === 'completed') {
             loopCount--
@@ -387,6 +428,7 @@ export class AgentRunner {
 
         if (gotError || this.abortController?.signal.aborted) {
           if (!runtimeClosed) {
+            await rollbackUnhandedTransaction()
             await runtimeCoordinator!.interruptTurn(
               runtimeTurn!,
               this.abortController?.signal.aborted ? 'User aborted the turn' : 'Provider request failed'
@@ -447,7 +489,8 @@ export class AgentRunner {
             arguments: toolCall.function.arguments,
             thoughtSignature: toolCall.thought_signature
           })),
-          usage: currentUsage
+          usage: currentUsage,
+          requestFingerprint: built.providerUsageRequestFingerprint
         })
         const batchId = toolCallsArray.length > 1
           ? `batch_${runtimeTurn!.turnId}_${loopCount}`
@@ -552,7 +595,8 @@ export class AgentRunner {
                   args,
                   config,
                   toolCallbacks,
-                  this.abortController?.signal
+                  this.abortController?.signal,
+                  txId ? { id: txId, service: this.editTransactionService } : undefined
                 )
               } else if (name === 'ExecutionControl') {
                 return await handleExecutionControl(
@@ -560,12 +604,15 @@ export class AgentRunner {
                   args,
                   config,
                   toolCallbacks,
-                  this.abortController?.signal
+                  this.abortController?.signal,
+                  txId ? { id: txId, service: this.editTransactionService } : undefined
                 )
               }
 
               const toolInstance = this.toolManager.getTool(name)
               let resultMessage = ''
+              let uiResultMessage: string | undefined
+              let fileReferences: import('../../../shared/types/context').FileContextReference[] | undefined
               let isError = false
               if (!toolInstance) {
                 resultMessage = `Error: Tool '${name}' not found.`
@@ -584,7 +631,7 @@ export class AgentRunner {
                   }
 
                   if (!resultMessage) {
-                    resultMessage = await toolInstance.execute(args, {
+                    const toolContext = {
                       workspaceRoot: config.workspaceRoot,
                       sessionId,
                       contextScopeId: runtimeTurn?.contextScopeId,
@@ -593,7 +640,13 @@ export class AgentRunner {
                       transactionId: txId || undefined,
                       editTransactionService: this.editTransactionService,
                       abortSignal: this.abortController?.signal
-                    })
+                    }
+                    const executed = typeof toolInstance.executeWithMetadata === 'function'
+                      ? await toolInstance.executeWithMetadata(args, toolContext)
+                      : { content: await toolInstance.execute(args, toolContext) }
+                    resultMessage = executed.content
+                    uiResultMessage = executed.uiContent
+                    fileReferences = executed.fileReferences
                     if (isToolErrorResult(resultMessage)) {
                       isError = true
                     }
@@ -621,7 +674,9 @@ export class AgentRunner {
                 tool_call_id: toolCallId,
                 name: name,
                 content: JSON.stringify(toolResultWrapper),
-                _rawArgs: args
+                _rawArgs: args,
+                _uiContent: uiResultMessage,
+                _fileReferences: fileReferences
               }
             })
           )
@@ -635,11 +690,12 @@ export class AgentRunner {
               callId: toolResult.tool_call_id,
               name: toolResult.name,
               content: toolResult.content,
-              status
+              status,
+              fileReferences: (toolResult as any)._fileReferences
             })
             callbacks.onToolEnd?.(
               toolResult.tool_call_id,
-              unwrapModelToolResultForUi(toolResult.content)
+              (toolResult as any)._uiContent || unwrapModelToolResultForUi(toolResult.content)
             )
           }
 
@@ -721,6 +777,7 @@ export class AgentRunner {
               runtimeClosed = true
             }
             log.info('[AgentRunner] run complete', { sessionId, loops: loopCount, finalContentLen: currentFullContent.length, finishReason });
+            transactionHandedOff = true
             callbacks.onDone(currentFullContent, currentStopReason, txId || undefined);
           }
           break;
@@ -737,6 +794,7 @@ export class AgentRunner {
                runtimeClosed = true
              }
              log.info('[AgentRunner] run suspended/waiting', { sessionId, loops: loopCount, finalContentLen: currentFullContent.length, state: currentState });
+             transactionHandedOff = true
              callbacks.onDone(currentFullContent, currentStopReason, txId || undefined);
            }
            break;
@@ -777,18 +835,15 @@ export class AgentRunner {
         break;
       }
       if (!runtimeClosed) {
+        await rollbackUnhandedTransaction()
         await runtimeCoordinator!.interruptTurn(runtimeTurn!, 'Agent loop ended before completion')
         runtimeClosed = true
       }
     } catch (err) {
+      await rollbackUnhandedTransaction()
       if (!runtimeClosed) {
         await runtimeCoordinator!.interruptTurn(runtimeTurn!, err instanceof Error ? err.message : String(err)).catch(() => undefined)
         runtimeClosed = true
-      }
-      if (txId) {
-        try {
-          await this.editTransactionService.rollback(txId)
-        } catch {}
       }
       throw err
     } finally {

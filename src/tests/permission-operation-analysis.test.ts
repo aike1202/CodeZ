@@ -3,7 +3,10 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from 'fs/promises'
 import os from 'os'
 import path from 'path'
 import { NestedCommandExpander } from '../main/services/permission/NestedCommandExpander'
-import { PathImpactAnalyzer } from '../main/services/permission/PathImpactAnalyzer'
+import {
+  analyzePathImpactSync,
+  PathImpactAnalyzer
+} from '../main/services/permission/PathImpactAnalyzer'
 
 describe('permission operation analysis', () => {
   it.each([
@@ -143,6 +146,7 @@ describe('permission operation analysis', () => {
       await symlink(outside, path.join(root, 'links', 'outside'), process.platform === 'win32' ? 'junction' : 'dir')
       const result = await new PathImpactAnalyzer().analyze(path.join(root, 'links', 'outside', 'x.txt'), root)
       expect(result.insideWorkspace).toBe(false)
+      expect(analyzePathImpactSync(path.join(root, 'links', 'outside', 'new.txt'), root).insideWorkspace).toBe(false)
     } finally {
       await rm(root, { recursive: true, force: true })
       await rm(outside, { recursive: true, force: true })

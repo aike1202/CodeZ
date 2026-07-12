@@ -136,6 +136,7 @@ export async function handleSubAgentRunnerSpawn(
       {
         workspaceRoot: config.workspaceRoot,
         sessionId: config.sessionId || 'session_default',
+        providerId: config.providerId,
         task: parsed.task || prompt || '',
         parentPrompt: parsed.task || prompt || '',
         subAgentId,
@@ -147,6 +148,7 @@ export async function handleSubAgentRunnerSpawn(
         contextCapabilities: config.contextCapabilities,
         runtimeCoordinator: config.runtimeCoordinator,
         contextBuilder: config.contextBuilder,
+        compactionService: config.compactionService,
         parentSignal,
         apiConfig: {
           baseUrl: config.baseUrl || '',

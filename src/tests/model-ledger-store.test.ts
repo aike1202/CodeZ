@@ -65,4 +65,73 @@ describe('ModelLedgerStore', () => {
     expect(loaded.throughSequence).toBe(2)
     expect(loaded.scopes.main.historyVersion).toBe(2)
   })
+
+  it('conditionally appends against the scope history version inside the ledger queue', async () => {
+    const store = await createStore()
+    await store.append('s1', 'main', 'user_message', { message: { id: 'u1' } as never }, 't1')
+
+    const stale = await store.appendIfHistoryVersion(
+      's1', 'main', 0, 'turn_completed', {
+        stopReason: 'stop', completedAt: '2026-07-10T00:00:01.000Z'
+      }, 't1'
+    )
+    const committed = await store.appendIfHistoryVersion(
+      's1', 'main', 1, 'turn_completed', {
+        stopReason: 'stop', completedAt: '2026-07-10T00:00:01.000Z'
+      }, 't1'
+    )
+
+    expect(stale).toBeNull()
+    expect(committed?.sequence).toBe(2)
+  })
+
+  it('serializes long-running maintenance within the same context scope', async () => {
+    const store = await createStore()
+    let releaseFirst!: () => void
+    let markFirstEntered!: () => void
+    const gate = new Promise<void>((resolve) => { releaseFirst = resolve })
+    const firstEntered = new Promise<void>((resolve) => { markFirstEntered = resolve })
+    const order: string[] = []
+    const first = store.runScopeExclusive('s1', 'main', async () => {
+      order.push('first:start')
+      markFirstEntered()
+      await gate
+      order.push('first:end')
+    })
+    await firstEntered
+    const second = store.runScopeExclusive('s1', 'main', async () => {
+      order.push('second')
+    })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(order).toEqual(['first:start'])
+    releaseFirst()
+    await Promise.all([first, second])
+    expect(order).toEqual(['first:start', 'first:end', 'second'])
+  })
+
+  it('does not activate a legacy usage anchor without a request fingerprint', async () => {
+    const store = await createStore()
+    await store.append('s1', 'main', 'user_message', {
+      message: { id: 'u1' } as never
+    }, 't1')
+    await store.append('s1', 'main', 'assistant_message', {
+      message: { id: 'a1' } as never,
+      usage: { inputTokens: 100, outputTokens: 10, totalTokens: 110 }
+    }, 't1')
+
+    expect((await store.load('s1')).scopes.main.lastProviderUsage).toBeUndefined()
+
+    await store.append('s1', 'main', 'user_message', {
+      message: { id: 'u2' } as never,
+      providerId: 'provider-current',
+      model: 'model-current'
+    }, 't2')
+
+    const scope = (await store.load('s1')).scopes.main
+    expect(scope.lastProviderUsage).toBeUndefined()
+    expect(scope.lastProviderUsageMessageId).toBeUndefined()
+    expect(scope.lastProviderUsageProviderId).toBeUndefined()
+    expect(scope.lastProviderUsageModel).toBeUndefined()
+    expect(scope.lastProviderUsageRequestFingerprint).toBeUndefined()
+  })
 })
