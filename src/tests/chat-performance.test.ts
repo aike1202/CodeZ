@@ -23,14 +23,32 @@ describe('chat stream rendering performance', () => {
     }, 40)
 
     for (let index = 0; index < 100; index++) {
-      batcher.pushMain(String(index % 10), index % 2 === 0 ? 'r' : '')
+      batcher.pushMain(String(index % 10))
     }
 
     expect(appendMain).not.toHaveBeenCalled()
     vi.advanceTimersByTime(40)
     expect(appendMain).toHaveBeenCalledTimes(1)
     expect(appendMain.mock.calls[0][0]).toHaveLength(100)
-    expect(appendMain.mock.calls[0][1]).toHaveLength(50)
+    expect(appendMain.mock.calls[0][1]).toBe('')
+  })
+
+  it('preserves a reasoning-to-text phase transition inside one batch', () => {
+    vi.useFakeTimers()
+    const appendMain = vi.fn()
+    const batcher = createStreamUpdateBatcher({
+      appendMain,
+      appendSubAgent: vi.fn()
+    }, 40)
+
+    batcher.pushMain('', 'thinking')
+    batcher.pushMain('answer')
+    batcher.flush()
+
+    expect(appendMain.mock.calls).toEqual([
+      ['', 'thinking'],
+      ['answer', '']
+    ])
   })
 
   it('flushes main and sub-agent chunks before terminal events', () => {

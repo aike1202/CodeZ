@@ -3,9 +3,9 @@ export interface StreamUpdateCallbacks {
   appendSubAgent: (subAgentId: string, delta: string, reasoningDelta: string) => void
 }
 
-interface BufferedChunk {
-  delta: string
-  reasoningDelta: string
+interface BufferedSegment {
+  kind: 'text' | 'reasoning'
+  content: string
 }
 
 export interface StreamUpdateBatcher {
@@ -21,8 +21,8 @@ export function createStreamUpdateBatcher(
   callbacks: StreamUpdateCallbacks,
   intervalMs = STREAM_RENDER_INTERVAL_MS
 ): StreamUpdateBatcher {
-  let main: BufferedChunk = { delta: '', reasoningDelta: '' }
-  const subAgents = new Map<string, BufferedChunk>()
+  let main: BufferedSegment[] = []
+  const subAgents = new Map<string, BufferedSegment[]>()
   let timer: ReturnType<typeof setTimeout> | null = null
 
   const clearTimer = () => {
@@ -35,15 +35,15 @@ export function createStreamUpdateBatcher(
     clearTimer()
 
     const pendingMain = main
-    main = { delta: '', reasoningDelta: '' }
+    main = []
     const pendingSubAgents = Array.from(subAgents.entries())
     subAgents.clear()
 
-    if (pendingMain.delta || pendingMain.reasoningDelta) {
-      callbacks.appendMain(pendingMain.delta, pendingMain.reasoningDelta)
-    }
-    for (const [subAgentId, chunk] of pendingSubAgents) {
-      callbacks.appendSubAgent(subAgentId, chunk.delta, chunk.reasoningDelta)
+    flushSegments(pendingMain, callbacks.appendMain)
+    for (const [subAgentId, segments] of pendingSubAgents) {
+      flushSegments(segments, (delta, reasoningDelta) => {
+        callbacks.appendSubAgent(subAgentId, delta, reasoningDelta)
+      })
     }
   }
 
@@ -55,23 +55,58 @@ export function createStreamUpdateBatcher(
   return {
     pushMain: (delta, reasoningDelta = '') => {
       if (!delta && !reasoningDelta) return
-      main.delta += delta
-      main.reasoningDelta += reasoningDelta
+      appendSegments(main, delta, reasoningDelta)
       schedule()
     },
     pushSubAgent: (subAgentId, delta, reasoningDelta) => {
       if (!delta && !reasoningDelta) return
-      const pending = subAgents.get(subAgentId) || { delta: '', reasoningDelta: '' }
-      pending.delta += delta
-      pending.reasoningDelta += reasoningDelta
+      const pending = subAgents.get(subAgentId) || []
+      appendSegments(pending, delta, reasoningDelta)
       subAgents.set(subAgentId, pending)
       schedule()
     },
     flush,
     cancel: () => {
       clearTimer()
-      main = { delta: '', reasoningDelta: '' }
+      main = []
       subAgents.clear()
+    }
+  }
+}
+
+function appendSegments(segments: BufferedSegment[], delta: string, reasoningDelta: string): void {
+  appendSegment(segments, 'text', delta)
+  appendSegment(segments, 'reasoning', reasoningDelta)
+}
+
+function appendSegment(
+  segments: BufferedSegment[],
+  kind: BufferedSegment['kind'],
+  content: string
+): void {
+  if (!content) return
+  const last = segments[segments.length - 1]
+  if (last?.kind === kind) {
+    last.content += content
+    return
+  }
+  segments.push({ kind, content })
+}
+
+function flushSegments(
+  segments: BufferedSegment[],
+  append: (delta: string, reasoningDelta: string) => void
+): void {
+  for (let index = 0; index < segments.length; index++) {
+    const segment = segments[index]
+    const next = segments[index + 1]
+    if (segment.kind === 'text' && next?.kind === 'reasoning') {
+      append(segment.content, next.content)
+      index += 1
+    } else if (segment.kind === 'text') {
+      append(segment.content, '')
+    } else {
+      append('', segment.content)
     }
   }
 }
