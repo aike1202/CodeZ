@@ -58,3 +58,28 @@ export interface SessionRuntimeStatusChanged {
   version: number
   status: SessionRuntimeStatus
 }
+
+export interface SubAgentHandoffTool {
+  name: string
+  status: 'success' | 'error' | 'interrupted'
+  target?: string
+  summary?: string
+}
+
+/** SubAgent 未完成时交给主 Agent 的有界、结构化执行快照。 */
+export interface SubAgentHandoff {
+  reasonCode: 'parent_interrupted' | 'provider_error' | 'protocol_failure' | 'runtime_error' | 'runtime_missing' | 'parent_delivery_missing'
+  reason: string
+  originalTask: string
+  knownContext?: string
+  scope?: { directories?: string[]; excludeGlobs?: string[] }
+  expectations?: { questions: string[]; outOfScope?: string[] }
+  depth?: 'quick' | 'normal' | 'exhaustive'
+  lastProgress?: string
+  filesExamined: string[]
+  filesModified: string[]
+  filesPossiblyModified: string[]
+  recentTools: SubAgentHandoffTool[]
+  workspaceMayHaveUntrackedChanges: boolean
+  canResume: boolean
+}

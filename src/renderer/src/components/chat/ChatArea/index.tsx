@@ -14,6 +14,7 @@ import { computeEditStats, handleDiffClickForFile } from '../../../utils/editDif
 import { useChatStore, type ChatMessage } from '../../../stores/chatStore'
 import { useSendMessage } from '../hooks/useSendMessage'
 import { ChatMessageList } from './components/ChatMessageList'
+import ConversationNavigator from '../ConversationNavigator'
 
 /** 距底部小于视口高度的此比例算"在底部" */
 const SCROLL_BOTTOM_RATIO = 0.15
@@ -306,6 +307,15 @@ export default function ChatArea({
         containerRef={containerRef}
         panelOpen={panelOpen}
         onScroll={handleScroll}
+        navigationRail={
+          hasMessages ? (
+            <ConversationNavigator
+              messages={messages}
+              containerRef={containerRef}
+              contentRef={contentRef}
+            />
+          ) : undefined
+        }
         messageArea={
           hasMessages ? (
             <div ref={contentRef} style={{ width: '100%', flexShrink: 0 }}>

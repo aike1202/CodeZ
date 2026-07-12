@@ -1,0 +1,130 @@
+.conversation-navigator {
+  position: absolute;
+  top: 50%;
+  left: 14px;
+  z-index: 35;
+  width: 32px;
+  max-height: calc(100% - 36px);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.conversation-navigator__rail {
+  position: absolute;
+  top: 7px;
+  bottom: 7px;
+  width: 100%;
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+  pointer-events: auto;
+}
+
+.conversation-navigator__marker {
+  position: absolute;
+  left: 0;
+  width: 28px;
+  height: 14px;
+  padding: 0;
+  transform: translateY(-50%);
+  cursor: pointer;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.conversation-navigator__tick {
+  display: block;
+  width: 8px;
+  height: 2px;
+  margin-right: auto;
+  border-radius: 999px;
+  background-color: var(--text-light);
+  opacity: 0.72;
+  transition: width 140ms ease, height 140ms ease, opacity 140ms ease,
+    background-color 140ms ease;
+}
+
+.conversation-navigator__marker:hover .conversation-navigator__tick,
+.conversation-navigator__marker.is-hovered .conversation-navigator__tick,
+.conversation-navigator__marker:focus-visible .conversation-navigator__tick,
+.conversation-navigator__rail.is-dragging .conversation-navigator__tick {
+  width: 16px;
+  height: 3px;
+  opacity: 1;
+  background-color: var(--text-muted);
+}
+
+.conversation-navigator__marker.is-active .conversation-navigator__tick {
+  width: 20px;
+  height: 3px;
+  opacity: 1;
+  background-color: var(--primary-color);
+}
+
+.conversation-navigator__marker:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid var(--primary-color);
+  outline-offset: 1px;
+}
+
+.conversation-navigator__tooltip {
+  position: absolute;
+  top: 50%;
+  left: 34px;
+  display: flex;
+  width: min(280px, calc(100vw - 96px));
+  padding: 10px 12px;
+  transform: translateY(-50%);
+  flex-direction: column;
+  gap: 5px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--bg-panel);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+  color: var(--text-main);
+  text-align: left;
+  pointer-events: none;
+}
+
+.conversation-navigator__marker.is-near-top .conversation-navigator__tooltip {
+  top: -4px;
+  transform: none;
+}
+
+.conversation-navigator__marker.is-near-bottom .conversation-navigator__tooltip {
+  top: auto;
+  bottom: -4px;
+  transform: none;
+}
+
+.conversation-navigator__summary {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.conversation-navigator__meta {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+@media (max-width: 720px) {
+  .conversation-navigator {
+    left: 10px;
+  }
+
+  .conversation-navigator__tooltip {
+    width: min(240px, calc(100vw - 72px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conversation-navigator__tick {
+    transition: none;
+  }
+}

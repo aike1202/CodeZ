@@ -36,7 +36,8 @@ export class SubAgentRunnerTool extends Tool {
       '- Use `expectations.questions` to specify what the subagent MUST answer — it will self-check against this list.',
       '- Use `context` to share what you already know (natural language) so the subagent does not duplicate work.',
       '- Use `depth` to control exploration depth. Budgets are subagent-specific; Research uses quick (16 loops), normal (48 loops), exhaustive (96 loops), and defaults to 64 loops when omitted.',
-      '- If a previous call returned `EXECUTION_INTERRUPTED`, preserve its type, prompt, context, scope, expectations, and depth and pass its `resume_subagent_id` back to this tool. This resumes the same subagent history; do not inspect or redo its work first.',
+      '- If an interrupted or failed call returns `resume_subagent_id`, preserve its type, prompt, context, scope, expectations, and depth and pass that ID back to this tool. This resumes the same subagent history; do not inspect or redo its work first.',
+      '- Interrupted and failed results include a structured `handoff` for the parent Agent: reason, last progress, files examined/modified, recent tools, and whether resume is available. Use it before deciding to resume or take over the remaining work yourself.',
       '- The subagent result is returned as the tool output; it includes structuredOutput, qualitySummary, and filesExamined.'
     ].join('\n')
   }
@@ -107,7 +108,7 @@ export class SubAgentRunnerTool extends Tool {
         },
         resume_subagent_id: {
           type: 'string',
-          description: 'The resume_subagent_id returned by an interrupted SubAgentRunner call. Reuses that subagent\'s durable context instead of starting over.'
+          description: 'The resume_subagent_id returned by a resumable interrupted or failed SubAgentRunner call. Reuses that subagent\'s durable context instead of starting over.'
         }
       },
       required: ['subagent_type', 'description', 'prompt']

@@ -126,6 +126,13 @@ describe('structured subagent completion protocol', () => {
     expect(result.status).toBe('failed')
     expect(result.qualitySummary?.coverage).toBe(0)
     expect(result.qualitySummary?.confidence).toBe('low')
+    expect(result.handoff).toMatchObject({
+      reasonCode: 'protocol_failure',
+      reason: expect.stringContaining('without submitting'),
+      originalTask: 'Investigate the failure.',
+      lastProgress: 'Still preparing the answer.',
+      canResume: true
+    })
   })
 
   it('does not accept a plain-text JSON object as a structured result', async () => {

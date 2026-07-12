@@ -3,6 +3,14 @@ import { BrowserWindow } from 'electron'
 import { createHash } from 'crypto'
 import { IPC_CHANNELS } from '../../../shared/ipc/channels'
 import type { AgentRunConfig, AgentRunnerCallbacks } from './types'
+import type { SubAgentHandoff } from '../../../shared/types/subagent'
+
+function truncateBridgeText(value: string, maxLength: number): string {
+  const normalized = value.trim()
+  return normalized.length <= maxLength
+    ? normalized
+    : `${normalized.slice(0, maxLength)}\n...[truncated]`
+}
 
 /**
  * 通用子智能体 spawn 拦截处理。
@@ -159,26 +167,35 @@ export async function handleSubAgentRunnerSpawn(
       win.webContents.send(IPC_CHANNELS.PLAN_SUBAGENT_PROGRESS, { status: result.status })
     }
 
+    const exposedOutput = result.status === 'completed'
+      ? result.output || ''
+      : truncateBridgeText(result.output || 'SubAgent did not complete.', 4000)
     callbacks.onSubAgentEnd?.(subAgentId, {
       status: result.status,
-      output: result.output || '',
-      qualitySummary: result.qualitySummary,
+      output: exposedOutput,
+      qualitySummary: result.status === 'completed' ? result.qualitySummary : undefined,
       toolCallCount: result.toolCallCount,
       filesExamined: result.filesExamined,
-      conclusion: result.structuredOutput?.conclusion
+      conclusion: result.structuredOutput?.conclusion,
+      handoff: result.handoff
     })
 
     const resultData = {
-        status: result.status,
-        subagent_type,
-        description: description || '',
-        output: result.output || '(subagent produced no text output)',
-        structuredOutput: result.structuredOutput,
-        qualitySummary: result.qualitySummary,
-        toolCallCount: result.toolCallCount,
-        filesExamined: result.filesExamined,
-        resume_subagent_id: result.status === 'interrupted' ? subAgentId : undefined,
-      }
+      status: result.status,
+      subagent_type,
+      description: truncateBridgeText(description || '', 200),
+      output: exposedOutput || '(subagent produced no text output)',
+      structuredOutput: result.status === 'completed' ? result.structuredOutput : undefined,
+      qualitySummary: result.status === 'completed' ? result.qualitySummary : undefined,
+      toolCallCount: result.toolCallCount,
+      filesExamined: result.filesExamined?.slice(-20).map((value) =>
+        truncateBridgeText(value, 240)
+      ),
+      handoff: result.handoff,
+      resume_subagent_id: result.handoff?.canResume || result.status === 'interrupted'
+        ? subAgentId
+        : undefined,
+    }
     const resultMsg = JSON.stringify(
       result.status === 'completed'
         ? { ok: true, data: resultData }
@@ -187,13 +204,13 @@ export async function handleSubAgentRunnerSpawn(
               ok: false,
               error: {
                 code: 'EXECUTION_INTERRUPTED',
-                message: result.output || `SubAgent '${subagent_type}' was interrupted.`
+                message: exposedOutput || `SubAgent '${subagent_type}' was interrupted.`
               },
               data: resultData
             }
           : {
               ok: false,
-              error: result.output || `SubAgent '${subagent_type}' did not submit a valid result.`,
+              error: exposedOutput || `SubAgent '${subagent_type}' did not submit a valid result.`,
               data: resultData
             }
     )
@@ -203,13 +220,58 @@ export async function handleSubAgentRunnerSpawn(
     if (win) {
       win.webContents.send(IPC_CHANNELS.PLAN_SUBAGENT_PROGRESS, { status: 'failed' })
     }
+    const rawReason = err instanceof Error ? err.message : String(err)
+    const reason = truncateBridgeText(rawReason, 1200)
+    const handoff: SubAgentHandoff = {
+      reasonCode: 'runtime_error',
+      reason,
+      originalTask: truncateBridgeText(parsed.task || prompt || '', 2500),
+      knownContext: parsed.context
+        ? truncateBridgeText(parsed.context, 1200)
+        : undefined,
+      scope: parsed.scope
+        ? {
+            directories: parsed.scope.directories?.slice(0, 10).map((value) =>
+              truncateBridgeText(value, 160)
+            ),
+            excludeGlobs: parsed.scope.excludeGlobs?.slice(0, 10).map((value) =>
+              truncateBridgeText(value, 160)
+            )
+          }
+        : undefined,
+      expectations: parsed.expectations
+        ? {
+            questions: parsed.expectations.questions.slice(0, 12).map((value) =>
+              truncateBridgeText(value, 240)
+            ),
+            outOfScope: parsed.expectations.outOfScope?.slice(0, 8).map((value) =>
+              truncateBridgeText(value, 240)
+            )
+          }
+        : undefined,
+      depth: parsed.depth,
+      filesExamined: [],
+      filesModified: [],
+      filesPossiblyModified: [],
+      recentTools: [],
+      workspaceMayHaveUntrackedChanges: false,
+      canResume: false
+    }
     callbacks.onSubAgentEnd?.(subAgentId, {
       status: 'failed',
-      toolCallCount: 0
+      output: reason,
+      toolCallCount: 0,
+      handoff
     })
     const errMsg = JSON.stringify({
       ok: false,
-      error: `SubAgent '${subagent_type}' execution failed: ${err.message}`
+      error: `SubAgent '${subagent_type}' execution failed: ${reason}`,
+      data: {
+        status: 'failed',
+        subagent_type,
+        description: description || '',
+        handoff
+      }
     })
     callbacks.onToolEnd?.(toolCallId, errMsg)
     return { role: 'tool' as const, tool_call_id: toolCallId, name, content: errMsg }

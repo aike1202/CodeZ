@@ -11,6 +11,7 @@ export interface ChatAreaLayoutProps {
   promptArea: ReactNode;
   terminalPanel?: ReactNode;
   scrollToBottomButton?: ReactNode;
+  navigationRail?: ReactNode;
   panelOpen?: boolean;
   containerRef?: React.RefObject<HTMLDivElement>;
   onScroll?: (e: React.UIEvent<HTMLDivElement>) => void;
@@ -22,6 +23,7 @@ export const ChatAreaLayout: React.FC<ChatAreaLayoutProps> = ({
   promptArea,
   terminalPanel,
   scrollToBottomButton,
+  navigationRail,
   panelOpen,
   containerRef,
   onScroll
@@ -30,14 +32,17 @@ export const ChatAreaLayout: React.FC<ChatAreaLayoutProps> = ({
   useTaskSubscription();
   return (
     <>
-      <Stack
-        className={`app-chat-column ${panelOpen ? 'app-chat-column--border' : ''}`}
-        ref={containerRef}
-        onScroll={onScroll}
-      >
-        <TaskCapsule />
-        {messageArea}
-      </Stack>
+      <div className="app-chat-scroll-shell">
+        <Stack
+          className={`app-chat-column ${panelOpen ? 'app-chat-column--border' : ''}`}
+          ref={containerRef}
+          onScroll={onScroll}
+        >
+          <TaskCapsule />
+          {messageArea}
+        </Stack>
+        {navigationRail}
+      </div>
       {auditArea}
       {scrollToBottomButton && (
         <div className="relative flex justify-center w-full">

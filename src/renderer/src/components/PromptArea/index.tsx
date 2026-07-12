@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ImagePlus } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
 import { useProviderStore } from '../../stores/providerStore'
@@ -31,6 +31,10 @@ import PermissionModeSelector from './components/PermissionModeSelector'
 import { useImageAttachments } from './hooks/useImageAttachments'
 import ImageAttachmentGrid from '../chat/ImageAttachmentGrid'
 import ImagePreviewModal from '../chat/ImagePreviewModal'
+import {
+  cloneComposerDraft,
+  getSessionComposerDraft
+} from '../../stores/chatStore/composerDrafts'
 
 const EFFORT_LABELS: Partial<Record<ThinkingEffort, string>> = {
   none: '关闭',
@@ -75,8 +79,15 @@ export default function PromptArea({
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const pendingPrompt = useChatStore((s) => s.pendingPrompt)
   const setPendingPrompt = useChatStore((s) => s.setPendingPrompt)
+  const setComposerDraft = useChatStore((s) => s.setComposerDraft)
   const streamCleanups = useChatStore((s) => s.streamCleanups)
+  const runtimeStatus = useChatStore((s) => activeSessionId
+    ? s.runtimeStatuses[activeSessionId]?.status
+    : undefined)
   const isStreaming = activeSessionId ? !!streamCleanups[activeSessionId] : false
+  const conversationBusy = isStreaming || Boolean(
+    runtimeStatus?.mainRunnerActive || runtimeStatus?.activeSubAgentIds.length
+  )
   const stopStream = activeSessionId ? streamCleanups[activeSessionId] ?? null : null
   const contextSnapshot = useChatStore((s) => activeSessionId ? s.contextBudgets[activeSessionId] : undefined)
   const compactionState = useChatStore((s) => activeSessionId ? s.compactionStates[activeSessionId] : undefined)
@@ -105,8 +116,57 @@ export default function PromptArea({
     attachments,
     clearComposerAttachments,
     restoreRejectedDrafts,
-    importing
+    importing,
+    conversationBusy
   )
+
+  const composerDraftInitializedRef = useRef(false)
+  const composerDraftSessionRef = useRef<string | null>(activeSessionId)
+  const liveComposerDraftRef = useRef(cloneComposerDraft())
+
+  useLayoutEffect(() => {
+    if (!composerDraftInitializedRef.current) {
+      composerDraftInitializedRef.current = true
+      composerDraftSessionRef.current = activeSessionId
+      const stored = getSessionComposerDraft(
+        useChatStore.getState().composerDrafts,
+        activeSessionId
+      )
+      liveComposerDraftRef.current = stored
+      if (stored.text !== text) setText(stored.text)
+      if (stored.attachments.length > 0 || attachments.length > 0) {
+        replaceAttachments(stored.attachments)
+      }
+      return
+    }
+
+    if (composerDraftSessionRef.current !== activeSessionId) {
+      const previousSessionId = composerDraftSessionRef.current
+      if (previousSessionId) {
+        setComposerDraft(previousSessionId, liveComposerDraftRef.current)
+      }
+
+      const next = getSessionComposerDraft(
+        useChatStore.getState().composerDrafts,
+        activeSessionId
+      )
+      composerDraftSessionRef.current = activeSessionId
+      liveComposerDraftRef.current = next
+      setText(next.text)
+      replaceAttachments(next.attachments)
+      setPreviewIndex(null)
+      return
+    }
+
+    liveComposerDraftRef.current = cloneComposerDraft({ text, attachments })
+  }, [activeSessionId, attachments, replaceAttachments, setComposerDraft, setText, text])
+
+  useEffect(() => () => {
+    const sessionId = composerDraftSessionRef.current
+    if (sessionId) {
+      useChatStore.getState().setComposerDraft(sessionId, liveComposerDraftRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     if (!pendingPrompt) return

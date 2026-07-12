@@ -10,6 +10,7 @@ import type { ModelContextBuilder } from '../../services/context/ModelContextBui
 import type { CompactionService } from '../../services/context/CompactionService'
 import type { ToolBatchMeta } from '../../../shared/types/toolExecution'
 import type { ImageAttachment, ResolveImageAttachment } from '../../../shared/types/attachment'
+import type { SubAgentHandoff } from '../../../shared/types/subagent'
 
 export interface SubAgentStartMeta {
   type: string
@@ -29,6 +30,7 @@ export interface SubAgentEndResult {
   toolCallCount: number
   filesExamined?: string[]
   conclusion?: string
+  handoff?: SubAgentHandoff
 }
 
 export interface AgentRunnerCallbacks extends StreamCallbacks {

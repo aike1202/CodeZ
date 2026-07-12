@@ -21,6 +21,8 @@ Do NOT delegate:
 - Announce the delegation plan to the user before spawning subagents.
 - Workers run in waves: all tasks in a wave start together; the next wave waits for the previous to complete.
 - If any task in a wave fails, execution halts. Already-completed tasks are preserved.
+- Use ExecutionInspect to read the authoritative failure/handoff state before recovery.
+- Use ExecutionControl to stop or take over an Executor; do not infer control state from UI text.
 
 ## Exceptions
 - When the user explicitly requests parallel execution, honor their grouping rather than re-deriving it.

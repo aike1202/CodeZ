@@ -7,11 +7,14 @@ import type { AgentRunnerCallbacks } from './types'
 import type { ModelContextCapabilities, ThinkingConfig } from '../../../shared/types/provider'
 import type { SessionRuntimeCoordinator } from '../../services/context/SessionRuntimeCoordinator'
 import type { ModelContextBuilder } from '../../services/context/ModelContextBuilder'
+import { getExecutionController } from '../../services/execution/ExecutionController'
 import type {
   ExecUnit,
+  ExecutorFailureReason,
   ExecutionGroupingResult,
   ExecutionWave,
   ParallelExecutionReport,
+  StepResultStatus,
   StepResult,
   WaveReport,
 } from '../../../shared/types/parallel'
@@ -37,6 +40,8 @@ export interface ParallelOrchestratorConfig {
   contextCapabilities?: ModelContextCapabilities
   runtimeCoordinator?: SessionRuntimeCoordinator
   contextBuilder?: ModelContextBuilder
+  /** 父 Agent 停止时撤销本次 execution 及其所有 Executor 租约。 */
+  parentSignal?: AbortSignal
 }
 
 /**
@@ -138,7 +143,7 @@ export function validateGrouping(
 // ─── SubAgent 结构化输出解析 ────────────────────────────────
 
 interface WorkerOutput {
-  status: 'completed' | 'failed'
+  status: StepResultStatus
   summary: string
   filesModified: string[]
   blockers?: string[]
@@ -158,10 +163,29 @@ function parseWorkerOutput(structured: Record<string, any> | undefined): WorkerO
 }
 
 export function normalizeWorkerResult(result: {
+  status?: 'completed' | 'failed' | 'interrupted'
   structuredOutput?: Record<string, any>
   output?: string
+  handoff?: import('../../../shared/types/subagent').SubAgentHandoff
   [key: string]: any
 }): WorkerOutput {
+  if (result.status === 'interrupted') {
+    return {
+      status: 'interrupted',
+      summary: result.output?.trim() || 'Executor was interrupted before completion.',
+      filesModified: result.handoff?.filesModified || [],
+      blockers: [result.handoff?.reason || result.output || 'Executor interrupted.']
+    }
+  }
+  if (result.status === 'failed') {
+    const structured = result.structuredOutput ? parseWorkerOutput(result.structuredOutput) : undefined
+    return {
+      status: 'failed',
+      summary: structured?.summary || result.output?.trim() || 'Executor failed.',
+      filesModified: structured?.filesModified || result.handoff?.filesModified || [],
+      blockers: structured?.blockers || [result.handoff?.reason || result.output || 'Executor failed.']
+    }
+  }
   if (result.structuredOutput) {
     return parseWorkerOutput(result.structuredOutput)
   }
@@ -208,6 +232,37 @@ function formatGitError(err: any): string {
   return stderr || stdout || err?.message || String(err)
 }
 
+export function prepareWorktreeArtifact(
+  wtName: string,
+  wtPath: string
+): { commit?: string; error: string | null } {
+  try {
+    gitInWorktree(wtPath, ['add', '-A'])
+    if (hasStagedChanges(wtPath)) {
+      gitInWorktree(wtPath, ['commit', '-m', `codez: worktree ${wtName}`])
+    }
+    const commit = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: wtPath,
+      timeout: 30_000,
+      stdio: 'pipe',
+      encoding: 'utf8'
+    }).trim()
+    return { commit, error: null }
+  } catch (err: any) {
+    return { error: `commit failed: ${formatGitError(err)}` }
+  }
+}
+
+export function mergePreparedWorktree(workspaceRoot: string, branch: string): string | null {
+  try {
+    gitInWorktree(workspaceRoot, ['merge', '--no-edit', branch])
+    return null
+  } catch (err: any) {
+    try { gitInWorktree(workspaceRoot, ['merge', '--abort']) } catch {}
+    return formatGitError(err) || 'worktree merge failed'
+  }
+}
+
 /**
  * 波末合并一个成功 step 的 worktree 回主工作区。
  * @returns null 成功；否则返回错误信息（合并冲突等）
@@ -218,28 +273,9 @@ export function mergeWorktree(
   wtPath: string,
   branch: string
 ): string | null {
-  try {
-    // worktree 内提交改动
-    gitInWorktree(wtPath, ['add', '-A'])
-    if (hasStagedChanges(wtPath)) {
-      try {
-        gitInWorktree(wtPath, ['commit', '-m', `codez: worktree ${wtName}`])
-      } catch (err: any) {
-        return `commit failed: ${formatGitError(err)}`
-      }
-    }
-    // 主区合并该分支
-    gitInWorktree(workspaceRoot, ['merge', '--no-edit', branch])
-    return null
-  } catch (err: any) {
-    // 合并冲突 → abort 保持主区干净
-    try {
-      gitInWorktree(workspaceRoot, ['merge', '--abort'])
-    } catch {
-      // ignore
-    }
-    return err?.message || 'worktree merge failed'
-  }
+  const artifact = prepareWorktreeArtifact(wtName, wtPath)
+  if (artifact.error) return artifact.error
+  return mergePreparedWorktree(workspaceRoot, branch)
 }
 
 // ─── 事件广播 ──────────────────────────────────────────────
@@ -282,6 +318,7 @@ export async function orchestrateParallelExecution(
 ): Promise<ParallelExecutionReport> {
   const unitsById = new Map(units.map(u => [u.id, u]))
   const waves = grouping.waves
+  const executionController = getExecutionController()
 
   // 1. 冲突校验（兜底守卫）
   const { error: validationError } = validateGrouping(waves, unitsById, isolation)
@@ -289,7 +326,30 @@ export async function orchestrateParallelExecution(
     throw new Error(validationError)
   }
 
+  const execution = executionController.createExecution({
+    workspaceRoot: config.workspaceRoot,
+    sessionId: config.sessionId,
+    source: hooks.source,
+    parentToolCallId: config.parentToolCallId,
+    waves,
+    isolation,
+    rationale: grouping.rationale,
+    parentSignal: config.parentSignal,
+    executorDefinitions: Object.fromEntries(units.map((unit) => [
+      unit.id,
+      {
+        task: buildWorkerTask(unit),
+        context: buildWorkerContext(unit) || undefined,
+        assignedFiles: unit.files || []
+      }
+    ]))
+  })
+  const executionId = execution.executionId
+  executionController.startExecution(executionId)
+
   broadcast(IPC_CHANNELS.PARALLEL_EXEC_STARTED, {
+    executionId,
+    sessionId: config.sessionId,
     source: hooks.source,
     planSlug: hooks.planSlug,
     waves,
@@ -303,6 +363,9 @@ export async function orchestrateParallelExecution(
 
   // 2. 按 wave 顺序循环（组间串行）
   for (const wave of waves) {
+    if (config.parentSignal?.aborted) {
+      break
+    }
     const stepIds = wave.stepIds.filter(id => unitsById.has(id) && !completedUnitIds.has(id))
     if (stepIds.length === 0) continue
 
@@ -311,6 +374,8 @@ export async function orchestrateParallelExecution(
       await hooks.onStatusChange(id, 'in_progress')
     }
     broadcast(IPC_CHANNELS.PARALLEL_WAVE_UPDATE, {
+      executionId,
+      sessionId: config.sessionId,
       waveIndex: wave.index,
       status: 'in_progress',
       stepResults: [],
@@ -318,37 +383,96 @@ export async function orchestrateParallelExecution(
 
     // worktree 档：为每个 unit 建 worktree
     const worktrees = new Map<string, { path: string; branch: string; name: string }>()
+    const worktreeSetupFailures = new Map<string, string>()
     if (isolation === 'worktree') {
       for (const id of stepIds) {
-        const name = safeName(hooks.source, id)
-        const info = WorktreeService.create(config.workspaceRoot, name)
-        worktrees.set(id, { path: info.path, branch: info.branch, name })
+        const name = safeName(`${hooks.source}-${executionId}`, id)
+        try {
+          const info = WorktreeService.create(config.workspaceRoot, name)
+          worktrees.set(id, { path: info.path, branch: info.branch, name })
+        } catch (error) {
+          const reason = `worktree setup failed: ${error instanceof Error ? error.message : String(error)}`
+          worktreeSetupFailures.set(id, reason)
+          executionController.failExecutorBeforeStart(executionId, id, reason)
+        }
       }
     }
 
     // 组内并行 + 并发闸
-    const results = await runWithConcurrencyLimit(
-      stepIds.map(id => () => spawnWorker(id, unitsById.get(id)!, isolation, worktrees.get(id), config, callbacks)),
+    const results = await runWithConcurrencyLimit<StepResult>(
+      stepIds.map(id => () => {
+        const setupFailure = worktreeSetupFailures.get(id)
+        if (setupFailure) {
+          const snapshot = executionController.getExecution(executionId)?.executors.find((item) => item.stepId === id)
+          return Promise.resolve<StepResult>({
+            stepId: id,
+            executorId: snapshot?.executorId,
+            status: 'failed' as const,
+            summary: '',
+            filesModified: [],
+            failureReason: 'runtime_error' as const,
+            error: setupFailure
+          })
+        }
+        return spawnWorker(
+          executionId,
+          id,
+          unitsById.get(id)!,
+          isolation,
+          worktrees.get(id),
+          config,
+          callbacks
+        )
+      }),
       concurrencyLimit
     )
 
-    // worktree 档：波末统一合并成功 unit 回主区
+    const waveHasFailure = results.some((result) => result.status !== 'completed')
+
+    // worktree 档：整波成功时沿用自动合并；部分成功时保留成功产物，等待主 Agent 接纳。
     if (isolation === 'worktree') {
       for (const r of results) {
         const wt = worktrees.get(r.stepId)
         if (!wt) continue
         if (r.status === 'completed') {
-          const mergeErr = mergeWorktree(config.workspaceRoot, wt.name, wt.path, wt.branch)
-          if (mergeErr) {
-            // 合并失败 → 标该 unit 失败，保留 worktree 供排查
-            r.status = 'failed'
-            r.error = `merge conflict: ${mergeErr}`
-            r.worktreePath = wt.path
+          if (waveHasFailure) {
+            const artifact = prepareWorktreeArtifact(wt.name, wt.path)
+            if (artifact.error) {
+              r.status = 'failed'
+              r.failureReason = 'runtime_error'
+              r.error = artifact.error
+              r.worktreePath = wt.path
+            } else {
+              r.worktreePath = wt.path
+              r.artifactStatus = 'ready'
+              r.artifactCommit = artifact.commit
+              const executorId = r.executorId || executionController
+                .getExecution(executionId)
+                ?.executors.find((executor) => executor.stepId === r.stepId)
+                ?.executorId
+              if (executorId) {
+                executionController.registerArtifact(executionId, executorId, async () => {
+                  const mergeErr = mergePreparedWorktree(config.workspaceRoot, wt.branch)
+                  if (mergeErr) return `merge conflict: ${mergeErr}`
+                  try { WorktreeService.remove(config.workspaceRoot, wt.name, true) } catch {}
+                  await hooks.onStatusChange(r.stepId, 'completed')
+                  completedUnitIds.add(r.stepId)
+                  return null
+                })
+              }
+            }
           } else {
-            try {
-              WorktreeService.remove(config.workspaceRoot, wt.name, true)
-            } catch {
-              // ignore cleanup failure
+            const mergeErr = mergeWorktree(config.workspaceRoot, wt.name, wt.path, wt.branch)
+            if (mergeErr) {
+              // 合并失败 → 标该 unit 失败，保留 worktree 供排查
+              r.status = 'failed'
+              r.failureReason = 'merge_conflict'
+              r.error = `merge conflict: ${mergeErr}`
+              r.worktreePath = wt.path
+              r.artifactStatus = 'merge_conflict'
+            } else {
+              try { WorktreeService.remove(config.workspaceRoot, wt.name, true) } catch {}
+              r.artifactStatus = 'merged'
             }
           }
         } else {
@@ -358,10 +482,15 @@ export async function orchestrateParallelExecution(
       }
     }
 
+    for (const result of results) {
+      executionController.reconcileExecutorResult(executionId, result)
+    }
+
     // 写回单元 completed/failed 状态
     for (const r of results) {
-      await hooks.onStatusChange(r.stepId, r.status === 'completed' ? 'completed' : 'pending')
-      if (r.status === 'completed') completedUnitIds.add(r.stepId)
+      const integrated = r.status === 'completed' && r.artifactStatus !== 'ready'
+      await hooks.onStatusChange(r.stepId, integrated ? 'completed' : 'pending')
+      if (integrated) completedUnitIds.add(r.stepId)
     }
 
     const waveReport: WaveReport = { waveIndex: wave.index, results }
@@ -369,33 +498,56 @@ export async function orchestrateParallelExecution(
 
     const failed = results.filter(r => r.status === 'failed')
     broadcast(IPC_CHANNELS.PARALLEL_WAVE_UPDATE, {
+      executionId,
+      sessionId: config.sessionId,
       waveIndex: wave.index,
-      status: failed.length > 0 ? 'failed' : 'completed',
+      status: results.some((result) => result.status === 'interrupted')
+        ? 'stopped'
+        : failed.length > 0
+          ? 'failed'
+          : 'completed',
       stepResults: results,
     })
 
     // 失败即停
-    if (failed.length > 0) {
-      haltedAt = { waveIndex: wave.index, failedStepIds: failed.map(r => r.stepId) }
+    const unsuccessful = results.filter(r => r.status !== 'completed')
+    if (unsuccessful.length > 0) {
+      haltedAt = { waveIndex: wave.index, failedStepIds: unsuccessful.map(r => r.stepId) }
       break
     }
   }
 
   const report: ParallelExecutionReport = {
+    executionId,
+    sessionId: config.sessionId,
     source: hooks.source,
     planSlug: hooks.planSlug,
-    status: haltedAt ? 'halted' : 'completed',
+    status: config.parentSignal?.aborted || executionController.getExecution(executionId)?.status === 'stopped'
+      ? 'stopped'
+      : haltedAt
+        ? 'halted'
+        : 'completed',
     waves: waveReports,
     haltedAt,
   }
 
-  broadcast(IPC_CHANNELS.PARALLEL_EXEC_DONE, { report })
+  const hasReadyArtifacts = executionController
+    .getExecution(executionId)
+    ?.executors.some((executor) => executor.artifactStatus === 'ready')
+  if (hasReadyArtifacts) executionController.markDecisionRequired(executionId)
+  else executionController.markExecutionTerminal(executionId, report.status)
+  broadcast(IPC_CHANNELS.PARALLEL_EXEC_DONE, {
+    executionId,
+    sessionId: config.sessionId,
+    report
+  })
   return report
 }
 
 // ─── Worker spawn ──────────────────────────────────────────
 
 async function spawnWorker(
+  executionId: string,
   stepId: string,
   step: ExecUnit,
   isolation: 'shared' | 'worktree',
@@ -404,33 +556,26 @@ async function spawnWorker(
   callbacks: AgentRunnerCallbacks
 ): Promise<StepResult> {
   const workspaceRoot = isolation === 'worktree' && worktree ? worktree.path : config.workspaceRoot
-  const subAgentId = `worker_${step.id}_${Date.now()}`
-
-  const contextLines: string[] = []
-  const appendContext = (heading: string, values: string[] | undefined) => {
-    if (!values?.length) return
-    contextLines.push(`### ${heading}`, ...values.map((value) => `- ${value}`), '')
+  const executionController = getExecutionController()
+  let attempt: ReturnType<typeof executionController.startExecutor>
+  try {
+    attempt = executionController.startExecutor(executionId, stepId)
+  } catch (err: any) {
+    const snapshot = executionController.getExecution(executionId)?.executors.find((item) => item.stepId === stepId)
+    return {
+      stepId,
+      executorId: snapshot?.executorId,
+      status: 'interrupted',
+      summary: '',
+      filesModified: [],
+      failureReason: 'parent_interrupted',
+      error: err?.message || String(err),
+      worktreePath: worktree?.path
+    }
   }
-  appendContext('Known Facts', step.contextBundle?.knownFacts)
-  appendContext('Implementation Decisions', step.contextBundle?.decisions)
-  appendContext('Constraints', step.contextBundle?.constraints)
-  appendContext('Do Not Re-investigate', step.contextBundle?.excludedDirections)
-  appendContext('Source References', step.contextBundle?.sourceReferences)
-  appendContext('Acceptance Criteria', step.acceptanceCriteria)
-  if (step.verificationCommand) {
-    contextLines.push('### Verification Command', step.verificationCommand, '')
-  }
-  const suppliedContext = contextLines.join('\n').trim()
-
-  const task = [
-    `Step ${step.id}: ${step.title}`,
-    '',
-    step.description,
-    '',
-    step.files && step.files.length > 0
-      ? `Assigned files (stay within these): ${step.files.join(', ')}`
-      : 'No specific files declared — infer from the description, but stay minimal.',
-  ].join('\n')
+  const subAgentId = attempt.snapshot.subAgentId || attempt.snapshot.executorId
+  const suppliedContext = buildWorkerContext(step)
+  const task = buildWorkerTask(step)
 
   callbacks.onSubAgentStart?.(subAgentId, {
     type: 'Executor',
@@ -452,6 +597,8 @@ async function spawnWorker(
         contextCapabilities: config.contextCapabilities,
         runtimeCoordinator: config.runtimeCoordinator,
         contextBuilder: config.contextBuilder,
+        parentSignal: attempt.signal,
+        controlToken: attempt.token,
         permissionScope:
           isolation === 'worktree'
             ? { allowAllWritesInWorkspace: true, allowBash: true }
@@ -464,12 +611,17 @@ async function spawnWorker(
     const output = normalizeWorkerResult(result as any)
     const stepResult: StepResult = {
       stepId,
+      executorId: attempt.snapshot.executorId,
+      attemptId: attempt.token.attemptId,
       status: output.status,
       summary: output.summary,
       filesModified: output.filesModified,
       qualitySummary: result.qualitySummary as any,
-      error: output.status === 'failed' ? (output.blockers?.join('; ') || 'worker reported failure') : undefined,
+      error: output.status !== 'completed' ? (output.blockers?.join('; ') || `Executor ${output.status}`) : undefined,
+      failureReason: failureReasonFromResult(result),
+      handoff: result.handoff,
     }
+    executionController.finishExecutor(executionId, stepId, stepResult)
 
     callbacks.onSubAgentEnd?.(subAgentId, {
       status: output.status,
@@ -477,19 +629,74 @@ async function spawnWorker(
       qualitySummary: result.qualitySummary,
       toolCallCount: result.toolCallCount,
       conclusion: output.summary,
+      filesExamined: result.filesExamined,
+      handoff: result.handoff,
     })
 
     return stepResult
   } catch (err: any) {
-    callbacks.onSubAgentEnd?.(subAgentId, { status: 'failed', toolCallCount: 0 })
-    return {
+    const stepResult: StepResult = {
       stepId,
+      executorId: attempt.snapshot.executorId,
+      attemptId: attempt.token.attemptId,
       status: 'failed',
       summary: '',
       filesModified: [],
+      failureReason: 'runtime_error',
       error: `Worker crashed: ${err?.message ?? err}`,
+      worktreePath: worktree?.path
     }
+    executionController.finishExecutor(executionId, stepId, stepResult)
+    callbacks.onSubAgentEnd?.(subAgentId, {
+      status: 'failed',
+      output: stepResult.error,
+      toolCallCount: 0
+    })
+    return stepResult
   }
+}
+
+export function buildWorkerContext(step: ExecUnit): string {
+  const contextLines: string[] = []
+  const appendContext = (heading: string, values: string[] | undefined) => {
+    if (!values?.length) return
+    contextLines.push(`### ${heading}`, ...values.map((value) => `- ${value}`), '')
+  }
+  appendContext('Known Facts', step.contextBundle?.knownFacts)
+  appendContext('Implementation Decisions', step.contextBundle?.decisions)
+  appendContext('Constraints', step.contextBundle?.constraints)
+  appendContext('Do Not Re-investigate', step.contextBundle?.excludedDirections)
+  appendContext('Source References', step.contextBundle?.sourceReferences)
+  appendContext('Acceptance Criteria', step.acceptanceCriteria)
+  if (step.verificationCommand) {
+    contextLines.push('### Verification Command', step.verificationCommand, '')
+  }
+  return contextLines.join('\n').trim()
+}
+
+export function buildWorkerTask(step: ExecUnit): string {
+  return [
+    `Step ${step.id}: ${step.title}`,
+    '',
+    step.description,
+    '',
+    step.files && step.files.length > 0
+      ? `Assigned files (stay within these): ${step.files.join(', ')}`
+      : 'No specific files declared — infer from the description, but stay minimal.'
+  ].join('\n')
+}
+
+export function failureReasonFromResult(result: {
+  status?: string
+  handoff?: import('../../../shared/types/subagent').SubAgentHandoff
+}): ExecutorFailureReason | undefined {
+  if (result.status === 'completed') return undefined
+  const reason = result.handoff?.reasonCode
+  if (reason === 'provider_error') return 'provider_error'
+  if (reason === 'protocol_failure') return 'protocol_failure'
+  if (reason === 'parent_interrupted') return 'parent_interrupted'
+  if (reason === 'runtime_missing' || reason === 'parent_delivery_missing') return 'runtime_missing'
+  return 'runtime_error'
 }
 
 // ─── 并发闸 ────────────────────────────────────────────────

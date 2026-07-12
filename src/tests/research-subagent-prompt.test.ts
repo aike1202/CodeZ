@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { ResearchSubAgent } from '../main/agent/definitions/ResearchSubAgent'
 
 describe('Research subagent handoff prompt', () => {
+  it('advertises Research only as a broad-reading context-isolation agent', () => {
+    expect(ResearchSubAgent.description).toContain('answer is absent from the parent context')
+    expect(ResearchSubAgent.description).toContain('reading across many files')
+    expect(ResearchSubAgent.whenToUse).toContain('only when ALL conditions are true')
+    expect(ResearchSubAgent.whenToUse).toContain('unnecessary parent-context weight')
+    expect(ResearchSubAgent.whenNotToUse).toContain('content just read, written, or generated')
+    expect(ResearchSubAgent.whenNotToUse).toContain('manageable number of direct reads')
+    expect(ResearchSubAgent.whenToUse).not.toContain('3+ files')
+  })
+
   it('requires a general Markdown handoff with shared tool policies', async () => {
     const prompt = await ResearchSubAgent.systemPromptBuilder({
       workspaceRoot: '/workspace',

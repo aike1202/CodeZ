@@ -624,9 +624,6 @@
   font-family: var(--font-sans, sans-serif);
   font-size: 12.5px;
   line-height: 1.72;
-  scrollbar-color: rgba(117, 87, 223, 0.34) transparent;
-  scrollbar-width: thin;
-
   > :first-child { margin-top: 0; }
   > :last-child { margin-bottom: 0; }
 

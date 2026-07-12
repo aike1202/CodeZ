@@ -63,7 +63,7 @@ describe('resolveDelegateIsolation', () => {
 })
 
 describe('compactIndependentSingletonWaves', () => {
-  it('combines serial singleton waves when their files are disjoint', () => {
+  it('preserves serial singleton waves even when their files are disjoint', () => {
     const units = new Map<string, ExecUnit>([
       ['t1', { id: 't1', title: 'A', description: '', files: ['src/a.ts'] }],
       ['t2', { id: 't2', title: 'B', description: '', files: ['src/b.ts'] }],
@@ -75,9 +75,7 @@ describe('compactIndependentSingletonWaves', () => {
       { index: 2, stepIds: ['t3'] },
     ]
 
-    expect(compactIndependentSingletonWaves(waves, units)).toEqual([
-      { index: 0, stepIds: ['t1', 't2', 't3'] },
-    ])
+    expect(compactIndependentSingletonWaves(waves, units)).toEqual(waves)
   })
 
   it('keeps conflicting singleton waves separate', () => {

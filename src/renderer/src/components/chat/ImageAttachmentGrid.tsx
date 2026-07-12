@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Image as ImageIcon, LoaderCircle, X } from 'lucide-react'
 import type { ComposerImageAttachment } from '@shared/types/attachment'
+import { createPreviewObjectUrl } from './attachmentPreviewBytes'
 import './ImageAttachmentGrid.css'
 
 interface ImageAttachmentGridProps {
@@ -31,8 +32,7 @@ export default function ImageAttachmentGrid({
       try {
         const preview = await window.api.attachment.readPreview(attachment, 'thumbnail')
         if (cancelled) return
-        const bytes = new Uint8Array(preview.bytes)
-        const url = URL.createObjectURL(new Blob([bytes], { type: preview.mimeType }))
+        const url = createPreviewObjectUrl(preview.bytes, preview.mimeType)
         urls.push(url)
         setPreviewUrls((current) => ({ ...current, [attachment.id]: url }))
       } catch {
@@ -67,7 +67,19 @@ export default function ImageAttachmentGrid({
               aria-label={`预览 ${attachment.name}`}
             >
               {previewUrl ? (
-                <img src={previewUrl} alt={attachment.name} />
+                <img
+                  src={previewUrl}
+                  alt={attachment.name}
+                  onError={() => {
+                    URL.revokeObjectURL(previewUrl)
+                    setPreviewUrls((current) => {
+                      const next = { ...current }
+                      delete next[attachment.id]
+                      return next
+                    })
+                    setUnavailableIds((current) => new Set(current).add(attachment.id))
+                  }}
+                />
               ) : loading ? (
                 <LoaderCircle className="image-attachment-spinner" size={18} aria-hidden="true" />
               ) : (

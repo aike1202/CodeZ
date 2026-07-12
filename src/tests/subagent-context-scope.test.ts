@@ -195,4 +195,76 @@ describe('SubAgent canonical context scope', () => {
     expect(replayed).toMatchObject({ status: 'completed', output: 'durable completed answer' })
     expect(chatMock.streamChat).toHaveBeenCalledTimes(1)
   })
+
+  it('preserves a resumable handoff when the subagent runtime fails after making progress', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codez-subagent-runtime-failure-'))
+    dirs.push(root)
+    const { SubAgentManager } = await import('../main/agent/SubAgentManager')
+    const { ModelLedgerStore } = await import('../main/services/context/ModelLedgerStore')
+    const { SessionRuntimeCoordinator } = await import('../main/services/context/SessionRuntimeCoordinator')
+    const { ModelContextBuilder } = await import('../main/services/context/ModelContextBuilder')
+
+    SubAgentManager.register({
+      type: 'ContextRuntimeFailureTest',
+      description: 'runtime failure handoff test agent',
+      whenToUse: 'test',
+      maxLoops: 2,
+      getTools: (): ToolDefinition[] => [],
+      systemPromptBuilder: () => 'test runtime failure subagent',
+      outputSpec: {
+        description: 'test result',
+        fields: [
+          { name: 'report', type: 'string', description: 'report', required: true },
+          { name: 'conclusion', type: 'string', description: 'conclusion', required: true },
+          { name: 'confidence', type: 'string', description: 'confidence', required: true }
+        ]
+      }
+    })
+
+    const ledger = new ModelLedgerStore(path.join(root, 'runtime'))
+    const coordinator = new SessionRuntimeCoordinator(ledger)
+    const realBuilder = new ModelContextBuilder(ledger)
+    let buildCount = 0
+    const failingBuilder = {
+      build: vi.fn(async (request: any) => {
+        buildCount++
+        if (buildCount === 2) throw new Error('context bridge failed')
+        return realBuilder.build(request)
+      })
+    } as any
+    chatMock.streamChat.mockImplementationOnce(async (_config, callbacks) => {
+      callbacks.onChunk('Durable progress before the runtime failure.', '')
+      callbacks.onDone('Durable progress before the runtime failure.', 'stop')
+    })
+
+    const result = await SubAgentManager.spawn('ContextRuntimeFailureTest', {
+      workspaceRoot: root,
+      sessionId: 's1',
+      task: 'finish the bridge',
+      parentPrompt: 'finish the bridge',
+      subAgentId: 'subagent-runtime-failure',
+      apiConfig: {
+        baseUrl: 'https://example.invalid', apiKey: 'key', apiFormat: 'openai', model: 'm1'
+      },
+      contextCapabilities: { contextWindowTokens: 65_536, maxOutputTokens: 4_096 },
+      runtimeCoordinator: coordinator,
+      contextBuilder: failingBuilder
+    }, {
+      onChunk: vi.fn(), onDone: vi.fn(), onError: vi.fn()
+    })
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      output: 'context bridge failed',
+      handoff: {
+        reasonCode: 'runtime_error',
+        reason: 'context bridge failed',
+        originalTask: 'finish the bridge',
+        lastProgress: 'Durable progress before the runtime failure.',
+        canResume: true
+      }
+    })
+    const scope = (await ledger.load('s1')).scopes['subagent:subagent-runtime-failure']
+    expect(scope.lastInterruptedTurnId).toBe(scope.activeMessages.at(-1)?.turnId)
+  })
 })

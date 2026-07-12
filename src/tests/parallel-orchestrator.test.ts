@@ -143,6 +143,40 @@ describe('mergeWorktree', () => {
 })
 
 describe('normalizeWorkerResult', () => {
+  it('preserves an explicit failed Runtime result even when it has text output', () => {
+    const result = normalizeWorkerResult({
+      type: 'Executor',
+      status: 'failed',
+      output: 'Provider request failed.',
+      toolCallCount: 2
+    })
+
+    expect(result.status).toBe('failed')
+    expect(result.summary).toBe('Provider request failed.')
+  })
+
+  it('preserves an interrupted Runtime result and confirmed modified files', () => {
+    const result = normalizeWorkerResult({
+      type: 'Executor',
+      status: 'interrupted',
+      output: 'Stopped by parent.',
+      handoff: {
+        reasonCode: 'parent_interrupted',
+        reason: 'Stopped by parent.',
+        originalTask: 'task',
+        filesExamined: [],
+        filesModified: ['src/a.ts'],
+        filesPossiblyModified: [],
+        recentTools: [],
+        workspaceMayHaveUntrackedChanges: false,
+        canResume: true
+      }
+    })
+
+    expect(result.status).toBe('interrupted')
+    expect(result.filesModified).toEqual(['src/a.ts'])
+  })
+
   it('recovers plain-text worker output as a completed summary', () => {
     const result = normalizeWorkerResult({
       type: 'Worker',

@@ -51,6 +51,8 @@ export function useSendMessage() {
   const appendStreamChunk = useChatStore((s) => s.appendStreamChunk)
   const finishStreaming = useChatStore((s) => s.finishStreaming)
   const setMessageExecutionStatus = useChatStore((s) => s.setMessageExecutionStatus)
+  const setMessageStreamPhase = useChatStore((s) => s.setMessageStreamPhase)
+  const setResponseWaitWarning = useChatStore((s) => s.setResponseWaitWarning)
   const persistCurrentSession = useChatStore((s) => s.persistCurrentSession)
   const setStreamCleanup = useChatStore((s) => s.setStreamCleanup)
   const createSession = useChatStore((s) => s.createSession)
@@ -239,6 +241,15 @@ export function useSendMessage() {
       // 前端兜底 watchdog：90s 无首字节提示（后端 60s watchdog 通常先触发，此为兜底）
       let firstByteTimer: ReturnType<typeof setTimeout> | null = null
       let gotFirstByte = false
+      const markResponseActivity = () => {
+        if (!gotFirstByte) gotFirstByte = true
+        if (firstByteTimer) {
+          clearTimeout(firstByteTimer)
+          firstByteTimer = null
+        }
+        setMessageStreamPhase(agentId, 'running')
+        setResponseWaitWarning(agentId, false)
+      }
 
       const streamHandle = (window as any).api.chat.stream(
         activeProv.id,
@@ -247,14 +258,12 @@ export function useSendMessage() {
         streamInput,
         {
           onChunk: (delta: string, reasoningDelta?: string) => {
-            if (!gotFirstByte) {
-              gotFirstByte = true
-              if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
-            }
+            markResponseActivity()
             streamUpdates.pushMain(delta, reasoningDelta)
           },
           onDone: async (fullContent: string, _stopReason?: string, txId?: string) => {
             if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
+            setResponseWaitWarning(agentId, false)
             streamUpdates.flush()
             finishStreaming(agentId, txId)
             setMessageExecutionStatus(agentId, 'completed')
@@ -274,6 +283,7 @@ export function useSendMessage() {
           },
           onError: (error: string) => {
             if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
+            setResponseWaitWarning(agentId, false)
             streamUpdates.flush()
             appendStreamChunk(agentId, `\n\n⚠️ 错误：${error}`)
             finishStreaming(agentId)
@@ -288,6 +298,7 @@ export function useSendMessage() {
             thoughtSignature?: string,
             batch?: ToolBatchMeta
           ) => {
+            markResponseActivity()
             streamUpdates.flush()
             startToolCall(agentId, {
               id: toolCallId || genId(),
@@ -307,9 +318,11 @@ export function useSendMessage() {
             useChatStore.getState().persistSession(sid)
           },
           onPermissionRequest: (request: any) => {
+            markResponseActivity()
             addPermissionRequest(agentId, request)
           },
           onAskUserRequest: (request: any) => {
+            markResponseActivity()
             addAskUserRequest(agentId, request)
           },
           onContextBudget: (snapshot: any) => {
@@ -332,6 +345,7 @@ export function useSendMessage() {
             })
           },
           onSubAgentStart: (subAgentId: string, meta: any) => {
+            markResponseActivity()
             streamUpdates.flush()
             startSubAgent(agentId, subAgentId, meta)
             useChatStore.getState().persistSession(sid)
@@ -361,12 +375,13 @@ export function useSendMessage() {
 
       firstByteTimer = setTimeout(() => {
         if (!gotFirstByte) {
-          appendStreamChunk(agentId, '\n\n⚠️ 长时间未收到响应（90s），可能网络或服务异常。建议点击停止按钮后重试。')
+          setResponseWaitWarning(agentId, true)
         }
       }, 90_000)
 
       const wrappedCleanup = () => {
         if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
+        setResponseWaitWarning(agentId, false)
         streamUpdates.flush()
         useChatStore.getState().markActiveRunUserAborted(sid)
         streamHandle.stop()
@@ -379,8 +394,10 @@ export function useSendMessage() {
       setStreamCleanup(sid, wrappedCleanup)
       try {
         await streamHandle.started
+        setMessageStreamPhase(agentId, 'running')
       } catch (error) {
         if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
+        setResponseWaitWarning(agentId, false)
         streamUpdates.cancel()
         streamHandle.stop()
         if (internal) {
@@ -418,6 +435,8 @@ export function useSendMessage() {
       appendStreamChunk,
       finishStreaming,
       setMessageExecutionStatus,
+      setMessageStreamPhase,
+      setResponseWaitWarning,
       persistCurrentSession,
       setStreamCleanup,
       createSession,

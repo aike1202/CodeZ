@@ -2,6 +2,7 @@ import React, { useMemo } from 'react'
 import ExecutionLog from './ExecutionLog'
 import MessageBody from './MessageBody'
 import EditApprovalWidget from './EditApprovalWidget'
+import { AlertTriangle } from 'lucide-react'
 import { extractMessageEdits, handleApprovalDiffClick } from './ChatArea' // We might need to move extractMessageEdits to a utils file?
 import type { ChatMessage, ExecutionTimelineItem } from '../../stores/chatStore'
 
@@ -36,6 +37,7 @@ export function AgentMessageContent({
 }: AgentMessageContentProps): React.ReactElement {
   
   const isStreaming = Boolean(msg.streaming && msg.id === lastStreamingMsgId)
+  const isStarting = isStreaming && msg.streamPhase === 'starting'
 
   const chunks = useMemo(() => {
     if (!msg.executionTimeline || msg.executionTimeline.length === 0) {
@@ -114,7 +116,7 @@ export function AgentMessageContent({
               strokeDasharray="40 60"
             />
           </svg>
-          <span>正在思考…</span>
+          <span>{isStarting ? '正在启动…' : '正在思考…'}</span>
         </div>
       )}
 
@@ -170,6 +172,13 @@ export function AgentMessageContent({
           )
         }
       })}
+
+      {msg.responseWaitWarning && (
+        <div className="agent-response-wait-warning" role="status" aria-live="polite">
+          <AlertTriangle size={18} aria-hidden="true" />
+          <span>长时间未收到响应（90s），可能网络或服务异常。建议点击停止按钮后重试。</span>
+        </div>
+      )}
 
       {allProcessed && (
         <EditApprovalWidget

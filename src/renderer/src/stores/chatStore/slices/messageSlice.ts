@@ -14,6 +14,8 @@ import type {
 import type { TaskItem } from '../../../../../shared/types/task'
 import { IPC_CHANNELS } from '../../../../../shared/ipc/channels'
 import type { ImageAttachment, PendingPromptDraft } from '../../../../../shared/types/attachment'
+import type { SubAgentHandoff } from '../../../../../shared/types/subagent'
+import { setSessionComposerDraft } from '../composerDrafts'
 
 function genId(): string {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -42,6 +44,7 @@ export interface MessageSlice {
   planReview: { plan: any; status: string } | null
   activePlanStreamId: string | null
   pendingPrompt: PendingPromptDraft | null
+  composerDrafts: Record<string, PendingPromptDraft | undefined>
   pendingInternalContinuation: PendingInternalContinuation | null
   tasks: TaskItem[]
 
@@ -55,6 +58,8 @@ export interface MessageSlice {
     msgId: string,
     status: 'completed' | 'error' | 'interrupted'
   ) => void
+  setMessageStreamPhase: (msgId: string, phase: 'starting' | 'running') => void
+  setResponseWaitWarning: (msgId: string, visible: boolean) => void
   setStreamCleanup: (sessionId: string, cleanup: (() => void) | null) => void
   setTransactionId: (msgId: string, txId: string) => void
   setDiffEntries: (msgId: string, diffEntries: Array<{ path: string; diff: string }>) => void
@@ -85,7 +90,7 @@ export interface MessageSlice {
   endSubAgent: (
     msgId: string,
     subAgentId: string,
-    result: { status: 'completed' | 'failed' | 'interrupted'; output?: string; qualitySummary?: any; toolCallCount: number; filesExamined?: string[] }
+    result: { status: 'completed' | 'failed' | 'interrupted'; output?: string; qualitySummary?: any; toolCallCount: number; filesExamined?: string[]; handoff?: SubAgentHandoff }
   ) => void
   setExpandedCapsule: (capsule: 'task' | 'plan' | null) => void
   setSubAgentStatus: (status: 'idle' | 'running' | 'completed' | 'failed') => void
@@ -95,6 +100,7 @@ export interface MessageSlice {
   setPlanReview: (review: { plan: any; status: string } | null) => void
   setActivePlanStreamId: (streamId: string | null) => void
   setPendingPrompt: (prompt: PendingPromptDraft | null) => void
+  setComposerDraft: (sessionId: string, draft: PendingPromptDraft) => void
   setPendingInternalContinuation: (continuation: PendingInternalContinuation | null) => void
   consumeInternalContinuation: (sessionId: string) => PendingInternalContinuation | null
   markActiveRunUserAborted: (sessionId: string) => void
@@ -201,6 +207,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
   planReview: null,
   activePlanStreamId: null,
   pendingPrompt: null,
+  composerDrafts: {},
   pendingInternalContinuation: null,
   tasks: [],
 
@@ -251,7 +258,8 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       id: genId(),
       role: 'agent',
       content: '',
-      streaming: true
+      streaming: true,
+      streamPhase: 'starting'
     }
     set((s) => {
       const nextMsgs = [...s.messages, msg]
@@ -343,7 +351,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
             ? { ...item, status: 'success' as const, completedAt: now, updatedAt: now }
             : item
         )
-        return { ...m, streaming: false, txId, executionTimeline: timeline }
+        return { ...m, streaming: false, streamPhase: undefined, txId, executionTimeline: timeline }
       },
       (session, updatedMessages) => ({
         ...session,
@@ -359,6 +367,20 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       executionStatus: status
     })))
     void get().persistCurrentSession()
+  },
+
+  setMessageStreamPhase: (msgId, phase) => {
+    set((s) => updateMessageInState(s, msgId, (message) => ({
+      ...message,
+      streamPhase: phase
+    })))
+  },
+
+  setResponseWaitWarning: (msgId, visible) => {
+    set((s) => updateMessageInState(s, msgId, (message) => ({
+      ...message,
+      responseWaitWarning: visible || undefined
+    })))
   },
 
   setStreamCleanup: (sessionId, cleanup) => {
@@ -539,7 +561,9 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
         let hasStructuredError = false
         try {
           const parsed = JSON.parse(result)
-          hasStructuredError = parsed?.ok === false || Boolean(parsed?.error && !parsed?.data)
+          const rawDataError = typeof parsed?.data === 'string' &&
+            parsed.data.trimStart().startsWith('Error:')
+          hasStructuredError = parsed?.ok === false || rawDataError || Boolean(parsed?.error && !parsed?.data)
         } catch {
           hasStructuredError = false
         }
@@ -712,7 +736,9 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
         let hasStructuredError = false
         try {
           const parsed = JSON.parse(result)
-          hasStructuredError = parsed?.ok === false || Boolean(parsed?.error && !parsed?.data)
+          const rawDataError = typeof parsed?.data === 'string' &&
+            parsed.data.trimStart().startsWith('Error:')
+          hasStructuredError = parsed?.ok === false || rawDataError || Boolean(parsed?.error && !parsed?.data)
         } catch {
           hasStructuredError = false
         }
@@ -757,7 +783,8 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
           output: result.output,
           qualitySummary: result.qualitySummary,
           toolCallCount: result.toolCallCount,
-          filesExamined: result.filesExamined
+          filesExamined: result.filesExamined,
+          handoff: result.handoff
         }
       }
     }))
@@ -825,6 +852,9 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
   setPlanReview: (review) => set({ planReview: review }),
   setActivePlanStreamId: (streamId) => set({ activePlanStreamId: streamId }),
   setPendingPrompt: (prompt) => set({ pendingPrompt: prompt }),
+  setComposerDraft: (sessionId, draft) => set((state) => ({
+    composerDrafts: setSessionComposerDraft(state.composerDrafts, sessionId, draft)
+  })),
   setPendingInternalContinuation: (continuation) => set({ pendingInternalContinuation: continuation }),
   consumeInternalContinuation: (sessionId) => {
     const pending = get().pendingInternalContinuation

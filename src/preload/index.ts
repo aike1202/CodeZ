@@ -470,19 +470,23 @@ const api = {
       onStarted?: (payload: { planSlug: string; waves: any[]; isolation: string; rationale: string }) => void
       onWaveUpdate?: (payload: { waveIndex: number; status: string; stepResults: any[] }) => void
       onDone?: (payload: { report: any }) => void
+      onExecutionEvent?: (payload: import('../shared/types/parallel').ParallelExecutionEvent) => void
     }): (() => void) => {
       const startedHandler = (_e: unknown, payload: any) => callbacks.onStarted?.(payload)
       const waveHandler = (_e: unknown, payload: any) => callbacks.onWaveUpdate?.(payload)
       const doneHandler = (_e: unknown, payload: any) => callbacks.onDone?.(payload)
+      const executionHandler = (_e: unknown, payload: any) => callbacks.onExecutionEvent?.(payload)
 
       ipcRenderer.on(IPC_CHANNELS.PARALLEL_EXEC_STARTED, startedHandler)
       ipcRenderer.on(IPC_CHANNELS.PARALLEL_WAVE_UPDATE, waveHandler)
       ipcRenderer.on(IPC_CHANNELS.PARALLEL_EXEC_DONE, doneHandler)
+      ipcRenderer.on(IPC_CHANNELS.EXECUTION_EVENT, executionHandler)
 
       return () => {
         ipcRenderer.removeListener(IPC_CHANNELS.PARALLEL_EXEC_STARTED, startedHandler)
         ipcRenderer.removeListener(IPC_CHANNELS.PARALLEL_WAVE_UPDATE, waveHandler)
         ipcRenderer.removeListener(IPC_CHANNELS.PARALLEL_EXEC_DONE, doneHandler)
+        ipcRenderer.removeListener(IPC_CHANNELS.EXECUTION_EVENT, executionHandler)
       }
     },
   },

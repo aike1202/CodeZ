@@ -21,8 +21,9 @@ import {
 import type { AgentRunner } from '../agent/AgentRunner'
 import { ChatRuntimeRegistry } from '../services/ChatRuntimeRegistry'
 import { getAttachmentService } from './attachment.handlers'
-import { getProviderImagePolicy } from '../../shared/utils/imageCapabilities'
+import { getProviderImagePolicy, supportsImageInput } from '../../shared/utils/imageCapabilities'
 import { SubAgentManager } from '../agent/SubAgentManager'
+import { getExecutionController } from '../services/execution/ExecutionController'
 
 const activeRunners = new ChatRuntimeRegistry<AgentRunner>()
 const stoppedBeforeRegistration = new Set<string>()
@@ -43,6 +44,11 @@ function publishRuntimeStatus(sessionId: string): void {
 
 activeRunners.onChange(publishRuntimeStatus)
 SubAgentManager.onActiveChange((sessionId) => activeRunners.touch(sessionId))
+getExecutionController().onEvent((event) => {
+  BrowserWindow.getAllWindows().forEach((window) => {
+    window.webContents.send(IPC_CHANNELS.EXECUTION_EVENT, event)
+  })
+})
 
 function finishStream(streamId: string): void {
   activeRunners.unregister(streamId)
@@ -103,7 +109,7 @@ export function registerChatIpc(): void {
       }
 
       const modelConfig = config.models?.find(m => m.id === request.model || m.name === request.model)
-      if (hasImages && modelConfig?.supportsVision !== true) {
+      if (hasImages && !supportsImageInput(modelConfig)) {
         throw new Error('当前模型未启用图片输入')
       }
       const contextWindowTokens = modelConfig?.maxContextTokens || 32000

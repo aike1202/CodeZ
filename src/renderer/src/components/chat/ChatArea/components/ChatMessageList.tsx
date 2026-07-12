@@ -47,6 +47,7 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
     return (
       <div
         className="chat-message-row w-full text-center my-4"
+        data-chat-message-id={msg.id}
         style={{ color: 'var(--text-muted, #9ca3af)', fontSize: '0.75rem' }}
       >
         {msg.content}
@@ -61,6 +62,7 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
       <Flex
         justify="end"
         className="chat-message-row w-full group animate-message-in"
+        data-chat-message-id={msg.id}
         style={{ position: 'relative' }}
       >
         <div className={`user-message-bubble${messageAttachments.length ? ' user-message-bubble--with-images' : ''}`}>
@@ -89,7 +91,11 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
   }
 
   return (
-    <Flex justify="start" className="chat-message-row w-full max-w-3xl animate-message-in">
+    <Flex
+      justify="start"
+      className="chat-message-row w-full max-w-3xl animate-message-in"
+      data-chat-message-id={msg.id}
+    >
       <Flex align="center" justify="center" className="agent-avatar">
         <IconBot width={18} height={18} />
       </Flex>

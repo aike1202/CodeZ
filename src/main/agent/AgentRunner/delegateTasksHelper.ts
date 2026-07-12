@@ -34,38 +34,11 @@ function filesConflict(a: ExecUnit, b: ExecUnit): boolean {
 
 export function compactIndependentSingletonWaves(
   waves: ExecutionWave[],
-  unitsById: Map<string, ExecUnit>
+  _unitsById: Map<string, ExecUnit>
 ): ExecutionWave[] {
-  if (waves.some(w => w.stepIds.length !== 1)) {
-    return waves
-  }
-
-  const compacted: ExecutionWave[] = []
-  for (const wave of waves) {
-    const unit = unitsById.get(wave.stepIds[0])
-    if (!unit || !unit.files || unit.files.length === 0) {
-      compacted.push({ index: compacted.length, stepIds: [...wave.stepIds] })
-      continue
-    }
-
-    let placed = false
-    for (const target of compacted) {
-      const hasConflict = target.stepIds.some(id => {
-        const existing = unitsById.get(id)
-        return !existing || !existing.files || existing.files.length === 0 || filesConflict(existing, unit)
-      })
-      if (!hasConflict) {
-        target.stepIds.push(unit.id)
-        placed = true
-        break
-      }
-    }
-    if (!placed) {
-      compacted.push({ index: compacted.length, stepIds: [unit.id] })
-    }
-  }
-
-  return compacted
+  // File disjointness cannot prove logical independence. Preserve the grouping
+  // chosen by the main Agent/ExecutionPlanner exactly.
+  return waves.map((wave) => ({ index: wave.index, stepIds: [...wave.stepIds] }))
 }
 
 export function collectDelegatedTerminalTasks(
@@ -93,7 +66,8 @@ export async function handleDelegateTasks(
   toolCallId: string,
   rawArgs: string,
   config: AgentRunConfig,
-  callbacks: AgentRunnerCallbacks
+  callbacks: AgentRunnerCallbacks,
+  parentSignal?: AbortSignal
 ): Promise<{ role: 'tool'; tool_call_id: string; name: string; content: string }> {
   const name = 'DelegateTasks'
 
@@ -134,6 +108,20 @@ export async function handleDelegateTasks(
     index: typeof w.index === 'number' ? w.index : i,
     stepIds: Array.isArray(w.taskIds) ? w.taskIds : [],
   }))
+  const duplicateWaveIndexes = waves
+    .map((wave) => wave.index)
+    .filter((index, position, all) => all.indexOf(index) !== position)
+  if (duplicateWaveIndexes.length > 0) {
+    return fail(`Duplicate wave index(es): ${Array.from(new Set(duplicateWaveIndexes)).join(', ')}.`)
+  }
+  const allReferencedIds = waves.flatMap((wave) => wave.stepIds)
+  const duplicateTaskIds = allReferencedIds.filter((id, position) => allReferencedIds.indexOf(id) !== position)
+  if (duplicateTaskIds.length > 0) {
+    return fail(`A task may appear in only one wave; duplicate task id(s): ${Array.from(new Set(duplicateTaskIds)).join(', ')}.`)
+  }
+  if (waves.some((wave) => wave.stepIds.length === 0)) {
+    return fail('DelegateTasks does not allow empty waves.')
+  }
   const referenced = new Set(waves.flatMap(w => w.stepIds))
   const unknown = [...referenced].filter(id => !allTasks.some(t => t.id === id))
   if (unknown.length > 0) {
@@ -159,8 +147,6 @@ export async function handleDelegateTasks(
 
   const isolationResolution = resolveDelegateIsolation(parsed.isolation, config.workspaceRoot)
   const isolation = isolationResolution.isolation
-  const unitsById = new Map(units.map(u => [u.id, u]))
-  waves = compactIndependentSingletonWaves(waves, unitsById)
   const runnableUnits = units.filter(u => !completedUnitIds.has(u.id))
   if (isolation === 'shared') {
     const sharedReadinessError = validateSharedDelegationReadiness(runnableUnits)
@@ -271,6 +257,7 @@ export async function handleDelegateTasks(
         contextCapabilities: config.contextCapabilities,
         runtimeCoordinator: config.runtimeCoordinator,
         contextBuilder: config.contextBuilder,
+        parentSignal,
       },
       callbacks
     )

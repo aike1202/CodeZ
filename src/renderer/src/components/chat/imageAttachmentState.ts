@@ -3,12 +3,14 @@ export interface ImageSendStateInput {
   attachmentCount: number
   importing: boolean
   supportsVision: boolean
+  blockedReason?: string | null
 }
 
 export function evaluateImageSendState(input: ImageSendStateInput): {
   canSend: boolean
   reason: string | null
 } {
+  if (input.blockedReason) return { canSend: false, reason: input.blockedReason }
   if (input.importing) return { canSend: false, reason: '照片仍在导入' }
   if (input.attachmentCount > 0 && !input.supportsVision) {
     return { canSend: false, reason: '当前模型未启用图片输入' }

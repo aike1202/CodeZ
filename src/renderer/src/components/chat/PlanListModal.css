@@ -84,15 +84,6 @@
   background-color: transparent;
 }
 
-/* 隐藏滚动条但保留滚动功能 */
-.plan-list-modal-content::-webkit-scrollbar {
-  width: 6px;
-}
-.plan-list-modal-content::-webkit-scrollbar-thumb {
-  background-color: var(--border);
-  border-radius: 10px;
-}
-
 .plan-list-empty {
   display: flex;
   flex-direction: column;

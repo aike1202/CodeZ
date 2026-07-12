@@ -11,7 +11,11 @@ import type {
 } from '../../shared/types/provider'
 import type { StreamCallbacks } from '../services/ChatService'
 import type { AgentRunnerCallbacks } from './AgentRunner'
-import type { SubAgentDetail } from '../../shared/types/subagent'
+import type {
+  SubAgentDetail,
+  SubAgentHandoff,
+  SubAgentHandoffTool
+} from '../../shared/types/subagent'
 import { allSubAgentDefinitions } from './definitions'
 import {
   generateSubmitResultTool,
@@ -32,6 +36,8 @@ import type { SessionRuntimeCoordinator, RuntimeTurnHandle } from '../services/c
 import { getContextCoreServices } from '../services/context/ContextRuntimeServices'
 import { ModelContextBuilder as CanonicalModelContextBuilder } from '../services/context/ModelContextBuilder'
 import { authorizePermissionToolCall } from '../services/PermissionManager'
+import type { ExecutorControlToken } from '../../shared/types/parallel'
+import { getExecutionController } from '../services/execution/ExecutionController'
 
 // ─── 子 Agent 写权限范围（并行 Worker 用） ──────────────────
 
@@ -101,6 +107,9 @@ export interface SubAgentContext {
   /** 父 Agent 的取消信号；触发时必须停止当前子智能体。 */
   parentSignal?: AbortSignal
 
+  /** 并行 Executor 的 Runtime 租约；每次工具调用前必须仍然有效。 */
+  controlToken?: ExecutorControlToken
+
   /**
    * 可写子 Agent 的写权限范围（非交互式校验）。
    * 只读子 Agent 不传，保持现有零权限门行为。
@@ -129,6 +138,7 @@ export interface SubAgentResult {
   qualitySummary?: SubAgentQualitySummary
   toolCallCount: number
   filesExamined?: string[]
+  handoff?: SubAgentHandoff
   planSlug?: string
 }
 
@@ -295,8 +305,13 @@ export async function authorizeSubAgentToolCall(
   sessionId: string,
   scope: SubAgentPermissionScope | undefined,
   onPermissionRequest?: AgentRunnerCallbacks['onPermissionRequest'],
-  agentId?: string
+  agentId?: string,
+  controlToken?: ExecutorControlToken
 ): Promise<string | null> {
+  if (controlToken) {
+    const leaseDenial = getExecutionController().assertLeaseActive(controlToken)
+    if (leaseDenial) return `Executor control denied: ${leaseDenial}`
+  }
   const scopeDenial = checkSubAgentToolPermission(toolName, parsedArgs, workspaceRoot, scope)
   if (scopeDenial) return scopeDenial
 
@@ -351,6 +366,67 @@ function buildRecoverableStopOutput(
   }
 
   return validateAgainstSpec(data, spec)
+}
+
+function truncateHandoffText(value: string, maxLength = 1200): string {
+  const normalized = value.trim()
+  return normalized.length <= maxLength
+    ? normalized
+    : `${normalized.slice(0, maxLength)}\n...[truncated]`
+}
+
+function describeAbortReason(reason: unknown): string {
+  if (reason instanceof Error && reason.message.trim()) return reason.message
+  if (typeof reason === 'string' && reason.trim()) return reason.trim()
+  return 'The parent Agent run was interrupted before the SubAgent completed.'
+}
+
+function extractToolTarget(name: string, rawArgs: string): string | undefined {
+  try {
+    const args = JSON.parse(rawArgs || '{}')
+    const direct = args.file_path || args.notebook_path || args.path || args.command || args.commandLine
+    if (typeof direct === 'string' && direct.trim()) return truncateHandoffText(direct, 240)
+    if (name === 'Read' && Array.isArray(args.files)) {
+      const paths = args.files.map((file: any) => file?.file_path).filter(Boolean)
+      if (paths.length > 0) return truncateHandoffText(paths.join(', '), 240)
+    }
+  } catch {}
+  return undefined
+}
+
+function summarizeToolResult(result: string): string | undefined {
+  try {
+    const parsed = JSON.parse(result)
+    const value = parsed?.ok === false
+      ? parsed.error?.message || parsed.error
+      : parsed?.data
+    if (typeof value === 'string') return truncateHandoffText(value, 400)
+    if (value !== undefined) return truncateHandoffText(JSON.stringify(value), 400)
+  } catch {
+    if (result.trim()) return truncateHandoffText(result, 400)
+  }
+  return undefined
+}
+
+function successfulReadFiles(rawArgs: string, rawResult: unknown): string[] {
+  if (typeof rawResult !== 'string') return []
+  try {
+    const files = JSON.parse(rawArgs || '{}').files || []
+    const blocks = Array.from(rawResult.matchAll(
+      /<file\b[^>]*>\r?\n([\s\S]*?)\r?\n<\/file>/g
+    ))
+    return files
+      .map((file: any, index: number) => ({
+        path: file?.file_path,
+        content: blocks[index]?.[1]?.trimStart() || ''
+      }))
+      .filter(({ path, content }: { path?: string; content: string }) =>
+        Boolean(path) && !/^(?:Error:|Cannot read)/i.test(content)
+      )
+      .map(({ path }: { path: string }) => path)
+  } catch {
+    return []
+  }
 }
 
 function replayCompletedSubAgentResult(
@@ -606,6 +682,7 @@ export class SubAgentManager {
     // SubAgent 事件作用域标识 — 优先用调用方注入的（与父工具调用绑定），否则回退到 handleId
     const subAgentId = ctx.subAgentId || handleId
     let abortController = new AbortController()
+    let interruptionReason = 'The parent Agent run was interrupted before the SubAgent completed.'
 
     const handle: SubAgentHandle = {
       id: handleId,
@@ -618,12 +695,15 @@ export class SubAgentManager {
         handle.status = 'interrupted'
       }
     }
-    const abortFromParent = () => handle.cancel()
+    const abortFromParent = () => {
+      interruptionReason = describeAbortReason(ctx.parentSignal?.reason)
+      handle.cancel()
+    }
 
     this.activeHandles.set(handleId, handle)
     this.notifyActiveChange(ctx.sessionId)
     ctx.parentSignal?.addEventListener('abort', abortFromParent, { once: true })
-    if (ctx.parentSignal?.aborted) handle.cancel()
+    if (ctx.parentSignal?.aborted) abortFromParent()
 
     const setup = await (async () => {
       const core = ctx.runtimeCoordinator
@@ -721,10 +801,68 @@ export class SubAgentManager {
     let finalOutput = ''
     let forcedStructuredOutput: SubAgentStructuredOutput | undefined
     let failureReason: string | undefined
+    let failureReasonCode: SubAgentHandoff['reasonCode'] | undefined
     const filesExamined = new Set<string>()
+    const filesModified = new Set<string>()
+    const recentTools: SubAgentHandoffTool[] = []
+    let latestProgress = ''
+    let workspaceMayHaveUntrackedChanges = false
     const effectiveMaxLoops = resolveMaxLoops(def, ctx)
     const finalizationReserveLoops = resolveFinalizationReserveLoops(def, effectiveMaxLoops)
     let finalizationNoticeRecorded = false
+    const buildHandoff = (
+      reasonCode: SubAgentHandoff['reasonCode'],
+      reason: string,
+      canResume: boolean
+    ): SubAgentHandoff => ({
+      reasonCode,
+      reason: truncateHandoffText(reason, 1200),
+      originalTask: truncateHandoffText(ctx.task || ctx.parentPrompt || '', 2500),
+      knownContext: ctx.context
+        ? truncateHandoffText(ctx.context, 1200)
+        : undefined,
+      scope: ctx.scope
+        ? {
+            directories: ctx.scope.directories?.slice(0, 10).map((value) =>
+              truncateHandoffText(value, 160)
+            ),
+            excludeGlobs: ctx.scope.excludeGlobs?.slice(0, 10).map((value) =>
+              truncateHandoffText(value, 160)
+            )
+          }
+        : undefined,
+      expectations: ctx.expectations
+        ? {
+            questions: ctx.expectations.questions.slice(0, 12).map((value) =>
+              truncateHandoffText(value, 240)
+            ),
+            outOfScope: ctx.expectations.outOfScope?.slice(0, 8).map((value) =>
+              truncateHandoffText(value, 240)
+            )
+          }
+        : undefined,
+      depth: ctx.depth,
+      lastProgress: latestProgress
+        ? truncateHandoffText(latestProgress, 1500)
+        : undefined,
+      filesExamined: Array.from(filesExamined).slice(-20).map((value) =>
+        truncateHandoffText(value, 240)
+      ),
+      filesModified: Array.from(filesModified).slice(-20).map((value) =>
+        truncateHandoffText(value, 240)
+      ),
+      filesPossiblyModified: recentTools
+        .filter((tool) =>
+          tool.status === 'interrupted' &&
+          ['Edit', 'Write', 'NotebookEdit'].includes(tool.name) &&
+          tool.target
+        )
+        .map((tool) => tool.target!)
+        .slice(-20),
+      recentTools: recentTools.slice(-8),
+      workspaceMayHaveUntrackedChanges,
+      canResume
+    })
 
     try {
       while (loopCount < effectiveMaxLoops && !abortController.signal.aborted) {
@@ -784,6 +922,7 @@ export class SubAgentManager {
                 if (thoughtSignature) thoughtSig = thoughtSignature
                 if (delta) {
                   currentContent += delta
+                  latestProgress = currentContent
                   callbacks.onSubAgentChunk?.(subAgentId, delta, '')
                 }
                 if (reasoningDelta) {
@@ -828,6 +967,7 @@ export class SubAgentManager {
         if (gotError || abortController.signal.aborted) {
           if (gotError && !abortController.signal.aborted && !isRecoverableProviderError(lastError)) {
             failureReason = lastError || 'SubAgent provider request failed.'
+            failureReasonCode = 'provider_error'
             finalOutput = failureReason
           }
           if (gotError && !abortController.signal.aborted && isRecoverableProviderError(lastError)) {
@@ -872,6 +1012,7 @@ export class SubAgentManager {
             }
             forcedStructuredOutput = buildRecoverableStopOutput(def.outputSpec, lastError)
             failureReason = lastError
+            failureReasonCode = 'provider_error'
             finalOutput =
               forcedStructuredOutput?.conclusion ||
               `Executor stopped after recoverable API/network error: ${lastError}`
@@ -1030,7 +1171,8 @@ export class SubAgentManager {
                   ctx.sessionId,
                   ctx.permissionScope,
                   callbacks.onPermissionRequest,
-                  subAgentId
+                  subAgentId,
+                  ctx.controlToken
                 )
                 if (denyReason) {
                   result = JSON.stringify({ ok: false, error: { code: 'PERMISSION_DENIED', message: denyReason } })
@@ -1038,7 +1180,33 @@ export class SubAgentManager {
                     callId: tc.id, name, content: result, status: 'error'
                   })
                   callbacks.onSubAgentToolEnd?.(subAgentId, tc.id, result)
+                  recentTools.push({
+                    name,
+                    status: 'error',
+                    target: extractToolTarget(name, args),
+                    summary: summarizeToolResult(result)
+                  })
                   return { role: 'tool' as const, tool_call_id: tc.id, name, content: result }
+                }
+                if (ctx.controlToken) {
+                  const leaseDenial = getExecutionController().assertLeaseActive(ctx.controlToken)
+                  if (leaseDenial) {
+                    result = JSON.stringify({
+                      ok: false,
+                      error: { code: 'EXECUTOR_LEASE_REVOKED', message: leaseDenial }
+                    })
+                    await core.coordinator.recordToolResult(runtimeTurn, {
+                      callId: tc.id, name, content: result, status: 'interrupted'
+                    })
+                    callbacks.onSubAgentToolEnd?.(subAgentId, tc.id, result)
+                    recentTools.push({
+                      name,
+                      status: 'interrupted',
+                      target: extractToolTarget(name, args),
+                      summary: leaseDenial
+                    })
+                    return { role: 'tool' as const, tool_call_id: tc.id, name, content: result }
+                  }
                 }
                 try {
                   const raw = await toolInstance.execute(args, {
@@ -1051,24 +1219,47 @@ export class SubAgentManager {
                   })
                   result = JSON.stringify({ ok: true, data: raw })
 
-                  // 追踪读取的文件
-                  if (name === 'Read') {
-                    try {
-                      const parsed = JSON.parse(args)
-                      for (const file of parsed.files || []) {
-                        if (file?.file_path) filesExamined.add(file.file_path)
-                      }
-                    } catch {}
-                  } else if (name === 'list_files') {
-                    try { const parsed = JSON.parse(args); if (parsed.file_path) filesExamined.add(parsed.file_path) } catch {}
-                  }
                 } catch (err: any) {
                   result = JSON.stringify({ ok: false, error: { code: 'EXECUTION_ERROR', message: err.message } })
                 }
               }
 
               let resultStatus: 'success' | 'error' = 'error'
-              try { resultStatus = JSON.parse(result).ok === true ? 'success' : 'error' } catch {}
+              let parsedResult: any
+              try {
+                parsedResult = JSON.parse(result)
+                const rawDataError = typeof parsedResult?.data === 'string' &&
+                  parsedResult.data.trimStart().startsWith('Error:')
+                const readBatchError = name === 'Read' && typeof parsedResult?.data === 'string' &&
+                  /<file\b[^>]*>\s*(?:Error:|Cannot read)/i.test(parsedResult.data)
+                resultStatus = parsedResult?.ok === true && !rawDataError && !readBatchError
+                  ? 'success'
+                  : 'error'
+              } catch {}
+              let handoffStatus: SubAgentHandoffTool['status'] = resultStatus
+              try {
+                if (JSON.parse(result)?.error?.code === 'EXECUTION_INTERRUPTED') handoffStatus = 'interrupted'
+              } catch {}
+              const target = extractToolTarget(name, args)
+              recentTools.push({
+                name,
+                status: handoffStatus,
+                target,
+                summary: summarizeToolResult(result)
+              })
+              if (resultStatus === 'success' && ['Edit', 'Write', 'NotebookEdit'].includes(name) && target) {
+                filesModified.add(target)
+              }
+              if (handoffStatus !== 'error' && ['Bash', 'PowerShell'].includes(name)) {
+                workspaceMayHaveUntrackedChanges = true
+              }
+              if (name === 'Read') {
+                for (const filePath of successfulReadFiles(args, parsedResult?.data)) {
+                  filesExamined.add(filePath)
+                }
+              } else if (resultStatus === 'success' && name === 'list_files' && target) {
+                filesExamined.add(target)
+              }
               await core.coordinator.recordToolResult(runtimeTurn, {
                 callId: tc.id, name, content: result, status: resultStatus
               })
@@ -1091,10 +1282,12 @@ export class SubAgentManager {
             continue
           }
 
-          await core.coordinator.completeTurn(runtimeTurn, { stopReason: 'stop', usage: currentUsage })
-          runtimeClosed = true
           if (def.outputSpec) {
             failureReason = 'SubAgent exhausted its run without submitting a valid structured result.'
+            failureReasonCode = 'protocol_failure'
+          } else {
+            await core.coordinator.completeTurn(runtimeTurn, { stopReason: 'stop', usage: currentUsage })
+            runtimeClosed = true
           }
           break
         }
@@ -1104,9 +1297,10 @@ export class SubAgentManager {
         const interruptedResult: SubAgentResult = {
           type: canonical,
           status: 'interrupted',
-          output: 'SubAgent execution was interrupted before completion.',
+          output: `SubAgent execution was interrupted before completion: ${interruptionReason}`,
           toolCallCount,
-          filesExamined: Array.from(filesExamined)
+          filesExamined: Array.from(filesExamined),
+          handoff: buildHandoff('parent_interrupted', interruptionReason, true)
         }
         handle.status = 'interrupted'
         handle.result = interruptedResult
@@ -1116,6 +1310,7 @@ export class SubAgentManager {
       const protocolFailure = Boolean(def.outputSpec && !forcedStructuredOutput)
       if (protocolFailure && !failureReason) {
         failureReason = 'SubAgent exhausted its run without submitting a valid structured result.'
+        failureReasonCode = 'protocol_failure'
       }
       if (protocolFailure && failureReason) {
         finalOutput = failureReason
@@ -1129,6 +1324,13 @@ export class SubAgentManager {
         structuredOutput: forcedStructuredOutput,
         toolCallCount,
         filesExamined: Array.from(filesExamined),
+      }
+      if (subResult.status === 'failed') {
+        subResult.handoff = buildHandoff(
+          failureReasonCode || 'runtime_error',
+          failureReason || finalOutput || 'SubAgent failed before completion.',
+          true
+        )
       }
 
       // 如果设置了 outputSpec 但没有 structuredOutput，生成警告质量摘要
@@ -1156,16 +1358,36 @@ export class SubAgentManager {
         const interruptedResult: SubAgentResult = {
           type: canonical,
           status: 'interrupted',
-          output: 'SubAgent execution was interrupted before completion.',
+          output: `SubAgent execution was interrupted before completion: ${interruptionReason}`,
           toolCallCount,
-          filesExamined: Array.from(filesExamined)
+          filesExamined: Array.from(filesExamined),
+          handoff: buildHandoff('parent_interrupted', interruptionReason, true)
         }
         handle.status = 'interrupted'
         handle.result = interruptedResult
         return interruptedResult
       }
+      const reason = err instanceof Error ? err.message : String(err)
+      const failedResult: SubAgentResult = {
+        type: canonical,
+        status: 'failed',
+        output: reason,
+        toolCallCount,
+        filesExamined: Array.from(filesExamined),
+        handoff: buildHandoff('runtime_error', reason, true)
+      }
+      if (def.outputSpec) {
+        failedResult.qualitySummary = {
+          coverage: 0,
+          confidence: 'low',
+          unresolvedCount: 0,
+          filesExaminedCount: filesExamined.size,
+          warning: reason
+        }
+      }
       handle.status = 'failed'
-      throw err
+      handle.result = failedResult
+      return failedResult
     } finally {
       ctx.parentSignal?.removeEventListener('abort', abortFromParent)
       if (!runtimeClosed) {

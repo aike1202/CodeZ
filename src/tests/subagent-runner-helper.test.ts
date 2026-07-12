@@ -81,7 +81,19 @@ describe('SubAgentRunner result forwarding', () => {
       status: 'interrupted',
       output: 'SubAgent execution was interrupted before completion.',
       toolCallCount: 2,
-      filesExamined: []
+      filesExamined: ['src/auth.ts'],
+      handoff: {
+        reasonCode: 'parent_interrupted',
+        reason: 'The user stopped the parent Agent run.',
+        originalTask: 'Investigate the project.',
+        lastProgress: 'Located the failing authorization branch.',
+        filesExamined: ['src/auth.ts'],
+        filesModified: ['src/auth.ts'],
+        filesPossiblyModified: [],
+        recentTools: [{ name: 'Edit', status: 'success', target: 'src/auth.ts' }],
+        workspaceMayHaveUntrackedChanges: false,
+        canResume: true
+      }
     })
 
     const { handleSubAgentRunnerSpawn } = await import('../main/agent/AgentRunner/subAgentRunnerHelper')
@@ -112,7 +124,13 @@ describe('SubAgentRunner result forwarding', () => {
       error: { code: 'EXECUTION_INTERRUPTED' },
       data: {
         status: 'interrupted',
-        subagent_type: 'Research'
+        subagent_type: 'Research',
+        handoff: {
+          reasonCode: 'parent_interrupted',
+          filesModified: ['src/auth.ts'],
+          filesPossiblyModified: [],
+          canResume: true
+        }
       }
     })
     expect(JSON.parse(result.content).data.resume_subagent_id).toMatch(

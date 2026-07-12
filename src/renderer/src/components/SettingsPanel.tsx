@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import type { ThinkingConfig, ThinkingMode, ThinkingEffort, ApiFormat } from '@shared/types/provider'
+import { getImageInputCapability } from '@shared/utils/imageCapabilities'
 import { getReasoningCapabilities } from '@shared/utils/reasoningCapabilities'
 import { IconAdd, IconEye, IconEyeOff, IconTrash, IconClose } from './Icons'
 import Button from './ui/Button'
@@ -222,44 +223,57 @@ export default function SettingsPanel({
           <div>
             <label className="settings-label">模型列表</label>
             <div className="settings-models-box">
-              {models.map((m, idx) => m ? (
-                <div key={m.id || idx} className="settings-model-card">
-                  <div className="settings-model-row">
-                    <div className="settings-model-name-wrapper">
-                      <Input
-                        variant="borderless"
-                        className="settings-model-input"
-                        placeholder="模型名，如 gpt-4o"
-                        value={m.name || ''}
-                        onChange={(e) => updateModel(idx, 'name', e.target.value)}
-                      />
+              {models.map((m, idx) => {
+                if (!m) return null
+                const imageCapability = getImageInputCapability(m)
+                const capabilityLabel = imageCapability.source === 'manual'
+                  ? '手动设置'
+                  : imageCapability.source === 'model-default'
+                    ? '自动识别'
+                    : '未识别'
+
+                return (
+                  <div key={m.id || idx} className="settings-model-card">
+                    <div className="settings-model-row">
+                      <div className="settings-model-name-wrapper">
+                        <Input
+                          variant="borderless"
+                          className="settings-model-input"
+                          placeholder="模型名，如 gpt-4o"
+                          value={m.name || ''}
+                          onChange={(e) => updateModel(idx, 'name', e.target.value)}
+                        />
+                      </div>
+                      <div className="settings-model-tokens-wrapper">
+                        <Input
+                          variant="borderless"
+                          type="number"
+                          step="0.1"
+                          className="settings-tokens-input"
+                          placeholder="上下文"
+                          value={m.maxContextTokens ? m.maxContextTokens / 10000 : ''}
+                          onChange={(e) => updateModel(idx, 'maxContextTokens', Math.round((parseFloat(e.target.value) || 0) * 10000))}
+                        />
+                        <span className="settings-tokens-unit">万Tokens</span>
+                        <Button type="text" danger size="none" className="settings-remove-model-btn" onClick={() => removeModel(idx)}>
+                          <IconClose />
+                        </Button>
+                      </div>
                     </div>
-                    <div className="settings-model-tokens-wrapper">
-                      <Input
-                        variant="borderless"
-                        type="number"
-                        step="0.1"
-                        className="settings-tokens-input"
-                        placeholder="上下文"
-                        value={m.maxContextTokens ? m.maxContextTokens / 10000 : ''}
-                        onChange={(e) => updateModel(idx, 'maxContextTokens', Math.round((parseFloat(e.target.value) || 0) * 10000))}
+                    <label className="settings-model-vision-toggle">
+                      <input
+                        type="checkbox"
+                        checked={imageCapability.supported}
+                        onChange={(event) => updateModel(idx, 'supportsVision', event.target.checked)}
                       />
-                      <span className="settings-tokens-unit">万Tokens</span>
-                      <Button type="text" danger size="none" className="settings-remove-model-btn" onClick={() => removeModel(idx)}>
-                        <IconClose />
-                      </Button>
-                    </div>
+                      支持图片输入
+                      <span className={`settings-model-vision-source is-${imageCapability.source}`}>
+                        {capabilityLabel}
+                      </span>
+                    </label>
                   </div>
-                  <label className="settings-model-vision-toggle">
-                    <input
-                      type="checkbox"
-                      checked={m.supportsVision === true}
-                      onChange={(event) => updateModel(idx, 'supportsVision', event.target.checked)}
-                    />
-                    支持图片输入
-                  </label>
-                </div>
-              ) : null)}
+                )
+              })}
               <div className="settings-add-model-wrapper">
                 <Button 
                   type="text"

@@ -30,6 +30,13 @@
   overflow: hidden;
 }
 
+.app-chat-scroll-shell {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
 .app-chat-column {
   flex: 1;
   overflow-y: auto;
@@ -101,6 +108,10 @@
   padding-bottom: 0;
 }
 
+.app-chat-scroll-shell:has(.conversation-navigator) .app-message-list {
+  padding-left: 56px;
+}
+
 .chat-message-row {
   content-visibility: auto;
   contain-intrinsic-size: auto 160px;
@@ -120,7 +131,6 @@
   /* P2-1: 用户消息气泡限高 */
   max-height: 350px;
   overflow-y: auto;
-  scrollbar-width: thin;
 }
 
 .user-message-bubble--with-images {
@@ -129,17 +139,6 @@
 
 .user-message-bubble--with-images .image-attachment-grid + * {
   margin-top: 8px;
-}
-
-.user-message-bubble::-webkit-scrollbar {
-  width: 6px;
-}
-.user-message-bubble::-webkit-scrollbar-track {
-  background: transparent;
-}
-.user-message-bubble::-webkit-scrollbar-thumb {
-  background-color: var(--border-color);
-  border-radius: 4px;
 }
 
 .agent-avatar {
@@ -168,6 +167,22 @@
   font-size: 15px;
   flex: 1;
   min-width: 0;
+}
+
+.agent-response-wait-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 0 16px;
+  color: var(--text-main);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.agent-response-wait-warning > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--color-warning);
 }
 
 .app-spacer {

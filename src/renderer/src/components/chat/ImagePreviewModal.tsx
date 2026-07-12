@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { ChevronLeft, ChevronRight, LoaderCircle, X } from 'lucide-react'
 import type { ComposerImageAttachment } from '@shared/types/attachment'
 import { nextPreviewIndex } from './imageAttachmentState'
+import { createPreviewObjectUrl } from './attachmentPreviewBytes'
 import './ImagePreviewModal.css'
 
 interface ImagePreviewModalProps {
@@ -37,8 +38,7 @@ export default function ImagePreviewModal({
     void window.api.attachment.readPreview(attachment, 'original')
       .then((preview) => {
         if (cancelled) return
-        const bytes = new Uint8Array(preview.bytes)
-        objectUrl = URL.createObjectURL(new Blob([bytes], { type: preview.mimeType }))
+        objectUrl = createPreviewObjectUrl(preview.bytes, preview.mimeType)
         setPreviewUrl(objectUrl)
       })
       .catch(() => {
@@ -98,7 +98,15 @@ export default function ImagePreviewModal({
 
       <div className="image-preview-stage">
         {previewUrl ? (
-          <img src={previewUrl} alt={current.name} />
+          <img
+            src={previewUrl}
+            alt={current.name}
+            onError={() => {
+              URL.revokeObjectURL(previewUrl)
+              setPreviewUrl(null)
+              setLoadError(true)
+            }}
+          />
         ) : loadError ? (
           <span>照片无法加载</span>
         ) : (

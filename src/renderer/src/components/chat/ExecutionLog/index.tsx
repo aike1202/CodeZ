@@ -186,21 +186,25 @@ export default function ExecutionLog({
               item.toolName === 'DelegateTasks' ||
               item.toolName === 'spawn'
 
-            const matchedSubAgent =
+            const matchedSubAgents =
               item.type === 'tool' &&
               (item.toolName === 'SubAgentRunner' ||
                 isOrchestratorTool)
-                ? subAgents?.find((s) => s.parentToolCallId === item.id)
-                : undefined
+                ? subAgents?.filter((s) => s.parentToolCallId === item.id) || []
+                : []
 
-            if (matchedSubAgent) {
+            if (matchedSubAgents.length > 0) {
               return (
-                <SubAgentCard
-                  key={item.id}
-                  subAgent={matchedSubAgent}
-                  onFileClick={onFileClick}
-                  onDiffClick={onDiffClick}
-                />
+                <React.Fragment key={item.id}>
+                  {matchedSubAgents.map((subAgent) => (
+                    <SubAgentCard
+                      key={subAgent.id}
+                      subAgent={subAgent}
+                      onFileClick={onFileClick}
+                      onDiffClick={onDiffClick}
+                    />
+                  ))}
+                </React.Fragment>
               )
             }
 

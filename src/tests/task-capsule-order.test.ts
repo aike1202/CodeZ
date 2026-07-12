@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { TaskItem } from '../shared/types/task'
-import { getTaskDisplayTasks } from '../renderer/src/components/chat/TaskCapsule.order'
+import {
+  getRemainingTaskCount,
+  getTaskDisplayTasks
+} from '../renderer/src/components/chat/TaskCapsule.order'
 
 const task = (id: string, status: TaskItem['status']): TaskItem => ({
   id,
@@ -9,8 +12,8 @@ const task = (id: string, status: TaskItem['status']): TaskItem => ({
   description: id
 })
 
-describe('TaskCapsule active task projection', () => {
-  it('keeps only pending and in-progress tasks in original list order', () => {
+describe('TaskCapsule task projection', () => {
+  it('keeps every task visible in original list order', () => {
     const tasks = [
       task('completed-first', 'completed'),
       task('pending-second', 'pending'),
@@ -20,16 +23,30 @@ describe('TaskCapsule active task projection', () => {
     ]
 
     expect(getTaskDisplayTasks(tasks).map((item) => item.id)).toEqual([
+      'completed-first',
       'pending-second',
       'running-third',
+      'cancelled-fourth',
       'pending-fifth'
     ])
   })
 
-  it('returns an empty projection when every task is terminal', () => {
-    expect(getTaskDisplayTasks([
+  it('keeps terminal tasks visible while reporting zero remaining tasks', () => {
+    const tasks = [
       task('done', 'completed'),
       task('stopped', 'cancelled')
-    ])).toEqual([])
+    ]
+
+    expect(getTaskDisplayTasks(tasks)).toEqual(tasks)
+    expect(getRemainingTaskCount(tasks)).toBe(0)
+  })
+
+  it('counts only pending and in-progress tasks as remaining', () => {
+    expect(getRemainingTaskCount([
+      task('done', 'completed'),
+      task('waiting', 'pending'),
+      task('running', 'in_progress'),
+      task('stopped', 'cancelled')
+    ])).toBe(2)
   })
 })

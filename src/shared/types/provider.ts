@@ -19,6 +19,7 @@ export interface ModelConfig {
   maxInputTokens?: number
   maxOutputTokens?: number
   reasoningCountsAgainstContext?: boolean
+  /** 未设置时按已知模型能力自动判断；boolean 值表示用户手动覆盖 */
   supportsVision?: boolean
   /** 单独覆盖该模型使用的接口协议 */
   apiFormat?: ApiFormat

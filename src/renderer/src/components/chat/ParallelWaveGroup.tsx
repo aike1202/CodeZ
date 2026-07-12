@@ -1,5 +1,5 @@
-import React, { useState } from 'react'
-import { Loader2, CheckCircle2, CircleDashed, XCircle, ChevronDown, ChevronRight, Zap } from 'lucide-react'
+import React, { useId, useState } from 'react'
+import { Loader2, CheckCircle2, CircleDashed, PackageCheck, XCircle, ChevronDown, ChevronRight, Zap } from 'lucide-react'
 import { useParallelExecStore } from '../../stores/parallelExecStore'
 import type { ParallelWaveState } from '../../stores/parallelExecStore'
 import './ParallelWaveGroup.css'
@@ -13,6 +13,7 @@ import './ParallelWaveGroup.css'
 export const ParallelWaveGroup: React.FC = () => {
   const { active, planSlug, isolation, rationale, waves, overallStatus } = useParallelExecStore()
   const [expanded, setExpanded] = useState(false)
+  const detailsId = useId()
 
   if (!active || waves.length === 0) return null
 
@@ -24,11 +25,19 @@ export const ParallelWaveGroup: React.FC = () => {
     (count, wave) => count + wave.stepResults.filter((result) => result.status === 'failed').length,
     0
   )
+  const readySteps = waves.reduce(
+    (count, wave) => count + wave.stepResults.filter((result) => result.status === 'succeeded').length,
+    0
+  )
   const totalSteps = waves.reduce((count, wave) => count + wave.stepIds.length, 0)
   const statusText = overallStatus === 'completed'
     ? `已完成 ${completedSteps}/${totalSteps}`
     : overallStatus === 'halted'
       ? `已停止${failedSteps > 0 ? ` · ${failedSteps} 失败` : ''}`
+      : overallStatus === 'stopped'
+        ? '已停止'
+        : overallStatus === 'decision_required'
+          ? `需要处理${readySteps > 0 ? ` · ${readySteps} 待合并` : ''}${failedSteps > 0 ? ` · ${failedSteps} 异常` : ''}`
       : `执行中 ${completedSteps}/${totalSteps}`
 
   return (
@@ -37,7 +46,7 @@ export const ParallelWaveGroup: React.FC = () => {
         type="button"
         className={`pwg-capsule pwg-capsule--${overallStatus ?? 'running'}`}
         aria-expanded={expanded}
-        aria-controls="parallel-execution-details"
+        aria-controls={detailsId}
         onClick={() => setExpanded((value) => !value)}
       >
         <Zap size={15} className="pwg-header-icon" />
@@ -51,7 +60,7 @@ export const ParallelWaveGroup: React.FC = () => {
       </button>
 
       {expanded ? (
-        <div id="parallel-execution-details" className="pwg-panel">
+        <div id={detailsId} className="pwg-panel">
           {rationale && <div className="pwg-rationale">分组理由：{rationale}</div>}
           {isolation && (
             <div className="pwg-isolation">
@@ -80,6 +89,7 @@ function WaveRow({ wave, halted }: WaveRowProps): React.ReactElement {
 
   const doneCount = wave.stepResults.filter((r) => r.status === 'completed').length
   const failCount = wave.stepResults.filter((r) => r.status === 'failed').length
+  const readyCount = wave.stepResults.filter((r) => r.status === 'succeeded').length
   const total = wave.stepIds.length
 
   const badgeText =
@@ -102,13 +112,17 @@ function WaveRow({ wave, halted }: WaveRowProps): React.ReactElement {
         <span className="pwg-wave-title">Wave {wave.index}</span>
         <span className={`pwg-wave-badge pwg-wave-badge--${wave.status}`}>{badgeText}</span>
         {failCount > 0 && <span className="pwg-wave-fail">· {failCount} 失败</span>}
+        {readyCount > 0 && <span className="pwg-wave-ready">· {readyCount} 待合并</span>}
       </button>
 
       {expanded && (
         <ul className="pwg-step-list">
           {wave.stepIds.map((stepId) => {
             const r = resultFor(stepId)
-            const status = r?.status ?? (wave.status === 'in_progress' ? 'running' : 'pending')
+            const runtimeStatus = wave.stepStatuses?.[stepId]
+            const status = runtimeStatus === 'queued'
+              ? 'pending'
+              : runtimeStatus || r?.status || (wave.status === 'in_progress' ? 'running' : 'pending')
             return (
               <li key={stepId} className={`pwg-step pwg-step--${status}`}>
                 <StepIcon status={status} waveStatus={wave.status} />
@@ -117,6 +131,7 @@ function WaveRow({ wave, halted }: WaveRowProps): React.ReactElement {
                 {r?.filesModified?.length ? (
                   <span className="pwg-step-files">✓ {r.filesModified.length} 文件</span>
                 ) : null}
+                {status === 'succeeded' && <span className="pwg-step-ready">待合并</span>}
                 {r?.error && <span className="pwg-step-error" title={r.error}>{r.error}</span>}
               </li>
             )
@@ -135,7 +150,9 @@ function StepIcon({
   waveStatus: string
 }): React.ReactElement {
   if (status === 'completed') return <CheckCircle2 size={13} className="pwg-icon--ok" />
-  if (status === 'failed') return <XCircle size={13} className="pwg-icon--err" />
+  if (status === 'succeeded') return <PackageCheck size={13} className="pwg-icon--ready" />
+  if (['failed', 'interrupted', 'stopped', 'lost'].includes(status))
+    return <XCircle size={13} className="pwg-icon--err" />
   if (status === 'running' || waveStatus === 'in_progress')
     return <Loader2 size={13} className="pwg-icon--run spin" />
   return <CircleDashed size={13} className="pwg-icon--pending" />

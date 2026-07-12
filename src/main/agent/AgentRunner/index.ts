@@ -16,6 +16,7 @@ import type { AgentRunConfig, AgentRunnerCallbacks } from './types'
 import { isToolErrorResult, buildToolError } from './agentErrorHandler'
 import { handleSubAgentRunnerSpawn } from './subAgentRunnerHelper'
 import { handleDelegateTasks } from './delegateTasksHelper'
+import { handleExecutionControl } from './executionControlHelper'
 import { getSessionStore } from '../../ipc/session.handlers'
 import { LoopStateMachine, AgentState, TransitionEvent, TerminationReason } from './LoopStateMachine'
 import { streamWithTimeoutRetry } from '../../services/chat/retry'
@@ -535,7 +536,16 @@ export class AgentRunner {
                   toolCallId,
                   args,
                   config,
-                  toolCallbacks
+                  toolCallbacks,
+                  this.abortController?.signal
+                )
+              } else if (name === 'ExecutionControl') {
+                return await handleExecutionControl(
+                  toolCallId,
+                  args,
+                  config,
+                  toolCallbacks,
+                  this.abortController?.signal
                 )
               }
 
@@ -763,7 +773,7 @@ export class AgentRunner {
 
   abort(): void {
     if (this.abortController) {
-      this.abortController.abort()
+      this.abortController.abort('The user stopped the parent Agent run.')
     }
     this.chatService.abort()
   }

@@ -5,6 +5,7 @@ import { useProviderStore } from '../../../stores/providerStore'
 import { builtinCommands } from '../../../commands/SlashCommandParser'
 import type { WorkspaceInfo } from '@shared/types/workspace'
 import type { ComposerImageAttachment } from '@shared/types/attachment'
+import { supportsImageInput } from '@shared/utils/imageCapabilities'
 import { evaluateImageSendState } from '../../chat/imageAttachmentState'
 import { restoreRejectedPromptText } from '../promptSubmissionState'
 
@@ -18,7 +19,8 @@ export function usePromptEditor(
   attachments: ComposerImageAttachment[],
   clearComposerAttachments: () => void,
   restoreRejectedDrafts: (attachments: ComposerImageAttachment[]) => void,
-  importingAttachments: boolean
+  importingAttachments: boolean,
+  conversationBusy: boolean
 ) {
   const [text, setText] = useState('')
   const [selectedModelName, setSelectedModelNameState] = useState<string>('')
@@ -50,7 +52,8 @@ export function usePromptEditor(
     text,
     attachmentCount: attachments.length,
     importing: importingAttachments,
-    supportsVision: selectedModel?.supportsVision === true
+    supportsVision: supportsImageInput(selectedModel),
+    blockedReason: conversationBusy ? '当前会话仍在运行' : null
   })
 
   useEffect(() => {

@@ -227,6 +227,17 @@ describe('SystemPromptService', () => {
     it('should contain delegation guidance', async () => {
       const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
       expect(prompt).toContain('subagent_guidance')
+      expect(prompt).toContain('Research is a context-isolation mechanism.')
+      expect(prompt).toContain('The needed answer does not exist in the conversation or parent Agent context.')
+      expect(prompt).toContain('expected to require broad exploration and reading many files')
+      expect(prompt).toContain('a concise evidence handoff is enough for the remaining work')
+      expect(prompt).toContain('File count alone is never a trigger.')
+      expect(prompt).toContain('Never delegate content you just read, wrote, or generated')
+      expect(prompt).not.toContain('Cross-cutting exploration (3+ files)')
+      expect(prompt).not.toContain('Delegate to Research — do NOT explore directly')
+      expect(prompt).toContain('Interrupted SubAgent handoff')
+      expect(prompt).toContain('filesModified')
+      expect(prompt).toContain('resume_subagent_id')
     })
 
     it('sections should appear in correct order', async () => {

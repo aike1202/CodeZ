@@ -82,6 +82,7 @@ export const IPC_CHANNELS = {
   PARALLEL_EXEC_STARTED: 'parallel:exec-started',
   PARALLEL_WAVE_UPDATE: 'parallel:wave-update',
   PARALLEL_EXEC_DONE: 'parallel:exec-done',
+  EXECUTION_EVENT: 'execution:event',
 
   // Task (轻量待办，仅会话内存)
   TASK_UPDATED: 'task:updated',

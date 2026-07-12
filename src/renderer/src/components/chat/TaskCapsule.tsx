@@ -1,8 +1,8 @@
 import React, { useRef, useEffect } from 'react'
 import { useChatStore } from '../../stores/chatStore'
-import { CircleDashed, Loader2, ListTodo, ChevronDown, ChevronUp } from 'lucide-react'
+import { CheckCircle2, CircleDashed, Loader2, ListTodo, ChevronDown, ChevronUp, XCircle } from 'lucide-react'
 import type { TaskItem, TaskStatus } from '../../../../shared/types/task'
-import { getTaskDisplayTasks } from './TaskCapsule.order'
+import { getRemainingTaskCount, getTaskDisplayTasks } from './TaskCapsule.order'
 import './TaskCapsule.css'
 
 export const TaskCapsule: React.FC = () => {
@@ -28,7 +28,7 @@ export const TaskCapsule: React.FC = () => {
     return null
   }
 
-  const total = displayTasks.length
+  const remaining = getRemainingTaskCount(displayTasks)
   const inProgress = displayTasks.find((t) => t.status === 'in_progress')
 
   // 从 tasks 里取第一个 TaskGroup 元数据作为清单头，兼容旧 title/subtitle
@@ -39,9 +39,16 @@ export const TaskCapsule: React.FC = () => {
   const requiresApproval = displayTasks.some(t => t.requiresApproval)
 
   const getStatusIcon = (status: TaskStatus) => {
-    return status === 'in_progress'
-      ? <Loader2 className="step-icon in-progress spin" size={14} />
-      : <CircleDashed className="step-icon pending" size={14} />
+    switch (status) {
+      case 'in_progress':
+        return <Loader2 className="step-icon in-progress spin" size={18} strokeWidth={2.25} aria-hidden="true" />
+      case 'completed':
+        return <CheckCircle2 className="step-icon completed" size={18} strokeWidth={2.25} aria-hidden="true" />
+      case 'cancelled':
+        return <XCircle className="step-icon cancelled" size={18} strokeWidth={2.25} aria-hidden="true" />
+      default:
+        return <CircleDashed className="step-icon pending" size={18} strokeWidth={2.25} aria-hidden="true" />
+    }
   }
 
   const headText = (task: TaskItem) => task.activeForm || task.subject
@@ -54,7 +61,7 @@ export const TaskCapsule: React.FC = () => {
       >
         <ListTodo className="plan-capsule-icon" size={14} />
         <span className="plan-capsule-text">
-          {inProgress ? headText(inProgress) : `Tasks ${total}`}
+          {inProgress ? headText(inProgress) : `Tasks ${displayTasks.length}`}
         </span>
         {expanded ? <ChevronUp size={14} className="chevron" /> : <ChevronDown size={14} className="chevron" />}
       </div>
@@ -74,7 +81,7 @@ export const TaskCapsule: React.FC = () => {
               ) : null}
             </div>
             <span className="plan-progress">
-              剩余 {total}
+              剩余 {remaining}
             </span>
           </div>
           <div className="plan-capsule-body">

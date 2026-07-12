@@ -2,7 +2,7 @@ import type { TaskItem } from '../../../../shared/types/task'
 import type { PermissionApprovalResponse, PermissionRequest } from '../../../../shared/types/permission'
 import type { ContextBudgetSnapshot } from '../../../../shared/types/context'
 import type { ImageAttachment, PendingPromptDraft } from '../../../../shared/types/attachment'
-import type { SessionRuntimeStatusChanged } from '../../../../shared/types/subagent'
+import type { SessionRuntimeStatusChanged, SubAgentHandoff } from '../../../../shared/types/subagent'
 
 export type AgentStateType =
   | 'processing'
@@ -82,7 +82,7 @@ export interface SubAgentRecord {
   scope?: { directories?: string[]; excludeGlobs?: string[] }
   parentToolCallId: string
   status: 'running' | 'completed' | 'failed' | 'interrupted'
-  interruptionReason?: 'runtime_missing' | 'user_aborted'
+  interruptionReason?: 'runtime_missing' | 'user_aborted' | 'parent_delivery_missing'
   startedAt: number
   completedAt?: number
   content: string
@@ -95,6 +95,7 @@ export interface SubAgentRecord {
     toolCallCount: number
     filesExamined?: string[]
     conclusion?: string
+    handoff?: SubAgentHandoff
   }
 }
 
@@ -134,6 +135,8 @@ export interface ChatMessage {
   role: 'user' | 'agent' | 'system'
   content: string
   streaming?: boolean
+  streamPhase?: 'starting' | 'running'
+  responseWaitWarning?: boolean
   interrupted?: boolean
   executionStatus?: 'completed' | 'error' | 'interrupted'
   reasoningContent?: string
@@ -187,6 +190,7 @@ export interface ChatState {
   planReview: { plan: any; status: string } | null
   activePlanStreamId: string | null
   pendingPrompt: PendingPromptDraft | null
+  composerDrafts: Record<string, PendingPromptDraft | undefined>
   pendingInternalContinuation: PendingInternalContinuation | null
   tasks: TaskItem[]
   contextBudgets: Record<string, ContextBudgetSnapshot | undefined>
@@ -212,6 +216,8 @@ export interface ChatState {
     msgId: string,
     status: 'completed' | 'error' | 'interrupted'
   ) => void
+  setMessageStreamPhase: (msgId: string, phase: 'starting' | 'running') => void
+  setResponseWaitWarning: (msgId: string, visible: boolean) => void
   setStreamCleanup: (sessionId: string, cleanup: (() => void) | null) => void
   setTransactionId: (msgId: string, txId: string) => void
   setDiffEntries: (msgId: string, diffEntries: Array<{ path: string; diff: string }>) => void
@@ -259,7 +265,7 @@ export interface ChatState {
   endSubAgent: (
     msgId: string,
     subAgentId: string,
-    result: { status: 'completed' | 'failed' | 'interrupted'; output?: string; qualitySummary?: any; toolCallCount: number; filesExamined?: string[] }
+    result: { status: 'completed' | 'failed' | 'interrupted'; output?: string; qualitySummary?: any; toolCallCount: number; filesExamined?: string[]; handoff?: SubAgentHandoff }
   ) => void
 
   setExpandedCapsule: (capsule: 'task' | 'plan' | null) => void
@@ -272,6 +278,7 @@ export interface ChatState {
   setContextBudget: (sessionId: string, snapshot: ContextBudgetSnapshot) => void
   setCompactionState: (sessionId: string, state: CompactionUiState) => void
   setPendingPrompt: (prompt: PendingPromptDraft | null) => void
+  setComposerDraft: (sessionId: string, draft: PendingPromptDraft) => void
   setPendingInternalContinuation: (continuation: PendingInternalContinuation | null) => void
   consumeInternalContinuation: (sessionId: string) => PendingInternalContinuation | null
   markActiveRunUserAborted: (sessionId: string) => void

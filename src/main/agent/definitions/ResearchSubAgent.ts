@@ -11,7 +11,7 @@ import type { ToolDefinition } from '../../../shared/types/provider'
 export const ResearchSubAgent: SubAgentDefinition = {
   type: 'Research',
   description:
-    'Read-only research agent. Explores the codebase to answer a scoped question and returns a Markdown report with evidence anchors. Use it when you need to understand a module, trace a data flow, or gather context without modifying files.',
+    'Read-only context-isolation agent for a scoped question whose answer is absent from the parent context and is expected to require broad reading across many files. It returns a concise evidence handoff so unnecessary raw exploration does not occupy the parent context.',
   maxLoops: 64,
   finalizationReserveLoops: 2,
   depthLoops: {
@@ -21,14 +21,15 @@ export const ResearchSubAgent: SubAgentDefinition = {
   },
 
   whenToUse: [
-    'You need to understand how a module/feature works across 3+ files or directories.',
-    'You need to trace a data flow or dependency chain through the codebase.',
-    'The user asks a "how does X work" or "where is Y defined" question requiring broad exploration.',
-    'You want to run independent explorations in parallel while continuing other work.',
+    'Use Research only when ALL conditions are true:',
+    'The answer is not already present in the conversation or parent Agent context.',
+    'Answering reliably is expected to require broad exploration and reading many files or directories.',
+    'The raw exploration would add unnecessary parent-context weight, while a concise evidence handoff is sufficient for the remaining task.',
   ].join('\n'),
   whenNotToUse: [
-    'Single file or single symbol lookup — use Glob/Grep/Read directly.',
-    'The answer is already available in your conversation context.',
+    'The answer is already available in conversation context, including content just read, written, or generated.',
+    'A targeted search or a manageable number of direct reads can answer the question.',
+    'You only want to verify your own recent work.',
     'The task requires writing or modifying files (use TaskGroup in the main agent instead).',
   ].join('\n'),
   costHint: 'Default: up to 64 loops with 2 reserved for the report. Depth budgets: quick 16, normal 48, exhaustive 96.',

@@ -166,6 +166,20 @@
   cursor: pointer;
 }
 
+.settings-model-vision-source {
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.settings-model-vision-source.is-model-default {
+  border-color: color-mix(in srgb, var(--color-success) 35%, var(--border));
+  color: var(--color-success);
+}
+
 .settings-model-name-wrapper {
   flex: 1;
 }

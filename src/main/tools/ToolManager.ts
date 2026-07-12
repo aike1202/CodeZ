@@ -21,6 +21,8 @@ import { RollbackLastEditTool } from './builtin/RollbackLastEditTool'
 import { UpdateResumeStateTool } from './builtin/UpdateResumeStateTool'
 import { WebSearchTool } from './builtin/WebSearchTool'
 import { WebFetchTool } from './builtin/WebFetchTool'
+import { ExecutionInspectTool } from './builtin/ExecutionInspectTool'
+import { ExecutionControlTool } from './builtin/ExecutionControlTool'
 
 import type { ToolDefinition } from '../../shared/types/provider'
 
@@ -61,7 +63,9 @@ export class ToolManager {
       new TaskGetTool(),
       new TaskUpdateTool(),
       new TaskListTool(),
-      new DelegateTasksTool()
+      new DelegateTasksTool(),
+      new ExecutionInspectTool(),
+      new ExecutionControlTool()
     ]
     
     for (const tool of builtinTools) {

@@ -1,6 +1,7 @@
 import type { StateCreator } from 'zustand'
 import type { ChatMessage, ChatState, ChatSession } from '../types'
 import { useWorkspaceStore } from '../../workspaceStore'
+import type { SubAgentHandoff, SubAgentHandoffTool } from '../../../../../shared/types/subagent'
 
 function genId(): string {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -27,24 +28,150 @@ function normalizeSession(session: ChatSession): ChatSession {
   }
 }
 
+function truncateHandoffText(value: string, maxLength: number): string {
+  const normalized = value.trim()
+  return normalized.length <= maxLength
+    ? normalized
+    : `${normalized.slice(0, maxLength)}\n...[truncated]`
+}
+
+function toolTarget(name: string, rawArgs: string): string | undefined {
+  try {
+    const args = JSON.parse(rawArgs || '{}')
+    const direct = args.file_path || args.notebook_path || args.path || args.command || args.commandLine
+    if (typeof direct === 'string' && direct.trim()) return truncateHandoffText(direct, 240)
+    if (name === 'Read' && Array.isArray(args.files)) {
+      const paths = args.files.map((file: any) => file?.file_path).filter(Boolean)
+      if (paths.length > 0) return truncateHandoffText(paths.join(', '), 240)
+    }
+  } catch {}
+  return undefined
+}
+
+function toolResultSummary(rawResult: string | undefined): string | undefined {
+  if (!rawResult?.trim()) return undefined
+  try {
+    const parsed = JSON.parse(rawResult)
+    const value = parsed?.ok === false
+      ? parsed.error?.message || parsed.error
+      : parsed?.data
+    if (value === undefined) return undefined
+    return truncateHandoffText(
+      typeof value === 'string' ? value : JSON.stringify(value),
+      400
+    )
+  } catch {
+    return truncateHandoffText(rawResult, 400)
+  }
+}
+
+function hasWrappedToolError(rawResult: string | undefined): boolean {
+  if (!rawResult?.trim()) return false
+  try {
+    const parsed = JSON.parse(rawResult)
+    return parsed?.ok === false ||
+      (typeof parsed?.data === 'string' && parsed.data.trimStart().startsWith('Error:')) ||
+      Boolean(parsed?.error && !parsed?.data)
+  } catch {
+    return rawResult.trimStart().startsWith('Error:')
+  }
+}
+
+function buildRecoveredSubAgentHandoff(
+  subAgent: any,
+  reasonCode: 'runtime_missing' | 'parent_delivery_missing' = 'runtime_missing'
+): SubAgentHandoff {
+  const tools: SubAgentHandoffTool[] = (subAgent.toolCalls || []).slice(-8).map((tool: any) => ({
+    name: tool.name,
+    status: tool.status === 'running'
+      ? 'interrupted'
+      : tool.status === 'success' && hasWrappedToolError(tool.result)
+        ? 'error'
+        : tool.status,
+    target: toolTarget(tool.name, tool.args),
+    summary: toolResultSummary(tool.result)
+  }))
+  const successfulTools = tools.filter((tool) => tool.status === 'success')
+  const filesModified = successfulTools
+    .filter((tool) => ['Edit', 'Write', 'NotebookEdit'].includes(tool.name) && tool.target)
+    .map((tool) => tool.target!)
+  const filesPossiblyModified = tools
+    .filter((tool) =>
+      tool.status === 'interrupted' &&
+      ['Edit', 'Write', 'NotebookEdit'].includes(tool.name) &&
+      tool.target
+    )
+    .map((tool) => tool.target!)
+  const filesExamined = new Set<string>(subAgent.result?.filesExamined || [])
+  for (const tool of successfulTools) {
+    if (['Read', 'list_files'].includes(tool.name) && tool.target) filesExamined.add(tool.target)
+  }
+  return {
+    reasonCode,
+    reason: reasonCode === 'parent_delivery_missing'
+      ? 'The SubAgent reached a terminal state, but its result may not have been delivered to the parent Agent before the runtime disappeared.'
+      : 'The SubAgent runtime disappeared before its result was delivered to the parent Agent.',
+    originalTask: truncateHandoffText(subAgent.prompt || '', 2500),
+    knownContext: subAgent.context
+      ? truncateHandoffText(subAgent.context, 1200)
+      : undefined,
+    scope: subAgent.scope
+      ? {
+          directories: subAgent.scope.directories?.slice(0, 10).map((value: string) =>
+            truncateHandoffText(value, 160)
+          ),
+          excludeGlobs: subAgent.scope.excludeGlobs?.slice(0, 10).map((value: string) =>
+            truncateHandoffText(value, 160)
+          )
+        }
+      : undefined,
+    expectations: subAgent.expectations
+      ? {
+          questions: subAgent.expectations.questions.slice(0, 12).map((value: string) =>
+            truncateHandoffText(value, 240)
+          ),
+          outOfScope: subAgent.expectations.outOfScope?.slice(0, 8).map((value: string) =>
+            truncateHandoffText(value, 240)
+          )
+        }
+      : undefined,
+    depth: subAgent.depth,
+    lastProgress: subAgent.content
+      ? truncateHandoffText(subAgent.content, 1500)
+      : undefined,
+    filesExamined: Array.from(filesExamined).slice(-20).map((value) =>
+      truncateHandoffText(value, 240)
+    ),
+    filesModified: Array.from(new Set(filesModified)).slice(-20),
+    filesPossiblyModified: Array.from(new Set(filesPossiblyModified)).slice(-20),
+    recentTools: tools,
+    workspaceMayHaveUntrackedChanges: tools.some((tool) =>
+      ['Bash', 'PowerShell'].includes(tool.name) && tool.status !== 'error'
+    ),
+    canResume: true
+  }
+}
+
 function buildSubAgentInterruptedContinuation(subAgents: any[]): string {
   const resumable = subAgents
-    .filter((sub) => sub?.status === 'interrupted' && typeof sub.id === 'string')
+    .filter((sub) => sub?.result?.handoff && typeof sub.id === 'string')
     .map((sub) => ({
-      resume_subagent_id: sub.id,
+      resume_subagent_id: sub.result.handoff.canResume ? sub.id : undefined,
       subagent_type: sub.type,
       description: sub.description,
       prompt: sub.prompt,
       context: sub.context,
       scope: sub.scope,
       depth: sub.depth,
-      expectations: sub.expectations
+      expectations: sub.expectations,
+      handoff: sub.result?.handoff || buildRecoveredSubAgentHandoff(sub)
     }))
   return [
-    'The SubAgentRunner calls below were interrupted because their runtime disappeared.',
-    'Resume each one with SubAgentRunner using the exact resume_subagent_id, type, prompt, and other arguments shown.',
-    'Do not restart, re-plan, re-inspect completed work, or replace the SubAgent unless resume itself returns an error.',
-    'Continue the existing user request after the resumed SubAgent finishes.',
+    'The SubAgent handoffs below may not have been delivered to the parent Agent before the runtime disappeared.',
+    'Use each structured handoff to understand the interruption reason, completed work, files examined or modified, and recent tool outcomes.',
+    'Choose autonomously whether to finish the remaining work in the parent Agent or resume the same SubAgent with the exact resume_subagent_id and original arguments.',
+    'Do not repeat completed work. Treat filesModified as confirmed changes; inspect filesPossiblyModified and the workspace first when side effects may have been interrupted or workspaceMayHaveUntrackedChanges is true.',
+    'Continue the existing user request without asking the user to reconstruct the lost context.',
     JSON.stringify(resumable)
   ].join(' ')
 }
@@ -84,7 +211,19 @@ function healInterruptedSubAgents(messages: any[]): {
   let changed = false
   const healedMessages = messages.map((message) => {
     const subAgents = message.subAgents
-    if (!Array.isArray(subAgents) || !subAgents.some((sub: any) => sub.status === 'running')) {
+    if (!Array.isArray(subAgents)) {
+      if (!message.streaming) return message
+      changed = true
+      return { ...message, streaming: false, interrupted: true }
+    }
+
+    const hasRunningSubAgent = subAgents.some((sub: any) => sub.status === 'running')
+    const hasUndeliveredTerminalSubAgent = Boolean(
+      message.streaming && subAgents.some((sub: any) =>
+        sub.status === 'completed' || sub.status === 'failed'
+      )
+    )
+    if (!hasRunningSubAgent && !hasUndeliveredTerminalSubAgent) {
       if (!message.streaming) return message
       changed = true
       return { ...message, streaming: false, interrupted: true }
@@ -92,13 +231,36 @@ function healInterruptedSubAgents(messages: any[]): {
 
     changed = true
     const healedSubAgents = subAgents.map((sub: any) => {
-      if (sub.status !== 'running') return sub
-      return {
-        ...sub,
-        status: 'interrupted',
-        interruptionReason: 'runtime_missing',
-        completedAt: sub.completedAt || Date.now()
+      if (sub.status === 'running') {
+        return {
+          ...sub,
+          status: 'interrupted',
+          interruptionReason: 'runtime_missing',
+          completedAt: sub.completedAt || Date.now(),
+          result: {
+            ...sub.result,
+            output: sub.result?.output || 'SubAgent runtime disappeared before completion.',
+            toolCallCount: sub.result?.toolCallCount ?? sub.toolCalls?.length ?? 0,
+            handoff: sub.result?.handoff || buildRecoveredSubAgentHandoff(sub)
+          }
+        }
       }
+      if (message.streaming && (sub.status === 'completed' || sub.status === 'failed')) {
+        return {
+          ...sub,
+          interruptionReason: 'parent_delivery_missing',
+          result: {
+            ...sub.result,
+            output: sub.result?.output || sub.content || 'SubAgent result delivery was interrupted.',
+            toolCallCount: sub.result?.toolCallCount ?? sub.toolCalls?.length ?? 0,
+            handoff: sub.result?.handoff || buildRecoveredSubAgentHandoff(
+              sub,
+              'parent_delivery_missing'
+            )
+          }
+        }
+      }
+      return sub
     })
     return {
       ...message,
@@ -108,15 +270,30 @@ function healInterruptedSubAgents(messages: any[]): {
     }
   })
 
-  const latestById = new Map<string, any>()
-  for (const message of healedMessages) {
+  const latestById = new Map<string, { subAgent: any; messageIndex: number }>()
+  let lastCompletedParentIndex = -1
+  for (let messageIndex = 0; messageIndex < healedMessages.length; messageIndex++) {
+    const message = healedMessages[messageIndex]
+    if (
+      message.role === 'agent' &&
+      message.executionStatus === 'completed' &&
+      !message.interrupted
+    ) {
+      lastCompletedParentIndex = messageIndex
+    }
     for (const subAgent of message.subAgents || []) {
-      if (typeof subAgent?.id === 'string') latestById.set(subAgent.id, subAgent)
+      if (typeof subAgent?.id === 'string') {
+        latestById.set(subAgent.id, { subAgent, messageIndex })
+      }
     }
   }
-  const resumableSubAgents = Array.from(latestById.values()).filter((subAgent) =>
-    subAgent.status === 'interrupted' && subAgent.interruptionReason === 'runtime_missing'
-  )
+  const resumableSubAgents = Array.from(latestById.values())
+    .filter(({ subAgent, messageIndex }) =>
+      messageIndex > lastCompletedParentIndex &&
+      Boolean(subAgent.result?.handoff) &&
+      ['runtime_missing', 'parent_delivery_missing'].includes(subAgent.interruptionReason)
+    )
+    .map(({ subAgent }) => subAgent)
 
   return {
     messages: healedMessages,
@@ -403,8 +580,12 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
         )
       }
 
+      const composerDrafts = { ...s.composerDrafts }
+      if (isAlreadyDeleted) delete composerDrafts[sessionId]
+
       return {
         sessions: newSessions,
+        composerDrafts,
         activeSessionId: s.activeSessionId === sessionId ? null : s.activeSessionId,
         messages: s.activeSessionId === sessionId ? [] : s.messages
       }
