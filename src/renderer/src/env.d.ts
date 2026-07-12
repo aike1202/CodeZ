@@ -168,6 +168,10 @@ declare global {
         list: () => Promise<import('@shared/types/subagent').SubAgentInfo[]>
         toggle: (type: string, enabled: boolean) => Promise<void>
         getDetail: (type: string) => Promise<import('@shared/types/subagent').SubAgentDetail | null>
+        setModel: (
+          type: string,
+          selections: import('@shared/types/subagent').SubAgentModelSelection[]
+        ) => Promise<void>
       }
       logger: {
         info: (...args: any[]) => void

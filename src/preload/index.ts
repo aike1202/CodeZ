@@ -493,7 +493,12 @@ const api = {
     toggle: (type: string, enabled: boolean): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.SUBAGENT_TOGGLE, type, enabled),
     getDetail: (type: string): Promise<any | null> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SUBAGENT_GET_DETAIL, type)
+      ipcRenderer.invoke(IPC_CHANNELS.SUBAGENT_GET_DETAIL, type),
+    setModel: (
+      type: string,
+      selections: import('../shared/types/subagent').SubAgentModelSelection[]
+    ): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SUBAGENT_SET_MODEL, type, selections)
   },
 
   plan: {

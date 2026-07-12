@@ -185,44 +185,27 @@ describe('structured subagent completion protocol', () => {
     expect(result.output).toContain('src/core.ts:10-20')
   })
 
-  it('rejects a Research report that does not contain the required evidence', async () => {
+  it('accepts an Explore plain-text report without submit_result', async () => {
     const { SubAgentManager } = await import('../main/agent/SubAgentManager')
-    const { ResearchSubAgent } = await import('../main/agent/definitions/ResearchSubAgent')
+    const { ExploreSubAgent } = await import('../main/agent/definitions/ExploreSubAgent')
 
     chatMock.streamChat.mockImplementationOnce(async (_config, callbacks) => {
-      callbacks.onChunk('', '', [{
-        index: 0,
-        id: 'submit-invalid-research',
-        type: 'function',
-        function: {
-          name: 'submit_result',
-          arguments: JSON.stringify({
-            report: '# Research Handoff\n\n## Direct Answer\nStarting soon.\n\n## Key Findings\n- No evidence yet.',
-            conclusion: 'Starting soon.',
-            confidence: 'low',
-          }),
-        },
-      }])
-      callbacks.onDone('', 'tool_calls')
+      callbacks.onChunk('The parser owns the failing branch at src/core.ts:10.', '')
+      callbacks.onDone('The parser owns the failing branch at src/core.ts:10.', 'stop')
     })
 
-    const toolEnds = vi.fn()
-    const result = await SubAgentManager.spawn('Research', {
+    const result = await SubAgentManager.spawn('Explore', {
       ...makeContext(),
       maxLoopsOverride: 1,
     }, {
       onChunk: vi.fn(),
       onDone: vi.fn(),
       onError: vi.fn(),
-      onSubAgentToolEnd: toolEnds,
     })
 
-    expect(ResearchSubAgent.validateStructuredOutput).toBeDefined()
-    expect(result.status).toBe('failed')
-    expect(toolEnds).toHaveBeenCalledWith(
-      expect.any(String),
-      'submit-invalid-research',
-      expect.stringContaining('evidence anchor')
-    )
+    expect(ExploreSubAgent.outputSpec).toBeUndefined()
+    expect(result.status).toBe('completed')
+    expect(result.output).toContain('src/core.ts:10')
+    expect(result.structuredOutput).toBeUndefined()
   })
 })

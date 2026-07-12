@@ -1,9 +1,9 @@
-import { ResearchSubAgent } from './ResearchSubAgent'
+import { ExploreSubAgent } from './ExploreSubAgent'
 import { ExecutionPlannerSubAgent } from './ExecutionPlannerSubAgent'
 import { WorkerSubAgent } from './WorkerSubAgent'
 
 export const allSubAgentDefinitions = [
-  ResearchSubAgent,
+  ExploreSubAgent,
   ExecutionPlannerSubAgent,
   WorkerSubAgent
 ]

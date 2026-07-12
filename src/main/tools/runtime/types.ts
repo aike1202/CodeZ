@@ -6,7 +6,7 @@ export type ToolSource = 'builtin' | 'skill' | 'mcp' | 'plugin'
 export type ToolExposure = 'always' | 'core' | 'deferred' | 'internal'
 export type ToolConcurrency = 'safe' | 'resource-locked' | 'exclusive'
 export type ToolInterruptBehavior = 'cancel' | 'block' | 'detach'
-export type AgentRole = 'main' | 'research' | 'execution-planner' | 'executor' | string
+export type AgentRole = 'main' | 'explore' | 'execution-planner' | 'executor' | string
 
 export interface ToolAvailabilityContext {
   platform: NodeJS.Platform

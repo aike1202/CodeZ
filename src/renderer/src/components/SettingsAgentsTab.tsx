@@ -44,7 +44,7 @@ export default function SettingsAgentsTab(): React.ReactElement {
         <div>
           <h1 className="agents-title">智能体</h1>
           <p className="agents-subtitle">
-            管理系统内置的子智能体。关闭后主智能体将无法通过 Task 委派该子智能体。
+            管理内置子智能体及其候选模型。未配置模型时跟随主 Agent。
           </p>
         </div>
         <Button variant="ghost" size="none" onClick={loadAgents} title="刷新">
@@ -86,6 +86,11 @@ export default function SettingsAgentsTab(): React.ReactElement {
                 <div className="agents-item-content">
                   <div className="agents-item-name">{agent.type}</div>
                   <p className="agents-item-desc">{agent.description || '无描述信息'}</p>
+                  <span className="agents-item-model">
+                    {agent.configuredModels?.length
+                      ? `${agent.configuredModels.length} 个候选模型`
+                      : '跟随主模型'}
+                  </span>
                 </div>
 
                 <div className="agents-item-actions" onClick={(e) => e.stopPropagation()}>

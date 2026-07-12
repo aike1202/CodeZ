@@ -1,3 +1,8 @@
+export interface SubAgentModelSelection {
+  providerId: string
+  model: string
+}
+
 /** 子智能体的展示信息 —— 用于设置页面渲染与开关控制 */
 export interface SubAgentInfo {
   /** 子智能体类型标识（唯一） */
@@ -10,6 +15,8 @@ export interface SubAgentInfo {
   costHint?: string
   /** 是否启用（false 时对主 Agent 不可见） */
   enabled: boolean
+  /** 用户手动指定的 Provider 与模型；未设置时使用默认策略 */
+  configuredModels?: SubAgentModelSelection[]
 }
 
 /** 子智能体输出字段（镜像 main 侧 SubAgentOutputField） */
@@ -26,8 +33,6 @@ export interface SubAgentDetail extends SubAgentInfo {
   whenNotToUse?: string
   /** 最大工具调用轮数 */
   maxLoops: number
-  /** 默认模型（未设置则跟随主 Agent） */
-  defaultModel?: string
   /** 隔离方式 */
   isolation?: string
   /** 是否可后台运行 */

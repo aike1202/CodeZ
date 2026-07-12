@@ -4,7 +4,15 @@ import Button from './ui/Button'
 import Flex from './ui/Flex'
 import Stack from './ui/Stack'
 import Card from './ui/Card'
-import { IconClose, IconZap } from './Icons'
+import {
+  IconChevronsDown,
+  IconChevronsUp,
+  IconClose,
+  IconTrash,
+  IconZap
+} from './Icons'
+import { useProviderStore } from '../stores/providerStore'
+import type { SubAgentModelSelection } from '@shared/types/subagent'
 import './SubAgentDetailModal.css'
 
 interface Props {
@@ -21,6 +29,10 @@ export default function SubAgentDetailModal({ type, onClose }: Props): React.Rea
   const [detail, setDetail] = useState<SubAgentDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [promptCopied, setPromptCopied] = useState(false)
+  const [savingModel, setSavingModel] = useState(false)
+  const [modelError, setModelError] = useState('')
+  const providers = useProviderStore((state) => state.providers)
+  const loadProviders = useProviderStore((state) => state.loadProviders)
 
   useEffect(() => {
     let alive = true
@@ -40,6 +52,10 @@ export default function SubAgentDetailModal({ type, onClose }: Props): React.Rea
   }, [type])
 
   useEffect(() => {
+    if (providers.length === 0) void loadProviders()
+  }, [providers.length, loadProviders])
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
     }
@@ -57,6 +73,48 @@ export default function SubAgentDetailModal({ type, onClose }: Props): React.Rea
       console.error(e)
     }
   }
+
+  const saveModels = async (selections: SubAgentModelSelection[]) => {
+    if (!detail) return
+    setSavingModel(true)
+    setModelError('')
+    try {
+      await window.api.subAgent.setModel(detail.type, selections)
+      setDetail((current) => current
+        ? { ...current, configuredModels: selections.length > 0 ? selections : undefined }
+        : current)
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : '模型配置保存失败')
+    } finally {
+      setSavingModel(false)
+    }
+  }
+
+  const handleAddModel = (value: string) => {
+    if (!detail || !value) return
+    const selection = JSON.parse(value) as SubAgentModelSelection
+    void saveModels([...(detail.configuredModels || []), selection])
+  }
+
+  const handleRemoveModel = (index: number) => {
+    if (!detail) return
+    void saveModels((detail.configuredModels || []).filter((_, itemIndex) => itemIndex !== index))
+  }
+
+  const handleMoveModel = (index: number, offset: -1 | 1) => {
+    if (!detail) return
+    const next = [...(detail.configuredModels || [])]
+    const target = index + offset
+    if (target < 0 || target >= next.length) return
+    ;[next[index], next[target]] = [next[target], next[index]]
+    void saveModels(next)
+  }
+
+  const selectedModelKeys = new Set(
+    (detail?.configuredModels || []).map((selection) =>
+      `${selection.providerId}\u0000${selection.model}`
+    )
+  )
 
   const renderMultiline = (text?: string) =>
     text
@@ -113,9 +171,11 @@ export default function SubAgentDetailModal({ type, onClose }: Props): React.Rea
                     <span className="sad-meta-value">{detail.maxLoops}</span>
                   </div>
                   <div className="sad-meta-item">
-                    <span className="sad-meta-label">默认模型</span>
+                    <span className="sad-meta-label">模型策略</span>
                     <span className="sad-meta-value">
-                      {detail.defaultModel || '跟随主 Agent'}
+                      {detail.configuredModels?.length
+                        ? `${detail.configuredModels.length} 个候选模型`
+                        : '跟随主 Agent'}
                     </span>
                   </div>
                   <div className="sad-meta-item">
@@ -131,6 +191,90 @@ export default function SubAgentDetailModal({ type, onClose }: Props): React.Rea
                     </span>
                   </div>
                 </div>
+
+                <section className="sad-section">
+                  <h4 className="sad-section-title">运行模型</h4>
+                  {detail.configuredModels?.length ? (
+                    <div className="sad-model-priority-list">
+                      {detail.configuredModels.map((selection, index) => {
+                        const provider = providers.find((item) => item.id === selection.providerId)
+                        return (
+                          <div
+                            key={`${selection.providerId}:${selection.model}`}
+                            className="sad-model-priority-item"
+                          >
+                            <span className="sad-model-priority-index">{index + 1}</span>
+                            <span className="sad-model-priority-name">
+                              {provider?.name || '未知 Provider'} / {selection.model}
+                            </span>
+                            <div className="sad-model-priority-actions">
+                              <Button
+                                variant="ghost"
+                                size="none"
+                                title="上移"
+                                disabled={savingModel || index === 0}
+                                onClick={() => handleMoveModel(index, -1)}
+                              >
+                                <IconChevronsUp />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="none"
+                                title="下移"
+                                disabled={savingModel || index === detail.configuredModels!.length - 1}
+                                onClick={() => handleMoveModel(index, 1)}
+                              >
+                                <IconChevronsDown />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="none"
+                                title="移除"
+                                disabled={savingModel}
+                                onClick={() => handleRemoveModel(index)}
+                              >
+                                <IconTrash />
+                              </Button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <p className="sad-text sad-muted">
+                      当前使用自动策略。
+                    </p>
+                  )}
+                  <select
+                    className="sad-model-select"
+                    value=""
+                    disabled={savingModel}
+                    onChange={(event) => handleAddModel(event.target.value)}
+                  >
+                    <option value="">添加候选模型...</option>
+                    {providers.map((provider) => (
+                      <optgroup key={provider.id} label={provider.name}>
+                        {provider.models.filter((model) =>
+                          !selectedModelKeys.has(`${provider.id}\u0000${model.name}`)
+                        ).map((model) => {
+                          const selection = JSON.stringify({
+                            providerId: provider.id,
+                            model: model.name
+                          })
+                          return (
+                            <option key={model.id} value={selection}>
+                              {model.name}
+                            </option>
+                          )
+                        })}
+                      </optgroup>
+                    ))}
+                  </select>
+                  <p className="sad-text sad-muted">
+                    按列表顺序使用首个可用模型；列表为空时跟随主 Agent。
+                  </p>
+                  {modelError && <p className="sad-model-error">{modelError}</p>}
+                </section>
 
                 {/* 描述 */}
                 <section className="sad-section">

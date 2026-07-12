@@ -35,7 +35,7 @@ export class SubAgentRunnerTool extends Tool {
       '- `description` is a short label (max 60 chars) shown in the execution log.',
       '- Use `expectations.questions` to specify what the subagent MUST answer — it will self-check against this list.',
       '- Use `context` to share what you already know (natural language) so the subagent does not duplicate work.',
-      '- Use `depth` to control exploration depth. Budgets are subagent-specific; Research uses quick (16 loops), normal (48 loops), exhaustive (96 loops), and defaults to 64 loops when omitted.',
+      '- Use `depth` to control exploration depth. Budgets are subagent-specific; Explore uses quick (8 loops), normal (16 loops), exhaustive (32 loops), and defaults to 24 loops when omitted.',
       '- If an interrupted or failed call returns `resume_subagent_id`, preserve its type, prompt, context, scope, expectations, and depth and pass that ID back to this tool. This resumes the same subagent history; do not inspect or redo its work first.',
       '- Interrupted and failed results include a structured `handoff` for the parent Agent: reason, last progress, files examined/modified, recent tools, and whether resume is available. Use it before deciding to resume or take over the remaining work yourself.',
       '- The subagent result is returned as the tool output; it includes structuredOutput, qualitySummary, and filesExamined.'
@@ -50,7 +50,7 @@ export class SubAgentRunnerTool extends Tool {
       properties: {
         subagent_type: {
           type: 'string',
-          enum: types.length > 0 ? types : ['Research'],
+          enum: types.length > 0 ? types : ['Explore'],
           description: 'The type of subagent to launch.'
         },
         description: {
@@ -104,7 +104,7 @@ export class SubAgentRunnerTool extends Tool {
         depth: {
           type: 'string',
           enum: ['quick', 'normal', 'exhaustive'],
-          description: 'Exploration depth. Research uses quick=16 loops, normal=48 loops, exhaustive=96 loops; omitted depth uses the subagent default. Use quick for simple lookups and exhaustive for full audits.'
+          description: 'Exploration depth. Explore uses quick=8 loops, normal=16 loops, exhaustive=32 loops; omitted depth uses the 24-loop default. Use quick for focused searches and exhaustive for broad codebase analysis.'
         },
         resume_subagent_id: {
           type: 'string',

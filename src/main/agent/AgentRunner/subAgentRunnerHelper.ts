@@ -150,6 +150,9 @@ export async function handleSubAgentRunnerSpawn(
         contextBuilder: config.contextBuilder,
         compactionService: config.compactionService,
         parentSignal,
+        permissionScope: def.allowShell
+          ? { allowBash: true, allowedWriteFiles: [] }
+          : undefined,
         apiConfig: {
           baseUrl: config.baseUrl || '',
           apiKey: config.apiKey || '',

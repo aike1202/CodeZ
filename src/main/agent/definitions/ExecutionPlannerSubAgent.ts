@@ -8,7 +8,7 @@ import type { ToolDefinition } from '../../../shared/types/provider'
  * 读批准的 Plan 全部步骤 → 分析文件依赖 + 逻辑依赖 → 输出并行执行波次
  * （waves）+ 隔离建议（isolation）+ 一句话理由（rationale）。
  *
- * 与 Plan / Research 正交：Plan 探索为出计划，Research 探索为返回发现，
+ * 与 Plan / Explore 正交：Plan 探索为出计划，Explore 探索为返回发现，
  * ExecutionPlanner 分析已批准计划为出并行编排方案。
  */
 export const ExecutionPlannerSubAgent: SubAgentDefinition = {

@@ -17,9 +17,11 @@ import type { AgentRunnerCallbacks } from './AgentRunner'
 import type {
   SubAgentDetail,
   SubAgentHandoff,
-  SubAgentHandoffTool
+  SubAgentHandoffTool,
+  SubAgentModelSelection
 } from '../../shared/types/subagent'
 import { allSubAgentDefinitions } from './definitions'
+import { resolveSubAgentModelContext } from './SubAgentModelResolver'
 import {
   generateSubmitResultTool,
   validateAgainstSpec,
@@ -193,7 +195,8 @@ export interface SubAgentDefinition {
   depthLoops?: Partial<Record<'quick' | 'normal' | 'exhaustive', number>>
   /** Reject a parsed structured result that does not meet agent-specific requirements. */
   validateStructuredOutput?: (output: SubAgentStructuredOutput) => string | undefined
-  defaultModel?: string
+  /** 是否向该子智能体开放 Shell；每次调用仍须通过统一权限策略。 */
+  allowShell?: boolean
   isolation?: 'none' | 'worktree'
   canRunInBackground?: boolean
   onBeforeSpawn?: (ctx: SubAgentContext) => Promise<void>
@@ -273,7 +276,7 @@ export function checkSubAgentToolPermission(
   workspaceRoot: string,
   scope: SubAgentPermissionScope | undefined
 ): string | null {
-  // 无 scope（只读子 Agent）：仅当调用了可写/终端工具才拒绝（它们本不该拿到这些工具）
+  // 无 scope（不含 Shell 的只读子 Agent）：可写和终端工具都不应出现在其工具集中。
   if (!scope) {
     if (WRITE_TOOL_NAMES.has(toolName) || SHELL_TOOL_NAMES.has(toolName)) {
       return `Tool '${toolName}' is not permitted for this subagent.`
@@ -580,6 +583,8 @@ export class SubAgentManager {
   private static activeChangeListeners = new Set<(sessionId: string) => void>()
   /** 被禁用的子智能体 type —— 不在此集合中即为启用 */
   private static disabledTypes = new Set<string>()
+  /** 用户为各子智能体配置的有序候选模型。 */
+  private static configuredModels = new Map<string, SubAgentModelSelection[]>()
 
   private static canonicalType(type: string): string {
     return this.aliases.get(type) || type
@@ -611,6 +616,10 @@ export class SubAgentManager {
   /** 设置被禁用的子智能体 type 集合（由 SettingsService 驱动） */
   static setDisabledTypes(types: string[]): void {
     this.disabledTypes = new Set(types)
+  }
+
+  static setConfiguredModels(models: Record<string, SubAgentModelSelection[]>): void {
+    this.configuredModels = new Map(Object.entries(models))
   }
 
   static isEnabled(type: string): boolean {
@@ -684,7 +693,6 @@ export class SubAgentManager {
       costHint: def.costHint,
       enabled: this.isEnabled(def.type),
       maxLoops: def.maxLoops,
-      defaultModel: def.defaultModel,
       isolation: def.isolation,
       canRunInBackground: def.canRunInBackground,
       tools,
@@ -722,6 +730,11 @@ export class SubAgentManager {
     if (!this.isEnabled(canonical)) {
       throw new Error(`SubAgent type '${type}' is disabled`)
     }
+    ctx = resolveSubAgentModelContext(
+      def,
+      ctx,
+      this.configuredModels.get(canonical) || this.configuredModels.get(type) || []
+    )
 
     const handleId = `subagent_${canonical}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
     // SubAgent 事件作用域标识 — 优先用调用方注入的（与父工具调用绑定），否则回退到 handleId

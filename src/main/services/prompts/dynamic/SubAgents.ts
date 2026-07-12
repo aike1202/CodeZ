@@ -9,7 +9,7 @@ export const SubAgentsModule: PromptModule = {
   build: () => {
     const defs = SubAgentManager.listEnabledDefinitions()
     if (defs.length === 0) return ''
-    const hasResearch = defs.some((def) => def.type === 'Research')
+    const hasExplore = defs.some((def) => def.type === 'Explore')
 
     const lines: string[] = []
     lines.push('<subagent_guidance>')
@@ -18,26 +18,19 @@ export const SubAgentsModule: PromptModule = {
     lines.push('| Situation | Action |')
     lines.push('|-----------|--------|')
     lines.push('| Single file/symbol lookup | Use Glob/Grep/Read directly |')
-    if (hasResearch) {
-      lines.push('| Manageable cross-file exploration | Explore directly with Glob/Grep/Read |')
-      lines.push('| Unknown answer requiring broad reading whose raw findings need not remain in parent context | Consider Research after checking all eligibility conditions below |')
+    if (hasExplore) {
+      lines.push('| Broad codebase exploration or deep research | Use Explore when direct search is insufficient |')
     }
     lines.push('| Multi-step implementation | Create a TaskGroup, then use DelegateTasks for independent tasks |')
-    if (hasResearch) {
-      lines.push('| User asks "analyze the project" | Identify specific unknown questions, then apply the same Research eligibility conditions |')
-    }
     lines.push('| Answer already in context | Do NOT delegate |')
     lines.push('')
-    if (hasResearch) {
-      lines.push('Research is a context-isolation mechanism. Use it only when ALL three conditions are true:')
-      lines.push('1. The needed answer does not exist in the conversation or parent Agent context.')
-      lines.push('2. Determining the answer reliably is expected to require broad exploration and reading many files.')
-      lines.push('3. Keeping those raw file contents in the parent context would be unnecessary; a concise evidence handoff is enough for the remaining work.')
-      lines.push('File count alone is never a trigger. If any condition is false or uncertain, investigate directly in the parent Agent.')
-      lines.push('- Never delegate content you just read, wrote, or generated.')
-      lines.push('- Never delegate merely to validate your own recent work; use targeted verification tools directly.')
-      lines.push('- When delegating, ask one bounded, self-contained question and include known context to prevent duplicate reading.')
-      lines.push('- The parent Agent remains responsible for integrating the findings and completing the user request.')
+    if (hasExplore) {
+      lines.push('Explore is a fast, read-only codebase search specialist:')
+      lines.push('- Prefer direct Glob, Grep, and Read calls for simple or directed lookups.')
+      lines.push('- Use Explore only after a simple directed search is insufficient, or when the task clearly needs more than a few dependent queries.')
+      lines.push('- Give Explore one self-contained question and include relevant known context so it does not repeat work.')
+      lines.push('- Choose quick, normal, or exhaustive depth to match the requested search breadth.')
+      lines.push('- Explore returns a concise plain-text report. The parent Agent remains responsible for interpreting it and completing the user request.')
       lines.push('')
     }
     lines.push('## Interrupted SubAgent handoff')

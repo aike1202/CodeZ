@@ -6,6 +6,26 @@ import { defaultSettings, defaultWebSearchSettings } from '../../shared/types/se
 
 const SETTINGS_FILE = 'settings.json'
 
+function normalizeSubAgentModels(
+  value: unknown
+): GeneralSettings['subAgentModels'] {
+  if (!value || typeof value !== 'object') return {}
+  const normalized: GeneralSettings['subAgentModels'] = {}
+  for (const [type, raw] of Object.entries(value)) {
+    const candidates = Array.isArray(raw) ? raw : [raw]
+    const valid = candidates.filter((candidate): candidate is { providerId: string; model: string } =>
+      Boolean(
+        candidate &&
+        typeof candidate === 'object' &&
+        typeof (candidate as any).providerId === 'string' &&
+        typeof (candidate as any).model === 'string'
+      )
+    )
+    if (valid.length > 0) normalized[type] = valid
+  }
+  return normalized
+}
+
 export class SettingsService {
   private filePath: string
   private cache: GeneralSettings
@@ -21,6 +41,7 @@ export class SettingsService {
       const parsed = JSON.parse(data)
       if (parsed) {
         this.cache = { ...defaultSettings, ...parsed }
+        this.cache.subAgentModels = normalizeSubAgentModels(parsed.subAgentModels)
         // 嵌套对象需深合并，避免旧配置缺字段
         this.cache.webSearch = {
           ...defaultWebSearchSettings,

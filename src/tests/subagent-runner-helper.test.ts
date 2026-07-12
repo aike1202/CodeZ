@@ -22,13 +22,13 @@ describe('SubAgentRunner result forwarding', () => {
     managerMock.getDefinition.mockReset()
     managerMock.listDefinitions.mockReset()
     managerMock.spawn.mockReset()
-    managerMock.getDefinition.mockReturnValue({ type: 'Research' })
-    managerMock.listDefinitions.mockReturnValue([{ type: 'Research' }])
+    managerMock.getDefinition.mockReturnValue({ type: 'Explore', allowShell: true })
+    managerMock.listDefinitions.mockReturnValue([{ type: 'Explore' }])
   })
 
   it('forwards a protocol failure to the parent as an error and a failed card state', async () => {
     managerMock.spawn.mockResolvedValue({
-      type: 'Research',
+      type: 'Explore',
       status: 'failed',
       output: 'SubAgent exhausted its run without submitting a valid structured result.',
       toolCallCount: 12,
@@ -41,7 +41,7 @@ describe('SubAgentRunner result forwarding', () => {
     const result = await handleSubAgentRunnerSpawn(
       'tool-1',
       JSON.stringify({
-        subagent_type: 'Research',
+        subagent_type: 'Explore',
         description: 'Investigate failure',
         prompt: 'Investigate the reported failure.',
       }),
@@ -65,11 +65,11 @@ describe('SubAgentRunner result forwarding', () => {
     const payload = JSON.parse(result.content)
     expect(payload).toMatchObject({
       ok: false,
-      data: { status: 'failed', subagent_type: 'Research' },
+      data: { status: 'failed', subagent_type: 'Explore' },
     })
     expect(payload.error).toContain('without submitting')
     expect(onSubAgentEnd).toHaveBeenCalledWith(
-      expect.stringMatching(/^subagent_Research_[0-9a-f]{16}_tool-1$/),
+      expect.stringMatching(/^subagent_Explore_[0-9a-f]{16}_tool-1$/),
       expect.objectContaining({ status: 'failed', toolCallCount: 12 })
     )
     expect(onToolEnd).toHaveBeenCalledWith('tool-1', result.content)
@@ -77,7 +77,7 @@ describe('SubAgentRunner result forwarding', () => {
 
   it('forwards an interruption with a machine-readable tool error', async () => {
     managerMock.spawn.mockResolvedValue({
-      type: 'Research',
+      type: 'Explore',
       status: 'interrupted',
       output: 'SubAgent execution was interrupted before completion.',
       toolCallCount: 2,
@@ -100,7 +100,7 @@ describe('SubAgentRunner result forwarding', () => {
     const result = await handleSubAgentRunnerSpawn(
       'tool-2',
       JSON.stringify({
-        subagent_type: 'Research',
+        subagent_type: 'Explore',
         description: 'Interrupted research',
         prompt: 'Investigate the project.'
       }),
@@ -124,7 +124,7 @@ describe('SubAgentRunner result forwarding', () => {
       error: { code: 'EXECUTION_INTERRUPTED' },
       data: {
         status: 'interrupted',
-        subagent_type: 'Research',
+        subagent_type: 'Explore',
         handoff: {
           reasonCode: 'parent_interrupted',
           filesModified: ['src/auth.ts'],
@@ -134,18 +134,18 @@ describe('SubAgentRunner result forwarding', () => {
       }
     })
     expect(JSON.parse(result.content).data.resume_subagent_id).toMatch(
-      /^subagent_Research_[0-9a-f]{16}_tool-2$/
+      /^subagent_Explore_[0-9a-f]{16}_tool-2$/
     )
   })
 
   it('resumes an interrupted subagent with the same durable identity', async () => {
     managerMock.spawn.mockResolvedValueOnce({
-      type: 'Research', status: 'interrupted', output: 'stopped', toolCallCount: 1, filesExamined: []
+      type: 'Explore', status: 'interrupted', output: 'stopped', toolCallCount: 1, filesExamined: []
     })
 
     const { handleSubAgentRunnerSpawn } = await import('../main/agent/AgentRunner/subAgentRunnerHelper')
     const commonArgs = {
-      subagent_type: 'Research',
+      subagent_type: 'Explore',
       description: 'Resume research',
       prompt: 'Investigate the project.',
       context: 'Authentication is already understood.',
@@ -164,7 +164,7 @@ describe('SubAgentRunner result forwarding', () => {
     const resumeSubAgentId = JSON.parse(interrupted.content).data.resume_subagent_id
 
     managerMock.spawn.mockResolvedValueOnce({
-      type: 'Research', status: 'completed', output: 'done', toolCallCount: 1, filesExamined: []
+      type: 'Explore', status: 'completed', output: 'done', toolCallCount: 1, filesExamined: []
     })
     await handleSubAgentRunnerSpawn(
       'tool-3',
@@ -177,13 +177,14 @@ describe('SubAgentRunner result forwarding', () => {
     )
 
     expect(managerMock.spawn).toHaveBeenCalledWith(
-      'Research',
+      'Explore',
       expect.objectContaining({
         subAgentId: resumeSubAgentId,
         resumeSubAgentId,
         providerId: 'provider-test',
         context: commonArgs.context,
-        scope: commonArgs.scope
+        scope: commonArgs.scope,
+        permissionScope: { allowBash: true, allowedWriteFiles: [] }
       }),
       expect.anything()
     )
@@ -194,7 +195,7 @@ describe('SubAgentRunner result forwarding', () => {
     const result = await handleSubAgentRunnerSpawn(
       'tool-4',
       JSON.stringify({
-        subagent_type: 'Research',
+        subagent_type: 'Explore',
         description: 'Invalid resume',
         prompt: 'Investigate the project.',
         resume_subagent_id: 'subagent_Executor_tool-2'
@@ -208,8 +209,9 @@ describe('SubAgentRunner result forwarding', () => {
 
     expect(JSON.parse(result.content)).toMatchObject({
       ok: false,
-      error: expect.stringContaining("invalid for subagent type 'Research'")
+      error: expect.stringContaining("invalid for subagent type 'Explore'")
     })
     expect(managerMock.spawn).not.toHaveBeenCalled()
   })
+
 })

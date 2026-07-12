@@ -39,8 +39,8 @@ describe('chat store sub-agent session restore', () => {
           streaming: true,
           subAgents: [
             {
-              id: 'subagent_Research_df42308184e13ef3_tool_1',
-              type: 'Research',
+              id: 'subagent_Explore_df42308184e13ef3_tool_1',
+              type: 'Explore',
               description: '分析项目进度',
               prompt: '请分析当前项目进度并汇总风险。',
               context: '只分析当前实现，不考虑旧版目录。',
@@ -84,7 +84,7 @@ describe('chat store sub-agent session restore', () => {
     ;(window as any).api.chat.getRuntimeStatus.mockResolvedValue({
       sessionId: 's1',
       mainRunnerActive: true,
-      activeSubAgentIds: ['subagent_Research_df42308184e13ef3_tool_1']
+      activeSubAgentIds: ['subagent_Explore_df42308184e13ef3_tool_1']
     })
     useChatStore.setState({
       sessions: [session as any],
@@ -125,7 +125,7 @@ describe('chat store sub-agent session restore', () => {
     expect(useChatStore.getState().pendingPrompt).toBeNull()
     expect(useChatStore.getState().pendingInternalContinuation).toMatchObject({ sessionId: 's1' })
     expect(useChatStore.getState().pendingInternalContinuation?.text).toContain(
-      '"resume_subagent_id":"subagent_Research_df42308184e13ef3_tool_1"'
+      '"resume_subagent_id":"subagent_Explore_df42308184e13ef3_tool_1"'
     )
     expect(useChatStore.getState().pendingInternalContinuation?.text).toContain(
       'Choose autonomously whether to finish the remaining work in the parent Agent or resume the same SubAgent'
@@ -157,7 +157,7 @@ describe('chat store sub-agent session restore', () => {
     await useChatStore.getState().selectSession('s1')
 
     expect(useChatStore.getState().pendingInternalContinuation?.text).toContain(
-      '"resume_subagent_id":"subagent_Research_df42308184e13ef3_tool_1"'
+      '"resume_subagent_id":"subagent_Explore_df42308184e13ef3_tool_1"'
     )
   })
 
@@ -174,8 +174,8 @@ describe('chat store sub-agent session restore', () => {
         content: '',
         streaming: true,
         subAgents: [{
-          id: 'subagent_Research_df42308184e13ef3_tool_2',
-          type: 'Research',
+          id: 'subagent_Explore_df42308184e13ef3_tool_2',
+          type: 'Explore',
           description: '分析项目进度',
           prompt: '请分析当前项目进度并汇总风险。',
           context: '只分析当前实现，不考虑旧版目录。',
@@ -226,7 +226,7 @@ describe('chat store sub-agent session restore', () => {
       '"reasonCode":"parent_delivery_missing"'
     )
     expect(useChatStore.getState().pendingInternalContinuation?.text).toContain(
-      '"resume_subagent_id":"subagent_Research_df42308184e13ef3_tool_2"'
+      '"resume_subagent_id":"subagent_Explore_df42308184e13ef3_tool_2"'
     )
   })
 })

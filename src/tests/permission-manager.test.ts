@@ -18,7 +18,7 @@ describe('PermissionManager', () => {
   it('recognizes a restricted subagent launch as read-only orchestration', async () => {
     const decision = await manager.evaluateToolCall(
       'SubAgentRunner',
-      { subagent_type: 'Research', prompt: 'inspect permissions' },
+      { subagent_type: 'Explore', prompt: 'inspect permissions' },
       context('auto')
     )
 
@@ -26,7 +26,7 @@ describe('PermissionManager', () => {
       action: 'allow',
       permission: 'read',
       ruleId: 'tool.subagent.restricted',
-      normalizedPattern: 'SubAgentRunner:Research'
+      normalizedPattern: 'SubAgentRunner:Explore'
     })
   })
 

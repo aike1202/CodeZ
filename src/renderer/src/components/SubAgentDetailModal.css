@@ -125,6 +125,81 @@
   color: var(--text-light);
 }
 
+.sad-model-select {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  font-size: 13px;
+}
+
+.sad-model-select:focus {
+  border-color: var(--primary-color);
+  outline: 2px solid color-mix(in srgb, var(--primary-color) 18%, transparent);
+}
+
+.sad-model-select:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.sad-model-priority-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sad-model-priority-item {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 36px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  background-color: var(--bg-app);
+}
+
+.sad-model-priority-index {
+  color: var(--text-light);
+  font-size: 12px;
+  text-align: center;
+}
+
+.sad-model-priority-name {
+  overflow: hidden;
+  color: var(--text-main);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sad-model-priority-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sad-model-priority-actions button {
+  width: 26px;
+  height: 26px;
+  color: var(--text-muted);
+}
+
+.sad-model-priority-actions svg {
+  width: 14px;
+  height: 14px;
+}
+
+.sad-model-error {
+  margin: 0;
+  color: var(--color-danger, #dc2626);
+  font-size: 12px;
+}
+
 /* Section */
 .sad-section {
   display: flex;

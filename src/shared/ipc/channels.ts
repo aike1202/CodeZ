@@ -132,5 +132,6 @@ export const IPC_CHANNELS = {
   // SubAgents
   SUBAGENT_LIST: 'subagent:list',
   SUBAGENT_TOGGLE: 'subagent:toggle',
-  SUBAGENT_GET_DETAIL: 'subagent:get-detail'
+  SUBAGENT_GET_DETAIL: 'subagent:get-detail',
+  SUBAGENT_SET_MODEL: 'subagent:set-model'
 } as const

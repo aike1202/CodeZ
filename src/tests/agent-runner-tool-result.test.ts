@@ -35,7 +35,7 @@ describe('AgentRunner tool result helpers', () => {
   it('受限 SubAgentRunner 不需要审批处理器', async () => {
     const result = await authorizeToolCall(
       'SubAgentRunner',
-      { subagent_type: 'Research', prompt: 'inspect permissions' },
+      { subagent_type: 'Explore', prompt: 'inspect permissions' },
       '/tmp/codez-workspace'
     )
 
@@ -73,7 +73,7 @@ describe('AgentRunner tool result helpers', () => {
     const approve = vi.fn().mockResolvedValue(true)
     const result = await authorizeToolCall(
       'SubAgentRunner',
-      { subagent_type: 'Research', prompt: 'inspect permissions' },
+      { subagent_type: 'Explore', prompt: 'inspect permissions' },
       '/tmp/codez-workspace',
       approve
     )

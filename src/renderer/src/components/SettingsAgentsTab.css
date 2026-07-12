@@ -126,6 +126,13 @@
   -webkit-box-orient: vertical;
 }
 
+.agents-item-model {
+  display: inline-block;
+  margin-top: 6px;
+  color: var(--text-light);
+  font-size: 11px;
+}
+
 .agents-item-actions {
   display: flex;
   align-items: center;

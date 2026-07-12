@@ -45,9 +45,9 @@ vi.mock('../main/agent/SubAgentManager', () => ({
   SubAgentManager: {
     listDefinitions: vi.fn().mockReturnValue([
       {
-        type: 'Research',
-        description: 'Read-only research agent.',
-        whenToUse: 'You need to explore a module.\nYou have a scoped question.',
+        type: 'Explore',
+        description: 'Fast read-only codebase exploration agent.',
+        whenToUse: 'A directed search is insufficient.\nThe task needs several dependent queries.',
         whenNotToUse: 'The answer is a single file lookup.',
         costHint: 'Up to 12 tool calls.'
       },
@@ -60,9 +60,9 @@ vi.mock('../main/agent/SubAgentManager', () => ({
     ]),
     listEnabledDefinitions: vi.fn().mockReturnValue([
       {
-        type: 'Research',
-        description: 'Read-only research agent.',
-        whenToUse: 'You need to explore a module.\nYou have a scoped question.',
+        type: 'Explore',
+        description: 'Fast read-only codebase exploration agent.',
+        whenToUse: 'A directed search is insufficient.\nThe task needs several dependent queries.',
         whenNotToUse: 'The answer is a single file lookup.',
         costHint: 'Up to 12 tool calls.'
       },
@@ -227,14 +227,12 @@ describe('SystemPromptService', () => {
     it('should contain delegation guidance', async () => {
       const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
       expect(prompt).toContain('subagent_guidance')
-      expect(prompt).toContain('Research is a context-isolation mechanism.')
-      expect(prompt).toContain('The needed answer does not exist in the conversation or parent Agent context.')
-      expect(prompt).toContain('expected to require broad exploration and reading many files')
-      expect(prompt).toContain('a concise evidence handoff is enough for the remaining work')
-      expect(prompt).toContain('File count alone is never a trigger.')
-      expect(prompt).toContain('Never delegate content you just read, wrote, or generated')
-      expect(prompt).not.toContain('Cross-cutting exploration (3+ files)')
-      expect(prompt).not.toContain('Delegate to Research — do NOT explore directly')
+      expect(prompt).toContain('Explore is a fast, read-only codebase search specialist:')
+      expect(prompt).toContain('Prefer direct Glob, Grep, and Read calls for simple or directed lookups.')
+      expect(prompt).toContain('after a simple directed search is insufficient')
+      expect(prompt).toContain('more than a few dependent queries')
+      expect(prompt).toContain('Explore returns a concise plain-text report.')
+      expect(prompt).not.toContain('Research is a context-isolation mechanism.')
       expect(prompt).toContain('Interrupted SubAgent handoff')
       expect(prompt).toContain('filesModified')
       expect(prompt).toContain('resume_subagent_id')

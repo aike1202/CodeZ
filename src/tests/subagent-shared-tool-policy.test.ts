@@ -69,7 +69,7 @@ describe('shared subagent tool policy', () => {
       SHARED_TOOL_USE_MODULES.map(module => module.build(promptContext)),
     )
 
-    for (const type of ['Research', 'ExecutionPlanner', 'Executor']) {
+    for (const type of ['Explore', 'ExecutionPlanner', 'Executor']) {
       const detail = await SubAgentManager.getDetail(type)
       expect(detail, `${type} definition`).toBeDefined()
       for (const section of sharedSections) {
@@ -91,7 +91,7 @@ describe('shared subagent tool policy', () => {
   it('keeps read-only subagents read-only after prompt sharing', async () => {
     const { SubAgentManager } = await import('../main/agent/SubAgentManager')
 
-    for (const type of ['Research', 'ExecutionPlanner']) {
+    for (const type of ['Explore', 'ExecutionPlanner']) {
       const detail = await SubAgentManager.getDetail(type)
       expect(detail?.tools).toContain('Read')
       expect(detail?.tools).not.toContain('Edit')
@@ -101,12 +101,12 @@ describe('shared subagent tool policy', () => {
 
   it('removes role-local read guidance that competes with the shared policy', async () => {
     const { SubAgentManager } = await import('../main/agent/SubAgentManager')
-    const research = await SubAgentManager.getDetail('Research')
+    const explore = await SubAgentManager.getDetail('Explore')
     const planner = await SubAgentManager.getDetail('ExecutionPlanner')
 
-    expect(research?.systemPrompt).toContain('using ONLY read-only tools')
-    expect(research?.systemPrompt).not.toContain('Read specific files/ranges')
-    expect(research?.systemPrompt).not.toContain('do not dump entire file contents')
+    expect(explore?.systemPrompt).toContain('Critical: Read-only mode')
+    expect(explore?.systemPrompt).not.toContain('Read specific files/ranges')
+    expect(explore?.systemPrompt).not.toContain('do not dump entire file contents')
 
     expect(planner?.systemPrompt).toContain('You have ONLY read-only tools')
     expect(planner?.systemPrompt).not.toContain('spot-check')
