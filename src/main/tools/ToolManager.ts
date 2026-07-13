@@ -16,7 +16,8 @@ import { TaskGetTool } from './builtin/TaskGetTool'
 import { TaskUpdateTool } from './builtin/TaskUpdateTool'
 import { TaskListTool } from './builtin/TaskListTool'
 import { DelegateTasksTool } from './builtin/DelegateTasksTool'
-import { SkillTool } from './builtin/SkillTool'
+import { ActivateSkillTool, SkillTool } from './builtin/SkillTool'
+import { DeactivateSkillTool } from './builtin/DeactivateSkillTool'
 import { RollbackLastEditTool } from './builtin/RollbackLastEditTool'
 import { UpdateResumeStateTool } from './builtin/UpdateResumeStateTool'
 import { WebSearchTool } from './builtin/WebSearchTool'
@@ -79,6 +80,8 @@ export class ToolManager {
       new McpAuthTool(),
       new AskUserQuestionTool(),
       new PushNotificationTool(),
+      new ActivateSkillTool(),
+      new DeactivateSkillTool(),
       new SkillTool(),
       new RollbackLastEditTool(),
       new UpdateResumeStateTool(),

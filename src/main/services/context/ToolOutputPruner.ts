@@ -24,7 +24,7 @@ export interface ToolOutputPruneResult {
   tokensAfter: number
 }
 
-const PROTECTED_TOOLS = new Set(['Skill'])
+const PROTECTED_TOOLS = new Set(['Skill', 'ActivateSkill', 'DeactivateSkill'])
 
 function isErrorResult(content: string): boolean {
   try {

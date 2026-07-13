@@ -66,7 +66,10 @@ export default function ExecutionLogDetail({
   }
 
   if (item.type === 'tool') {
-    if (item.toolName === 'Skill' || item.toolName === 'invoke_skill') {
+    if (
+      item.toolName === 'Skill' || item.toolName === 'ActivateSkill' ||
+      item.toolName === 'DeactivateSkill' || item.toolName === 'invoke_skill'
+    ) {
       const skillArgs = parseArgs(item.args || '')
       const skillName = String(skillArgs.skill || item.target || 'Skill')
       const rawInvocationArgs = skillArgs.args
@@ -75,7 +78,12 @@ export default function ExecutionLogDetail({
         : rawInvocationArgs !== undefined
           ? [['args', rawInvocationArgs] as [string, unknown]]
           : Object.entries(skillArgs).filter(([key]) => key !== 'skill')
-      const statusLabel = item.status === 'running' ? '调用中' : item.status === 'error' ? '调用失败' : '已完成'
+      const isDeactivation = item.toolName === 'DeactivateSkill'
+      const statusLabel = item.status === 'running'
+        ? (isDeactivation ? '停用中' : '调用中')
+        : item.status === 'error'
+          ? (isDeactivation ? '停用失败' : '调用失败')
+          : '已完成'
 
       return (
         <div className="exe-log-skill-card">
@@ -84,7 +92,9 @@ export default function ExecutionLogDetail({
               <IconSkills />
             </span>
             <div className="exe-log-skill-heading">
-              <span className="exe-log-skill-eyebrow">Skill invocation</span>
+              <span className="exe-log-skill-eyebrow">
+                {isDeactivation ? 'Skill deactivation' : 'Skill activation'}
+              </span>
               <strong className="exe-log-skill-name">{skillName}</strong>
             </div>
             <span className={`exe-log-skill-status is-${item.status}`}>

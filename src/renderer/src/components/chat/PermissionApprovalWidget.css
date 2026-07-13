@@ -1,4 +1,8 @@
 .permission-approval-float-card {
+  display: flex;
+  max-height: min(70dvh, 720px);
+  min-height: 0;
+  overflow: hidden;
   border: 1px solid var(--border-color);
   background: var(--bg-surface);
   backdrop-filter: blur(8px);
@@ -7,6 +11,22 @@
   padding: 12px 16px;
   border-radius: 12px;
   /* 关键修复：取消相对高度拉抬，通过外层 margin 控制 */
+}
+
+.permission-approval-stack {
+  flex: 1;
+  min-height: 0;
+}
+
+.permission-approval-list {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 [data-theme='dark'] .permission-approval-float-card {
@@ -38,6 +58,7 @@
 }
 
 .permission-approval-title {
+  flex: 0 0 auto;
   color: var(--text-primary);
   font-size: 13px;
 }
@@ -47,6 +68,7 @@
 }
 
 .permission-approval-float-item {
+  flex: 0 0 auto;
   padding: 10px 12px;
   border-radius: 6px;
   border: 1px solid var(--border-color);
@@ -100,6 +122,9 @@
 }
 
 .permission-approval-float-details {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px dashed var(--border-color);
@@ -109,10 +134,17 @@
   border-top-color: rgba(255, 255, 255, 0.1);
 }
 
-.permission-approval-float-details pre {
-  margin: 0;
-  max-height: 160px;
+.permission-approval-detail-scroll {
+  max-height: clamp(96px, 22dvh, 220px);
+  min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+  scrollbar-gutter: stable;
+}
+
+.permission-approval-detail-scroll pre {
+  margin: 0;
   padding: 10px;
   border-radius: 6px;
   background: #f1f5f9;
@@ -122,13 +154,15 @@
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
-[data-theme='dark'] .permission-approval-float-details pre {
+[data-theme='dark'] .permission-approval-detail-scroll pre {
   background: rgba(2, 6, 23, 0.6);
   color: #cbd5e1;
 }
 
 .permission-approval-actions {
+  padding-top: 8px;
   margin-top: 8px;
+  border-top: 1px solid var(--border-color);
   flex-shrink: 0;
 }
 

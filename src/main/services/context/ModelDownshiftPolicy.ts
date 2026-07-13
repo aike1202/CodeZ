@@ -9,6 +9,10 @@ import { ResumeStateManager } from './ResumeStateManager'
 import { FileContextProjector } from './FileContextProjector'
 import { FileContextRestorer } from './FileContextRestorer'
 import { SkillContextRestorer } from './SkillContextRestorer'
+import {
+  activeSessionSkillNames,
+  renderSessionSkillStateContext
+} from './SessionSkillState'
 import { ProviderMessageAdapter } from '../chat/ProviderMessageAdapter'
 import { buildModelContextItems } from './ModelContextBuilder'
 import {
@@ -52,8 +56,11 @@ export async function evaluateModelDownshiftCompaction(input: {
   })
   const skillContext = new SkillContextRestorer(budgetService).reconcile({
     context: scope.postCompactionSkillContext,
-    messages: scope.activeMessages
+    messages: scope.activeMessages,
+    activeSkillNames: activeSessionSkillNames(scope.skillStates),
+    activeSkills: scope.skillStates
   })
+  const sessionSkillState = renderSessionSkillStateContext(scope.skillStates)
   const resume = scope.resumeState && scope.resumeState.revision !== scope.latestCompactionResumeRevision
     ? new ResumeStateManager().renderBounded(scope.resumeState)
     : ''
@@ -72,6 +79,7 @@ export async function evaluateModelDownshiftCompaction(input: {
     summary,
     resume,
     skillContext,
+    sessionSkillState,
     fileContext,
     currentInputMessageId: anchorTurnInput?.id || '',
     history: projectedMessages
@@ -127,6 +135,7 @@ export async function evaluateModelDownshiftCompaction(input: {
       ...(input.instructions || []),
       ...(resume ? [resume] : []),
       ...(skillContext ? [skillContext.content] : []),
+      ...(sessionSkillState ? [sessionSkillState] : []),
       ...(fileContext ? [fileContext.content] : [])
     ],
     summary,

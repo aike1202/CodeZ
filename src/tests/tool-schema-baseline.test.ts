@@ -21,7 +21,7 @@ describe('V1/V2 tool schema baseline', () => {
       }))
       .sort((a, b) => a.name.localeCompare(b.name))
     expect(baseline.map((item) => item.name)).toEqual(V1_TOOL_NAMES)
-    expect(fingerprint(baseline)).toBe('c9758968773d556ed9c93b48185323e16048a60f209164601142d695262a7bf4')
+    expect(fingerprint(baseline)).toBe('3afdad78b1ef46581fee03944f48a7c6c24662d28687cc0c59b84be5cdbba790')
   })
 
   it('records a comparable default eager-schema budget', () => {
@@ -39,5 +39,12 @@ describe('V1/V2 tool schema baseline', () => {
     })
     expect(v2Bytes).toBeLessThan(v1Bytes)
     expect(1 - v2Bytes / v1Bytes).toBeGreaterThanOrEqual(0.2)
+  })
+
+  it('exposes session skill lifecycle tools while retaining the legacy Skill tool', () => {
+    const names = new Set(new ToolManager().createCatalogSnapshot().descriptors.map((tool) => tool.name))
+    expect(names.has('ActivateSkill')).toBe(true)
+    expect(names.has('DeactivateSkill')).toBe(true)
+    expect(names.has('Skill')).toBe(true)
   })
 })

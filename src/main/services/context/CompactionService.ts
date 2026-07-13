@@ -15,6 +15,11 @@ import { ModelHistoryNormalizer } from './ModelHistoryNormalizer'
 import { ModelLedgerStore } from './ModelLedgerStore'
 import { ToolOutputPruner } from './ToolOutputPruner'
 import { SkillContextRestorer } from './SkillContextRestorer'
+import {
+  activeSessionSkillNames,
+  deriveSessionSkillStates,
+  renderSessionSkillStateContext
+} from './SessionSkillState'
 
 export interface CompactionRequest {
   sessionId: string
@@ -87,14 +92,18 @@ export class CompactionService {
       const sourceHistoryVersion = scope.historyVersion
       const currentSkillContext = this.skillRestorer.reconcile({
         context: scope.postCompactionSkillContext,
-        messages: scope.activeMessages
+        messages: scope.activeMessages,
+        activeSkillNames: activeSessionSkillNames(scope.skillStates),
+        activeSkills: scope.skillStates
       })
+      const sessionSkillState = renderSessionSkillStateContext(scope.skillStates)
       const tokensBefore = this.measure(
         request,
         scope.activeMessages,
         scope.latestCompaction ? renderCompactionSummary(scope.latestCompaction) : '',
         sourceHistoryVersion,
         currentSkillContext?.content,
+        sessionSkillState,
         scope.postCompactionFileContext?.content
       ).totalInputTokens
       const baseTailBudget = this.budget.recentTailBudget(
@@ -241,20 +250,25 @@ export class CompactionService {
         request,
         retainedMessages,
         renderedSummary,
-        sourceHistoryVersion
+        sourceHistoryVersion,
+        undefined,
+        sessionSkillState
       ).totalInputTokens
       const restoredSkillContext = this.skillRestorer.restore({
         messages: scope.activeMessages,
         retainedTail: retainedMessages,
         existing: scope.postCompactionSkillContext,
-        maxTotalTokens: Math.max(0, restoreTarget - bareTokensAfter)
+        maxTotalTokens: Math.max(0, restoreTarget - bareTokensAfter),
+        activeSkillNames: activeSessionSkillNames(scope.skillStates),
+        activeSkills: scope.skillStates
       })
       const baseTokensAfter = this.measure(
         request,
         retainedMessages,
         renderedSummary,
         sourceHistoryVersion,
-        restoredSkillContext?.content
+        restoredSkillContext?.content,
+        sessionSkillState
       ).totalInputTokens
       const restoredFileContext = await this.fileRestorer.restore({
         messages: scope.activeMessages,
@@ -270,6 +284,7 @@ export class CompactionService {
         renderedSummary,
         sourceHistoryVersion,
         restoredSkillContext?.content,
+        sessionSkillState,
         restoredFileContext?.content
       ).totalInputTokens
       if (tokensAfter > limits.hardInputLimit) {
@@ -288,6 +303,11 @@ export class CompactionService {
       }
 
       const sourceHash = createHash('sha256').update(JSON.stringify(head)).digest('hex')
+      const postCompactionSkillStates = deriveSessionSkillStates({
+        initial: scope.postCompactionSkillStates,
+        postCompaction: scope.postCompactionSkillContext,
+        messages: head
+      })
       const completed = await this.ledger.appendIfHistoryVersion(
         request.sessionId,
         request.contextScopeId,
@@ -305,7 +325,9 @@ export class CompactionService {
           resumeState: scope.resumeState,
           activeMessages: retainedMessages,
           postCompactionFileContext: restoredFileContext,
-          postCompactionSkillContext: restoredSkillContext
+          postCompactionSkillContext: restoredSkillContext,
+          skillStates: scope.skillStates?.map((skill) => ({ ...skill })),
+          postCompactionSkillStates
         }
       )
       if (!completed) {
@@ -348,6 +370,7 @@ export class CompactionService {
     summary: string,
     historyVersion: number,
     skillContext?: string,
+    sessionSkillState?: string,
     fileContext?: string
   ) {
     return this.budget.measureRequest({
@@ -357,6 +380,7 @@ export class CompactionService {
       instructions: [
         ...(request.instructions || []),
         ...(skillContext ? [skillContext] : []),
+        ...(sessionSkillState ? [sessionSkillState] : []),
         ...(fileContext ? [fileContext] : [])
       ],
       summary,

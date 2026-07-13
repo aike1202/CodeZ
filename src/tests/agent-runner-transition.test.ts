@@ -1,24 +1,24 @@
 import { describe, expect, it } from 'vitest'
-import { resolveAgentTransition } from '../main/agent/AgentRunner'
+import { resolveAgentTransition, updateConsecutiveIdleTurns } from '../main/agent/AgentRunner'
 import { TransitionEvent } from '../main/agent/AgentRunner/LoopStateMachine'
 
 describe('AgentRunner transition resolution', () => {
-  it('completes when the assistant stops despite pending tasks', () => {
+  it.each(['stop', 'length'] as const)('continues active tasks after a text-only %s response', (stopReason) => {
     const transition = resolveAgentTransition({
       toolCallCount: 0,
       isVerificationFailure: false,
       verificationRetryCount: 0,
       maxVerificationRetries: 3,
-      consecutiveIdleTurns: 0,
-      stopReason: 'stop',
+      consecutiveIdleTurns: 1,
+      stopReason,
       hasPendingTasks: true,
-      assistantContent: '请确认一下：代码是否在别的目录？'
+      assistantContent: '继续处理剩余任务。'
     })
 
-    expect(transition).toBe(TransitionEvent.Completed)
+    expect(transition).toBe(TransitionEvent.SchedulerContinue)
   })
 
-  it('does not auto-continue pending work when the assistant stops', () => {
+  it('completes a text-only response when no active task remains', () => {
     const transition = resolveAgentTransition({
       toolCallCount: 0,
       isVerificationFailure: false,
@@ -26,8 +26,8 @@ describe('AgentRunner transition resolution', () => {
       maxVerificationRetries: 3,
       consecutiveIdleTurns: 0,
       stopReason: 'stop',
-      hasPendingTasks: true,
-      assistantContent: '我会继续检查当前工作区附近查找项目文件。'
+      hasPendingTasks: false,
+      assistantContent: '全部完成。'
     })
 
     expect(transition).toBe(TransitionEvent.Completed)
@@ -48,18 +48,69 @@ describe('AgentRunner transition resolution', () => {
     expect(transition).toBe(TransitionEvent.ToolExecuted)
   })
 
-  it('completes truncated output instead of injecting an auto-continue prompt', () => {
+  it('pauses after three unchanged idle turns with active tasks', () => {
     const transition = resolveAgentTransition({
       toolCallCount: 0,
       isVerificationFailure: false,
       verificationRetryCount: 0,
       maxVerificationRetries: 3,
-      consecutiveIdleTurns: 0,
-      stopReason: 'length',
+      consecutiveIdleTurns: 3,
+      stopReason: 'stop',
       hasPendingTasks: true,
-      assistantContent: 'partial response'
+      assistantContent: '仍在处理。'
     })
 
-    expect(transition).toBe(TransitionEvent.Completed)
+    expect(transition).toBe(TransitionEvent.MaxIdleReached)
+  })
+
+  it('pauses when the repeated tool failure guard is reached', () => {
+    const transition = resolveAgentTransition({
+      toolCallCount: 1,
+      isVerificationFailure: false,
+      verificationRetryCount: 0,
+      maxVerificationRetries: 3,
+      consecutiveIdleTurns: 0,
+      repeatedFailureLimitReached: true,
+      hasPendingTasks: true
+    })
+
+    expect(transition).toBe(TransitionEvent.RepeatedFailure)
+  })
+
+  it('keeps verification retries ahead of active-task continuation', () => {
+    const transition = resolveAgentTransition({
+      toolCallCount: 0,
+      isVerificationFailure: true,
+      verificationRetryCount: 1,
+      maxVerificationRetries: 3,
+      consecutiveIdleTurns: 1,
+      hasPendingTasks: true
+    })
+
+    expect(transition).toBe(TransitionEvent.RetryRequested)
+  })
+})
+
+describe('AgentRunner idle progress tracking', () => {
+  it('counts text-only turns with unchanged active tasks', () => {
+    expect(updateConsecutiveIdleTurns({
+      previous: 1,
+      toolCallCount: 0,
+      hasPendingTasks: true,
+      taskStatusChanged: false,
+      hadSuccessfulToolExecution: false
+    })).toBe(2)
+  })
+
+  it.each([
+    { taskStatusChanged: true, hadSuccessfulToolExecution: false, hasPendingTasks: true },
+    { taskStatusChanged: false, hadSuccessfulToolExecution: true, hasPendingTasks: true },
+    { taskStatusChanged: false, hadSuccessfulToolExecution: false, hasPendingTasks: false }
+  ])('resets idle turns when observable progress occurs (%o)', (progress) => {
+    expect(updateConsecutiveIdleTurns({
+      previous: 2,
+      toolCallCount: progress.hadSuccessfulToolExecution ? 1 : 0,
+      ...progress
+    })).toBe(0)
   })
 })

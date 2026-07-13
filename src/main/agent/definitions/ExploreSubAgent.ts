@@ -93,6 +93,7 @@ export const ExploreSubAgent: SubAgentDefinition = {
     'A direct Glob, Grep, or Read call can answer the question quickly.',
     'The answer is already available in the parent context.',
     'The task requires modifying files, implementing changes, or running state-changing commands.',
+    'The task is to review or verify completed changes; use Reviewer instead.',
   ].join('\n'),
   costHint: 'Uses configured candidate models and otherwise follows the main Agent. Budgets: quick 8, normal 16, default 24, exhaustive 32 loops.',
 

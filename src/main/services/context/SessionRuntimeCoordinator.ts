@@ -4,6 +4,7 @@ import type {
   FileContextReference,
   NormalizedModelMessage,
   NormalizedToolCall,
+  SkillStateUpdatedPayload,
   VersionedResumeState
 } from '../../../shared/types'
 import type { AgentStopReason, ProviderTokenUsage } from '../../../shared/types/provider'
@@ -154,6 +155,20 @@ export class SessionRuntimeCoordinator {
   async recordResumeState(handle: RuntimeTurnHandle, resumeState: VersionedResumeState): Promise<void> {
     const turn = this.requireActive(handle)
     await this.ledger.append(turn.sessionId, turn.contextScopeId, 'resume_state_updated', { resumeState }, turn.turnId)
+  }
+
+  async updateSkillState(
+    handle: RuntimeTurnHandle,
+    state: SkillStateUpdatedPayload
+  ): Promise<void> {
+    const turn = this.requireActive(handle)
+    await this.ledger.append(
+      turn.sessionId,
+      turn.contextScopeId,
+      'skill_state_updated',
+      state,
+      turn.turnId
+    )
   }
 
   async recordUserContinuation(

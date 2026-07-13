@@ -1,7 +1,11 @@
 import type { StateCreator } from 'zustand'
 import type { ChatMessage, ChatState, ChatSession } from '../types'
 import { useWorkspaceStore } from '../../workspaceStore'
-import type { SubAgentHandoff, SubAgentHandoffTool } from '../../../../../shared/types/subagent'
+import type {
+  SessionRuntimeStatus,
+  SubAgentHandoff,
+  SubAgentHandoffTool
+} from '../../../../../shared/types/subagent'
 import type { QueuedPrompt } from '../../../../../shared/types/queuedPrompt'
 
 function genId(): string {
@@ -13,6 +17,10 @@ let _selectSessionSeq = 0
 
 function hasUnfinishedTasks(tasks: Array<{ status: string }> | undefined): boolean {
   return Boolean(tasks?.some((task) => task.status === 'pending' || task.status === 'in_progress'))
+}
+
+function inactiveRuntimeStatus(sessionId: string): SessionRuntimeStatus {
+  return { sessionId, mainRunnerActive: false, activeSubAgentIds: [] }
 }
 
 const normalizeMessage = (message: ChatMessage): ChatMessage => ({
@@ -162,30 +170,6 @@ function buildRecoveredSubAgentHandoff(
   }
 }
 
-function buildSubAgentInterruptedContinuation(subAgents: any[]): string {
-  const resumable = subAgents
-    .filter((sub) => sub?.result?.handoff && typeof sub.id === 'string')
-    .map((sub) => ({
-      resume_subagent_id: sub.result.handoff.canResume ? sub.id : undefined,
-      subagent_type: sub.type,
-      description: sub.description,
-      prompt: sub.prompt,
-      context: sub.context,
-      scope: sub.scope,
-      depth: sub.depth,
-      expectations: sub.expectations,
-      handoff: sub.result?.handoff || buildRecoveredSubAgentHandoff(sub)
-    }))
-  return [
-    'The SubAgent handoffs below may not have been delivered to the parent Agent before the runtime disappeared.',
-    'Use each structured handoff to understand the interruption reason, completed work, files examined or modified, and recent tool outcomes.',
-    'Choose autonomously whether to finish the remaining work in the parent Agent or resume the same SubAgent with the exact resume_subagent_id and original arguments.',
-    'Do not repeat completed work. Treat filesModified as confirmed changes; inspect filesPossiblyModified and the workspace first when side effects may have been interrupted or workspaceMayHaveUntrackedChanges is true.',
-    'Continue the existing user request without asking the user to reconstruct the lost context.',
-    JSON.stringify(resumable)
-  ].join(' ')
-}
-
 export function interruptPendingRequests(
   messages: ChatMessage[],
   runtimeStatus: { sessionId: string; mainRunnerActive: boolean; activeSubAgentIds: string[] }
@@ -216,15 +200,23 @@ export function interruptPendingRequests(
 function healInterruptedSubAgents(messages: any[]): {
   messages: any[]
   changed: boolean
-  continuationText?: string
 } {
   let changed = false
+  const interruptMessage = (message: any, subAgents = message.subAgents) => ({
+    ...message,
+    streaming: false,
+    streamPhase: undefined,
+    responseWaitWarning: undefined,
+    interrupted: true,
+    executionStatus: 'interrupted',
+    ...(Array.isArray(subAgents) ? { subAgents } : {})
+  })
   const healedMessages = messages.map((message) => {
     const subAgents = message.subAgents
     if (!Array.isArray(subAgents)) {
       if (!message.streaming) return message
       changed = true
-      return { ...message, streaming: false, interrupted: true }
+      return interruptMessage(message)
     }
 
     const hasRunningSubAgent = subAgents.some((sub: any) => sub.status === 'running')
@@ -236,7 +228,7 @@ function healInterruptedSubAgents(messages: any[]): {
     if (!hasRunningSubAgent && !hasUndeliveredTerminalSubAgent) {
       if (!message.streaming) return message
       changed = true
-      return { ...message, streaming: false, interrupted: true }
+      return interruptMessage(message)
     }
 
     changed = true
@@ -272,45 +264,12 @@ function healInterruptedSubAgents(messages: any[]): {
       }
       return sub
     })
-    return {
-      ...message,
-      streaming: false,
-      interrupted: true,
-      subAgents: healedSubAgents
-    }
+    return interruptMessage(message, healedSubAgents)
   })
-
-  const latestById = new Map<string, { subAgent: any; messageIndex: number }>()
-  let lastCompletedParentIndex = -1
-  for (let messageIndex = 0; messageIndex < healedMessages.length; messageIndex++) {
-    const message = healedMessages[messageIndex]
-    if (
-      message.role === 'agent' &&
-      message.executionStatus === 'completed' &&
-      !message.interrupted
-    ) {
-      lastCompletedParentIndex = messageIndex
-    }
-    for (const subAgent of message.subAgents || []) {
-      if (typeof subAgent?.id === 'string') {
-        latestById.set(subAgent.id, { subAgent, messageIndex })
-      }
-    }
-  }
-  const resumableSubAgents = Array.from(latestById.values())
-    .filter(({ subAgent, messageIndex }) =>
-      messageIndex > lastCompletedParentIndex &&
-      Boolean(subAgent.result?.handoff) &&
-      ['runtime_missing', 'parent_delivery_missing'].includes(subAgent.interruptionReason)
-    )
-    .map(({ subAgent }) => subAgent)
 
   return {
     messages: healedMessages,
-    changed,
-    continuationText: resumableSubAgents.length > 0
-      ? buildSubAgentInterruptedContinuation(resumableSubAgents)
-      : undefined
+    changed
   }
 }
 
@@ -396,12 +355,14 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     // 优先从主进程获取最新数据，避免使用内存中的旧快照
     try {
       const runtimeStatusPromise = window.api.chat?.getRuntimeStatus
-        ? window.api.chat.getRuntimeStatus(sessionId)
-        : Promise.resolve({
-            sessionId,
-            mainRunnerActive: true,
-            activeSubAgentIds: []
+        ? window.api.chat.getRuntimeStatus(sessionId).catch((error) => {
+            console.warn(
+              '[sessionSlice.selectSession] Runtime status unavailable; restoring as interrupted:',
+              error
+            )
+            return inactiveRuntimeStatus(sessionId)
           })
+        : Promise.resolve(inactiveRuntimeStatus(sessionId))
       const [freshSession, runtimeStatus] = await Promise.all([
         window.api.session.get(sessionId),
         runtimeStatusPromise
@@ -423,7 +384,7 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
           ? cachedMessages
           : freshMessages
         const healed = runtimeActive
-          ? { messages: sourceMessages, changed: false, continuationText: undefined }
+          ? { messages: sourceMessages, changed: false }
           : healInterruptedSubAgents(sourceMessages)
         const interruptedRequests = interruptPendingRequests(healed.messages, runtimeStatus)
         const normalizedFreshSession = normalizeSession(freshSession as ChatSession)
@@ -452,14 +413,6 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
         })
         if (healed.changed || interruptedRequests.changed) {
           await window.api.session.save(healedSession)
-        }
-        if (healed.continuationText && seq === _selectSessionSeq && get().activeSessionId === sessionId) {
-          set({
-            pendingInternalContinuation: {
-              sessionId,
-              text: healed.continuationText
-            }
-          })
         }
         if (freshSession.linkedPlanSlug) {
           try {

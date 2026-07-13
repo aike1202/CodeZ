@@ -3,7 +3,7 @@ import { TaskStore } from '../../services/TaskStore'
 import { WorktreeService } from '../../services/WorktreeService'
 import type { AgentRunConfig, AgentRunnerCallbacks } from './types'
 import type { ExecUnit, ExecutionGroupingResult, ExecutionWave, ParallelExecutionReport } from '../../../shared/types/parallel'
-import type { TaskItem, TaskStatus } from '../../../shared/types/task'
+import type { TaskItem } from '../../../shared/types/task'
 import type { EditTransactionService } from '../../services/EditTransactionService'
 
 export function resolveDelegateIsolation(
@@ -61,7 +61,7 @@ export function collectDelegatedTerminalTasks(
  * DelegateTasks 工具的拦截处理。
  *
  * 读取会话 Task → 映射为 ExecUnit → 调解耦后的 orchestrator 跑 Worker →
- * 通过 onStatusChange 把状态写回 TaskStore（内存）→ 返回报告给主 Agent。
+ * ExecutionController 事件实时投影回 TaskStore → 返回报告给主 Agent。
  */
 export async function handleDelegateTasks(
   toolCallId: string,
@@ -232,14 +232,9 @@ export async function handleDelegateTasks(
       isolation,
       {
         source: `task:${sessionId}`,
-        onStatusChange: (unitId, status) => {
-          const taskStatus: TaskStatus = status === 'in_progress'
-            ? 'in_progress'
-            : status === 'completed'
-              ? 'completed'
-              : 'pending'
-          store.setStatuses(sessionId, [{ id: unitId, status: taskStatus }])
-        },
+        // TaskStore subscribes to ExecutionController and receives per-Executor
+        // transitions. Wave-level hooks would incorrectly mark queued tasks running.
+        onStatusChange: () => undefined,
       },
       {
         workspaceRoot: config.workspaceRoot,

@@ -176,7 +176,19 @@ describe('TaskStore persistence', () => {
       { subject: 'Second task' }
     ])
     store.update('s1', 't1', { status: 'in_progress' })
-    store.update('s1', 't2', { status: 'completed' })
+    store.update('s1', 't2', {
+      status: 'completed',
+      executorRuntime: {
+        executionId: 'exec-old',
+        executionCreatedAt: 1,
+        executorId: 'executor-old',
+        waveIndex: 0,
+        isolation: 'shared',
+        status: 'completed',
+        attemptCount: 1,
+        updatedAt: 2,
+      }
+    })
 
     const tool = new TaskUpdateTool()
     const result = JSON.parse(await tool.execute(JSON.stringify({ taskId: 't2', status: 'in_progress' }), {
@@ -186,6 +198,7 @@ describe('TaskStore persistence', () => {
 
     expect(result.ok).toBe(false)
     expect(store.getById('s1', 't2')?.status).toBe('completed')
+    expect(store.getById('s1', 't2')?.executorRuntime?.executionId).toBe('exec-old')
   })
 
   it('clears persisted session tasks when the task list is cleared', async () => {

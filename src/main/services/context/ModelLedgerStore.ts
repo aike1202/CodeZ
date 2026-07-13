@@ -12,6 +12,11 @@ import {
   type SessionRuntimeSnapshot
 } from '../../../shared/types/context'
 import { atomicWriteFile, atomicWriteJson } from './atomicFile'
+import {
+  applyMessageToSessionSkillStates,
+  deriveSessionSkillStates,
+  upsertSessionSkillState
+} from './SessionSkillState'
 
 export interface LoadedSessionRuntime extends SessionRuntimeSnapshot {
   warnings: string[]
@@ -59,6 +64,11 @@ function applyEvent(state: LoadedSessionRuntime, event: AnyLedgerEvent): void {
       scope.lastProviderId = event.payload.providerId || scope.lastProviderId
       scope.lastModel = event.payload.model || scope.lastModel
       scope.activeMessages.push({ ...event.payload.message, sourceSequence: event.sequence })
+      scope.skillStates = applyMessageToSessionSkillStates(
+        scope.skillStates,
+        scope.activeMessages,
+        scope.activeMessages.at(-1)!
+      )
       break
     case 'assistant_message':
       scope.activeMessages.push({ ...event.payload.message, sourceSequence: event.sequence })
@@ -75,6 +85,19 @@ function applyEvent(state: LoadedSessionRuntime, event: AnyLedgerEvent): void {
       break
     case 'tool_result':
       scope.activeMessages.push({ ...event.payload.message, sourceSequence: event.sequence })
+      scope.skillStates = applyMessageToSessionSkillStates(
+        scope.skillStates,
+        scope.activeMessages,
+        scope.activeMessages.at(-1)!
+      )
+      break
+    case 'skill_state_updated':
+      scope.skillStates = upsertSessionSkillState(scope.skillStates, {
+        ...event.payload,
+        updatedAt: event.createdAt,
+        updatedSequence: event.sequence
+      })
+      clearProviderUsage(scope)
       break
     case 'turn_completed':
       scope.lastCompletedTurnId = event.turnId
@@ -107,8 +130,15 @@ function applyEvent(state: LoadedSessionRuntime, event: AnyLedgerEvent): void {
             ...event.payload.postCompactionSkillContext,
             skills: event.payload.postCompactionSkillContext.skills.map((skill) => ({ ...skill })),
             sourceSequence: event.sequence
-          }
+        }
         : undefined
+      if (event.payload.skillStates) {
+        scope.skillStates = event.payload.skillStates.map((skill) => ({ ...skill }))
+      }
+      scope.postCompactionSkillStates = (
+        event.payload.postCompactionSkillStates || event.payload.skillStates || scope.skillStates || []
+      )
+        .map((skill) => ({ ...skill }))
       scope.resumeState = event.payload.resumeState || scope.resumeState
       scope.latestCompactionResumeRevision = event.payload.resumeState?.revision
       clearProviderUsage(scope)
@@ -121,6 +151,8 @@ function applyEvent(state: LoadedSessionRuntime, event: AnyLedgerEvent): void {
       scope.latestCompaction = event.payload.summary
       delete scope.postCompactionFileContext
       delete scope.postCompactionSkillContext
+      delete scope.skillStates
+      delete scope.postCompactionSkillStates
       scope.legacyImport = {
         sourceHash: event.payload.sourceHash,
         mode: event.payload.mode,
@@ -130,6 +162,13 @@ function applyEvent(state: LoadedSessionRuntime, event: AnyLedgerEvent): void {
       break
     case 'history_reverted': {
       scope.activeMessages = event.payload.activeMessages.map((message) => ({ ...message }))
+      scope.skillStates = event.payload.skillStates
+        ? event.payload.skillStates.map((skill) => ({ ...skill }))
+        : deriveSessionSkillStates({
+            initial: scope.postCompactionSkillStates,
+            postCompaction: scope.postCompactionSkillContext,
+            messages: scope.activeMessages
+          })
       const latest = scope.activeMessages.at(-1)
       scope.lastCompletedTurnId = latest?.turnId
       delete scope.lastInterruptedTurnId
@@ -296,7 +335,12 @@ export class ModelLedgerStore {
             toolCalls: message.toolCalls?.map((call) => ({ ...call })),
             attachments: message.attachments?.map((attachment) => ({ ...attachment })),
             fileReferences: message.fileReferences?.map((reference) => ({ ...reference }))
-          }))
+          })),
+          skillStates: deriveSessionSkillStates({
+            initial: scope.postCompactionSkillStates,
+            postCompaction: scope.postCompactionSkillContext,
+            messages: scope.activeMessages.slice(0, targetIndex)
+          })
         }
       }
     })
@@ -364,6 +408,16 @@ export class ModelLedgerStore {
       const expectedVersion = scope.historyVersion + (eventChangesHistory(event.type) ? 1 : 0)
       if (event.historyVersion !== expectedVersion) throw new Error('LEDGER_CORRUPTED: invalid history version')
       applyEvent(state, event)
+    }
+
+    for (const scope of Object.values(state.scopes)) {
+      if (scope.skillStates === undefined) {
+        scope.skillStates = deriveSessionSkillStates({
+          initial: scope.postCompactionSkillStates,
+          postCompaction: scope.postCompactionSkillContext,
+          messages: scope.activeMessages
+        })
+      }
     }
 
     this.cache.set(sessionId, state)

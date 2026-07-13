@@ -1,10 +1,79 @@
 // src/main/tools/builtin/SkillTool.ts
 import { Tool, ToolContext } from '../Tool'
 import { SkillManager } from '../../services/SkillManager'
+import {
+  findSessionSkillState,
+  hashSkillContent
+} from '../../services/context/SessionSkillState'
 
 interface SkillArgs {
   skill?: string
   args?: string
+  force?: boolean
+}
+
+function stateMarker(value: Record<string, unknown>): string {
+  return JSON.stringify({ type: 'skill_state', ...value })
+}
+
+async function activateSkill(rawArgs: string, context: ToolContext): Promise<string> {
+  const parsed = JSON.parse(rawArgs) as SkillArgs
+  if (!parsed.skill) return 'Error: skill is required.'
+
+  const sm = SkillManager.getInstance()
+  const skills = await sm.getSkills(context.workspaceRoot)
+  const matched = skills.find((skill) =>
+    skill.name === parsed.skill || skill.id === parsed.skill
+  )
+  const content = matched
+    ? await sm.getSkillContent(context.workspaceRoot, matched.name)
+    : null
+  if (!content || !matched) {
+    const list = skills.slice(0, 30).map((s) => `- ${s.name} (${s.id})`).join('\n')
+    return `Error: skill "${parsed.skill}" not found. Available:\n${list || '(none)'}`
+  }
+
+  const args = parsed.args || ''
+  const contentHash = hashSkillContent(content)
+  const scope = context.runtimeCoordinator && context.sessionId && context.contextScopeId
+    ? await context.runtimeCoordinator.getScopeView(context.sessionId, context.contextScopeId)
+    : undefined
+  const current = findSessionSkillState(scope?.skillStates, matched.name)
+  if (current?.status === 'disabled' && !parsed.force) {
+    return `Error: skill "${matched.name}" is disabled for this conversation. Only reactivate it with force=true after the user explicitly asks to re-enable it.`
+  }
+  const sameContent = current?.contentHash === contentHash || Boolean(
+    current?.content && (content.includes(current.content) || current.content.includes(content))
+  )
+  if (current?.status === 'active' && current.args === args && sameContent && !parsed.force) {
+    return stateMarker({
+      status: 'already_active',
+      skill: matched.name,
+      contentHash,
+      message: 'Continue following the active skill content already present in this conversation. Do not activate it again merely to reload it.'
+    })
+  }
+
+  if (context.runtimeCoordinator && context.runtimeTurn) {
+    await context.runtimeCoordinator.updateSkillState(context.runtimeTurn, {
+      name: matched.name,
+      status: 'active',
+      content,
+      contentHash,
+      args,
+      source: 'model'
+    })
+  }
+
+  const escapeTag = (value: string) => value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+  return [
+    `<command-name>${escapeTag(matched.name)}</command-name>`,
+    `<command-args>${escapeTag(args)}</command-args>`,
+    content
+  ].join('\n')
 }
 
 export class SkillTool extends Tool {
@@ -33,31 +102,44 @@ export class SkillTool extends Tool {
 
   async execute(args: string, context: ToolContext): Promise<string> {
     try {
-      const parsed = JSON.parse(args) as SkillArgs
-      if (!parsed.skill) return 'Error: skill is required.'
+      return await activateSkill(args, context)
+    } catch (err: any) {
+      return `Error: ${err.message}`
+    }
+  }
+}
 
-      const sm = SkillManager.getInstance()
-      const skills = await sm.getSkills(context.workspaceRoot)
-      const matched = skills.find((skill) =>
-        skill.name === parsed.skill || skill.id === parsed.skill
-      )
-      const content = matched
-        ? await sm.getSkillContent(context.workspaceRoot, matched.name)
-        : null
-      if (content) {
-        const escapeTag = (value: string) => value
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-        return [
-          `<command-name>${escapeTag(matched!.name)}</command-name>`,
-          `<command-args>${escapeTag(parsed.args || '')}</command-args>`,
-          content
-        ].join('\n')
-      }
+export class ActivateSkillTool extends Tool {
+  get name() {
+    return 'ActivateSkill'
+  }
 
-      const list = skills.slice(0, 30).map((s) => `- ${s.name} (${s.id})`).join('\n')
-      return `Error: skill "${parsed.skill}" not found. Available:\n${list || '(none)'}`
+  get summary() {
+    return 'Activate or refresh a session skill.'
+  }
+
+  get description() {
+    return 'Activate a skill for the current conversation and load its instructions. Active skills persist across turns, compaction, network failures, and restart. Do not activate an already-active skill merely to reload it. A skill disabled for this conversation may only be reactivated with force=true after the user explicitly asks to re-enable it. The legacy Skill tool remains available for compatibility.'
+  }
+
+  get parameters_schema() {
+    return {
+      type: 'object',
+      properties: {
+        skill: { type: 'string', description: 'Exact available skill name or id.' },
+        args: { type: 'string', description: 'Optional arguments for this activation.' },
+        force: {
+          type: 'boolean',
+          description: 'Refresh active content or re-enable a session-disabled skill. Use for disabled skills only after an explicit user request.'
+        }
+      },
+      required: ['skill']
+    }
+  }
+
+  async execute(args: string, context: ToolContext): Promise<string> {
+    try {
+      return await activateSkill(args, context)
     } catch (err: any) {
       return `Error: ${err.message}`
     }

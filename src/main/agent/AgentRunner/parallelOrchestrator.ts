@@ -674,6 +674,7 @@ export async function orchestrateParallelExecution(
             } else {
               try { WorktreeService.remove(config.workspaceRoot, wt.name, true) } catch {}
               r.artifactStatus = 'merged'
+              r.worktreePath = undefined
             }
           }
         } else {
@@ -825,6 +826,7 @@ async function spawnWorker(
       error: output.status !== 'completed' ? (output.blockers?.join('; ') || `Executor ${output.status}`) : undefined,
       failureReason: failureReasonFromResult(result),
       handoff: result.handoff,
+      worktreePath: worktree?.path,
     }
     executionController.finishExecutor(executionId, stepId, stepResult)
 

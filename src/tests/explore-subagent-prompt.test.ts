@@ -9,6 +9,7 @@ describe('Explore subagent prompt', () => {
     expect(ExploreSubAgent.whenToUse).toContain('directed search is insufficient')
     expect(ExploreSubAgent.whenToUse).toContain('more than a few dependent queries')
     expect(ExploreSubAgent.whenNotToUse).toContain('Glob, Grep, or Read')
+    expect(ExploreSubAgent.whenNotToUse).toContain('use Reviewer instead')
     expect(ExploreSubAgent.outputSpec).toBeUndefined()
   })
 

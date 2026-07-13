@@ -238,6 +238,20 @@ export class ExecutionController {
   reconcileExecutorResult(executionId: string, result: StepResult): ExecutorRuntimeSnapshot {
     const runtime = this.requireRuntime(executionId)
     const executor = this.requireExecutor(runtime, result.stepId)
+    if (
+      runtime.snapshot.status === 'stopped' ||
+      runtime.snapshot.status === 'cancelled' ||
+      executor.status === 'stopped' ||
+      executor.status === 'taken_over' ||
+      executor.status === 'lost' ||
+      (
+        result.attemptId !== undefined &&
+        executor.attemptId !== undefined &&
+        result.attemptId !== executor.attemptId
+      )
+    ) {
+      return structuredClone(executor)
+    }
     executor.status = result.status === 'completed'
       ? result.artifactStatus === 'ready' ? 'succeeded' : 'completed'
       : result.status === 'interrupted'

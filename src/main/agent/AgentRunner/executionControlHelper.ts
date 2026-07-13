@@ -1,7 +1,6 @@
 import path from 'path'
 import { getExecutionController } from '../../services/execution/ExecutionController'
 import { SubAgentManager } from '../SubAgentManager'
-import { TaskStore } from '../../services/TaskStore'
 import { WorktreeService } from '../../services/WorktreeService'
 import type { AgentRunConfig, AgentRunnerCallbacks } from './types'
 import type { StepResult } from '../../../shared/types/parallel'
@@ -184,17 +183,15 @@ export async function handleExecutionControl(
         stepResult.status = 'failed'
         stepResult.failureReason = 'merge_conflict'
         stepResult.error = `merge conflict: ${mergeError}`
+        stepResult.artifactStatus = 'merge_conflict'
       } else {
         try { WorktreeService.remove(config.workspaceRoot, name, true) } catch {}
         stepResult.worktreePath = undefined
+        stepResult.artifactStatus = 'merged'
       }
       controller.reconcileExecutorResult(execution.executionId, stepResult)
     }
 
-    TaskStore.getInstance().setStatuses(sessionId, [{
-      id: executor.stepId,
-      status: stepResult.status === 'completed' ? 'completed' : 'pending'
-    }])
     const latest = controller.getExecution(execution.executionId)!
     if (latest.executors.every((item) => item.status === 'completed')) {
       controller.markExecutionTerminal(execution.executionId, 'completed')

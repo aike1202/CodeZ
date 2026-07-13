@@ -1,3 +1,9 @@
+import type {
+  ArtifactRuntimeStatus,
+  ExecutorFailureReason,
+  ExecutorRuntimeStatus,
+} from './parallel'
+
 /**
  * 轻量 Task（待办）类型定义。
  *
@@ -14,6 +20,24 @@
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
 export type TaskRiskLevel = 'low' | 'medium' | 'high'
 export type TaskApprovalStatus = 'not_required' | 'pending' | 'approved' | 'changes_requested' | 'rejected'
+
+/** Executor 权威生命周期在逻辑 Task 上的持久化投影。 */
+export interface TaskExecutorRuntime {
+  executionId: string
+  executionCreatedAt: number
+  executorId: string
+  waveIndex: number
+  isolation: 'shared' | 'worktree'
+  status: ExecutorRuntimeStatus
+  attemptCount: number
+  updatedAt: number
+  summary?: string
+  error?: string
+  failureReason?: ExecutorFailureReason
+  artifactStatus?: ArtifactRuntimeStatus
+  /** 主 Agent 手动推进 Task 后，不再接受该 execution 的后续投影。 */
+  detached?: boolean
+}
 
 export interface TaskContextBundle {
   /** 研究阶段已经确认、执行阶段可直接使用的事实。 */
@@ -62,6 +86,8 @@ export interface TaskItem {
   files?: string[]
   /** 进行时文案，给进度条显示，如 "提取 useAuth hook 中" */
   activeForm?: string
+  /** DelegateTasks/ExecutionControl 的实时执行状态；逻辑 status 仍用于待办流转。 */
+  executorRuntime?: TaskExecutorRuntime
 }
 
 /** IPC TASK_UPDATED 事件 payload：某会话的全量 Task 清单。 */

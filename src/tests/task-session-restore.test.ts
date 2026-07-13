@@ -239,6 +239,32 @@ describe('chat store task session restore', () => {
     expect(useChatStore.getState().sessions[0].tasks).toEqual(unfinishedTasks)
   })
 
+  it('setSessionTasks updates a background session without replacing visible tasks', async () => {
+    const { useChatStore } = await import('../renderer/src/stores/chatStore')
+    const backgroundTasks: TaskItem[] = [
+      { id: 't9', subject: 'Background Executor', description: '', status: 'in_progress' }
+    ]
+    const activeUpdateTasks: TaskItem[] = [
+      { id: 't1', subject: 'Active Executor completed', description: '', status: 'completed' }
+    ]
+    useChatStore.setState({
+      sessions: [
+        { id: 's1', projectId: 'p1', summary: 'Active', relativeTime: 'now', messages: [], tasks: unfinishedTasks } as any,
+        { id: 's2', projectId: 'p1', summary: 'Background', relativeTime: 'now', messages: [], tasks: [] } as any
+      ],
+      activeSessionId: 's1',
+      tasks: unfinishedTasks
+    })
+
+    useChatStore.getState().setSessionTasks('s2', backgroundTasks)
+
+    expect(useChatStore.getState().tasks).toEqual(unfinishedTasks)
+    expect(useChatStore.getState().sessions.find(session => session.id === 's2')?.tasks).toEqual(backgroundTasks)
+
+    useChatStore.getState().setSessionTasks('s1', activeUpdateTasks)
+    expect(useChatStore.getState().tasks).toEqual(activeUpdateTasks)
+  })
+
   it('revert restores text and images as one pending composer draft', async () => {
     const { useChatStore } = await import('../renderer/src/stores/chatStore')
     const attachment = imageAttachmentFixture()

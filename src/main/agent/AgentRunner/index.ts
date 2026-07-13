@@ -8,6 +8,7 @@ import {
 } from '../../services/PermissionManager'
 import { normalizeAskUserTextFallback } from '../../tools/builtin/AskUserQuestionTool'
 import { TaskStore } from '../../services/TaskStore'
+import { getExecutionController } from '../../services/execution/ExecutionController'
 import { SubAgentManager } from '../SubAgentManager'
 import { RulesResolver } from '../RulesResolver'
 import type { ChatProviderErrorCode, ProviderTokenUsage, ToolDefinition } from '../../../shared/types/provider'
@@ -97,10 +98,15 @@ export function resolveAgentTransition(input: {
   verificationRetryCount: number
   maxVerificationRetries: number
   consecutiveIdleTurns: number
+  repeatedFailureLimitReached?: boolean
   stopReason?: import('../../../shared/types/provider').AgentStopReason
   hasPendingTasks?: boolean
   assistantContent?: string
 }): TransitionEvent {
+  if (input.repeatedFailureLimitReached) {
+    return TransitionEvent.RepeatedFailure
+  }
+
   if (input.toolCallCount > 0) {
     return TransitionEvent.ToolExecuted
   }
@@ -109,11 +115,30 @@ export function resolveAgentTransition(input: {
     return TransitionEvent.RetryRequested
   }
 
-  if (input.consecutiveIdleTurns >= 3) {
-    return TransitionEvent.MaxIdleReached
+  if (input.hasPendingTasks) {
+    return input.consecutiveIdleTurns >= 3
+      ? TransitionEvent.MaxIdleReached
+      : TransitionEvent.SchedulerContinue
   }
 
   return TransitionEvent.Completed
+}
+
+export function updateConsecutiveIdleTurns(input: {
+  previous: number
+  toolCallCount: number
+  hasPendingTasks: boolean
+  taskStatusChanged: boolean
+  hadSuccessfulToolExecution: boolean
+}): number {
+  if (input.taskStatusChanged || input.hadSuccessfulToolExecution || !input.hasPendingTasks) {
+    return 0
+  }
+  return input.toolCallCount === 0 ? input.previous + 1 : input.previous
+}
+
+function createTaskStatusSnapshot(taskStore: TaskStore, sessionId: string): string {
+  return taskStore.list(sessionId).map(task => `${task.id}:${task.status}`).join('|')
 }
 
 export class AgentRunner {
@@ -169,7 +194,6 @@ export class AgentRunner {
             config.apiFormat || 'openai'
           )
         : undefined
-    const MAX_LOOPS = 30
     let loopCount = 0
     let consecutiveFailures = 0
     const MAX_CONSECUTIVE_FAILURES = 5
@@ -185,7 +209,7 @@ export class AgentRunner {
 
     const sessionId = runtimeTurn?.sessionId || config.sessionId || `session_${Date.now()}`
 
-    log.info('[AgentRunner] run start', { sessionId, model: config.model, loopMax: MAX_LOOPS, msgCount: allMessages.length })
+    log.info('[AgentRunner] run start', { sessionId, model: config.model, loopMode: 'terminal-state', msgCount: allMessages.length })
 
     try {
       const sessionStore = getSessionStore()
@@ -200,6 +224,9 @@ export class AgentRunner {
         if (taskStore.list(sessionId).length === 0) {
           taskStore.restore(sessionId, session.tasks)
         }
+      }
+      if (taskStore.list(sessionId).some(task => task.executorRuntime)) {
+        getExecutionController().restoreSession(config.workspaceRoot, sessionId)
       }
 
       // ─── 注入 active_tasks ─────────────────────────
@@ -249,6 +276,7 @@ export class AgentRunner {
     }
 
     let consecutiveIdleTurns = 0
+    let lastTaskStatusSnapshot = createTaskStatusSnapshot(taskStore, sessionId)
     let currentState = AgentState.Running
     const contextBudgetService = new ContextBudgetService()
     const runtimeToolManager = typeof (this.toolManager as any).createCatalogSnapshot === 'function'
@@ -275,7 +303,7 @@ export class AgentRunner {
     })
 
     try {
-      while (loopCount < MAX_LOOPS && !this.abortController?.signal.aborted) {
+      while (!this.abortController?.signal.aborted) {
         loopCount++
 
         await flushPendingSteers()
@@ -559,26 +587,24 @@ export class AgentRunner {
           )
         })
 
+        let repeatedFailureLimitReached = false
+        let hadSuccessfulToolExecution = false
+
         if (toolCallsArray.length > 0) {
           let pipelineResults: ToolPipelineResult[]
-          if (loopCount >= MAX_LOOPS - 1 || consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-            const reason = loopCount >= MAX_LOOPS - 1
-              ? `已达 ${MAX_LOOPS} 步的安全上限`
-              : `已连续失败 ${MAX_CONSECUTIVE_FAILURES} 次`
+          if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            repeatedFailureLimitReached = true
             const errMsg = [
-              `提示：当前任务${reason}。`,
-              '为了保障运行安全并防止死循环，后续的工具执行已被自动挂起。',
-              '请您放心，已完成的工作均已妥善保存。请在下方的回复中直接告诉用户：',
-              '1. 目前已为您完成了哪些修改和成果；',
-              '2. 还有哪些步骤因为达到限制而暂时挂起；',
-              '3. 温馨提示用户：如果需要继续，可以直接点击右上角的“继续”按钮，或者在对话框中回复“继续”或“继续推进”。'
+              `提示：当前任务已连续失败 ${MAX_CONSECUTIVE_FAILURES} 次。`,
+              '为防止无进展重试，本轮工具执行已暂停。',
+              '请检查最近的工具错误、调整任务或补充必要信息后再继续。'
             ].join('\n')
             pipelineResults = normalizedToolCalls.map((call) => ({
               call,
               canonicalName: call.name,
               result: {
                 status: 'denied',
-                error: { code: 'TOOL_LOOP_LIMIT', message: errMsg, recoverable: false },
+                error: { code: 'TOOL_FAILURE_LIMIT', message: errMsg, recoverable: false },
                 modelContent: `Error: ${errMsg}`
               }
             }))
@@ -751,15 +777,25 @@ export class AgentRunner {
           }
 
           const hasSuccess = pipelineResults.some((item) => item.result.status === 'success')
-          if (!hasSuccess) {
-            consecutiveFailures++
-          } else {
+          if (hasSuccess) {
+            hadSuccessfulToolExecution = true
             consecutiveFailures = 0
+          } else if (!repeatedFailureLimitReached) {
+            consecutiveFailures++
           }
         }
 
-        const taskStore = TaskStore.getInstance();
-        const hasPendingTasks = taskStore.list(sessionId).some(t => t.status === 'pending' || t.status === 'in_progress');
+        const currentTaskStatusSnapshot = createTaskStatusSnapshot(taskStore, sessionId)
+        const taskStatusChanged = currentTaskStatusSnapshot !== lastTaskStatusSnapshot
+        const hasPendingTasks = taskStore.list(sessionId).some(t => t.status === 'pending' || t.status === 'in_progress')
+        consecutiveIdleTurns = updateConsecutiveIdleTurns({
+          previous: consecutiveIdleTurns,
+          toolCallCount: toolCallsArray.length,
+          hasPendingTasks,
+          taskStatusChanged,
+          hadSuccessfulToolExecution
+        })
+        lastTaskStatusSnapshot = currentTaskStatusSnapshot
 
         const isVerificationFailure = filesModifiedInSession && lastVerificationResult && !lastVerificationResult.success;
         
@@ -775,7 +811,10 @@ export class AgentRunner {
           verificationRetryCount,
           maxVerificationRetries: MAX_VERIFICATION_RETRIES,
           consecutiveIdleTurns,
-          stopReason: currentStopReason
+          repeatedFailureLimitReached,
+          stopReason: currentStopReason,
+          hasPendingTasks,
+          assistantContent: currentFullContent
         });
 
         currentState = LoopStateMachine.next(currentState, transitionEvent);
@@ -817,11 +856,26 @@ export class AgentRunner {
 
         // --- Handle Running state transitions ---
         if (transitionEvent === TransitionEvent.ToolExecuted) {
-          consecutiveIdleTurns = 0;
           if (filesModifiedInSession && lastVerificationResult && lastVerificationResult.success) {
             verificationRetryCount = 0;
           }
           continue; // Loop continues naturally to process new messages (tool results)
+        }
+
+        if (transitionEvent === TransitionEvent.SchedulerContinue) {
+          const continuationMessage = [
+            '<internal_continuation>',
+            `Active tasks remain (${taskStore.summary(sessionId)}).`,
+            'Continue the task with the available tools, update task status when work changes, or use AskUserQuestion only when required user input is the actual blocker.',
+            '</internal_continuation>'
+          ].join('\n')
+          await runtimeCoordinator!.recordUserContinuation(runtimeTurn!, continuationMessage)
+          log.info('[AgentRunner] continuing active tasks after text-only turn', {
+            sessionId,
+            loopCount,
+            consecutiveIdleTurns
+          })
+          continue
         }
 
         if (transitionEvent === TransitionEvent.RetryRequested) {

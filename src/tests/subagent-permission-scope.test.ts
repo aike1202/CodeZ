@@ -98,6 +98,32 @@ describe('checkSubAgentToolPermission', () => {
     })
   })
 
+  describe('Reviewer verification shell scope', () => {
+    const scope: SubAgentPermissionScope = {
+      allowedWriteFiles: [],
+      allowBash: true,
+      shellPolicy: 'verification',
+    }
+
+    it('enforces the Reviewer policy before the normal runtime permission policy', async () => {
+      await expect(authorizeSubAgentToolCall(
+        'Bash',
+        { command: 'git diff -- src/main.ts' },
+        WS,
+        'session-review',
+        scope,
+      )).resolves.toBeNull()
+
+      await expect(authorizeSubAgentToolCall(
+        'PowerShell',
+        { command: "Set-Content -Path src/main.ts -Value 'changed'" },
+        WS,
+        'session-review',
+        scope,
+      )).resolves.toContain('Reviewer shell command denied')
+    })
+  })
+
   describe('worktree scope (allowAllWritesInWorkspace)', () => {
     const scope: SubAgentPermissionScope = { allowAllWritesInWorkspace: true, allowBash: true }
     it('allows any write inside workspace', () => {

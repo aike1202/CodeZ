@@ -6,11 +6,14 @@ import { AgentRunner, unwrapModelToolResultForUi } from '../main/agent/AgentRunn
 import { ModelLedgerStore } from '../main/services/context/ModelLedgerStore'
 import { SessionRuntimeCoordinator } from '../main/services/context/SessionRuntimeCoordinator'
 import { ModelContextBuilder } from '../main/services/context/ModelContextBuilder'
+import { TaskStore } from '../main/services/TaskStore'
 import type { ContextBudgetSnapshot } from '../shared/types/context'
 
 const dirs: string[] = []
+const taskSessions: string[] = []
 afterEach(async () => {
   delete process.env.CODEZ_TOOL_RUNTIME_V2
+  for (const sessionId of taskSessions.splice(0)) TaskStore.getInstance().restore(sessionId, [])
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
@@ -96,6 +99,182 @@ describe('AgentRunner canonical ledger path', () => {
     expect(order.at(-1)).toBe('ui-done')
     expect(budgets.at(-1)?.estimateSource).toBe('provider')
     expect(budgets.at(-1)?.totalInputTokens).toBe(100)
+  })
+
+  it('keeps executing tools after loop 30 while the run is making progress', async () => {
+    process.env.CODEZ_TOOL_RUNTIME_V2 = '0'
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codez-runner-unbounded-'))
+    dirs.push(root)
+    const ledger = new ModelLedgerStore(path.join(root, 'runtime'))
+    const runtime = new SessionRuntimeCoordinator(ledger)
+    const turn = await runtime.beginTurn({
+      sessionId: 'unbounded-s1', contextScopeId: 'main', text: 'inspect repeatedly', providerId: 'p1', model: 'm1'
+    })
+    let sample = 0
+    const chatService = {
+      streamChat: vi.fn(async (_config: unknown, callbacks: any) => {
+        sample++
+        if (sample <= 31) {
+          callbacks.onChunk('', '', [{
+            index: 0,
+            id: `call-${sample}`,
+            function: { name: 'TaskList', arguments: '{}' }
+          }])
+          callbacks.onDone('', 'tool_calls')
+        } else {
+          callbacks.onChunk('done after 31 tool rounds', '')
+          callbacks.onDone('done after 31 tool rounds', 'stop')
+        }
+      }),
+      abort: vi.fn()
+    }
+    const rollback = vi.fn(async () => undefined)
+    const runner = new AgentRunner({
+      chatService: chatService as any,
+      toolManager: {
+        getToolDefinitions: () => [],
+        getTool: () => ({ execute: async () => 'unexpected fallback execution' })
+      } as any,
+      editTransactionService: {
+        beginTransaction: async () => 'tx-unbounded',
+        rollback
+      } as any
+    })
+    const toolEnds: string[] = []
+    const onDone = vi.fn()
+
+    await runner.run({
+      baseUrl: 'https://example.test', apiKey: 'key', model: 'm1', workspaceRoot: root,
+      tools: [{ type: 'function', function: { name: 'TaskList', description: 'list', parameters: { type: 'object' } } }],
+      providerId: 'p1', runtimeTurn: turn, runtimeCoordinator: runtime,
+      contextBuilder: new ModelContextBuilder(ledger),
+      contextCapabilities: { contextWindowTokens: 100_000, maxOutputTokens: 2_000 },
+      systemPrompt: 'system'
+    }, {
+      onChunk: () => undefined,
+      onDone,
+      onError: (error) => { throw new Error(error) },
+      onToolEnd: (callId) => toolEnds.push(callId)
+    })
+
+    expect(chatService.streamChat).toHaveBeenCalledTimes(32)
+    expect(toolEnds).toHaveLength(31)
+    expect(toolEnds.at(-1)).toBe('call-31')
+    expect(onDone).toHaveBeenCalledWith('done after 31 tool rounds', 'stop', 'tx-unbounded')
+    expect(rollback).not.toHaveBeenCalled()
+    expect((await ledger.load('unbounded-s1')).scopes.main.lastCompletedTurnId).toBe(turn.turnId)
+  })
+
+  it('pauses instead of looping after repeated tool failures', async () => {
+    process.env.CODEZ_TOOL_RUNTIME_V2 = '0'
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codez-runner-failure-limit-'))
+    dirs.push(root)
+    const ledger = new ModelLedgerStore(path.join(root, 'runtime'))
+    const runtime = new SessionRuntimeCoordinator(ledger)
+    const turn = await runtime.beginTurn({
+      sessionId: 'failure-s1', contextScopeId: 'main', text: 'keep retrying', providerId: 'p1', model: 'm1'
+    })
+    let sample = 0
+    const chatService = {
+      streamChat: vi.fn(async (_config: unknown, callbacks: any) => {
+        sample++
+        callbacks.onChunk('', '', [{
+          index: 0,
+          id: `failure-call-${sample}`,
+          function: { name: 'MissingTool', arguments: '{}' }
+        }])
+        callbacks.onDone('', 'tool_calls')
+      }),
+      abort: vi.fn()
+    }
+    const rollback = vi.fn(async () => undefined)
+    const runner = new AgentRunner({
+      chatService: chatService as any,
+      toolManager: { getToolDefinitions: () => [] } as any,
+      editTransactionService: {
+        beginTransaction: async () => 'tx-failure-limit',
+        rollback
+      } as any
+    })
+    const toolResults: string[] = []
+    const onDone = vi.fn()
+
+    await runner.run({
+      baseUrl: 'https://example.test', apiKey: 'key', model: 'm1', workspaceRoot: root,
+      tools: [{ type: 'function', function: { name: 'MissingTool', description: 'missing', parameters: { type: 'object' } } }],
+      providerId: 'p1', runtimeTurn: turn, runtimeCoordinator: runtime,
+      contextBuilder: new ModelContextBuilder(ledger),
+      contextCapabilities: { contextWindowTokens: 20_000, maxOutputTokens: 2_000 },
+      systemPrompt: 'system'
+    }, {
+      onChunk: () => undefined,
+      onDone,
+      onError: (error) => { throw new Error(error) },
+      onToolEnd: (_callId, result) => toolResults.push(result)
+    })
+
+    expect(chatService.streamChat).toHaveBeenCalledTimes(6)
+    expect(toolResults).toHaveLength(6)
+    expect(toolResults.at(-1)).toContain('已连续失败 5 次')
+    expect(onDone).toHaveBeenCalledWith('', 'tool_calls', 'tx-failure-limit')
+    expect(rollback).not.toHaveBeenCalled()
+    expect((await ledger.load('failure-s1')).scopes.main.lastCompletedTurnId).toBe(turn.turnId)
+  })
+
+  it('pauses after three unchanged text-only turns with active tasks', async () => {
+    const sessionId = 'idle-s1'
+    taskSessions.push(sessionId)
+    TaskStore.getInstance().restore(sessionId, [{
+      id: 't1',
+      subject: 'Finish implementation',
+      description: '',
+      status: 'in_progress'
+    }])
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codez-runner-idle-'))
+    dirs.push(root)
+    const ledger = new ModelLedgerStore(path.join(root, 'runtime'))
+    const runtime = new SessionRuntimeCoordinator(ledger)
+    const continuationSpy = vi.spyOn(runtime, 'recordUserContinuation')
+    const turn = await runtime.beginTurn({
+      sessionId, contextScopeId: 'main', text: 'finish the task', providerId: 'p1', model: 'm1'
+    })
+    let sample = 0
+    const chatService = {
+      streamChat: vi.fn(async (_config: unknown, callbacks: any) => {
+        sample++
+        const content = `progress update ${sample}`
+        callbacks.onChunk(content, '')
+        callbacks.onDone(content, 'stop')
+      }),
+      abort: vi.fn()
+    }
+    const runner = new AgentRunner({
+      chatService: chatService as any,
+      toolManager: { getToolDefinitions: () => [] } as any,
+      editTransactionService: {
+        beginTransaction: async () => 'tx-idle',
+        rollback: async () => undefined
+      } as any
+    })
+    const onDone = vi.fn()
+
+    await runner.run({
+      baseUrl: 'https://example.test', apiKey: 'key', model: 'm1', workspaceRoot: root,
+      tools: [], providerId: 'p1', runtimeTurn: turn, runtimeCoordinator: runtime,
+      contextBuilder: new ModelContextBuilder(ledger),
+      contextCapabilities: { contextWindowTokens: 10_000, maxOutputTokens: 2_000 },
+      systemPrompt: 'system'
+    }, {
+      onChunk: () => undefined,
+      onDone,
+      onError: (error) => { throw new Error(error) }
+    })
+
+    expect(chatService.streamChat).toHaveBeenCalledTimes(3)
+    expect(continuationSpy).toHaveBeenCalledTimes(2)
+    expect(continuationSpy.mock.calls.every(([, message]) => message.includes('<internal_continuation>'))).toBe(true)
+    expect(onDone).toHaveBeenCalledWith('progress update 3', 'stop', 'tx-idle')
+    expect((await ledger.load(sessionId)).scopes.main.lastCompletedTurnId).toBe(turn.turnId)
   })
 
   it('converts a degraded text clarification to an AskUserQuestion tool call', async () => {

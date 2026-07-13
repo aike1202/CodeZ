@@ -11,6 +11,7 @@ export enum TransitionEvent {
   OutputTruncated = 'OutputTruncated',
   SchedulerContinue = 'SchedulerContinue',
   MaxIdleReached = 'MaxIdleReached',
+  RepeatedFailure = 'RepeatedFailure',
   WaitingInput = 'WaitingInput',
   Completed = 'Completed',
   Failed = 'Failed',
@@ -21,7 +22,6 @@ export enum TerminationReason {
   Completed = 'Completed',
   Failed = 'Failed',
   Cancelled = 'Cancelled',
-  MaxLoop = 'MaxLoop',
   FatalError = 'FatalError'
 }
 
@@ -34,6 +34,7 @@ const FSM_TABLE: TransitionTable = {
     [TransitionEvent.OutputTruncated]: AgentState.Running,
     [TransitionEvent.SchedulerContinue]: AgentState.Running,
     [TransitionEvent.MaxIdleReached]: AgentState.WaitingUser,
+    [TransitionEvent.RepeatedFailure]: AgentState.WaitingUser,
     [TransitionEvent.WaitingInput]: AgentState.WaitingUser,
     [TransitionEvent.Completed]: AgentState.Terminated,
     [TransitionEvent.Failed]: AgentState.Terminated,

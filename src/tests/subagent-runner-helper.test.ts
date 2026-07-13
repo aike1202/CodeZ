@@ -214,4 +214,48 @@ describe('SubAgentRunner result forwarding', () => {
     expect(managerMock.spawn).not.toHaveBeenCalled()
   })
 
+  it('passes the Reviewer verification shell policy into its runtime scope', async () => {
+    managerMock.getDefinition.mockReturnValue({
+      type: 'Reviewer',
+      allowShell: true,
+      shellPolicy: 'verification'
+    })
+    managerMock.listDefinitions.mockReturnValue([{ type: 'Reviewer' }])
+    managerMock.spawn.mockResolvedValue({
+      type: 'Reviewer',
+      status: 'completed',
+      output: 'No findings.',
+      structuredOutput: { verdict: 'PASS', report: 'No findings.' },
+      toolCallCount: 3,
+      filesExamined: ['src/main.ts']
+    })
+
+    const { handleSubAgentRunnerSpawn } = await import('../main/agent/AgentRunner/subAgentRunnerHelper')
+    await handleSubAgentRunnerSpawn(
+      'tool-review',
+      JSON.stringify({
+        subagent_type: 'Reviewer',
+        description: 'Review completed change',
+        prompt: 'Review the completed change against the original user goal.'
+      }),
+      {
+        workspaceRoot: process.cwd(), sessionId: 'session-1', baseUrl: 'https://example.invalid',
+        apiKey: 'test-key', apiFormat: 'openai', model: 'test-model'
+      } as any,
+      { onChunk: vi.fn(), onDone: vi.fn(), onError: vi.fn() }
+    )
+
+    expect(managerMock.spawn).toHaveBeenCalledWith(
+      'Reviewer',
+      expect.objectContaining({
+        permissionScope: {
+          allowBash: true,
+          allowedWriteFiles: [],
+          shellPolicy: 'verification'
+        }
+      }),
+      expect.anything()
+    )
+  })
+
 })

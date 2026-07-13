@@ -151,7 +151,7 @@ export async function handleSubAgentRunnerSpawn(
         compactionService: config.compactionService,
         parentSignal,
         permissionScope: def.allowShell
-          ? { allowBash: true, allowedWriteFiles: [] }
+          ? { allowBash: true, allowedWriteFiles: [], shellPolicy: def.shellPolicy }
           : undefined,
         apiConfig: {
           baseUrl: config.baseUrl || '',

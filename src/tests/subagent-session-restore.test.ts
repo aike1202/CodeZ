@@ -37,6 +37,8 @@ describe('chat store sub-agent session restore', () => {
           role: 'agent',
           content: '',
           streaming: true,
+          streamPhase: 'starting',
+          responseWaitWarning: true,
           subAgents: [
             {
               id: 'subagent_Explore_df42308184e13ef3_tool_1',
@@ -123,25 +125,14 @@ describe('chat store sub-agent session restore', () => {
     expect(useChatStore.getState().messages[0].streaming).toBe(false)
     expect(useChatStore.getState().messages[0].interrupted).toBe(true)
     expect(useChatStore.getState().pendingPrompt).toBeNull()
-    expect(useChatStore.getState().pendingInternalContinuation).toMatchObject({ sessionId: 's1' })
-    expect(useChatStore.getState().pendingInternalContinuation?.text).toContain(
-      '"resume_subagent_id":"subagent_Explore_df42308184e13ef3_tool_1"'
-    )
-    expect(useChatStore.getState().pendingInternalContinuation?.text).toContain(
-      'Choose autonomously whether to finish the remaining work in the parent Agent or resume the same SubAgent'
-    )
-    expect(useChatStore.getState().pendingInternalContinuation?.text).toContain(
-      '"reasonCode":"runtime_missing"'
-    )
-    expect(useChatStore.getState().pendingInternalContinuation?.text).toContain(
-      '"lastProgress":"已读取 package.json"'
-    )
-    expect(useChatStore.getState().pendingInternalContinuation?.text).toContain(
-      '"context":"只分析当前实现，不考虑旧版目录。"'
-    )
-    expect(useChatStore.getState().pendingInternalContinuation?.text).toContain(
-      '"scope":{"directories":["src"],"excludeGlobs":["**/*.test.ts"]}'
-    )
+    expect(useChatStore.getState().messages[0]).toMatchObject({
+      streaming: false,
+      interrupted: true,
+      executionStatus: 'interrupted'
+    })
+    expect(useChatStore.getState().messages[0].streamPhase).toBeUndefined()
+    expect(useChatStore.getState().messages[0].responseWaitWarning).toBeUndefined()
+    expect(useChatStore.getState().pendingInternalContinuation).toBeNull()
     expect((window as any).api.session.save).toHaveBeenCalled()
 
     const savedSession = (window as any).api.session.save.mock.calls.at(-1)[0]
@@ -156,9 +147,47 @@ describe('chat store sub-agent session restore', () => {
 
     await useChatStore.getState().selectSession('s1')
 
-    expect(useChatStore.getState().pendingInternalContinuation?.text).toContain(
-      '"resume_subagent_id":"subagent_Explore_df42308184e13ef3_tool_1"'
-    )
+    expect(useChatStore.getState().pendingInternalContinuation).toBeNull()
+  })
+
+  it('restores a stale starting message as interrupted when runtime status is unavailable', async () => {
+    const { useChatStore } = await import('../renderer/src/stores/chatStore')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const session = {
+      id: 's-runtime-unavailable',
+      projectId: 'p1',
+      summary: 'Stale starting session',
+      relativeTime: 'now',
+      messages: [{
+        id: 'agent-starting',
+        role: 'agent',
+        content: '',
+        streaming: true,
+        streamPhase: 'starting',
+        responseWaitWarning: true
+      }]
+    }
+    ;(window as any).api.session.get.mockResolvedValue(session)
+    ;(window as any).api.chat.getRuntimeStatus.mockRejectedValue(new Error('IPC unavailable'))
+    useChatStore.setState({
+      sessions: [session as any],
+      activeSessionId: null,
+      messages: [],
+      pendingInternalContinuation: null
+    })
+
+    await useChatStore.getState().selectSession(session.id)
+
+    expect(useChatStore.getState().messages[0]).toMatchObject({
+      streaming: false,
+      interrupted: true,
+      executionStatus: 'interrupted'
+    })
+    expect(useChatStore.getState().messages[0].streamPhase).toBeUndefined()
+    expect(useChatStore.getState().messages[0].responseWaitWarning).toBeUndefined()
+    expect(useChatStore.getState().pendingInternalContinuation).toBeNull()
+    expect((window as any).api.session.save).toHaveBeenCalled()
+    warnSpy.mockRestore()
   })
 
   it('bridges a terminal subagent whose result may not have reached the parent ledger', async () => {
@@ -222,11 +251,6 @@ describe('chat store sub-agent session restore', () => {
         }
       }
     })
-    expect(useChatStore.getState().pendingInternalContinuation?.text).toContain(
-      '"reasonCode":"parent_delivery_missing"'
-    )
-    expect(useChatStore.getState().pendingInternalContinuation?.text).toContain(
-      '"resume_subagent_id":"subagent_Explore_df42308184e13ef3_tool_2"'
-    )
+    expect(useChatStore.getState().pendingInternalContinuation).toBeNull()
   })
 })

@@ -40,7 +40,9 @@ const VERB_TRANSLATIONS: Record<string, string> = {
   Fetching: '正在获取',
   Fetched: '已获取网页',
   Invoking: '正在调用技能',
-  Invoked: '已调用技能'
+  Invoked: '已调用技能',
+  Deactivating: '正在停用技能',
+  Deactivated: '已停用技能'
 }
 
 interface LogItemRowProps {
@@ -71,7 +73,10 @@ export function LogItemRow({
   onDiffClick
 }: LogItemRowProps): React.ReactElement {
   const isSkillItem =
-    item.type === 'tool' && (item.toolName === 'Skill' || item.toolName === 'invoke_skill')
+    item.type === 'tool' && (
+      item.toolName === 'Skill' || item.toolName === 'ActivateSkill' ||
+      item.toolName === 'DeactivateSkill' || item.toolName === 'invoke_skill'
+    )
   const isTaskSummarySkill = isSkillItem && item.target === 'task-summary'
 
   const getItemIcon = (item: UnifiedTimelineItem) => {

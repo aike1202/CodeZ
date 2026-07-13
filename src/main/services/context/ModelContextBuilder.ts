@@ -23,6 +23,10 @@ import { ResumeStateManager } from './ResumeStateManager'
 import { ToolOutputPruner } from './ToolOutputPruner'
 import { SkillContextRestorer } from './SkillContextRestorer'
 import {
+  activeSessionSkillNames,
+  renderSessionSkillStateContext
+} from './SessionSkillState'
+import {
   fingerprintProviderRequest,
   type ProviderUsageRequestProfile
 } from './ProviderUsageRequestFingerprint'
@@ -57,6 +61,7 @@ export function buildModelContextItems(input: {
   summary: string
   resume: string
   skillContext?: PostCompactionSkillContext
+  sessionSkillState?: string
   fileContext?: PostCompactionFileContext
   currentInputMessageId: string
   history: readonly NormalizedModelMessage[]
@@ -88,6 +93,19 @@ export function buildModelContextItems(input: {
           status: 'complete',
           createdAt: input.skillContext.createdAt,
           sourceSequence: input.skillContext.sourceSequence
+        }
+      })
+    }
+    if (input.sessionSkillState && message.id === input.currentInputMessageId) {
+      items.push({
+        kind: 'skill_state',
+        message: {
+          id: `skill-state:${message.turnId}`,
+          turnId: message.turnId,
+          role: 'assistant',
+          content: input.sessionSkillState,
+          status: 'complete',
+          createdAt: message.createdAt
         }
       })
     }
@@ -153,8 +171,11 @@ export class ModelContextBuilder {
     })
     const skillContext = this.skillRestorer.reconcile({
       context: scope.postCompactionSkillContext,
-      messages: scope.activeMessages
+      messages: scope.activeMessages,
+      activeSkillNames: activeSessionSkillNames(scope.skillStates),
+      activeSkills: scope.skillStates
     })
+    const sessionSkillState = renderSessionSkillStateContext(scope.skillStates)
 
     const fileContextChanged = Boolean(
       scope.postCompactionFileContext &&
@@ -179,6 +200,7 @@ export class ModelContextBuilder {
         summary,
         resume,
         skillContext,
+        sessionSkillState,
         fileContext,
         currentInputMessageId: current.id,
         history: messages
@@ -205,7 +227,7 @@ export class ModelContextBuilder {
     }
     let providerBaseline = resolveProviderBaseline(activeMessages)
     let budget = this.measure(
-      request, recentHistory, summary, resume, skillContext?.content || '', fileContext?.content || '',
+      request, recentHistory, summary, resume, skillContext?.content || '', sessionSkillState, fileContext?.content || '',
       scope.historyVersion, rawHistoryTokens,
       current.attachments, providerBaseline?.usage,
       providerBaseline?.additionalTokens
@@ -240,7 +262,7 @@ export class ModelContextBuilder {
       recentHistory = activeMessages.filter((message) => message.id !== current.id)
       providerBaseline = resolveProviderBaseline(activeMessages)
       budget = this.measure(
-        request, recentHistory, summary, resume, skillContext?.content || '', fileContext?.content || '',
+        request, recentHistory, summary, resume, skillContext?.content || '', sessionSkillState, fileContext?.content || '',
         scope.historyVersion, rawHistoryTokens,
         current.attachments,
         providerBaseline?.usage,
@@ -266,7 +288,7 @@ export class ModelContextBuilder {
       recentHistory = activeMessages.filter((message) => message.id !== current.id)
       providerBaseline = resolveProviderBaseline(activeMessages)
       budget = this.measure(
-        request, recentHistory, summary, resume, skillContext?.content || '', fileContext?.content || '',
+        request, recentHistory, summary, resume, skillContext?.content || '', sessionSkillState, fileContext?.content || '',
         scope.historyVersion, rawHistoryTokens,
         current.attachments,
         providerBaseline?.usage,
@@ -309,6 +331,7 @@ export class ModelContextBuilder {
       summary,
       resume,
       skillContext,
+      sessionSkillState,
       fileContext,
       currentInputMessageId: current.id,
       history: activeMessages
@@ -333,6 +356,7 @@ export class ModelContextBuilder {
     summary: string,
     resume: string,
     skillContext: string,
+    sessionSkillState: string,
     fileContext: string,
     historyVersion: number,
     rawHistoryTokens: number,
@@ -348,6 +372,7 @@ export class ModelContextBuilder {
         ...(request.instructions || []),
         ...(resume ? [resume] : []),
         ...(skillContext ? [skillContext] : []),
+        ...(sessionSkillState ? [sessionSkillState] : []),
         ...(fileContext ? [fileContext] : [])
       ],
       summary,

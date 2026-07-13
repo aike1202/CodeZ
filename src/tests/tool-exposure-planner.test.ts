@@ -12,9 +12,14 @@ describe('ToolExposurePlanner', () => {
     expect(eager.has('Edit')).toBe(true)
     expect(eager.has('AskUserQuestion')).toBe(true)
     expect(eager.has('Skill')).toBe(true)
+    expect(eager.has('ActivateSkill')).toBe(true)
+    expect(eager.has('DeactivateSkill')).toBe(true)
     expect(deferred.has('Skill')).toBe(false)
+    expect(deferred.has('ActivateSkill')).toBe(false)
+    expect(deferred.has('DeactivateSkill')).toBe(false)
     expect(deferred.has('WebSearch')).toBe(true)
     expect(deferred.has('NotebookEdit')).toBe(true)
+    expect(deferred.has('SubAgentRunner')).toBe(true)
   })
 
   it('activates deferred tools for the next plan', () => {

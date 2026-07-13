@@ -13,7 +13,7 @@ import type {
 import { fingerprint } from './canonicalJson'
 
 const READ_ONLY = new Set([
-  'Read', 'list_files', 'Glob', 'Grep', 'Skill', 'TaskGet', 'TaskList',
+  'Read', 'list_files', 'Glob', 'Grep', 'Skill', 'ActivateSkill', 'DeactivateSkill', 'TaskGet', 'TaskList',
   'ExecutionInspect', 'update_resume_state', 'AskUserQuestion', 'ToolSearch', 'ToolResultRead',
   'ListMcpResources', 'ReadMcpResource', 'GetMcpPrompt'
 ])
@@ -144,7 +144,10 @@ async function planLegacyEffects(
     effects.push({ kind: 'read-memory', path: `session:${context.sessionId || 'unknown'}:tasks` })
   } else if (name === 'AskUserQuestion') {
     effects.push({ kind: 'user-interaction', channel: 'ask-user' })
-  } else if (name === 'ToolSearch' || name === 'ToolResultRead' || name === 'Skill') {
+  } else if (
+    name === 'ToolSearch' || name === 'ToolResultRead' ||
+    name === 'Skill' || name === 'ActivateSkill' || name === 'DeactivateSkill'
+  ) {
     effects.push({ kind: 'internal', target: name })
   } else if (name === 'rollback_last_edit') {
     effects.push({ kind: 'rollback', target: context.workspaceRoot })
@@ -185,6 +188,9 @@ async function resourceKeysFor(
     return [`file:${resolvePath(filePath, context.workspaceRoot)}:${access}`]
   }
   if (TASK_TOOLS.has(name)) return [`session:${context.sessionId || 'unknown'}:tasks`]
+  if (name === 'Skill' || name === 'ActivateSkill' || name === 'DeactivateSkill') {
+    return [`session:${context.sessionId || 'unknown'}:skills`]
+  }
   if (name === 'AskUserQuestion') return [`session:${context.sessionId || 'unknown'}:user-interaction`]
   if (name === 'ExecutionControl' || name === 'ExecutionInspect') {
     return [`execution:${String(input.execution_id || 'unknown')}`]
@@ -217,7 +223,7 @@ export class LegacyToolAdapter implements ToolHandler<Record<string, unknown>, u
         destructive: () => ['Write', 'rollback_last_edit', 'ExecutionControl'].includes(legacyTool.name),
         concurrency: EXCLUSIVE.has(legacyTool.name)
           ? 'exclusive'
-          : ['Edit', 'Write', 'NotebookEdit', 'TaskCreate', 'TaskUpdate', 'ExecutionControl'].includes(legacyTool.name)
+          : ['Edit', 'Write', 'NotebookEdit', 'TaskCreate', 'TaskUpdate', 'ExecutionControl', 'Skill', 'ActivateSkill', 'DeactivateSkill'].includes(legacyTool.name)
             ? 'resource-locked'
             : 'safe',
         interrupt: ['Bash', 'PowerShell'].includes(legacyTool.name) ? 'cancel' : 'block',

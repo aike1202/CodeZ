@@ -45,19 +45,21 @@ vi.mock('../main/services/SkillManager', () => ({
 
 vi.mock('../main/agent/SubAgentManager', () => ({
   SubAgentManager: {
-    listEnabledDefinitions: vi.fn().mockReturnValue([{
-      type: 'Explore',
-      description: 'Fast read-only codebase exploration agent.',
-      whenToUse: 'A directed search is insufficient.',
-      whenNotToUse: 'The answer is a directed lookup.'
-    }])
+    listEnabledDefinitions: vi.fn().mockReturnValue([
+      {
+        type: 'Explore',
+        description: 'Fast read-only codebase exploration agent.',
+        whenToUse: 'A directed search is insufficient.',
+        whenNotToUse: 'The answer is a directed lookup.'
+      },
+      {
+        type: 'Reviewer',
+        description: 'Independent read-only implementation reviewer.',
+        whenToUse: 'After implementation and before reporting completion.',
+        whenNotToUse: 'General exploration.'
+      }
+    ])
   }
-}))
-
-vi.mock('../main/tools/ToolManager', () => ({
-  ToolManager: vi.fn().mockImplementation(() => ({
-    getAllTools: vi.fn().mockReturnValue([])
-  }))
 }))
 
 vi.mock('os', async (importOriginal) => {
@@ -157,6 +159,30 @@ describe('SystemPromptService', () => {
     const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
     expect(prompt).toContain('Scale verification to risk')
     expect(prompt).toContain('【VERIFICATION STRATEGY】')
+  })
+
+  it('requires an independent Reviewer after project changes with a complete handoff', async () => {
+    const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
+
+    expect(prompt).toContain('## Independent review gate')
+    expect(prompt).toContain('you MUST invoke Reviewer')
+    expect(prompt).toContain('Do not use Explore')
+    expect(prompt).toContain('Original user goal and acceptance criteria')
+    expect(prompt).toContain('Actual changes and implementation approach')
+    expect(prompt).toContain('Complete changed-file list')
+    expect(prompt).toContain('Verification commands already run and their actual results')
+    expect(prompt).toContain('On FAIL, fix the findings and launch Reviewer again')
+  })
+
+  it('keeps the Reviewer gate in the default exposure where SubAgentRunner is deferred', async () => {
+    const { availableTools: _availableTools, deferredTools: _deferredTools, ...defaultCtx } = mockCtx
+    const prompt = await SystemPromptService.buildSystemPrompt(defaultCtx)
+
+    expect(prompt).toContain('<deferred_tools>')
+    expect(prompt).toContain('- SubAgentRunner:')
+    expect(prompt).toContain('<subagent_guidance>')
+    expect(prompt).toContain('## Independent review gate')
+    expect(prompt).toContain('you MUST invoke Reviewer')
   })
 
   it('does not emit the legacy duplicate system reminder', async () => {

@@ -287,8 +287,10 @@ export function buildUnifiedTimeline(
           verbDisplay = tc.status === 'running' ? 'Executing' : 'Executed'
         } else if (tc.name === 'Write' || tc.name === 'write_to_file') {
           verbDisplay = tc.status === 'running' ? 'Saving' : 'Saved'
-        } else if (tc.name === 'Skill' || tc.name === 'invoke_skill') {
+        } else if (tc.name === 'Skill' || tc.name === 'ActivateSkill' || tc.name === 'invoke_skill') {
           verbDisplay = tc.status === 'running' ? 'Invoking' : 'Invoked'
+        } else if (tc.name === 'DeactivateSkill') {
+          verbDisplay = tc.status === 'running' ? 'Deactivating' : 'Deactivated'
         } else if (tc.name === 'WebFetch' || tc.name === 'web_fetch' || tc.name === 'fetch') {
           verbDisplay = tc.status === 'running' ? 'Fetching' : 'Fetched'
         } else if (tc.name === 'WebSearch' || tc.name === 'web_search') {
@@ -388,12 +390,12 @@ export function buildUnifiedTimeline(
         }
 
         // Skill：展示技能名
-        if (tc.name === 'Skill') {
+        if (tc.name === 'Skill' || tc.name === 'ActivateSkill' || tc.name === 'DeactivateSkill') {
           try {
             const ska = JSON.parse(tc.args)
-            targetDisplay = ska.skill || ska.command || '调用技能'
+            targetDisplay = ska.skill || ska.command || '技能'
           } catch {
-            targetDisplay = '调用技能'
+            targetDisplay = '技能'
           }
         }
 

@@ -1,9 +1,59 @@
 import React, { useRef, useEffect } from 'react'
 import { useChatStore } from '../../stores/chatStore'
-import { CheckCircle2, CircleDashed, Loader2, ListTodo, ChevronDown, ChevronUp, XCircle } from 'lucide-react'
-import type { TaskItem, TaskStatus } from '../../../../shared/types/task'
+import {
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  CircleAlert,
+  CircleDashed,
+  GitMerge,
+  ListTodo,
+  Loader2,
+  Pause,
+  UserCheck,
+  XCircle,
+} from 'lucide-react'
+import type { TaskItem } from '../../../../shared/types/task'
 import { getRemainingTaskCount, getTaskDisplayTasks } from './TaskCapsule.order'
+import {
+  getTaskDisplayStatus,
+  getTaskStatusLabel,
+  isTaskDisplayActive,
+  type TaskDisplayStatus,
+} from './TaskCapsule.status'
 import './TaskCapsule.css'
+
+const TASK_ICON_PROPS = { size: 18, strokeWidth: 2.25, 'aria-hidden': true as const }
+
+function TaskStatusIcon({ status }: { status: TaskDisplayStatus }): React.ReactElement {
+  switch (status) {
+    case 'running':
+    case 'in_progress':
+    case 'stopping':
+    case 'integrating':
+      return <Loader2 className={`step-icon ${status} spin`} {...TASK_ICON_PROPS} />
+    case 'paused':
+      return <Pause className="step-icon paused" {...TASK_ICON_PROPS} />
+    case 'succeeded':
+      return <GitMerge className="step-icon succeeded" {...TASK_ICON_PROPS} />
+    case 'completed':
+      return <CheckCircle2 className="step-icon completed" {...TASK_ICON_PROPS} />
+    case 'failed':
+    case 'interrupted':
+    case 'lost':
+      return <CircleAlert className={`step-icon ${status}`} {...TASK_ICON_PROPS} />
+    case 'taken_over':
+      return <UserCheck className="step-icon taken-over" {...TASK_ICON_PROPS} />
+    case 'stopped':
+    case 'cancelled':
+      return <XCircle className={`step-icon ${status}`} {...TASK_ICON_PROPS} />
+    case 'pending':
+    case 'queued':
+      return <CircleDashed className="step-icon pending" {...TASK_ICON_PROPS} />
+  }
+}
+
+const getHeadText = (task: TaskItem): string => task.activeForm || task.subject
 
 export const TaskCapsule: React.FC = () => {
   const tasks = useChatStore((s) => s.tasks)
@@ -29,7 +79,8 @@ export const TaskCapsule: React.FC = () => {
   }
 
   const remaining = getRemainingTaskCount(displayTasks)
-  const inProgress = displayTasks.find((t) => t.status === 'in_progress')
+  const taskViews = displayTasks.map(task => ({ task, displayStatus: getTaskDisplayStatus(task) }))
+  const activeTasks = taskViews.filter(({ displayStatus }) => isTaskDisplayActive(displayStatus))
 
   // 从 tasks 里取第一个 TaskGroup 元数据作为清单头，兼容旧 title/subtitle
   const listTitle = displayTasks.find(t => t.groupTitle)?.groupTitle || displayTasks.find(t => t.title)?.title
@@ -37,21 +88,6 @@ export const TaskCapsule: React.FC = () => {
   const groupRisk = displayTasks.find(t => t.riskLevel)?.riskLevel
   const approvalStatus = displayTasks.find(t => t.approvalStatus)?.approvalStatus
   const requiresApproval = displayTasks.some(t => t.requiresApproval)
-
-  const getStatusIcon = (status: TaskStatus) => {
-    switch (status) {
-      case 'in_progress':
-        return <Loader2 className="step-icon in-progress spin" size={18} strokeWidth={2.25} aria-hidden="true" />
-      case 'completed':
-        return <CheckCircle2 className="step-icon completed" size={18} strokeWidth={2.25} aria-hidden="true" />
-      case 'cancelled':
-        return <XCircle className="step-icon cancelled" size={18} strokeWidth={2.25} aria-hidden="true" />
-      default:
-        return <CircleDashed className="step-icon pending" size={18} strokeWidth={2.25} aria-hidden="true" />
-    }
-  }
-
-  const headText = (task: TaskItem) => task.activeForm || task.subject
 
   return (
     <div className={`plan-capsule-wrapper task-capsule-wrapper ${expanded ? 'expanded' : ''}`} ref={capsuleRef}>
@@ -61,7 +97,11 @@ export const TaskCapsule: React.FC = () => {
       >
         <ListTodo className="plan-capsule-icon" size={14} />
         <span className="plan-capsule-text">
-          {inProgress ? headText(inProgress) : `Tasks ${displayTasks.length}`}
+          {activeTasks.length > 1
+            ? `${activeTasks.length} 项任务执行中`
+            : activeTasks.length === 1
+              ? getHeadText(activeTasks[0].task)
+              : `任务 ${displayTasks.length}`}
         </span>
         {expanded ? <ChevronUp size={14} className="chevron" /> : <ChevronDown size={14} className="chevron" />}
       </div>
@@ -86,11 +126,19 @@ export const TaskCapsule: React.FC = () => {
           </div>
           <div className="plan-capsule-body">
             <ul className="plan-steps-list">
-              {displayTasks.map((task) => (
-                <li key={task.id} className={`step-item status-${task.status}`}>
-                  {getStatusIcon(task.status)}
+              {taskViews.map(({ task, displayStatus }) => (
+                <li key={task.id} className={`step-item status-${displayStatus}`}>
+                  <TaskStatusIcon status={displayStatus} />
                   <div className="step-info">
-                    <span className="step-title">{task.subject}</span>
+                    <div className="task-step-title-row">
+                      <span className="step-title">{task.subject}</span>
+                      <span
+                        className={`task-status-label status-${displayStatus}`}
+                        title={task.executorRuntime?.error}
+                      >
+                        {getTaskStatusLabel(displayStatus)}
+                      </span>
+                    </div>
                     {task.acceptanceCriteria && task.acceptanceCriteria.length > 0 ? (
                       <span className="step-desc">{task.acceptanceCriteria.join(' / ')}</span>
                     ) : null}

@@ -48,6 +48,7 @@ import { resolveEffectiveReasoningBudgetTokens } from '../services/chat/utils'
 import type { EditTransactionService } from '../services/EditTransactionService'
 import type { CompactionService } from '../services/context/CompactionService'
 import { analyzePathImpactSync } from '../services/permission/PathImpactAnalyzer'
+import { checkReviewerShellCommand } from './ReviewerShellPolicy'
 import {
   getToolRuntimeFeatureFlags,
   LegacyToolExecutionPipeline,
@@ -78,6 +79,8 @@ export interface SubAgentPermissionScope {
   allowedWriteFiles?: string[]
   /** 是否允许 Worker 请求 Shell 工具；获准后仍需通过统一运行时权限策略。 */
   allowBash?: boolean
+  /** Reviewer 专用验证命令策略；在统一运行时权限策略之前拒绝直接项目写入命令。 */
+  shellPolicy?: 'verification'
   /**
    * worktree 档：物理隔离已兜底，放宽到 workspaceRoot 内任意文件可写。
    * 为 true 时忽略 allowedWriteFiles，只做「不逃逸 workspaceRoot」的边界检查。
@@ -199,6 +202,8 @@ export interface SubAgentDefinition {
   validateStructuredOutput?: (output: SubAgentStructuredOutput) => string | undefined
   /** 是否向该子智能体开放 Shell；每次调用仍须通过统一权限策略。 */
   allowShell?: boolean
+  /** 可选的额外 Shell 约束；Reviewer 使用 verification 拒绝直接项目写入命令。 */
+  shellPolicy?: 'verification'
   isolation?: 'none' | 'worktree'
   canRunInBackground?: boolean
   onBeforeSpawn?: (ctx: SubAgentContext) => Promise<void>
@@ -329,6 +334,20 @@ export function checkSubAgentToolPermission(
   return null
 }
 
+async function checkSubAgentShellPolicy(
+  toolName: string,
+  parsedArgs: unknown,
+  scope: SubAgentPermissionScope | undefined,
+): Promise<string | null> {
+  if (
+    scope?.shellPolicy !== 'verification' ||
+    (toolName !== 'Bash' && toolName !== 'PowerShell')
+  ) {
+    return null
+  }
+  return checkReviewerShellCommand(toolName, parsedArgs)
+}
+
 export async function authorizeSubAgentToolCall(
   toolName: string,
   parsedArgs: unknown,
@@ -345,6 +364,8 @@ export async function authorizeSubAgentToolCall(
   }
   const scopeDenial = checkSubAgentToolPermission(toolName, parsedArgs, workspaceRoot, scope)
   if (scopeDenial) return scopeDenial
+  const shellPolicyDenial = await checkSubAgentShellPolicy(toolName, parsedArgs, scope)
+  if (shellPolicyDenial) return shellPolicyDenial
 
   const authorization = await authorizePermissionToolCall(
     toolName,
@@ -1323,6 +1344,22 @@ export class SubAgentManager {
                   allowed: false,
                   requestId: `scope_${prepared.call.callId}`,
                   error: { code: 'PERMISSION_DENIED', message: scopeDenial, recoverable: false }
+                }
+              }
+              const shellPolicyDenial = await checkSubAgentShellPolicy(
+                prepared.handler.descriptor.name,
+                prepared.input,
+                ctx.permissionScope
+              )
+              if (shellPolicyDenial) {
+                return {
+                  allowed: false,
+                  requestId: `scope_${prepared.call.callId}`,
+                  error: {
+                    code: 'PERMISSION_DENIED',
+                    message: shellPolicyDenial,
+                    recoverable: false
+                  }
                 }
               }
               if (runtimeFlags.effectPolicy === 'shadow') {

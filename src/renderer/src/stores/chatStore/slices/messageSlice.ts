@@ -105,6 +105,7 @@ export interface MessageSlice {
   consumeInternalContinuation: (sessionId: string) => PendingInternalContinuation | null
   markActiveRunUserAborted: (sessionId: string) => void
   setTasks: (tasks: TaskItem[]) => void
+  setSessionTasks: (sessionId: string, tasks: TaskItem[]) => void
   revertToMessage: (msgId: string) => Promise<boolean>
   previewRevertMessage: (msgId: string) => Promise<{ toDelete: string[], toRestore: string[] } | null>
 }
@@ -914,6 +915,12 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       session.id === s.activeSessionId ? { ...session, tasks } : session
     )
   })),
+  setSessionTasks: (sessionId, tasks) => set((s) => {
+    const sessions = s.sessions.map((session) =>
+      session.id === sessionId ? { ...session, tasks } : session
+    )
+    return s.activeSessionId === sessionId ? { sessions, tasks } : { sessions }
+  }),
 
   revertToMessage: async (msgId: string) => {
     const initial = get()

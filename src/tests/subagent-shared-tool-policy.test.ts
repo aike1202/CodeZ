@@ -74,7 +74,7 @@ describe('shared subagent tool policy', () => {
       stableSharedModules.map(module => module.build(resolvedContext)),
     )).filter((section): section is string => Boolean(section))
 
-    for (const type of ['Explore', 'ExecutionPlanner', 'Executor']) {
+    for (const type of ['Explore', 'Reviewer', 'ExecutionPlanner', 'Executor']) {
       const detail = await SubAgentManager.getDetail(type)
       expect(detail, `${type} definition`).toBeDefined()
       for (const section of sharedSections) {
@@ -96,7 +96,7 @@ describe('shared subagent tool policy', () => {
   it('keeps read-only subagents read-only after prompt sharing', async () => {
     const { SubAgentManager } = await import('../main/agent/SubAgentManager')
 
-    for (const type of ['Explore', 'ExecutionPlanner']) {
+    for (const type of ['Explore', 'Reviewer', 'ExecutionPlanner']) {
       const detail = await SubAgentManager.getDetail(type)
       expect(detail?.tools).toContain('Read')
       expect(detail?.tools).not.toContain('Edit')

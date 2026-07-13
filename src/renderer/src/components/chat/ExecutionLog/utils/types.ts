@@ -54,6 +54,8 @@ export interface UnifiedTimelineItem {
     | 'Fetched'
     | 'Invoking'
     | 'Invoked'
+    | 'Deactivating'
+    | 'Deactivated'
   target: string
   detail?: string
   args?: string

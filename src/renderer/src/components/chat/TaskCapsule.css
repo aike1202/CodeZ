@@ -37,8 +37,24 @@
   color: var(--color-success);
 }
 
-.step-icon.in-progress {
+.step-icon.in-progress,
+.step-icon.in_progress,
+.step-icon.running,
+.step-icon.stopping,
+.step-icon.integrating {
   color: var(--primary-color);
+}
+
+.step-icon.paused,
+.step-icon.succeeded,
+.step-icon.taken-over {
+  color: var(--color-warning, #ca8a04);
+}
+
+.step-icon.failed,
+.step-icon.interrupted,
+.step-icon.lost {
+  color: var(--color-danger, #dc2626);
 }
 
 .task-capsule-wrapper .step-icon {
@@ -143,14 +159,46 @@
 .step-info {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
   min-width: 0;
   gap: 2px;
 }
 
+.task-step-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
 .step-title {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 0.82rem;
   line-height: 1.35;
   color: var(--text-main);
+  overflow-wrap: anywhere;
+}
+
+.task-status-label {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.task-status-label.status-running,
+.task-status-label.status-in_progress,
+.task-status-label.status-integrating,
+.task-status-label.status-stopping {
+  color: var(--primary-color);
+}
+
+.task-status-label.status-failed,
+.task-status-label.status-interrupted,
+.task-status-label.status-lost {
+  color: var(--color-danger, #dc2626);
 }
 
 .task-capsule-wrapper .step-item.status-completed .step-title {

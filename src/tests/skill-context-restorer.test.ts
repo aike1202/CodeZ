@@ -51,4 +51,12 @@ describe('SkillContextRestorer', () => {
     })
     expect(reconciled).toBeUndefined()
   })
+
+  it('does not restore content for a session-disabled skill', () => {
+    const messages = invocation('Review', '<command-name>Review</command-name>\nreview instructions', 1)
+    expect(new SkillContextRestorer().restore({
+      messages,
+      activeSkillNames: new Set()
+    })).toBeUndefined()
+  })
 })

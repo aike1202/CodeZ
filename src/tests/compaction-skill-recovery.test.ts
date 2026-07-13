@@ -69,6 +69,9 @@ describe('compaction invoked-skill recovery', () => {
     expect(scope.postCompactionSkillContext?.skills).toEqual([
       expect.objectContaining({ name: 'Review' })
     ])
+    expect(scope.skillStates).toEqual([
+      expect.objectContaining({ name: 'Review', status: 'active' })
+    ])
     expect(scope.activeMessages.some((message) => message.name === 'Skill')).toBe(false)
 
     const next = await runtime.beginTurn({
@@ -81,11 +84,15 @@ describe('compaction invoked-skill recovery', () => {
       systemPrompt: 'system', toolSchemas: [], allowCompaction: false
     })
     const skillIndex = built.items.findIndex((item) => item.kind === 'skill_context')
+    const stateIndex = built.items.findIndex((item) => item.kind === 'skill_state')
     const inputIndex = built.items.findIndex((item) =>
       'id' in item.message && item.message.id === next.userMessageId
     )
     expect(skillIndex).toBeGreaterThan(-1)
     expect(skillIndex).toBeLessThan(inputIndex)
     expect(built.items[skillIndex].message.content).toContain('Follow the review checklist')
+    expect(stateIndex).toBeGreaterThan(skillIndex)
+    expect(stateIndex).toBeLessThan(inputIndex)
+    expect(built.items[stateIndex].message.content).toContain('session_skill_state')
   })
 })

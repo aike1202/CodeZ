@@ -76,8 +76,11 @@ export function getToolNoun(toolName: string): string {
     case 'write_to_file':
       return '保存文件'
     case 'Skill':
+    case 'ActivateSkill':
     case 'invoke_skill':
       return '技能'
+    case 'DeactivateSkill':
+      return '技能状态'
     case 'WebFetch':
     case 'web_fetch':
     case 'fetch':

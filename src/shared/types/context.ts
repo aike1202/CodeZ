@@ -9,6 +9,7 @@ export type LedgerEventType =
   | 'user_message'
   | 'assistant_message'
   | 'tool_result'
+  | 'skill_state_updated'
   | 'turn_completed'
   | 'turn_interrupted'
   | 'resume_state_updated'
@@ -20,7 +21,7 @@ export type LedgerEventType =
 
 const HISTORY_EVENT_TYPES = new Set<LedgerEventType>([
   'user_message', 'assistant_message', 'tool_result', 'turn_interrupted',
-  'resume_state_updated', 'compaction_completed', 'legacy_import_completed',
+  'skill_state_updated', 'resume_state_updated', 'compaction_completed', 'legacy_import_completed',
   'history_reverted'
 ])
 
@@ -131,6 +132,20 @@ export interface InvokedSkillContextEntry {
   invokedSequence: number
 }
 
+export type SessionSkillStatus = 'active' | 'inactive' | 'disabled'
+
+export interface SessionSkillState {
+  name: string
+  status: SessionSkillStatus
+  content?: string
+  contentHash?: string
+  args?: string
+  source: 'model' | 'user' | 'recovery'
+  reason?: string
+  updatedAt: string
+  updatedSequence: number
+}
+
 export interface PostCompactionSkillContext {
   content: string
   skills: InvokedSkillContextEntry[]
@@ -157,7 +172,7 @@ export interface NormalizedModelMessage {
 }
 
 export interface ModelContextItem {
-  kind: 'system' | 'compaction_summary' | 'resume_state' | 'skill_context' | 'file_context' | 'user' | 'assistant' | 'tool'
+  kind: 'system' | 'compaction_summary' | 'resume_state' | 'skill_context' | 'skill_state' | 'file_context' | 'user' | 'assistant' | 'tool'
   message: NormalizedModelMessage | {
     role: 'system'
     content: string
@@ -261,6 +276,16 @@ export interface ToolResultPayload {
   fullResultSha256?: string
 }
 
+export interface SkillStateUpdatedPayload {
+  name: string
+  status: SessionSkillStatus
+  content?: string
+  contentHash?: string
+  args?: string
+  source: SessionSkillState['source']
+  reason?: string
+}
+
 export interface TurnCompletedPayload {
   stopReason: AgentStopReason
   usage?: ProviderTokenUsage
@@ -292,6 +317,8 @@ export interface CompactionCompletedPayload {
   activeMessages: NormalizedModelMessage[]
   postCompactionFileContext?: PostCompactionFileContext
   postCompactionSkillContext?: PostCompactionSkillContext
+  skillStates?: SessionSkillState[]
+  postCompactionSkillStates?: SessionSkillState[]
 }
 
 export interface CompactionFailedPayload {
@@ -307,6 +334,7 @@ export interface HistoryRevertedPayload {
   targetUiMessageId: string
   targetMessageId: string
   activeMessages: NormalizedModelMessage[]
+  skillStates?: SessionSkillState[]
 }
 
 export interface LegacyImportCompletedPayload {
@@ -320,6 +348,7 @@ export interface LedgerPayloadByType {
   user_message: UserMessagePayload
   assistant_message: AssistantMessagePayload
   tool_result: ToolResultPayload
+  skill_state_updated: SkillStateUpdatedPayload
   turn_completed: TurnCompletedPayload
   turn_interrupted: TurnInterruptedPayload
   resume_state_updated: { resumeState: VersionedResumeState }
@@ -372,6 +401,8 @@ export interface SessionRuntimeScopeSnapshot {
   lastProviderUsageRequestFingerprint?: string
   postCompactionFileContext?: PostCompactionFileContext
   postCompactionSkillContext?: PostCompactionSkillContext
+  skillStates?: SessionSkillState[]
+  postCompactionSkillStates?: SessionSkillState[]
 }
 
 export interface SessionRuntimeSnapshot {

@@ -296,4 +296,5 @@ export interface ChatState {
   consumeInternalContinuation: (sessionId: string) => PendingInternalContinuation | null
   markActiveRunUserAborted: (sessionId: string) => void
   setTasks: (tasks: TaskItem[]) => void
+  setSessionTasks: (sessionId: string, tasks: TaskItem[]) => void
 }

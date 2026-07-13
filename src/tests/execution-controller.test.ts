@@ -91,6 +91,43 @@ describe('ExecutionController', () => {
     expect(controller.getExecution(execution.executionId)?.executors[0].status).toBe('stopped')
   })
 
+  it('does not reconcile a late result over a stopped or newer Executor attempt', () => {
+    const execution = controller.createExecution({
+      workspaceRoot: root,
+      sessionId: 's1',
+      source: 'task:s1',
+      waves: [{ index: 0, stepIds: ['t1'] }],
+      isolation: 'shared',
+      rationale: ''
+    })
+    const first = controller.startExecutor(execution.executionId, 't1')
+    controller.stopExecutor(execution.executionId, first.snapshot.executorId)
+
+    controller.reconcileExecutorResult(execution.executionId, {
+      stepId: 't1',
+      executorId: first.snapshot.executorId,
+      attemptId: first.token.attemptId,
+      status: 'completed',
+      summary: 'late',
+      filesModified: []
+    })
+    expect(controller.getExecution(execution.executionId)?.executors[0].status).toBe('stopped')
+
+    const second = controller.startExecutor(execution.executionId, 't1')
+    controller.reconcileExecutorResult(execution.executionId, {
+      stepId: 't1',
+      executorId: first.snapshot.executorId,
+      attemptId: first.token.attemptId,
+      status: 'failed',
+      summary: 'older attempt failed late',
+      filesModified: []
+    })
+    expect(controller.getExecution(execution.executionId)?.executors[0]).toMatchObject({
+      status: 'running',
+      attemptId: second.token.attemptId
+    })
+  })
+
   it('rejects duplicate step ids before scheduling', () => {
     expect(() => controller.createExecution({
       workspaceRoot: root,
