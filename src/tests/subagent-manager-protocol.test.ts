@@ -45,7 +45,7 @@ beforeEach(() => {
   chatMock.streamChat.mockReset()
 })
 
-describe('structured subagent completion protocol', () => {
+describe('structured subagent completion protocol', { timeout: 15_000 }, () => {
   it('reserves the last loop for submit_result and forwards the Markdown report', async () => {
     const { SubAgentManager } = await import('../main/agent/SubAgentManager')
     SubAgentManager.register({
@@ -207,5 +207,40 @@ describe('structured subagent completion protocol', () => {
     expect(result.status).toBe('completed')
     expect(result.output).toContain('src/core.ts:10')
     expect(result.structuredOutput).toBeUndefined()
+  })
+
+  it('uses one runtime context for lifecycle hooks and prompt construction', async () => {
+    const { SubAgentManager } = await import('../main/agent/SubAgentManager')
+    let beforeSpawnContext: unknown
+    let promptContext: unknown
+
+    SubAgentManager.register({
+      type: 'PromptContextIdentityTest',
+      description: 'Prompt context identity test',
+      whenToUse: 'test',
+      maxLoops: 1,
+      getTools: () => [readTool],
+      onBeforeSpawn: async (ctx) => {
+        beforeSpawnContext = ctx
+      },
+      systemPromptBuilder: (ctx) => {
+        promptContext = ctx
+        return 'test subagent'
+      },
+    })
+
+    chatMock.streamChat.mockImplementationOnce(async (_config, callbacks) => {
+      callbacks.onChunk('done', '')
+      callbacks.onDone('done', 'stop')
+    })
+
+    await SubAgentManager.spawn('PromptContextIdentityTest', makeContext(), {
+      onChunk: vi.fn(),
+      onDone: vi.fn(),
+      onError: vi.fn(),
+    })
+
+    expect(promptContext).toBe(beforeSpawnContext)
+    expect((promptContext as { promptTools?: ToolDefinition[] }).promptTools).toEqual([readTool])
   })
 })

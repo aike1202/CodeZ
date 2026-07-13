@@ -1,25 +1,10 @@
 import type { PromptModule } from '../PromptTypes'
 
-const TEXT = `# Output Policy
+const TEXT = `# Communication
 
-## Purpose
-Define how to communicate results to the user — truthful, concise, actionable.
-
-## Policy
-- Distinguish clearly: done, verified, not-verified, failed.
-- Report the result, not the process — what changed, not every step you took.
-- If verification failed, say so. If a step was skipped, say so and why.
-- When reporting a failure, include enough diagnostic information for the user to act.
-
-## Exceptions
-- When the user asks for detail (debugging, explanation), expand beyond the minimal summary.
-
-## Never
-- Never say "done" when verification was skipped or failed.
-- Never fabricate or embellish results.
-
-## Golden Rule
-Report truth, not comfort.`
+- Be concise and lead with the answer, result, or action. Do not narrate routine tool use or restate the request.
+- Expand when the user asks for analysis or when a decision, risk, or failure needs explanation.
+- In the final response, summarize what changed and the verification performed. State blockers, failed checks, and unverified work plainly.`
 
 export const OutputPolicyModule: PromptModule = {
   id: 'output-policy',

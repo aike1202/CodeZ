@@ -2,11 +2,7 @@
 
 import type { PromptContext, PromptModule, PromptLayer } from './PromptTypes'
 import { LAYER_ORDER } from './PromptTypes'
-
-interface RegisteredModule {
-  module: PromptModule
-  enabled: boolean
-}
+import { SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from './PromptCache'
 
 export class PromptPipeline {
   private modules: PromptModule[] = []
@@ -30,44 +26,47 @@ export class PromptPipeline {
     return this
   }
 
-  /** 执行完整流程：过滤 → 排序 → 构建 → 拼接 → 追加版本标记。 */
-  async run(ctx: PromptContext): Promise<string> {
-    const resolved: RegisteredModule[] = []
-    for (const m of this.modules) {
-      const enabled = m.isEnabled ? await m.isEnabled(ctx) : true
-      if (enabled) resolved.push({ module: m, enabled })
-    }
-
-    resolved.sort((a, b) => {
-      const layerDiff = LAYER_ORDER[a.module.layer] - LAYER_ORDER[b.module.layer]
+  private sortedModules(): PromptModule[] {
+    return [...this.modules].sort((a, b) => {
+      const layerDiff = LAYER_ORDER[a.layer] - LAYER_ORDER[b.layer]
       if (layerDiff !== 0) return layerDiff
-      return a.module.priority - b.module.priority
+      return a.priority - b.priority
     })
+  }
 
-    const sections: string[] = []
-    for (const reg of resolved) {
-      const text = await reg.module.build(ctx)
-      if (text && text.trim()) {
-        sections.push(text.trim())
-      }
-    }
+  /** 执行完整流程：排序 → 并行解析 → 分离稳定前缀与动态上下文。 */
+  async run(ctx: PromptContext): Promise<string> {
+    const resolved = await Promise.all(this.sortedModules().map(async (m) => {
+      const enabled = m.isEnabled ? await m.isEnabled(ctx) : true
+      if (!enabled) return null
+      const text = await m.build(ctx)
+      if (!text?.trim()) return null
+      return { module: m, text: text.trim() }
+    }))
 
-    const ids = resolved.map(r => r.module.id).join(',')
-    const layers = [...new Set(resolved.map(r => r.module.layer))].join('/')
-    const versionTag = `<!-- prompt:v2.0 layers:${layers} enabled:${ids} -->`
+    const active = resolved.filter((item): item is NonNullable<typeof item> => item !== null)
+    const staticSections = active
+      .filter(({ module }) => module.layer === 'core' || module.layer === 'execution')
+      .map(({ text }) => text)
+    const dynamicSections = active
+      .filter(({ module }) => module.layer !== 'core' && module.layer !== 'execution')
+      .map(({ text }) => text)
 
-    return sections.join('\n\n') + '\n\n' + versionTag
+    if (staticSections.length === 0) return dynamicSections.join('\n\n')
+    if (dynamicSections.length === 0) return staticSections.join('\n\n')
+    return [
+      staticSections.join('\n\n'),
+      SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+      dynamicSections.join('\n\n')
+    ].join('\n\n')
   }
 
   /** 调试用：列出当前启用的模块 id。 */
-  listEnabled(ctx: PromptContext): Array<{ id: string; layer: PromptLayer; priority: number }> {
-    return this.modules
-      .filter(m => (m.isEnabled ? m.isEnabled(ctx) : true))
-      .sort((a, b) => {
-        const layerDiff = LAYER_ORDER[a.layer] - LAYER_ORDER[b.layer]
-        if (layerDiff !== 0) return layerDiff
-        return a.priority - b.priority
-      })
-      .map(m => ({ id: m.id, layer: m.layer, priority: m.priority }))
+  async listEnabled(ctx: PromptContext): Promise<Array<{ id: string; layer: PromptLayer; priority: number }>> {
+    const modules = this.sortedModules()
+    const enabled = await Promise.all(modules.map(m => m.isEnabled ? m.isEnabled(ctx) : true))
+    return modules
+      .filter((_module, index) => enabled[index])
+      .map(module => ({ id: module.id, layer: module.layer, priority: module.priority }))
   }
 }

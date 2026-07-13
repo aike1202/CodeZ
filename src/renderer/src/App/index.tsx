@@ -5,14 +5,17 @@ import AppLayout from '../components/layout/AppLayout'
 import SettingsPage from '../pages/SettingsPage'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useProviderStore } from '../stores/providerStore'
-import { useChatStore } from '../stores/chatStore'
+import { useChatStore, type SubAgentRecord } from '../stores/chatStore'
 import TaskHistoryModal from '../components/modals/TaskHistoryModal'
 import PlanListModal from '../components/chat/PlanListModal'
 import ChatArea from '../components/chat/ChatArea'
 import RightWorkspacePanel, {
-  SUBAGENT_TAB_ID,
   TERMINAL_TAB_ID
 } from '../components/RightWorkspacePanel'
+import {
+  createSubAgentWorkspaceTab,
+  type SubAgentWorkspaceTab
+} from '../components/RightWorkspacePanel/subagentTabs'
 import '../styles.css'
 import '../App.css'
 
@@ -62,23 +65,23 @@ export default function App(): React.ReactElement {
   const [sidebarWidth, setSidebarWidth] = useState(260)
   const [previewPanelWidth, setPreviewPanelWidth] = useState(480)
   const [terminalOpen, setTerminalOpen] = useState(false)
-  const [subagentLogOpen, setSubagentLogOpen] = useState(false)
+  const [subagentTabs, setSubagentTabs] = useState<SubAgentWorkspaceTab[]>([])
   const [rightPanelVisible, setRightPanelVisible] = useState(false)
   const [activeRightTabId, setActiveRightTabId] = useState<string | null>(null)
   const [taskModalOpen, setTaskModalOpen] = useState(false)
-  const autoOpenedSubagentSessionRef = useRef<string | null>(null)
+  const subagentInstanceCountsRef = useRef(new Map<string, number>())
 
   const subAgents = useMemo(
     () => messages.flatMap((message) => message.subAgents ?? []),
     [messages]
   )
-  const hasRightTabs = previewTabs.length > 0 || terminalOpen || subagentLogOpen
+  const hasRightTabs = previewTabs.length > 0 || terminalOpen || subagentTabs.length > 0
   const panelOpen = rightPanelVisible && hasRightTabs
   const rightTabIds = useMemo(() => [
     ...previewTabs.map((tab) => tab.id),
     ...(terminalOpen ? [TERMINAL_TAB_ID] : []),
-    ...(subagentLogOpen ? [SUBAGENT_TAB_ID] : [])
-  ], [previewTabs, subagentLogOpen, terminalOpen])
+    ...subagentTabs.map((tab) => tab.id)
+  ], [previewTabs, subagentTabs, terminalOpen])
   const resolvedActiveRightTabId = rightTabIds.includes(activeRightTabId ?? '')
     ? activeRightTabId
     : rightTabIds[0] ?? null
@@ -119,7 +122,7 @@ export default function App(): React.ReactElement {
   useEffect(() => {
     if (!workspace) {
       setTerminalOpen(false)
-      setSubagentLogOpen(false)
+      setSubagentTabs([])
       setRightPanelVisible(false)
     }
   }, [workspace])
@@ -131,13 +134,10 @@ export default function App(): React.ReactElement {
   }, [activePreviewTabId])
 
   useEffect(() => {
-    if (!activeSessionId || subAgents.length === 0) return
-    if (autoOpenedSubagentSessionRef.current === activeSessionId) return
-    autoOpenedSubagentSessionRef.current = activeSessionId
-    setSubagentLogOpen(true)
-    setRightPanelVisible(true)
-    setActiveRightTabId((current) => current ?? SUBAGENT_TAB_ID)
-  }, [activeSessionId, subAgents.length])
+    setSubagentTabs([])
+    subagentInstanceCountsRef.current.clear()
+    setActiveRightTabId((current) => current?.startsWith('subagent:') ? null : current)
+  }, [activeSessionId])
 
   const maxSidebarWidth = useMemo(() => {
     const totalWidth = typeof window !== 'undefined' ? window.innerWidth : 1200
@@ -173,11 +173,14 @@ export default function App(): React.ReactElement {
     setActiveRightTabId(TERMINAL_TAB_ID)
   }, [workspace])
 
-  const openSubagentTab = useCallback(() => {
+  const handleSubAgentClick = useCallback((subAgent: SubAgentRecord) => {
     if (!workspace) return
-    setSubagentLogOpen(true)
+    const instanceNumber = (subagentInstanceCountsRef.current.get(subAgent.id) ?? 0) + 1
+    subagentInstanceCountsRef.current.set(subAgent.id, instanceNumber)
+    const tab = createSubAgentWorkspaceTab(subAgent.id, instanceNumber)
+    setSubagentTabs((current) => [...current, tab])
     setRightPanelVisible(true)
-    setActiveRightTabId(SUBAGENT_TAB_ID)
+    setActiveRightTabId(tab.id)
   }, [workspace])
 
   const handleSelectRightTab = useCallback((tabId: string) => {
@@ -187,7 +190,9 @@ export default function App(): React.ReactElement {
 
   const handleCloseRightTab = useCallback((tabId: string) => {
     if (tabId === TERMINAL_TAB_ID) setTerminalOpen(false)
-    else if (tabId === SUBAGENT_TAB_ID) setSubagentLogOpen(false)
+    else if (tabId.startsWith('subagent:')) {
+      setSubagentTabs((current) => current.filter((tab) => tab.id !== tabId))
+    }
     else closePreview(tabId)
     setActiveRightTabId((current) => (current === tabId ? null : current))
   }, [closePreview])
@@ -271,15 +276,6 @@ export default function App(): React.ReactElement {
                 openTerminalTab()
               }
             }}
-            subagentLogOpen={panelOpen && resolvedActiveRightTabId === SUBAGENT_TAB_ID}
-            onToggleSubagentLogs={() => {
-              if (panelOpen && resolvedActiveRightTabId === SUBAGENT_TAB_ID) {
-                handleCloseRightTab(SUBAGENT_TAB_ID)
-              } else {
-                openSubagentTab()
-              }
-            }}
-            hasSubagentLogs={subAgents.length > 0}
             onOpenTasks={() => setTaskModalOpen(true)}
             hasWorkspace={!!workspace}
           />
@@ -290,7 +286,7 @@ export default function App(): React.ReactElement {
               previewTabs={previewTabs}
               activeTabId={resolvedActiveRightTabId}
               terminalOpen={terminalOpen}
-              subagentLogOpen={subagentLogOpen}
+              subagentTabs={subagentTabs}
               subAgents={subAgents}
               messages={messages}
               workspace={workspace}
@@ -298,7 +294,6 @@ export default function App(): React.ReactElement {
               onSelectTab={handleSelectRightTab}
               onCloseTab={handleCloseRightTab}
               onOpenTerminal={openTerminalTab}
-              onOpenSubagents={openSubagentTab}
               onClosePanel={() => setRightPanelVisible(false)}
               onFileClick={handleFileClick}
               onDiffClick={handleDiffClick}
@@ -312,6 +307,7 @@ export default function App(): React.ReactElement {
             workspace={workspace}
             panelOpen={panelOpen}
             handleFileClick={handleFileClick}
+            handleSubAgentClick={handleSubAgentClick}
             handleDiffClick={handleDiffClick}
             handleOpenRecentProject={handleOpenRecentProject}
             onOpenSettings={(tab?: string) => {

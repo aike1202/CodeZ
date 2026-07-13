@@ -17,7 +17,8 @@ describe('RulesResolver', () => {
   const mockHomeDir = path.join(__dirname, 'mock_home')
 
   beforeEach(async () => {
-    (os.homedir as any).mockReturnValue(mockHomeDir)
+    RulesResolver.clearLoadedDirectoryRules()
+    ;(os.homedir as any).mockReturnValue(mockHomeDir)
     await fs.mkdir(mockWorkspace, { recursive: true })
     await fs.mkdir(mockHomeDir, { recursive: true })
   })
@@ -87,6 +88,60 @@ describe('RulesResolver', () => {
 
       const rules = await RulesResolver.getWorkspaceRules(mockWorkspace)
       expect(rules).toContain('Project Rule')
+    })
+  })
+
+  describe('directory-scoped rules', () => {
+    it('loads nested AGENTS.md only when a file in that directory is read', async () => {
+      const featureDir = path.join(mockWorkspace, 'src', 'feature')
+      await fs.mkdir(featureDir, { recursive: true })
+      await fs.writeFile(path.join(mockWorkspace, 'AGENTS.md'), 'Root Rule')
+      await fs.writeFile(path.join(featureDir, 'AGENTS.md'), 'Feature Rule')
+      const target = path.join(featureDir, 'index.ts')
+      await fs.writeFile(target, 'export {}')
+
+      const instruction = await RulesResolver.loadDirectoryRulesForFiles(
+        mockWorkspace,
+        [target],
+        'session-1'
+      )
+      expect(instruction).toContain('<directory_instructions>')
+      expect(instruction).toContain('Feature Rule')
+      expect(instruction).not.toContain('Root Rule')
+      expect(RulesResolver.getLoadedDirectoryRules('session-1')).toContain('Feature Rule')
+
+      const duplicate = await RulesResolver.loadDirectoryRulesForFiles(
+        mockWorkspace,
+        [target],
+        'session-1'
+      )
+      expect(duplicate).toBe('')
+    })
+
+    it('ignores paths outside the workspace', async () => {
+      const outside = path.join(mockHomeDir, 'outside.ts')
+      await fs.writeFile(outside, 'outside')
+      await expect(RulesResolver.loadDirectoryRulesForFiles(
+        mockWorkspace,
+        [outside],
+        'session-2'
+      )).resolves.toBe('')
+    })
+
+    it('removes cached directory rules when the source file is deleted', async () => {
+      const featureDir = path.join(mockWorkspace, 'src', 'feature')
+      const rulePath = path.join(featureDir, 'AGENTS.md')
+      const target = path.join(featureDir, 'index.ts')
+      await fs.mkdir(featureDir, { recursive: true })
+      await fs.writeFile(rulePath, 'Temporary Feature Rule')
+      await fs.writeFile(target, 'export {}')
+
+      await RulesResolver.loadDirectoryRulesForFiles(mockWorkspace, [target], 'session-3')
+      expect(RulesResolver.getLoadedDirectoryRules('session-3')).toContain('Temporary Feature Rule')
+
+      await fs.rm(rulePath)
+      await RulesResolver.loadDirectoryRulesForFiles(mockWorkspace, [target], 'session-3')
+      expect(RulesResolver.getLoadedDirectoryRules('session-3')).toBe('')
     })
   })
 })

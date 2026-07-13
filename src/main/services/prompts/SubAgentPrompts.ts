@@ -1,17 +1,16 @@
 import { PromptPipeline } from './PromptPipeline'
 import type { PromptContext, PromptModule } from './PromptTypes'
+import { resolvePromptContext } from './PromptContextResolver'
 
 import { IdentityModule } from './core/Identity'
 import { SecurityModule } from './core/Security'
 import { HarnessModule } from './core/Harness'
 import { EngineeringPhilosophyModule } from './core/EngineeringPhilosophy'
-import { ReasoningPolicyModule } from './core/ReasoningPolicy'
-import { DecisionPolicyModule } from './core/DecisionPolicy'
 import { ContextManagementModule } from './context/ContextManagement'
 import { RepositoryRulesModule } from './context/RepositoryRules'
 import { EnvironmentModule } from './context/Environment'
-import { GitStatusModule } from './context/GitStatus'
 import { SkillsModule } from './context/Skills'
+import { VerificationStrategyModule } from './context/VerificationStrategy'
 import { InvestigationModule } from './execution/Investigation'
 import { EditingModule } from './execution/Editing'
 import { VerificationModule } from './execution/Verification'
@@ -23,7 +22,6 @@ export const SHARED_TOOL_USE_MODULES: PromptModule[] = [
   SecurityModule,
   HarnessModule,
   InvestigationModule,
-  FailureRecoveryModule,
   ToolPolicyModule,
 ]
 
@@ -36,18 +34,17 @@ function createExecutorPipeline(): PromptPipeline {
     .register(IdentityModule)
     .registerAll(SHARED_TOOL_USE_MODULES)
     .register(EngineeringPhilosophyModule)
-    .register(ReasoningPolicyModule)
-    .register(DecisionPolicyModule)
+    .register(FailureRecoveryModule)
     .register(ContextManagementModule)
     .register(RepositoryRulesModule)
     .register(EnvironmentModule)
-    .register(GitStatusModule)
     .register(SkillsModule)
+    .register(VerificationStrategyModule)
     .register(EditingModule)
     .register(VerificationModule)
     .register(OutputPolicyModule)
 }
 
 export async function buildExecutorSharedPrompt(ctx: PromptContext): Promise<string> {
-  return createExecutorPipeline().run(ctx)
+  return createExecutorPipeline().run(await resolvePromptContext(ctx))
 }

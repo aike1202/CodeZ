@@ -1,16 +1,20 @@
 import type { PromptModule, PromptContext } from '../PromptTypes'
-import { RulesResolver } from '../../../agent/RulesResolver'
-
 export const RepositoryRulesModule: PromptModule = {
   id: 'repository-rules',
   layer: 'context',
   priority: 2,
-  isEnabled: async (ctx: PromptContext) => {
-    const rules = await RulesResolver.getWorkspaceRules(ctx.workspaceRoot)
-    return !!rules
-  },
-  build: async (ctx: PromptContext) => {
-    const rules = await RulesResolver.getWorkspaceRules(ctx.workspaceRoot)
-    return `<repository_instructions>\n${rules}\n</repository_instructions>`
+  build: (ctx: PromptContext) => {
+    const sections = [
+      ctx.globalRules ? `<global_rules>\n${ctx.globalRules}\n</global_rules>` : '',
+      ctx.workspaceRules ? `<workspace_rules>\n${ctx.workspaceRules}\n</workspace_rules>` : '',
+      ctx.directoryRules ? `<directory_rules>\n${ctx.directoryRules}\n</directory_rules>` : ''
+    ].filter(Boolean)
+    if (sections.length === 0) return ''
+    return [
+      '<repository_instructions>',
+      'Instruction precedence within project guidance is: global < workspace < closest directory < the current explicit user request. Safety and runtime permission rules cannot be overridden.',
+      ...sections,
+      '</repository_instructions>'
+    ].join('\n')
   },
 }

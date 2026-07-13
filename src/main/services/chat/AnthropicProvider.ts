@@ -5,6 +5,28 @@ import log from '../../logger'
 import { logPrompt } from '../PromptLogger'
 import type { ProviderTokenUsage } from '../../../shared/types/provider'
 import { classifyProviderError } from './errors'
+import { splitSystemPromptSections } from '../prompts/PromptCache'
+
+const EPHEMERAL_CACHE_CONTROL = { type: 'ephemeral' as const }
+
+export function buildAnthropicSystemBlocks(systemPrompt: string): any[] {
+  const { staticContent, dynamicContent } = splitSystemPromptSections(systemPrompt)
+  return [staticContent, dynamicContent]
+    .filter(Boolean)
+    .map(text => ({ type: 'text', text, cache_control: EPHEMERAL_CACHE_CONTROL }))
+}
+
+export function buildAnthropicTools(
+  tools: ChatRequestConfig['tools']
+): any[] | undefined {
+  if (!tools?.length) return undefined
+  return tools.map((tool, index) => ({
+    name: tool.function.name,
+    description: tool.function.description,
+    input_schema: tool.function.parameters,
+    ...(index === tools.length - 1 ? { cache_control: EPHEMERAL_CACHE_CONTROL } : {})
+  }))
+}
 
 export function extractAnthropicUsage(value: any): ProviderTokenUsage {
   const inputTokens = Number(value?.input_tokens || 0) +
@@ -140,11 +162,7 @@ export class AnthropicProvider implements IChatProvider {
       .join('\n')
     const anthropicMessages = await buildAnthropicMessages(messages, resolveImage)
 
-    const anthropicTools = tools?.map(t => ({
-      name: t.function.name,
-      description: t.function.description,
-      input_schema: t.function.parameters
-    }))
+    const anthropicTools = buildAnthropicTools(tools)
 
     const thinkingPayload = await import('./utils').then(m => m.buildThinkingPayload(thinking, model, baseUrl, !!(tools && tools.length > 0), 'anthropic'))
     const visibleOutputTokens = config.maxOutputTokens || 8192
@@ -158,7 +176,7 @@ export class AnthropicProvider implements IChatProvider {
     }
     
     if (systemPrompt) {
-      requestPayload.system = systemPrompt.trim()
+      requestPayload.system = buildAnthropicSystemBlocks(systemPrompt)
     }
     if (anthropicTools && anthropicTools.length > 0) {
       requestPayload.tools = anthropicTools

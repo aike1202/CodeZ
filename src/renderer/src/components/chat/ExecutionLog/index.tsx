@@ -46,6 +46,11 @@ export default function ExecutionLog({
     [normalizedTimeline, commands, edits, reasoning, streaming]
   )
   const displayItems = useMemo(() => groupParallelToolBatches(unifiedItems), [unifiedItems])
+  const visibleSubAgents = useMemo(() => {
+    if (!subAgents?.length) return []
+    const parentToolIds = new Set(unifiedItems.map((item) => item.id))
+    return subAgents.filter((subAgent) => parentToolIds.has(subAgent.parentToolCallId))
+  }, [subAgents, unifiedItems])
 
   const running = useMemo(() => {
     return !interrupted && (
@@ -176,38 +181,9 @@ export default function ExecutionLog({
                   expandedMap={expandedMap}
                   hasItemDetail={hasDetail}
                   toggleItemExpand={toggleItemExpand}
-                  subAgents={subAgents}
-                  onSubAgentClick={onSubAgentClick}
                   onFileClick={onFileClick}
                   onDiffClick={onDiffClick}
                 />
-              )
-            }
-
-            const isOrchestratorTool =
-              item.toolName === 'DelegateTasks' ||
-              item.toolName === 'spawn'
-
-            const matchedSubAgents =
-              item.type === 'tool' &&
-              (item.toolName === 'SubAgentRunner' ||
-                isOrchestratorTool)
-                ? subAgents?.filter((s) => s.parentToolCallId === item.id) || []
-                : []
-
-            if (matchedSubAgents.length > 0) {
-              return (
-                <React.Fragment key={item.id}>
-                  {matchedSubAgents.map((subAgent) => (
-                    <SubAgentCard
-                      key={subAgent.id}
-                      subAgent={subAgent}
-                      onOpenDetails={onSubAgentClick}
-                      onFileClick={onFileClick}
-                      onDiffClick={onDiffClick}
-                    />
-                  ))}
-                </React.Fragment>
               )
             }
 
@@ -226,6 +202,17 @@ export default function ExecutionLog({
           })}
         </Stack>
       </div>
+      {visibleSubAgents.length > 0 && (
+        <div className="subagent-launcher-list">
+          {visibleSubAgents.map((subAgent) => (
+            <SubAgentCard
+              key={subAgent.id}
+              subAgent={subAgent}
+              onOpenDetails={onSubAgentClick}
+            />
+          ))}
+        </div>
+      )}
     </div>
   )
 }

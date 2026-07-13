@@ -3,13 +3,15 @@ import type { PromptContext } from '../main/services/prompts/PromptTypes'
 
 vi.mock('../main/agent/RulesResolver', () => ({
   RulesResolver: {
+    getGlobalRules: vi.fn().mockResolvedValue(''),
     getWorkspaceRules: vi.fn().mockResolvedValue('Workspace Rule Content'),
+    getLoadedDirectoryRules: vi.fn().mockReturnValue(''),
   },
 }))
 
 vi.mock('../main/services/GitContextService', () => ({
   GitContextService: {
-    getSnapshot: vi.fn().mockReturnValue('Current branch: main'),
+    getSnapshot: vi.fn().mockResolvedValue('Branch: main'),
   },
 }))
 
@@ -64,10 +66,13 @@ describe('shared subagent tool policy', () => {
   it('injects every shared tool-use module into all built-in subagents', async () => {
     const { SubAgentManager } = await import('../main/agent/SubAgentManager')
     const { SHARED_TOOL_USE_MODULES } = await import('../main/services/prompts/SubAgentPrompts')
+    const { resolvePromptContext } = await import('../main/services/prompts/PromptContextResolver')
+    const resolvedContext = await resolvePromptContext(promptContext)
 
-    const sharedSections = await Promise.all(
-      SHARED_TOOL_USE_MODULES.map(module => module.build(promptContext)),
-    )
+    const stableSharedModules = SHARED_TOOL_USE_MODULES.filter(module => module.layer !== 'dynamic')
+    const sharedSections = (await Promise.all(
+      stableSharedModules.map(module => module.build(resolvedContext)),
+    )).filter((section): section is string => Boolean(section))
 
     for (const type of ['Explore', 'ExecutionPlanner', 'Executor']) {
       const detail = await SubAgentManager.getDetail(type)
@@ -82,7 +87,7 @@ describe('shared subagent tool policy', () => {
     const { SHARED_TOOL_USE_MODULES } = await import('../main/services/prompts/SubAgentPrompts')
     const { createDefaultPipeline } = await import('../main/services/prompts/PromptBuilder')
 
-    const enabledIds = createDefaultPipeline().listEnabled(promptContext).map(module => module.id)
+    const enabledIds = (await createDefaultPipeline().listEnabled(promptContext)).map(module => module.id)
     for (const module of SHARED_TOOL_USE_MODULES) {
       expect(enabledIds).toContain(module.id)
     }

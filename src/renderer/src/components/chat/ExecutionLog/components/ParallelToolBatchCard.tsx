@@ -2,8 +2,6 @@ import React, { useEffect, useState } from 'react'
 import { CheckCircle2, ChevronDown, FolderSearch2, ListTree, Loader2, XCircle } from 'lucide-react'
 import type { ParallelToolBatchItem, UnifiedTimelineItem } from '../utils'
 import { getParallelBatchDuration } from '../utils'
-import type { SubAgentRecord } from '../../../../stores/chatStore'
-import SubAgentCard from '../../SubAgentCard'
 import { LogItemRow } from './LogItemRow'
 import './ParallelToolBatchCard.css'
 
@@ -12,8 +10,6 @@ interface ParallelToolBatchCardProps {
   expandedMap: Record<string, boolean>
   hasItemDetail: (item: UnifiedTimelineItem) => boolean
   toggleItemExpand: (id: string, event: React.MouseEvent) => void
-  subAgents?: SubAgentRecord[]
-  onSubAgentClick?: (subAgent: SubAgentRecord) => void
   onFileClick?: (filePath: string, virtualContent?: string) => void
   onDiffClick?: (
     filePath: string,
@@ -37,8 +33,6 @@ export function ParallelToolBatchCard({
   expandedMap,
   hasItemDetail,
   toggleItemExpand,
-  subAgents,
-  onSubAgentClick,
   onFileClick,
   onDiffClick
 }: ParallelToolBatchCardProps): React.ReactElement {
@@ -104,31 +98,6 @@ export function ParallelToolBatchCard({
       {expanded && (
         <div className="parallel-tool-batch-body">
           {batch.items.map((item, index) => {
-            const isOrchestratorTool =
-              item.toolName === 'DelegateTasks' ||
-              item.toolName === 'spawn'
-            const matchedSubAgents =
-              item.type === 'tool' &&
-              (item.toolName === 'SubAgentRunner' || isOrchestratorTool)
-                ? subAgents?.filter((subAgent) => subAgent.parentToolCallId === item.id) || []
-                : []
-
-            if (matchedSubAgents.length > 0) {
-              return (
-                <React.Fragment key={item.id}>
-                  {matchedSubAgents.map((subAgent) => (
-                    <SubAgentCard
-                      key={subAgent.id}
-                      subAgent={subAgent}
-                      onOpenDetails={onSubAgentClick}
-                      onFileClick={onFileClick}
-                      onDiffClick={onDiffClick}
-                    />
-                  ))}
-                </React.Fragment>
-              )
-            }
-
             return (
               <LogItemRow
                 key={item.id}

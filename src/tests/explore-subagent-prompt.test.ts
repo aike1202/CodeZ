@@ -35,7 +35,7 @@ describe('Explore subagent prompt', () => {
       contextCapabilities: { contextWindowTokens: 100_000 },
     })
 
-    expect(prompt).toContain('# Tool Policy')
+    expect(prompt).toContain('# Using tools')
     expect(prompt).toContain('file search specialist')
     expect(prompt).toContain('Critical: Read-only mode')
     expect(prompt).toContain('Batch independent searches and reads')

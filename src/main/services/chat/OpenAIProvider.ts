@@ -6,12 +6,16 @@ import type { ProviderTokenUsage } from '../../../shared/types/provider'
 import { classifyProviderError } from './errors'
 import type { ChatMessage } from '../../../shared/types/provider'
 import type { ResolveImageAttachment } from '../../../shared/types/attachment'
+import { stripSystemPromptMarkers } from '../prompts/PromptCache'
 
 export async function resolveOpenAIMessages(
   messages: ChatMessage[],
   resolveImage?: ResolveImageAttachment
 ): Promise<any[]> {
   return Promise.all(messages.map(async (message) => {
+    if (message.role === 'system') {
+      return { ...message, content: stripSystemPromptMarkers(message.content || '') }
+    }
     if (message.role !== 'user' || !message.attachments?.length) return message
     if (!resolveImage) throw new Error('Image resolver is unavailable')
     const images = await Promise.all(message.attachments.map(resolveImage))

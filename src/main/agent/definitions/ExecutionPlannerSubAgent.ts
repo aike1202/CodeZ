@@ -1,5 +1,5 @@
 import { SubAgentDefinition, SubAgentContext } from '../SubAgentManager'
-import { ToolManager } from '../../tools/ToolManager'
+import type { ToolManager } from '../../tools/ToolManager'
 import { buildSharedToolUsePrompt } from '../../services/prompts/SubAgentPrompts'
 import type { ToolDefinition } from '../../../shared/types/provider'
 
@@ -60,12 +60,21 @@ export const ExecutionPlannerSubAgent: SubAgentDefinition = {
   },
 
   systemPromptBuilder: async (ctx: SubAgentContext): Promise<string> => {
+    const tools = ctx.promptTools || ['Read', 'list_files', 'Glob', 'Grep'].map(name => ({
+      type: 'function' as const,
+      function: { name, description: `${name} tool`, parameters: {} }
+    }))
     const sharedPrompt = await buildSharedToolUsePrompt({
       workspaceRoot: ctx.workspaceRoot,
       modelId: ctx.modelOverride || ctx.apiConfig.model,
       modelDisplayName: ctx.modelOverride || ctx.apiConfig.model,
       contextWindowTokens: ctx.contextCapabilities?.contextWindowTokens ?? 1,
       sessionId: ctx.sessionId,
+      availableTools: tools.map(tool => ({
+        name: tool.function.name,
+        summary: tool.function.description
+      })),
+      deferredTools: []
     })
     const plannerPrompt = [
       'You are an ExecutionPlanner SubAgent for the CodeZ coding assistant.',

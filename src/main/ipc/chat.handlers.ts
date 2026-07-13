@@ -42,6 +42,7 @@ import {
 } from '../services/chat/utils'
 import { ToolManager } from '../tools/ToolManager'
 import { getMcpConnectionManager } from '../services/mcp'
+import { getWorkspacePermissionStore } from '../services/permission/workspacePermissionStore'
 
 function applyRequestReasoningReserve(
   capabilities: ModelContextCapabilities,
@@ -251,13 +252,17 @@ export function registerChatIpc(): void {
       if (consumePendingStop(streamId)) return streamId
 
       const { SystemPromptService } = await import('../services/SystemPromptService')
+      const permissionMode = await getWorkspacePermissionStore().getMode(currentWorkspace)
 
       const sysPrompt = await SystemPromptService.buildSystemPrompt({
         workspaceRoot: currentWorkspace,
         modelId: request.model,
         modelDisplayName: `${modelConfig?.name || request.model} (${contextWindowTokens.toLocaleString()} context)`,
         contextWindowTokens,
-        sessionId: request.sessionId
+        sessionId: request.sessionId,
+        apiFormat,
+        permissionMode,
+        thinkingEnabled: thinking.enabled
       })
 
       const reminder = await SystemPromptService.buildSystemReminder(currentWorkspace)
@@ -547,7 +552,10 @@ export function registerChatIpc(): void {
         modelId: scope.lastModel,
         modelDisplayName: `${modelConfig?.name || scope.lastModel} (${contextWindowTokens.toLocaleString()} context)`,
         contextWindowTokens,
-        sessionId: request.sessionId
+        sessionId: request.sessionId,
+        apiFormat,
+        permissionMode: await getWorkspacePermissionStore().getMode(workspace),
+        thinkingEnabled: thinking.enabled
       })
       const reminder = await SystemPromptService.buildSystemReminder(workspace)
       await getMcpConnectionManager().syncWorkspace(workspace)

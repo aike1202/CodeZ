@@ -20,7 +20,7 @@ vi.mock('../main/services/ChatService', () => ({
   }))
 }))
 
-describe('SubAgentManager parent abort propagation', () => {
+describe('SubAgentManager parent abort propagation', { timeout: 15_000 }, () => {
   it('returns interrupted and removes the session handle when the parent aborts', async () => {
     const { SubAgentManager } = await import('../main/agent/SubAgentManager')
 

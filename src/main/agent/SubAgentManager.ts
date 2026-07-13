@@ -126,6 +126,8 @@ export interface SubAgentContext {
   modelOverride?: string
   maxLoopsOverride?: number
   contextCapabilities?: ModelContextCapabilities
+  /** Resolved tool schemas for prompt adaptation; populated by the runtime before prompt assembly. */
+  promptTools?: ToolDefinition[]
   runtimeCoordinator?: SessionRuntimeCoordinator
   contextBuilder?: ModelContextBuilder
   compactionService?: CompactionService
@@ -796,6 +798,7 @@ export class SubAgentManager {
         availableTools.push(submitResultTool)
       }
 
+      ctx.promptTools = availableTools
       const systemPrompt = await buildExtendedSystemPrompt(def, ctx)
       const task = ctx.task || ctx.parentPrompt || ''
       const contextBuilder = ctx.contextBuilder || new CanonicalModelContextBuilder(core.ledger)

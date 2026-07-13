@@ -1,5 +1,5 @@
 import type { SubAgentDefinition, SubAgentContext } from '../SubAgentManager'
-import { ToolManager } from '../../tools/ToolManager'
+import type { ToolManager } from '../../tools/ToolManager'
 import { buildSharedToolUsePrompt } from '../../services/prompts/SubAgentPrompts'
 import type { ToolDefinition } from '../../../shared/types/provider'
 
@@ -99,12 +99,21 @@ export const ExploreSubAgent: SubAgentDefinition = {
   getTools: getExploreTools,
 
   systemPromptBuilder: async (ctx): Promise<string> => {
+    const tools = ctx.promptTools || ['Read', 'list_files', 'Glob', 'Grep', 'Bash', 'PowerShell'].map(name => ({
+      type: 'function' as const,
+      function: { name, description: `${name} tool`, parameters: {} }
+    }))
     const sharedPrompt = await buildSharedToolUsePrompt({
       workspaceRoot: ctx.workspaceRoot,
       modelId: ctx.modelOverride || ctx.apiConfig.model,
       modelDisplayName: ctx.modelOverride || ctx.apiConfig.model,
       contextWindowTokens: ctx.contextCapabilities?.contextWindowTokens ?? 1,
       sessionId: ctx.sessionId,
+      availableTools: tools.map(tool => ({
+        name: tool.function.name,
+        summary: tool.function.description
+      })),
+      deferredTools: []
     })
     return [sharedPrompt, buildExploreRolePrompt(ctx)].join('\n\n')
   },

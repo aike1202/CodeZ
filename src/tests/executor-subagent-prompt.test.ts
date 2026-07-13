@@ -2,13 +2,15 @@ import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('../main/agent/RulesResolver', () => ({
   RulesResolver: {
+    getGlobalRules: vi.fn().mockResolvedValue(''),
     getWorkspaceRules: vi.fn().mockResolvedValue('Workspace Rule Content'),
+    getLoadedDirectoryRules: vi.fn().mockReturnValue(''),
   },
 }))
 
 vi.mock('../main/services/GitContextService', () => ({
   GitContextService: {
-    getSnapshot: vi.fn().mockReturnValue('Current branch: main'),
+    getSnapshot: vi.fn().mockResolvedValue('Branch: main'),
   },
 }))
 
@@ -60,16 +62,17 @@ describe('Executor subagent prompt', () => {
 
     expect(detail?.type).toBe('Executor')
     expect(detail?.systemPrompt).toContain('You are CodeZ')
-    expect(detail?.systemPrompt).toContain('# Security')
+    expect(detail?.systemPrompt).toContain('# Safety')
     expect(detail?.systemPrompt).toContain('Workspace Rule Content')
     expect(detail?.systemPrompt).toContain('# Editing')
     expect(detail?.systemPrompt).toContain('VERIFICATION STRATEGY')
-    expect(detail?.systemPrompt).toContain('# Tool Policy')
+    expect(detail?.systemPrompt).toContain('# Using tools')
     expect(detail?.systemPrompt).toContain('# Executor Constraints')
     expect(detail?.systemPrompt).toContain('submit_result')
 
     expect(detail?.systemPrompt).not.toContain('# Delegation')
     expect(detail?.systemPrompt).not.toContain('<subagent_guidance>')
+    expect(detail?.systemPrompt).not.toContain('<git_status>')
   })
 
   it('keeps Worker as a compatibility alias for existing callers', async () => {
@@ -107,5 +110,8 @@ describe('Executor subagent prompt', () => {
     expect(prompt).toContain('## Supplied Research and Plan Context')
     expect(prompt).toContain('Sidebar status comes from streamCleanups')
     expect(prompt).toContain('Do not repeat broad repository exploration')
+    expect(prompt).toContain('- API format: openai')
+    expect(prompt).not.toContain('- Permission mode:')
+    expect(prompt).not.toContain('- Extended thinking:')
   })
 })

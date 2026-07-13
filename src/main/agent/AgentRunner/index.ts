@@ -9,6 +9,7 @@ import {
 import { normalizeAskUserTextFallback } from '../../tools/builtin/AskUserQuestionTool'
 import { TaskStore } from '../../services/TaskStore'
 import { SubAgentManager } from '../SubAgentManager'
+import { RulesResolver } from '../RulesResolver'
 import type { ChatProviderErrorCode, ProviderTokenUsage, ToolDefinition } from '../../../shared/types/provider'
 import log from '../../logger'
 import { logPrompt } from '../../services/PromptLogger'
@@ -721,6 +722,17 @@ export class AgentRunner {
               (toolResult as any)._uiContent || unwrapModelToolResultForUi(toolResult.content)
             )
           }
+
+          const readFilePaths = pipelineResults.flatMap((item) =>
+            item.canonicalName === 'Read' && item.result.status === 'success'
+              ? (item.result.fileReferences || []).map(reference => reference.path)
+              : [])
+          const directoryInstructions = await RulesResolver.loadDirectoryRulesForFiles(
+            config.workspaceRoot,
+            readFilePaths,
+            sessionId
+          )
+          if (directoryInstructions) runtimeInstructions.push(directoryInstructions)
 
           for (const tr of toolResults) {
             const item = tr._pipelineResult

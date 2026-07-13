@@ -1,7 +1,27 @@
 import type { SubAgentDefinition, SubAgentContext } from '../SubAgentManager'
-import { ToolManager } from '../../tools/ToolManager'
+import type { ToolManager } from '../../tools/ToolManager'
 import { buildExecutorSharedPrompt } from '../../services/prompts/SubAgentPrompts'
 import type { ToolDefinition } from '../../../shared/types/provider'
+
+function getExecutorTools(toolManager: ToolManager): ToolDefinition[] {
+  const readOnly = toolManager.getReadOnlyTools()
+  const writeToolNames = ['Edit', 'Write', 'NotebookEdit', 'Bash', 'PowerShell']
+  const additional: ToolDefinition[] = []
+  for (const name of writeToolNames) {
+    const tool = toolManager.getTool(name)
+    if (tool) {
+      additional.push({
+        type: 'function',
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters_schema,
+        },
+      })
+    }
+  }
+  return [...readOnly, ...additional]
+}
 
 /**
  * Executor 执行器（可写）：
@@ -26,25 +46,7 @@ export const WorkerSubAgent: SubAgentDefinition = {
   ].join('\n'),
   costHint: 'Up to 20 tool calls including file edits. One executor per plan step.',
 
-  getTools: (toolManager: ToolManager): ToolDefinition[] => {
-    const readOnly = toolManager.getReadOnlyTools()
-    const writeToolNames = ['Edit', 'Write', 'NotebookEdit', 'Bash', 'PowerShell']
-    const additional: ToolDefinition[] = []
-    for (const name of writeToolNames) {
-      const tool = toolManager.getTool(name)
-      if (tool) {
-        additional.push({
-          type: 'function',
-          function: {
-            name: tool.name,
-            description: tool.description,
-            parameters: tool.parameters_schema,
-          },
-        })
-      }
-    }
-    return [...readOnly, ...additional]
-  },
+  getTools: getExecutorTools,
 
   outputSpec: {
     description: 'Report the outcome of executing this plan step.',
@@ -80,12 +82,28 @@ export const WorkerSubAgent: SubAgentDefinition = {
     if (!ctx.contextCapabilities) {
       throw new Error('Executor requires resolved model context capabilities')
     }
+    const tools = ctx.promptTools || ['Read', 'Edit', 'Write', 'NotebookEdit', 'Bash', 'PowerShell'].map(name => ({
+      type: 'function' as const,
+      function: { name, description: `${name} tool`, parameters: {} }
+    }))
+    const apiFormat = ctx.apiConfig.apiFormat === 'anthropic' || ctx.apiConfig.apiFormat === 'gemini'
+      ? ctx.apiConfig.apiFormat
+      : ctx.apiConfig.apiFormat === 'openai'
+        ? 'openai'
+        : undefined
     const sharedPrompt = await buildExecutorSharedPrompt({
       workspaceRoot: ctx.workspaceRoot,
       modelId: ctx.modelOverride || ctx.apiConfig.model,
       modelDisplayName: ctx.modelOverride || ctx.apiConfig.model,
       contextWindowTokens: ctx.contextCapabilities.contextWindowTokens,
       sessionId: ctx.sessionId,
+      apiFormat,
+      thinkingEnabled: ctx.apiConfig.thinking?.enabled,
+      availableTools: tools.map(tool => ({
+        name: tool.function.name,
+        summary: tool.function.description
+      })),
+      deferredTools: []
     })
 
     const executorPrompt = [

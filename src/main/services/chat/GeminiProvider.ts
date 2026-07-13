@@ -5,6 +5,7 @@ import { logPrompt } from '../PromptLogger'
 import type { ChatMessage, ProviderTokenUsage } from '../../../shared/types/provider'
 import type { ResolveImageAttachment } from '../../../shared/types/attachment'
 import { classifyProviderError } from './errors'
+import { stripSystemPromptMarkers } from '../prompts/PromptCache'
 
 export function extractGeminiUsage(value: any): ProviderTokenUsage {
   return {
@@ -35,7 +36,7 @@ export async function buildGeminiContents(
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i]
     if (msg.role === 'system') {
-      systemInstructionParts.push({ text: msg.content })
+      systemInstructionParts.push({ text: stripSystemPromptMarkers(msg.content || '') })
     } else if (msg.role === 'user') {
       const parts: any[] = msg.content?.trim() ? [{ text: msg.content }] : []
       if (msg.attachments?.length) {

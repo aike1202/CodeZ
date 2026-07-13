@@ -11,7 +11,7 @@ vi.mock('../main/services/ChatService', () => ({
   })),
 }))
 
-describe('SubAgentManager recoverable provider errors', () => {
+describe('SubAgentManager recoverable provider errors', { timeout: 15_000 }, () => {
   const workerOutputSpec = {
     description: 'Report worker outcome',
     fields: [

@@ -13,7 +13,7 @@ export interface AgentMessageContentProps {
   lastStreamingMsgId: string | null
   showParallelExecution?: boolean
   handleFileClick: (filePath: string, virtualContent?: string) => Promise<void>
-  handleSubAgentClick: (subAgent: SubAgentRecord) => void
+  handleSubAgentClick?: (subAgent: SubAgentRecord) => void
   handleDiffClick: (
     filePath: string,
     editInfo: {
@@ -34,7 +34,7 @@ export function AgentMessageContent({
   lastStreamingMsgId,
   showParallelExecution = false,
   handleFileClick,
-  handleSubAgentClick,
+  handleSubAgentClick = () => {},
   handleDiffClick
 }: AgentMessageContentProps): React.ReactElement {
   

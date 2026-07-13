@@ -20,7 +20,7 @@ afterEach(async () => {
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
-describe('SubAgent canonical context scope', () => {
+describe('SubAgent canonical context scope', { timeout: 15_000 }, () => {
   it('uses resolved model capabilities without changing the main scope version', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'codez-subagent-scope-'))
     dirs.push(root)

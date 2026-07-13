@@ -1,75 +1,37 @@
-import { execSync } from 'child_process'
-import * as path from 'path'
-import * as fs from 'fs'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
+
+const execFileAsync = promisify(execFile)
 
 export class GitContextService {
   /**
    * Get a formatted git status snapshot for the given workspace.
    * Returns empty string if the directory is not a git repository.
    */
-  static getSnapshot(workspaceRoot: string): string {
-    if (!fs.existsSync(path.join(workspaceRoot, '.git'))) {
-      return ''
-    }
-
+  static async getSnapshot(workspaceRoot: string): Promise<string> {
     try {
-      // Verify it's a git repo
-      execSync('git rev-parse --git-dir', {
+      const { stdout } = await execFileAsync('git', ['status', '--short', '--branch'], {
         cwd: workspaceRoot,
         timeout: 5000,
-        stdio: 'pipe'
+        encoding: 'utf8',
+        maxBuffer: 256 * 1024,
+        windowsHide: true
       })
+      const lines = stdout.trim().split(/\r?\n/).filter(Boolean)
+      if (lines.length === 0) return 'Branch: unknown\nWorking tree: clean'
+      const branch = lines[0].replace(/^##\s*/, '')
+      const changes = lines.slice(1)
+      const visibleChanges = changes.slice(0, 40)
+      return [
+        `Branch: ${branch}`,
+        `Working tree: ${changes.length === 0 ? 'clean' : `${changes.length} changed path(s)`}`,
+        ...visibleChanges,
+        ...(changes.length > visibleChanges.length
+          ? [`... ${changes.length - visibleChanges.length} more changed path(s)`]
+          : [])
+      ].join('\n')
     } catch {
       return ''
     }
-
-    const run = (cmd: string): string => {
-      try {
-        return execSync(cmd, {
-          cwd: workspaceRoot,
-          timeout: 5000,
-          stdio: 'pipe',
-          encoding: 'utf-8'
-        }).trim()
-      } catch {
-        return ''
-      }
-    }
-
-    const currentBranch = run('git rev-parse --abbrev-ref HEAD') || 'unknown'
-
-    let mainBranch = 'main'
-    try {
-      const ref = run('git symbolic-ref refs/remotes/origin/HEAD')
-      if (ref) {
-        mainBranch = ref.replace('refs/remotes/origin/', '').trim()
-      }
-    } catch {
-      // Fall back to "main"
-    }
-
-    const gitUser = run('git config user.name') || 'unknown'
-
-    const status = run('git status --porcelain') || '(unable to read)'
-
-    const recentCommits = run('git --no-pager log --oneline -5')
-
-    const lines: string[] = []
-    lines.push(`Current branch: ${currentBranch}`)
-    lines.push('')
-    lines.push(`Main branch (you will usually use this for PRs): ${mainBranch}`)
-    lines.push('')
-    lines.push(`Git user: ${gitUser}`)
-    lines.push('')
-    lines.push('Status:')
-    lines.push(status)
-
-    if (recentCommits) {
-      lines.push('')
-      lines.push('Recent commits:')
-      lines.push(recentCommits)
-    }
-
-    return lines.join('\n')
   }
 }

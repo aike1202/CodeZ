@@ -4,8 +4,8 @@ export type PromptLayer = 'core' | 'context' | 'execution' | 'dynamic' | 'remind
 
 export const LAYER_ORDER: Record<PromptLayer, number> = {
   core: 0,
-  context: 1,
-  execution: 2,
+  execution: 1,
+  context: 2,
   dynamic: 3,
   reminder: 4,
 }
@@ -20,7 +20,17 @@ export interface PromptModule {
   /** 启用条件：返回 true 才注入；省略则始终启用。可同步或异步。 */
   isEnabled?(ctx: PromptContext): boolean | Promise<boolean>
   /** 构建文本内容 */
-  build(ctx: PromptContext): string | Promise<string>
+  build(ctx: PromptContext): string | null | Promise<string | null>
+}
+
+export interface PromptSkillSummary {
+  name: string
+  description: string
+}
+
+export interface PromptToolSummary {
+  name: string
+  summary: string
 }
 
 export interface PromptContext {
@@ -29,4 +39,15 @@ export interface PromptContext {
   modelDisplayName: string
   contextWindowTokens: number
   sessionId?: string
+  apiFormat?: 'openai' | 'anthropic' | 'gemini'
+  permissionMode?: 'auto' | 'full-access'
+  thinkingEnabled?: boolean
+  availableTools?: readonly PromptToolSummary[]
+  deferredTools?: readonly PromptToolSummary[]
+  activeSkills?: readonly PromptSkillSummary[]
+  globalRules?: string
+  workspaceRules?: string
+  directoryRules?: string
+  gitStatus?: string
+  now?: Date
 }
