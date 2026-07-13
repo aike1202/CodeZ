@@ -74,6 +74,35 @@ describe('SessionStore runtime schema', () => {
     expect(JSON.parse(await readFile(file, 'utf8')).sessions).toHaveLength(1)
   })
 
+  it('preserves the main-process runtime reference when the renderer saves stale UI state', async () => {
+    root = await mkdtemp(path.join(os.tmpdir(), 'codez-session-'))
+    const file = path.join(root, 'sessions.json')
+    const store = new SessionStore(file)
+    await store.save({
+      id: 's1', projectId: 'p1', summary: 'x', relativeTime: 'now',
+      messages: [{ id: 'm1', role: 'agent', content: 'before migration' }]
+    })
+    await store.setRuntimeRef('s1', {
+      schemaVersion: 2,
+      ledgerVersion: 1,
+      migratedAt: '2026-07-10T00:00:00.000Z',
+      legacySourceHash: 'source-hash',
+      legacyImportMode: 'summary'
+    })
+
+    await store.save({
+      id: 's1', projectId: 'p1', summary: 'x', relativeTime: 'now',
+      messages: [{ id: 'm2', role: 'agent', content: 'renderer update' }]
+    })
+
+    expect(store.get('s1')?.messages[0].content).toBe('renderer update')
+    expect(store.get('s1')?.runtime).toMatchObject({
+      schemaVersion: 2,
+      legacySourceHash: 'source-hash',
+      legacyImportMode: 'summary'
+    })
+  })
+
   it('throws and rolls back cache when persistence fails', async () => {
     root = await mkdtemp(path.join(os.tmpdir(), 'codez-session-'))
     const file = path.join(root, 'sessions.json')

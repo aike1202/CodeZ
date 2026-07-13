@@ -11,6 +11,7 @@ import IconMinimize from '../icons/IconMinimize'
 import IconMaximize from '../icons/IconMaximize'
 import IconWindowRestore from '../icons/IconWindowRestore'
 import IconClose from '../icons/IconClose'
+import { Bot } from 'lucide-react'
 
 import './TopBar.css'
 import type { TopBarProps } from './types'
@@ -28,6 +29,9 @@ function sendWindowControl(action: 'minimize' | 'maximize' | 'close') {
 export default function TopBar({
   terminalOpen = false,
   onToggleTerminal,
+  subagentLogOpen = false,
+  onToggleSubagentLogs,
+  hasSubagentLogs = false,
   onOpenTasks,
   hasWorkspace = false
 }: TopBarProps): React.ReactElement {
@@ -192,6 +196,26 @@ export default function TopBar({
           disabled={!hasWorkspace}
         >
           <IconTerminal />
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="none"
+          className={`user-menu-btn ${
+            !hasWorkspace
+              ? 'topbar-action-btn-disabled'
+              : subagentLogOpen
+                ? 'topbar-action-btn-active'
+                : 'topbar-action-btn-normal'
+          }`}
+          title={hasWorkspace
+            ? hasSubagentLogs ? '查看子智能体日志' : '打开子智能体日志页'
+            : '请先打开一个项目'}
+          aria-label="切换显示子智能体日志"
+          onClick={hasWorkspace ? onToggleSubagentLogs : undefined}
+          disabled={!hasWorkspace}
+        >
+          <Bot size={16} aria-hidden="true" />
         </Button>
 
         <Button variant="ghost" size="none" className="user-menu-btn" title="用户菜单">

@@ -60,7 +60,11 @@ export class SessionStore {
     return this.enqueueMutation(async () => {
       const idx = this.cache.findIndex((s) => s.id === session.id)
       if (idx >= 0) {
-        this.cache[idx] = session
+        const current = this.cache[idx]
+        this.cache[idx] = {
+          ...session,
+          runtime: session.runtime ?? current.runtime
+        }
       } else {
         this.cache.unshift(session)
         if (this.cache.length > MAX_SESSIONS) {

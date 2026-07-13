@@ -4,6 +4,7 @@ import Flex from '../../ui/Flex'
 import Stack from '../../ui/Stack'
 import IconClose from '../../icons/IconClose'
 import IconPlus from '../../icons/IconPlus'
+import { RotateCw, SquareTerminal, Trash2 } from 'lucide-react'
 import './TerminalPanel.css'
 import type { TerminalPanelProps, TerminalTab } from './types'
 import { TerminalInstance } from './components/TerminalInstance'
@@ -15,7 +16,9 @@ export default function TerminalPanel({
   setHeight,
   onClose,
   sidebarWidth,
-  previewPanelWidth
+  previewPanelWidth,
+  layout = 'bottom',
+  visible = true
 }: TerminalPanelProps): React.ReactElement {
   const [tabs, setTabs] = useState<TerminalTab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
@@ -25,15 +28,16 @@ export default function TerminalPanel({
   useEffect(() => {
     if (tabs.length === 0) {
       const firstId = `term_${workspaceId}_${Date.now()}`
-      setTabs([{ id: firstId, name: 'Terminal 1' }])
+      setTabs([{ id: firstId, name: '终端 1' }])
       setActiveTabId(firstId)
     }
   }, [workspaceId])
 
   const handleDragMouseDown = (e: React.MouseEvent) => {
+    if (layout === 'side' || !setHeight) return
     e.preventDefault()
     const startY = e.clientY
-    const startHeight = height
+    const startHeight = height ?? 200
 
     const onMouseMove = (moveEvent: MouseEvent) => {
       const deltaY = startY - moveEvent.clientY
@@ -53,9 +57,8 @@ export default function TerminalPanel({
   }
 
   const handleAddTab = () => {
-    const nextNum = tabs.length + 1
     const newId = `term_${workspaceId}_${Date.now()}`
-    setTabs([...tabs, { id: newId, name: `Terminal ${nextNum}` }])
+    setTabs((current) => [...current, { id: newId, name: `终端 ${current.length + 1}` }])
     setActiveTabId(newId)
   }
 
@@ -88,12 +91,18 @@ export default function TerminalPanel({
   }
 
   return (
-    <Stack className="terminal-panel" style={{ height }}>
-      <div className="terminal-drag-bar" onMouseDown={handleDragMouseDown} />
+    <Stack
+      className={`terminal-panel ${layout === 'side' ? 'terminal-panel--side' : ''}`}
+      style={{ height: layout === 'side' ? '100%' : height }}
+    >
+      {layout === 'bottom' && <div className="terminal-drag-bar" onMouseDown={handleDragMouseDown} />}
 
       <Flex align="center" justify="between" className="terminal-header">
         <Flex align="center" gap={1} className="terminal-header-left">
-          <span className="terminal-header-title">Terminal</span>
+          <span className="terminal-header-title">
+            <SquareTerminal size={13} aria-hidden="true" />
+            会话
+          </span>
 
           <Flex align="center" gap={1.5} className="terminal-tabs">
             {tabs.map((tab) => {
@@ -138,8 +147,9 @@ export default function TerminalPanel({
             onClick={handleClear}
             className="terminal-action-btn"
             title="清除当前激活终端的屏幕内容"
+            aria-label="清除当前终端屏幕"
           >
-            清屏
+            <Trash2 size={14} aria-hidden="true" />
           </Button>
           <Button
             variant="ghost"
@@ -147,8 +157,9 @@ export default function TerminalPanel({
             onClick={handleReset}
             className="terminal-action-btn"
             title="重置当前激活终端会话"
+            aria-label="重置当前终端会话"
           >
-            重置
+            <RotateCw size={14} aria-hidden="true" />
           </Button>
           <Button
             variant="ghost"
@@ -171,7 +182,8 @@ export default function TerminalPanel({
             visible={tab.id === activeTabId}
             sidebarWidth={sidebarWidth}
             previewPanelWidth={previewPanelWidth}
-            height={height}
+            height={height ?? 0}
+            panelVisible={visible}
             clearTrigger={clearTriggers[tab.id] || 0}
             resetTrigger={resetTriggers[tab.id] || 0}
           />

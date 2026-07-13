@@ -17,7 +17,8 @@ export default function FilePreviewPanel({
   previewContent = null,
   messages = [],
   onClose = () => {},
-  onFileClick = () => {}
+  onFileClick = () => {},
+  hideHeader = false
 }: FilePreviewPanelProps): React.ReactElement | null {
   const activeToolCall = useMemo(() => {
     if (!previewPath) return null
@@ -89,15 +90,17 @@ export default function FilePreviewPanel({
 
   return (
     <div className="preview-panel-container" style={{ width: '100%' }}>
-      <Flex align="center" justify="between" className="preview-panel-header">
-        <Flex align="center" gap={2} className="preview-panel-title-area">
-          <IconFile className="preview-file-icon" />
-          <span className="preview-panel-title-text">{sideTitle}</span>
+      {!hideHeader && (
+        <Flex align="center" justify="between" className="preview-panel-header">
+          <Flex align="center" gap={2} className="preview-panel-title-area">
+            <IconFile className="preview-file-icon" />
+            <span className="preview-panel-title-text">{sideTitle}</span>
+          </Flex>
+          <Button variant="ghost" size="none" className="preview-close-btn" onClick={onClose}>
+            <IconClose className="preview-close-icon" />
+          </Button>
         </Flex>
-        <Button variant="ghost" size="none" className="preview-close-btn" onClick={onClose}>
-          <IconClose className="preview-close-icon" />
-        </Button>
-      </Flex>
+      )}
       <div className="preview-body-container">
         {previewDiff ? (
           <DiffViewer

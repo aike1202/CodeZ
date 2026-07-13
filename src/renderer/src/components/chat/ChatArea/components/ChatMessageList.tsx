@@ -4,7 +4,7 @@ import IconBot from '../../../icons/IconBot'
 import Flex from '../../../ui/Flex'
 import Stack from '../../../ui/Stack'
 import { AgentMessageContent } from '../../AgentMessageContent'
-import type { ChatMessage } from '../../../../stores/chatStore'
+import type { ChatMessage, SubAgentRecord } from '../../../../stores/chatStore'
 import { useChatStore } from '../../../../stores/chatStore'
 import IconRestore from '../../../icons/IconRestore'
 import RevertPreviewModal from '../../../modals/RevertPreviewModal'
@@ -16,6 +16,7 @@ interface ChatMessageListProps {
   messages: ChatMessage[]
   lastStreamingMsgId: string | null
   handleFileClick: (filePath: string, virtualContent?: string) => Promise<void>
+  handleSubAgentClick: (subAgent: SubAgentRecord) => void
   handleDiffClick: (
     filePath: string,
     editInfo: {
@@ -40,6 +41,7 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
   lastStreamingMsgId,
   showParallelExecution,
   handleFileClick,
+  handleSubAgentClick,
   handleDiffClick,
   onOpenImages,
   onPreviewRevert,
@@ -107,6 +109,7 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
         lastStreamingMsgId={lastStreamingMsgId}
         showParallelExecution={showParallelExecution}
         handleFileClick={handleFileClick}
+        handleSubAgentClick={handleSubAgentClick}
         handleDiffClick={handleDiffClick}
       />
     </Flex>
@@ -117,6 +120,7 @@ export function ChatMessageList({
   messages,
   lastStreamingMsgId,
   handleFileClick,
+  handleSubAgentClick,
   handleDiffClick
 }: ChatMessageListProps): React.ReactElement {
   const [previewData, setPreviewData] = React.useState<{ msgId: string, toDelete: string[], toRestore: string[], unknownStatus?: boolean } | null>(null)
@@ -151,6 +155,7 @@ export function ChatMessageList({
             lastStreamingMsgId={lastStreamingMsgId}
             showParallelExecution={msg.id === latestAgentMessageId}
             handleFileClick={handleFileClick}
+            handleSubAgentClick={handleSubAgentClick}
             handleDiffClick={handleDiffClick}
             onOpenImages={handleOpenImages}
             onPreviewRevert={handlePreviewRevert}

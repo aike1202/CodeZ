@@ -11,6 +11,11 @@
   flex-direction: column;
 }
 
+.terminal-panel--side {
+  border-top: 0;
+  box-shadow: none;
+}
+
 .terminal-drag-bar {
   position: absolute;
   top: 0;
@@ -48,6 +53,9 @@
 }
 
 .terminal-header-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-weight: bold;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -138,11 +146,17 @@
 .terminal-action-btn {
   color: var(--text-muted);
   cursor: pointer;
-  transition: color 0.2s;
+  transition: color 0.2s, background-color 0.2s;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
 }
 
 .terminal-action-btn:hover {
   color: #111827; /* hover:text-gray-800 */
+  background: var(--bg-hover);
 }
 
 .terminal-close-panel-btn {
@@ -171,6 +185,21 @@
   width: 100%;
   padding: 8px;
   text-align: left;
+}
+
+.terminal-panel--side .terminal-header {
+  min-height: 38px;
+  padding: 4px 8px 4px 10px;
+  background: var(--bg-panel);
+}
+
+.terminal-panel--side .terminal-tabs {
+  max-width: 220px;
+}
+
+.terminal-panel--side .terminal-header-right {
+  gap: 3px;
+  margin-left: 8px;
 }
 
 .terminal-instance-mount.block {

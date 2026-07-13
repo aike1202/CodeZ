@@ -3,6 +3,7 @@ import IconLoading from '../icons/IconLoading'
 import IconCheck from '../icons/IconCheck'
 import IconWarning from '../icons/IconWarning'
 import IconChevronDown from '../icons/IconChevronDown'
+import { PanelRightOpen } from 'lucide-react'
 import { LogItemRow } from './ExecutionLog/components/LogItemRow'
 import {
   buildFallbackTimeline,
@@ -15,6 +16,8 @@ import './SubAgentCard.css'
 
 interface SubAgentCardProps {
   subAgent: SubAgentRecord
+  defaultExpanded?: boolean
+  onOpenDetails?: (subAgent: SubAgentRecord) => void
   onFileClick?: (filePath: string, virtualContent?: string) => void
   onDiffClick?: (
     filePath: string,
@@ -41,10 +44,12 @@ function fmtSmartDuration(ms: number): string {
 
 export function SubAgentCard({
   subAgent,
+  defaultExpanded,
+  onOpenDetails,
   onFileClick,
   onDiffClick
 }: SubAgentCardProps): React.ReactElement {
-  const [expanded, setExpanded] = useState<boolean>(subAgent.status === 'running')
+  const [expanded, setExpanded] = useState<boolean>(defaultExpanded ?? subAgent.status === 'running')
   const [showPrompt, setShowPrompt] = useState(false)
   const [showTimeline, setShowTimeline] = useState(true)
   const [showReply, setShowReply] = useState(false)
@@ -58,6 +63,7 @@ export function SubAgentCard({
   const isRunning = subAgent.status === 'running'
   const isFailed = subAgent.status === 'failed'
   const isInterrupted = subAgent.status === 'interrupted'
+  const isLauncher = Boolean(onOpenDetails)
 
   const durationMs = useMemo(() => {
     const end = subAgent.completedAt || Date.now()
@@ -112,7 +118,12 @@ export function SubAgentCard({
       <button
         type="button"
         className="subagent-card-header"
-        onClick={() => setExpanded((v) => !v)}
+        aria-label={isLauncher ? `打开子智能体日志：${shortDesc}` : undefined}
+        aria-expanded={isLauncher ? undefined : expanded}
+        onClick={() => {
+          if (onOpenDetails) onOpenDetails(subAgent)
+          else setExpanded((value) => !value)
+        }}
       >
         <span className="subagent-card-status">
           {isRunning ? (
@@ -135,15 +146,24 @@ export function SubAgentCard({
           用时 {fmtSmartDuration(durationMs)}
         </span>
 
-        <IconChevronDown
-          width="14"
-          height="14"
-          className={`subagent-card-chevron ${expanded ? 'subagent-card-chevron--expanded' : ''}`}
-        />
+        {isLauncher ? (
+          <PanelRightOpen
+            width="14"
+            height="14"
+            className="subagent-card-open-icon"
+            aria-hidden="true"
+          />
+        ) : (
+          <IconChevronDown
+            width="14"
+            height="14"
+            className={`subagent-card-chevron ${expanded ? 'subagent-card-chevron--expanded' : ''}`}
+          />
+        )}
       </button>
 
       {/* ── 折叠状态下也展示小条统计线 ── */}
-      {!expanded && (
+      {(!expanded || isLauncher) && (
         <div className="subagent-card-meta-bar">
           <span>工具调用 {toolCount}</span>
           {filesExamined > 0 && <span>· 读取 {filesExamined} 文件</span>}
@@ -154,7 +174,7 @@ export function SubAgentCard({
       )}
 
       {/* ── 展开体 ── */}
-      {expanded && (
+      {expanded && !isLauncher && (
         <div className="subagent-card-body">
           {/* 统计行 */}
           <div className="subagent-card-stats-row">

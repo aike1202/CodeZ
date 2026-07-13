@@ -7,11 +7,10 @@ import PromptArea from '../../PromptArea'
 import EditApprovalWidget from '../EditApprovalWidget'
 import PermissionApprovalWidget from '../PermissionApprovalWidget'
 import AskUserQuestionWidget from '../AskUserQuestionWidget'
-import TerminalPanel from '../TerminalPanel'
 import { ChatAreaLayout } from '../ChatAreaLayout'
 import { parseArgs } from '../../../utils/parseArgs'
 import { computeEditStats, handleDiffClickForFile } from '../../../utils/editDiffUtils'
-import { useChatStore, type ChatMessage } from '../../../stores/chatStore'
+import { useChatStore, type ChatMessage, type SubAgentRecord } from '../../../stores/chatStore'
 import { useSendMessage } from '../hooks/useSendMessage'
 import { ChatMessageList } from './components/ChatMessageList'
 import ConversationNavigator from '../ConversationNavigator'
@@ -107,14 +106,9 @@ export interface ChatAreaProps {
   messages: ChatMessage[]
   activeSessionId: string | null
   workspace: WorkspaceInfo | null
-  terminalOpen: boolean
-  setTerminalOpen: (open: boolean) => void
-  terminalHeight: number
-  setTerminalHeight: (height: number) => void
-  sidebarWidth: number
-  previewPanelWidth: number
   panelOpen: boolean
   handleFileClick: (filePath: string, virtualContent?: string) => Promise<void>
+  handleSubAgentClick: (subAgent: SubAgentRecord) => void
   handleDiffClick: (
     filePath: string,
     editInfo: {
@@ -132,14 +126,9 @@ export default function ChatArea({
   messages,
   activeSessionId,
   workspace,
-  terminalOpen,
-  setTerminalOpen,
-  terminalHeight,
-  setTerminalHeight,
-  sidebarWidth,
-  previewPanelWidth,
   panelOpen,
   handleFileClick,
+  handleSubAgentClick,
   handleDiffClick,
   handleOpenRecentProject,
   onOpenSettings
@@ -366,6 +355,7 @@ export default function ChatArea({
                 messages={messages}
                 lastStreamingMsgId={lastStreamingMsgId}
                 handleFileClick={handleFileClick}
+                handleSubAgentClick={handleSubAgentClick}
                 handleDiffClick={handleDiffClick}
               />
             </div>
@@ -460,19 +450,6 @@ export default function ChatArea({
             workspace={workspace}
           />
         </div>
-      }
-      terminalPanel={
-        terminalOpen && workspace ? (
-          <TerminalPanel
-            workspaceId={workspace.id}
-            rootPath={workspace.rootPath}
-            height={terminalHeight}
-            setHeight={setTerminalHeight}
-            onClose={() => setTerminalOpen(false)}
-            sidebarWidth={sidebarWidth}
-            previewPanelWidth={previewPanelWidth}
-          />
-        ) : undefined
       }
       />
     </>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import Sidebar from '../components/Sidebar'
 import TopBar from '../components/TopBar'
 import AppLayout from '../components/layout/AppLayout'
@@ -8,13 +8,20 @@ import { useProviderStore } from '../stores/providerStore'
 import { useChatStore } from '../stores/chatStore'
 import TaskHistoryModal from '../components/modals/TaskHistoryModal'
 import PlanListModal from '../components/chat/PlanListModal'
-import FilePreviewPanel from '../components/FilePreviewPanel'
 import ChatArea from '../components/chat/ChatArea'
+import RightWorkspacePanel, {
+  SUBAGENT_TAB_ID,
+  TERMINAL_TAB_ID
+} from '../components/RightWorkspacePanel'
 import '../styles.css'
 import '../App.css'
 
 import { useAppWorkspace } from './hooks/useAppWorkspace'
-import { useAppPreview } from './hooks/useAppPreview'
+import {
+  getDiffPreviewTabId,
+  getFilePreviewTabId,
+  useAppPreview
+} from './hooks/useAppPreview'
 
 export default function App(): React.ReactElement {
   const loadProviders = useProviderStore((s) => s.loadProviders)
@@ -41,14 +48,12 @@ export default function App(): React.ReactElement {
   } = useAppWorkspace()
 
   const {
-    previewPath,
-    previewContent,
-    previewLoading,
-    previewDiff,
-    panelOpen,
-    handleFileClick,
-    handleDiffClick,
-    closePreview
+    previewTabs,
+    activePreviewTabId,
+    handleFileClick: loadFilePreview,
+    handleDiffClick: loadDiffPreview,
+    closePreview,
+    selectPreviewTab
   } = useAppPreview()
 
   const [currentView, setCurrentView] = useState<'home' | 'chat' | 'settings'>('home')
@@ -57,8 +62,26 @@ export default function App(): React.ReactElement {
   const [sidebarWidth, setSidebarWidth] = useState(260)
   const [previewPanelWidth, setPreviewPanelWidth] = useState(480)
   const [terminalOpen, setTerminalOpen] = useState(false)
-  const [terminalHeight, setTerminalHeight] = useState(200)
+  const [subagentLogOpen, setSubagentLogOpen] = useState(false)
+  const [rightPanelVisible, setRightPanelVisible] = useState(false)
+  const [activeRightTabId, setActiveRightTabId] = useState<string | null>(null)
   const [taskModalOpen, setTaskModalOpen] = useState(false)
+  const autoOpenedSubagentSessionRef = useRef<string | null>(null)
+
+  const subAgents = useMemo(
+    () => messages.flatMap((message) => message.subAgents ?? []),
+    [messages]
+  )
+  const hasRightTabs = previewTabs.length > 0 || terminalOpen || subagentLogOpen
+  const panelOpen = rightPanelVisible && hasRightTabs
+  const rightTabIds = useMemo(() => [
+    ...previewTabs.map((tab) => tab.id),
+    ...(terminalOpen ? [TERMINAL_TAB_ID] : []),
+    ...(subagentLogOpen ? [SUBAGENT_TAB_ID] : [])
+  ], [previewTabs, subagentLogOpen, terminalOpen])
+  const resolvedActiveRightTabId = rightTabIds.includes(activeRightTabId ?? '')
+    ? activeRightTabId
+    : rightTabIds[0] ?? null
 
   useEffect(() => {
     window.api.workspace.getRecentProjects().then((p) => useWorkspaceStore.getState().setRecentProjects(p)).catch(() => {})
@@ -94,8 +117,27 @@ export default function App(): React.ReactElement {
   }, [])
 
   useEffect(() => {
-    if (!workspace) setTerminalOpen(false)
+    if (!workspace) {
+      setTerminalOpen(false)
+      setSubagentLogOpen(false)
+      setRightPanelVisible(false)
+    }
   }, [workspace])
+
+  useEffect(() => {
+    if (!activePreviewTabId) return
+    setActiveRightTabId(activePreviewTabId)
+    setRightPanelVisible(true)
+  }, [activePreviewTabId])
+
+  useEffect(() => {
+    if (!activeSessionId || subAgents.length === 0) return
+    if (autoOpenedSubagentSessionRef.current === activeSessionId) return
+    autoOpenedSubagentSessionRef.current = activeSessionId
+    setSubagentLogOpen(true)
+    setRightPanelVisible(true)
+    setActiveRightTabId((current) => current ?? SUBAGENT_TAB_ID)
+  }, [activeSessionId, subAgents.length])
 
   const maxSidebarWidth = useMemo(() => {
     const totalWidth = typeof window !== 'undefined' ? window.innerWidth : 1200
@@ -103,6 +145,52 @@ export default function App(): React.ReactElement {
   }, [panelOpen, previewPanelWidth])
 
   const hasMessages = messages.length > 0
+
+  const handleFileClick = useCallback(async (filePath: string, virtualContent?: string) => {
+    setActiveRightTabId(getFilePreviewTabId(filePath))
+    setRightPanelVisible(true)
+    await loadFilePreview(filePath, virtualContent)
+  }, [loadFilePreview])
+
+  const handleDiffClick = useCallback((
+    filePath: string,
+    editInfo: {
+      type: 'write' | 'replace'
+      targetContent?: string
+      replacementContent?: string
+      codeContent?: string
+    }
+  ) => {
+    setActiveRightTabId(getDiffPreviewTabId(filePath))
+    setRightPanelVisible(true)
+    loadDiffPreview(filePath, editInfo)
+  }, [loadDiffPreview])
+
+  const openTerminalTab = useCallback(() => {
+    if (!workspace) return
+    setTerminalOpen(true)
+    setRightPanelVisible(true)
+    setActiveRightTabId(TERMINAL_TAB_ID)
+  }, [workspace])
+
+  const openSubagentTab = useCallback(() => {
+    if (!workspace) return
+    setSubagentLogOpen(true)
+    setRightPanelVisible(true)
+    setActiveRightTabId(SUBAGENT_TAB_ID)
+  }, [workspace])
+
+  const handleSelectRightTab = useCallback((tabId: string) => {
+    setActiveRightTabId(tabId)
+    if (tabId.startsWith('file:') || tabId.startsWith('diff:')) selectPreviewTab(tabId)
+  }, [selectPreviewTab])
+
+  const handleCloseRightTab = useCallback((tabId: string) => {
+    if (tabId === TERMINAL_TAB_ID) setTerminalOpen(false)
+    else if (tabId === SUBAGENT_TAB_ID) setSubagentLogOpen(false)
+    else closePreview(tabId)
+    setActiveRightTabId((current) => (current === tabId ? null : current))
+  }, [closePreview])
 
   const handleCreateFromSkill = async (triggerName: string, promptSuffix: string) => {
     let ws = useWorkspaceStore.getState().workspace
@@ -175,22 +263,45 @@ export default function App(): React.ReactElement {
         topbar={
           <TopBar
             onOpenProject={handleOpenProject}
-            terminalOpen={terminalOpen}
-            onToggleTerminal={() => setTerminalOpen(!terminalOpen)}
+            terminalOpen={panelOpen && resolvedActiveRightTabId === TERMINAL_TAB_ID}
+            onToggleTerminal={() => {
+              if (panelOpen && resolvedActiveRightTabId === TERMINAL_TAB_ID) {
+                handleCloseRightTab(TERMINAL_TAB_ID)
+              } else {
+                openTerminalTab()
+              }
+            }}
+            subagentLogOpen={panelOpen && resolvedActiveRightTabId === SUBAGENT_TAB_ID}
+            onToggleSubagentLogs={() => {
+              if (panelOpen && resolvedActiveRightTabId === SUBAGENT_TAB_ID) {
+                handleCloseRightTab(SUBAGENT_TAB_ID)
+              } else {
+                openSubagentTab()
+              }
+            }}
+            hasSubagentLogs={subAgents.length > 0}
             onOpenTasks={() => setTaskModalOpen(true)}
             hasWorkspace={!!workspace}
           />
         }
         rightPanel={
-          panelOpen ? (
-            <FilePreviewPanel
-              previewPath={previewPath}
-              previewDiff={previewDiff}
-              previewLoading={previewLoading}
-              previewContent={previewContent}
+          panelOpen && workspace ? (
+            <RightWorkspacePanel
+              previewTabs={previewTabs}
+              activeTabId={resolvedActiveRightTabId}
+              terminalOpen={terminalOpen}
+              subagentLogOpen={subagentLogOpen}
+              subAgents={subAgents}
               messages={messages}
-              onClose={closePreview}
+              workspace={workspace}
+              panelWidth={previewPanelWidth}
+              onSelectTab={handleSelectRightTab}
+              onCloseTab={handleCloseRightTab}
+              onOpenTerminal={openTerminalTab}
+              onOpenSubagents={openSubagentTab}
+              onClosePanel={() => setRightPanelVisible(false)}
               onFileClick={handleFileClick}
+              onDiffClick={handleDiffClick}
             />
           ) : undefined
         }
@@ -199,12 +310,6 @@ export default function App(): React.ReactElement {
             messages={messages}
             activeSessionId={activeSessionId}
             workspace={workspace}
-            terminalOpen={terminalOpen}
-            setTerminalOpen={setTerminalOpen}
-            terminalHeight={terminalHeight}
-            setTerminalHeight={setTerminalHeight}
-            sidebarWidth={sidebarWidth}
-            previewPanelWidth={previewPanelWidth}
             panelOpen={panelOpen}
             handleFileClick={handleFileClick}
             handleDiffClick={handleDiffClick}

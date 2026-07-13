@@ -73,11 +73,14 @@ function normalizeLegacyContent(content: string): {
   try {
     const parsed = JSON.parse(content)
     if (parsed?.ok === true) {
-      const data = parsed.data
+      const data = Object.prototype.hasOwnProperty.call(parsed, 'data')
+        ? parsed.data
+        : parsed
+      const modelContent = typeof data === 'string' ? data : JSON.stringify(data)
       return {
         ok: true,
         data,
-        modelContent: typeof data === 'string' ? data : JSON.stringify(data)
+        modelContent: modelContent ?? content
       }
     }
     if (parsed?.ok === false) {

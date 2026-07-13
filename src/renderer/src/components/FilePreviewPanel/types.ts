@@ -17,4 +17,5 @@ export interface FilePreviewPanelProps {
   messages?: any[]
   onClose?: () => void
   onFileClick?: (path: string) => void
+  hideHeader?: boolean
 }

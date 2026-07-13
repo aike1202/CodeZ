@@ -66,15 +66,15 @@ export class LegacySessionMigrationService {
 
     const sourceHash = stableSourceHash(session)
     const existing = (await this.ledger.load(sessionId)).scopes[MAIN_CONTEXT_SCOPE]?.legacyImport
-    if (existing?.sourceHash === sourceHash) {
+    if (existing) {
       await this.sessions.setRuntimeRef(sessionId, {
         schemaVersion: 2,
         ledgerVersion: 1,
         migratedAt: new Date().toISOString(),
-        legacySourceHash: sourceHash,
+        legacySourceHash: existing.sourceHash,
         legacyImportMode: existing.mode
       })
-      return { sourceHash, mode: existing.mode, eventId: existing.eventId }
+      return { sourceHash: existing.sourceHash, mode: existing.mode, eventId: existing.eventId }
     }
 
     const transcript = serializeLegacyTranscript(session.messages)

@@ -10,6 +10,7 @@ interface TerminalInstanceProps {
   sidebarWidth?: number
   previewPanelWidth?: number
   height: number
+  panelVisible?: boolean
   clearTrigger: number
   resetTrigger: number
 }
@@ -21,6 +22,7 @@ export function TerminalInstance({
   sidebarWidth,
   previewPanelWidth,
   height,
+  panelVisible = true,
   clearTrigger,
   resetTrigger
 }: TerminalInstanceProps): React.ReactElement {
@@ -29,7 +31,7 @@ export function TerminalInstance({
   const fitAddonRef = useRef<FitAddon | null>(null)
 
   useEffect(() => {
-    if (!visible) return
+    if (!visible || !panelVisible) return
     const handleResize = () => {
       if (fitAddonRef.current) {
         try {
@@ -46,13 +48,13 @@ export function TerminalInstance({
       clearTimeout(timer)
       window.removeEventListener('resize', handleResize)
     }
-  }, [visible, sidebarWidth, previewPanelWidth, height])
+  }, [visible, panelVisible, sidebarWidth, previewPanelWidth, height])
 
   useEffect(() => {
-    if (visible && termRef.current) {
+    if (visible && panelVisible && termRef.current) {
       termRef.current.focus()
     }
-  }, [visible])
+  }, [visible, panelVisible])
 
   useEffect(() => {
     if (clearTrigger > 0 && termRef.current) {
@@ -165,7 +167,7 @@ export function TerminalInstance({
       }
     }, 150)
 
-    if (visible) {
+    if (visible && panelVisible) {
       term.focus()
     }
 

@@ -88,6 +88,17 @@
   color: var(--text-light);
   transition: transform 0.2s ease;
 }
+
+.subagent-card-open-icon {
+  flex-shrink: 0;
+  color: var(--text-light);
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.subagent-card-header:hover .subagent-card-open-icon {
+  color: var(--primary-color);
+  transform: translateX(1px);
+}
 .subagent-card-chevron--expanded {
   transform: rotate(180deg);
 }

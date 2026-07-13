@@ -35,6 +35,7 @@ async function fixture(summarize = vi.fn().mockResolvedValue(summary(0))) {
   })
   const ledger = new ModelLedgerStore(path.join(root, 'session-runtime'))
   return {
+    root,
     summarize,
     sessions,
     ledger,
@@ -62,5 +63,33 @@ describe('LegacySessionMigrationService', () => {
     expect(second.sourceHash).toBe(first.sourceHash)
     expect(summarize).toHaveBeenCalledTimes(1)
     expect((await f.ledger.load('s1')).scopes.main.activeMessages.every((message) => message.role !== 'tool')).toBe(true)
+  })
+
+  it('recovers a missing runtime reference from a completed ledger import', async () => {
+    const f = await fixture()
+    const first = await f.service.ensureMigrated('s1')
+    const recoveryFile = path.join(f.root, 'recovery-sessions.json')
+    const recoverySessions = new SessionStore(recoveryFile)
+    await recoverySessions.save({
+      id: 's1', projectId: 'p1', summary: 'legacy', relativeTime: 'now',
+      messages: [
+        { id: 'u1', role: 'user', content: 'check file' },
+        { id: 'a1', role: 'agent', content: 'checked file' },
+        { id: 'a2', role: 'agent', content: 'renderer persisted a terminal error' }
+      ]
+    })
+
+    const recovered = await new LegacySessionMigrationService(
+      recoverySessions,
+      f.ledger,
+      { summarize: f.summarize }
+    ).ensureMigrated('s1')
+
+    expect(recovered).toEqual(first)
+    expect(f.summarize).toHaveBeenCalledTimes(1)
+    expect(recoverySessions.get('s1')?.runtime).toMatchObject({
+      legacySourceHash: first.sourceHash,
+      legacyImportMode: first.mode
+    })
   })
 })

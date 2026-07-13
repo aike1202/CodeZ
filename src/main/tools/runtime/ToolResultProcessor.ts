@@ -25,7 +25,11 @@ export class ToolResultProcessor {
     results: readonly ToolPipelineResult[],
     context: { workspaceRoot: string; sessionId?: string }
   ): Promise<ToolPipelineResult[]> {
-    const processed = results.map((item) => {
+    const processed = results.map((item): ToolPipelineResult => {
+      if (item.result.status === 'success' && typeof item.result.modelContent !== 'string') {
+        const modelContent = JSON.stringify(item.result.data ?? '') ?? ''
+        return { ...item, result: { ...item.result, modelContent } }
+      }
       if (item.result.status === 'success') return item
       const modelContent = truncateMiddle(item.result.modelContent || `Error: ${item.result.error.message}`, this.limits.errorChars)
       return { ...item, result: { ...item.result, modelContent } }

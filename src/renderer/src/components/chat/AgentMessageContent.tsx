@@ -4,7 +4,7 @@ import MessageBody from './MessageBody'
 import EditApprovalWidget from './EditApprovalWidget'
 import { AlertTriangle } from 'lucide-react'
 import { extractMessageEdits, handleApprovalDiffClick } from './ChatArea' // We might need to move extractMessageEdits to a utils file?
-import type { ChatMessage, ExecutionTimelineItem } from '../../stores/chatStore'
+import type { ChatMessage, ExecutionTimelineItem, SubAgentRecord } from '../../stores/chatStore'
 
 // Wait, I will just export extractMessageEdits from ExecutionLogUtils or somewhere if needed, but for now I can import from ChatArea. Or better, move it to ChatAreaUtils.ts?
 
@@ -13,6 +13,7 @@ export interface AgentMessageContentProps {
   lastStreamingMsgId: string | null
   showParallelExecution?: boolean
   handleFileClick: (filePath: string, virtualContent?: string) => Promise<void>
+  handleSubAgentClick: (subAgent: SubAgentRecord) => void
   handleDiffClick: (
     filePath: string,
     editInfo: {
@@ -33,6 +34,7 @@ export function AgentMessageContent({
   lastStreamingMsgId,
   showParallelExecution = false,
   handleFileClick,
+  handleSubAgentClick,
   handleDiffClick
 }: AgentMessageContentProps): React.ReactElement {
   
@@ -132,6 +134,7 @@ export function AgentMessageContent({
             streaming={isStreaming && !msg.content}
             interrupted={msg.interrupted}
             subAgents={msg.subAgents}
+            onSubAgentClick={handleSubAgentClick}
             showParallelExecution={showParallelExecution}
           />
         </div>
@@ -166,6 +169,7 @@ export function AgentMessageContent({
                 streaming={chunk.streaming}
                 interrupted={msg.interrupted}
                 subAgents={msg.subAgents}
+                onSubAgentClick={handleSubAgentClick}
                 showParallelExecution={showParallelExecution && idx === firstExecutionChunkIndex}
               />
             </div>

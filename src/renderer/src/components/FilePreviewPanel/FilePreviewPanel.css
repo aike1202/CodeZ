@@ -21,8 +21,6 @@
   flex-direction: column;
   background-color: var(--bg-panel);
   overflow: hidden;
-  border-left: 1px solid var(--border-gray-200);
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); /* shadow-xl */
   flex-shrink: 0;
   height: 100%;
 }
@@ -229,7 +227,6 @@
 @media (prefers-color-scheme: dark) {
   .preview-panel-container {
     background-color: #1e1e1e;
-    border-left-color: #2d2d2d;
   }
   .preview-panel-header {
     background-color: #252526;

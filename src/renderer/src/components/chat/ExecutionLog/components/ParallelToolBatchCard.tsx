@@ -13,6 +13,7 @@ interface ParallelToolBatchCardProps {
   hasItemDetail: (item: UnifiedTimelineItem) => boolean
   toggleItemExpand: (id: string, event: React.MouseEvent) => void
   subAgents?: SubAgentRecord[]
+  onSubAgentClick?: (subAgent: SubAgentRecord) => void
   onFileClick?: (filePath: string, virtualContent?: string) => void
   onDiffClick?: (
     filePath: string,
@@ -37,6 +38,7 @@ export function ParallelToolBatchCard({
   hasItemDetail,
   toggleItemExpand,
   subAgents,
+  onSubAgentClick,
   onFileClick,
   onDiffClick
 }: ParallelToolBatchCardProps): React.ReactElement {
@@ -118,6 +120,7 @@ export function ParallelToolBatchCard({
                     <SubAgentCard
                       key={subAgent.id}
                       subAgent={subAgent}
+                      onOpenDetails={onSubAgentClick}
                       onFileClick={onFileClick}
                       onDiffClick={onDiffClick}
                     />

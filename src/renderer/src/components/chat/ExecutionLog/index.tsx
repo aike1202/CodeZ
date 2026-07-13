@@ -31,6 +31,7 @@ export default function ExecutionLog({
   streaming,
   interrupted,
   subAgents,
+  onSubAgentClick,
   showParallelExecution = false
 }: ExecutionLogProps): React.ReactElement | null {
   const [expanded, setExpanded] = useState(false)
@@ -176,6 +177,7 @@ export default function ExecutionLog({
                   hasItemDetail={hasDetail}
                   toggleItemExpand={toggleItemExpand}
                   subAgents={subAgents}
+                  onSubAgentClick={onSubAgentClick}
                   onFileClick={onFileClick}
                   onDiffClick={onDiffClick}
                 />
@@ -200,6 +202,7 @@ export default function ExecutionLog({
                     <SubAgentCard
                       key={subAgent.id}
                       subAgent={subAgent}
+                      onOpenDetails={onSubAgentClick}
                       onFileClick={onFileClick}
                       onDiffClick={onDiffClick}
                     />
