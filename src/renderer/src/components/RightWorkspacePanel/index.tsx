@@ -86,17 +86,12 @@ export default function RightWorkspacePanel({
         closable: true
       })
     }
-    const totals = new Map<string, number>()
-    subagentTabs.forEach((tab) => totals.set(tab.subAgentId, (totals.get(tab.subAgentId) ?? 0) + 1))
     subagentTabs.forEach((tab) => {
       const subAgent = subAgents.find((agent) => agent.id === tab.subAgentId)
       if (!subAgent) return
-      const title = totals.get(tab.subAgentId)! > 1
-        ? `${subAgent.type} · ${tab.instanceNumber}`
-        : subAgent.type
       fileTabs.push({
         id: tab.id,
-        title: title || '子智能体',
+        title: subAgent.type || '子智能体',
         titleDetail: subAgent.description || subAgent.prompt,
         kind: 'subagent',
         closable: true,

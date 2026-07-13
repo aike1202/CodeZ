@@ -12,9 +12,21 @@ import { getMcpContentStore } from '../services/mcp'
 let sessionStore: SessionStore | null = null
 let loadPromise: Promise<void> | null = null
 
+async function loadSessionStore(store: SessionStore): Promise<void> {
+  await store.load()
+  const exposureState = getToolExposureState()
+  for (const session of store.getAll()) {
+    if (session.isDeleted) continue
+    exposureState.restoreSession(
+      session.id,
+      session.toolRuntime?.activatedDeferredTools
+    )
+  }
+}
+
 export async function initializeSessionStore(): Promise<SessionStore> {
   if (!sessionStore) sessionStore = new SessionStore()
-  if (!loadPromise) loadPromise = sessionStore.load()
+  if (!loadPromise) loadPromise = loadSessionStore(sessionStore)
   await loadPromise
   return sessionStore
 }
@@ -26,7 +38,7 @@ export async function getSessionStoreReady(): Promise<SessionStore> {
 export function getSessionStore(): SessionStore {
   if (!sessionStore) {
     sessionStore = new SessionStore()
-    loadPromise = sessionStore.load()
+    loadPromise = loadSessionStore(sessionStore)
   }
   return sessionStore
 }

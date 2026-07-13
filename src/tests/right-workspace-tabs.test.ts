@@ -17,11 +17,11 @@ describe('right workspace preview tab identity', () => {
     expect(getFilePreviewTabId(filePath)).not.toBe(getDiffPreviewTabId(filePath))
   })
 
-  it('creates independent tabs when the same subagent is opened repeatedly', () => {
-    const firstTab = createSubAgentWorkspaceTab('agent-1', 1)
-    const secondTab = createSubAgentWorkspaceTab('agent-1', 2)
+  it('uses one stable tab identity for repeated opens of the same subagent', () => {
+    const firstTab = createSubAgentWorkspaceTab('agent-1')
+    const secondTab = createSubAgentWorkspaceTab('agent-1')
 
     expect(firstTab.subAgentId).toBe(secondTab.subAgentId)
-    expect(firstTab.id).not.toBe(secondTab.id)
+    expect(firstTab.id).toBe(secondTab.id)
   })
 })

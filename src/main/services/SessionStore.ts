@@ -63,7 +63,8 @@ export class SessionStore {
         const current = this.cache[idx]
         this.cache[idx] = {
           ...session,
-          runtime: session.runtime ?? current.runtime
+          runtime: current.runtime,
+          toolRuntime: current.toolRuntime
         }
       } else {
         this.cache.unshift(session)
@@ -94,6 +95,30 @@ export class SessionStore {
       const idx = this.cache.findIndex((session) => session.id === sessionId)
       if (idx < 0) throw new Error(`Session not found: ${sessionId}`)
       this.cache[idx] = { ...this.cache[idx], runtime: { ...runtime } }
+    })
+  }
+
+  async addActivatedDeferredTools(
+    sessionId: string,
+    contextScopeId: string,
+    toolNames: readonly string[]
+  ): Promise<void> {
+    if (toolNames.length === 0) return
+    return this.enqueueMutation(async () => {
+      const idx = this.cache.findIndex((session) => session.id === sessionId)
+      if (idx < 0) throw new Error(`Session not found: ${sessionId}`)
+      const session = this.cache[idx]
+      const existing = session.toolRuntime?.activatedDeferredTools?.[contextScopeId] || []
+      this.cache[idx] = {
+        ...session,
+        toolRuntime: {
+          ...session.toolRuntime,
+          activatedDeferredTools: {
+            ...session.toolRuntime?.activatedDeferredTools,
+            [contextScopeId]: [...new Set([...existing, ...toolNames])]
+          }
+        }
+      }
     })
   }
 

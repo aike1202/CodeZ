@@ -71,6 +71,12 @@ export function groupParallelToolBatches(
         (right.batchIndex ?? Number.MAX_SAFE_INTEGER)
       )
 
+    if (batchItems.length < 2) {
+      result.push(batchItems[0] || item)
+      index += 1
+      continue
+    }
+
     result.push({
       id: item.batchId,
       type: 'parallel-batch',

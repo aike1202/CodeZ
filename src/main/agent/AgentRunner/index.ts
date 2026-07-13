@@ -660,19 +660,12 @@ export class AgentRunner {
                   activate: (toolNames) => {
                     exposureState.activate(exposureScopeId, toolNames)
                     const sessionStore = getSessionStore()
-                    const session = sessionStore.getAll().find((item) => item.id === sessionId)
-                    if (!session) return
                     const activated = [...exposureState.get(exposureScopeId)]
-                    void sessionStore.save({
-                      ...session,
-                      toolRuntime: {
-                        ...session.toolRuntime,
-                        activatedDeferredTools: {
-                          ...session.toolRuntime?.activatedDeferredTools,
-                          [runtimeTurn!.contextScopeId]: activated
-                        }
-                      }
-                    }).catch((error) => log.error('[AgentRunner] failed to persist tool exposure state', {
+                    void sessionStore.addActivatedDeferredTools(
+                      sessionId,
+                      runtimeTurn!.contextScopeId,
+                      activated
+                    ).catch((error) => log.error('[AgentRunner] failed to persist tool exposure state', {
                       sessionId,
                       error: error instanceof Error ? error.message : String(error)
                     }))

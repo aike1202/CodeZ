@@ -21,7 +21,7 @@ const CORE = new Set(['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash', 'PowerShe
 const ALWAYS = new Set(['AskUserQuestion', 'ToolSearch'])
 const DEFERRED = new Set([
   'NotebookEdit', 'PushNotification', 'WebSearch', 'WebFetch',
-  'Skill', 'rollback_last_edit', 'SubAgentRunner', 'DelegateTasks',
+  'rollback_last_edit', 'SubAgentRunner', 'DelegateTasks',
   'ExecutionControl', 'ExecutionInspect',
   'ListMcpResources', 'ReadMcpResource', 'GetMcpPrompt', 'McpAuth'
 ])

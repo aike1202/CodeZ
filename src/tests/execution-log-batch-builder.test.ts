@@ -28,6 +28,77 @@ const toolItem = (
 })
 
 describe('execution log parallel batch builder', () => {
+  it('hides ToolSearch schema-loading operations from the default timeline', () => {
+    const timeline: ExecutionTimelineItem[] = [{
+      id: 'tool_search-skill',
+      type: 'tool',
+      toolCall: {
+        id: 'search-skill',
+        name: 'ToolSearch',
+        args: JSON.stringify({ query: 'select:Skill', max_results: 5 }),
+        status: 'success',
+        result: JSON.stringify({ activated: ['Skill'], availableNextTurn: true }),
+        startedAt: 100,
+        completedAt: 200,
+        sequence: 0
+      },
+      startedAt: 100,
+      updatedAt: 200,
+      sequence: 0
+    }]
+
+    expect(buildUnifiedTimeline(timeline, [], [], undefined, false)).toEqual([])
+  })
+
+  it('does not leave a one-item parallel batch after hiding ToolSearch', () => {
+    const timeline: ExecutionTimelineItem[] = [
+      {
+        id: 'tool_search-web',
+        type: 'tool',
+        toolCall: {
+          id: 'search-web',
+          name: 'ToolSearch',
+          args: JSON.stringify({ query: 'select:WebSearch' }),
+          status: 'success',
+          result: JSON.stringify({ activated: ['WebSearch'] }),
+          startedAt: 100,
+          completedAt: 200,
+          sequence: 0,
+          batchId: 'batch-with-search',
+          batchIndex: 0,
+          batchSize: 2
+        },
+        startedAt: 100,
+        updatedAt: 200,
+        sequence: 0
+      },
+      {
+        id: 'tool_task-get-visible',
+        type: 'tool',
+        toolCall: {
+          id: 'task-get-visible',
+          name: 'TaskGet',
+          args: JSON.stringify({ taskId: 't1' }),
+          status: 'success',
+          result: '{}',
+          startedAt: 101,
+          completedAt: 201,
+          sequence: 1,
+          batchId: 'batch-with-search',
+          batchIndex: 1,
+          batchSize: 2
+        },
+        startedAt: 101,
+        updatedAt: 201,
+        sequence: 1
+      }
+    ]
+
+    const visible = buildUnifiedTimeline(timeline, [], [], undefined, false)
+    expect(groupParallelToolBatches(visible)).toEqual(visible)
+    expect(visible).toMatchObject([{ toolName: 'TaskGet' }])
+  })
+
   it('groups one model response into one parallel batch', () => {
     const items = [
       toolItem('read-a', 100, { batchId: 'batch-1', batchIndex: 0, batchSize: 4 }),

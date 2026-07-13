@@ -77,6 +77,7 @@ export function buildUnifiedTimeline(
       })
     } else if (item.type === 'tool') {
       const tc = item.toolCall
+      if (tc.name === 'ToolSearch') return
       const duration = formatDuration(tc)
       const toolTimelineMeta = {
         completedAt: tc.completedAt,

@@ -92,7 +92,12 @@ describe('SessionStore runtime schema', () => {
 
     await store.save({
       id: 's1', projectId: 'p1', summary: 'x', relativeTime: 'now',
-      messages: [{ id: 'm2', role: 'agent', content: 'renderer update' }]
+      messages: [{ id: 'm2', role: 'agent', content: 'renderer update' }],
+      runtime: {
+        schemaVersion: 2,
+        ledgerVersion: 1,
+        legacySourceHash: 'stale-source-hash'
+      }
     })
 
     expect(store.get('s1')?.messages[0].content).toBe('renderer update')
@@ -100,6 +105,67 @@ describe('SessionStore runtime schema', () => {
       schemaVersion: 2,
       legacySourceHash: 'source-hash',
       legacyImportMode: 'summary'
+    })
+  })
+
+  it('preserves and merges main-process tool activations across stale renderer saves', async () => {
+    root = await mkdtemp(path.join(os.tmpdir(), 'codez-session-'))
+    const file = path.join(root, 'sessions.json')
+    const store = new SessionStore(file)
+    await store.save({
+      id: 's1', projectId: 'p1', summary: 'x', relativeTime: 'now', messages: []
+    })
+
+    await store.addActivatedDeferredTools('s1', 'main', ['WebSearch'])
+    const staleRendererSnapshot = {
+      id: 's1', projectId: 'p1', summary: 'updated', relativeTime: 'now', messages: [],
+      toolRuntime: { activatedDeferredTools: { main: ['WebSearch'] } }
+    }
+    await store.addActivatedDeferredTools('s1', 'main', ['NotebookEdit'])
+    await store.addActivatedDeferredTools('s1', 'subagent:worker-1', ['WebFetch'])
+    await store.save({
+      ...staleRendererSnapshot,
+      summary: 'renderer snapshot'
+    })
+
+    const reloaded = new SessionStore(file)
+    await reloaded.load()
+    expect(reloaded.get('s1')?.toolRuntime?.activatedDeferredTools?.main).toEqual([
+      'WebSearch',
+      'NotebookEdit'
+    ])
+    expect(reloaded.get('s1')?.toolRuntime?.activatedDeferredTools?.['subagent:worker-1']).toEqual([
+      'WebFetch'
+    ])
+    expect(reloaded.get('s1')?.summary).toBe('renderer snapshot')
+  })
+
+  it('serializes renderer saves and tool activation patches without cross-field loss', async () => {
+    root = await mkdtemp(path.join(os.tmpdir(), 'codez-session-'))
+    const file = path.join(root, 'sessions.json')
+    const store = new SessionStore(file)
+    const base = (id: string) => ({
+      id, projectId: 'p1', summary: 'initial', relativeTime: 'now', messages: []
+    })
+    await store.save(base('patch-first'))
+    await store.save(base('save-first'))
+
+    await Promise.all([
+      store.addActivatedDeferredTools('patch-first', 'main', ['WebSearch']),
+      store.save({ ...base('patch-first'), summary: 'renderer after patch' })
+    ])
+    await Promise.all([
+      store.save({ ...base('save-first'), summary: 'renderer before patch' }),
+      store.addActivatedDeferredTools('save-first', 'main', ['WebFetch'])
+    ])
+
+    expect(store.get('patch-first')).toMatchObject({
+      summary: 'renderer after patch',
+      toolRuntime: { activatedDeferredTools: { main: ['WebSearch'] } }
+    })
+    expect(store.get('save-first')).toMatchObject({
+      summary: 'renderer before patch',
+      toolRuntime: { activatedDeferredTools: { main: ['WebFetch'] } }
     })
   })
 

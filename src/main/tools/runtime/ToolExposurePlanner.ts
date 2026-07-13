@@ -108,6 +108,16 @@ export class ToolExposureState {
     this.activatedByScope.set(scopeId, current)
   }
 
+  restoreSession(
+    sessionId: string,
+    activatedByContextScope: Readonly<Record<string, readonly string[]>> | undefined
+  ): void {
+    if (!activatedByContextScope) return
+    for (const [contextScopeId, toolNames] of Object.entries(activatedByContextScope)) {
+      this.activate(`${sessionId}:${contextScopeId}`, toolNames)
+    }
+  }
+
   clear(scopeId?: string): void {
     if (scopeId) this.activatedByScope.delete(scopeId)
     else this.activatedByScope.clear()

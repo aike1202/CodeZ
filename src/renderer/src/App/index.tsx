@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import Sidebar from '../components/Sidebar'
 import TopBar from '../components/TopBar'
 import AppLayout from '../components/layout/AppLayout'
@@ -69,7 +69,6 @@ export default function App(): React.ReactElement {
   const [rightPanelVisible, setRightPanelVisible] = useState(false)
   const [activeRightTabId, setActiveRightTabId] = useState<string | null>(null)
   const [taskModalOpen, setTaskModalOpen] = useState(false)
-  const subagentInstanceCountsRef = useRef(new Map<string, number>())
 
   const subAgents = useMemo(
     () => messages.flatMap((message) => message.subAgents ?? []),
@@ -135,7 +134,6 @@ export default function App(): React.ReactElement {
 
   useEffect(() => {
     setSubagentTabs([])
-    subagentInstanceCountsRef.current.clear()
     setActiveRightTabId((current) => current?.startsWith('subagent:') ? null : current)
   }, [activeSessionId])
 
@@ -175,10 +173,12 @@ export default function App(): React.ReactElement {
 
   const handleSubAgentClick = useCallback((subAgent: SubAgentRecord) => {
     if (!workspace) return
-    const instanceNumber = (subagentInstanceCountsRef.current.get(subAgent.id) ?? 0) + 1
-    subagentInstanceCountsRef.current.set(subAgent.id, instanceNumber)
-    const tab = createSubAgentWorkspaceTab(subAgent.id, instanceNumber)
-    setSubagentTabs((current) => [...current, tab])
+    const tab = createSubAgentWorkspaceTab(subAgent.id)
+    setSubagentTabs((current) =>
+      current.some((existingTab) => existingTab.subAgentId === subAgent.id)
+        ? current
+        : [...current, tab]
+    )
     setRightPanelVisible(true)
     setActiveRightTabId(tab.id)
   }, [workspace])
