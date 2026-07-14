@@ -68,6 +68,7 @@ export function buildSummaryText(
   interrupted = false
 ): string {
   if (interrupted) return '执行已中断'
+  const lastCompaction = [...items].reverse().find((item) => item.type === 'compaction')
   const readCount = items.filter((i) => i.type === 'tool' && i.verb === 'Analyzed').length
   const dirCount = items.filter((i) => i.type === 'tool' && i.verb === 'Explored').length
   const searchCount = items.filter((i) => i.verb === 'Searched').length
@@ -83,6 +84,9 @@ export function buildSummaryText(
     editCount > 0 ? `${editCount} 处修改` : '',
     askCount > 0 ? `${askCount} 次提问` : ''
   ].filter(Boolean)
+
+  const containsOnlyCompaction = items.every((item) => item.type === 'compaction')
+  if (parts.length === 0 && lastCompaction && containsOnlyCompaction) return lastCompaction.target
 
   // 如果有提问项，使用更贴切的前缀
   const hasAskOnly = askCount > 0 && parts.length === 1

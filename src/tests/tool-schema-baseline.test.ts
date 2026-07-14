@@ -21,7 +21,7 @@ describe('V1/V2 tool schema baseline', () => {
       }))
       .sort((a, b) => a.name.localeCompare(b.name))
     expect(baseline.map((item) => item.name)).toEqual(V1_TOOL_NAMES)
-    expect(fingerprint(baseline)).toBe('3afdad78b1ef46581fee03944f48a7c6c24662d28687cc0c59b84be5cdbba790')
+    expect(fingerprint(baseline)).toBe('36600dbdc089322cf9c3313c6321274a29fba75376b108f49e367204541d227e')
   })
 
   it('records a comparable default eager-schema budget', () => {

@@ -1,24 +1,42 @@
 import type {
-  CompactionSummaryV1,
+  CompactionSummary,
   NormalizedModelMessage,
   VersionedResumeState
 } from '../../../shared/types/context'
-import type { ApiFormat, ThinkingConfig } from '../../../shared/types/provider'
+import type {
+  AgentStopReason,
+  ApiFormat,
+  ChatProviderErrorCode,
+  ProviderTokenUsage,
+  ThinkingConfig
+} from '../../../shared/types/provider'
 import { ChatService } from '../ChatService'
 import { buildCompactionPrompt } from './CompactionSummary'
 
 export interface CompactionModelInput {
   coveredThroughSequence: number
   messages: NormalizedModelMessage[]
-  previousSummary?: CompactionSummaryV1
+  previousSummary?: CompactionSummary
   resumeState?: VersionedResumeState
   instructions?: string
   validationFeedback?: string
-  previousInvalidOutput?: string
 }
 
 export interface CompactionModelClient {
-  generate(input: CompactionModelInput): Promise<string>
+  generate(input: CompactionModelInput): Promise<string | CompactionGenerationResult>
+}
+
+export interface CompactionGenerationResult {
+  text: string
+  stopReason?: AgentStopReason
+  usage?: ProviderTokenUsage
+}
+
+export class CompactionModelError extends Error {
+  constructor(message: string, readonly providerCode?: ChatProviderErrorCode) {
+    super(message)
+    this.name = 'CompactionModelError'
+  }
 }
 
 export interface ChatCompactionModelConfig {
@@ -36,20 +54,26 @@ export class ChatCompactionModelClient implements CompactionModelClient {
     private readonly chat = new ChatService()
   ) {}
 
-  async generate(input: CompactionModelInput): Promise<string> {
+  async generate(input: CompactionModelInput): Promise<CompactionGenerationResult> {
     const prompt = buildCompactionPrompt(input)
-    return new Promise<string>((resolve, reject) => {
+    return new Promise<CompactionGenerationResult>((resolve, reject) => {
+      let usage: ProviderTokenUsage | undefined
       this.chat.streamChat({
         ...this.config,
+        thinking: this.config.thinking
+          ? { ...this.config.thinking, enabled: false, effort: 'none' }
+          : { enabled: false, mode: 'none', effort: 'none' },
+        maxOutputTokens: Math.min(this.config.maxOutputTokens ?? 20_000, 20_000),
         messages: [
-          { role: 'system', content: 'You produce strict, evidence-based JSON summaries for durable context compaction.' },
+          { role: 'system', content: 'Summarize the conversation as evidence-based continuation text. Never call tools.' },
           { role: 'user', content: prompt }
         ],
         tools: undefined
       }, {
         onChunk: () => undefined,
-        onDone: (content) => resolve(content),
-        onError: (error) => reject(new Error(error))
+        onDone: (content, stopReason) => resolve({ text: content, stopReason, usage }),
+        onError: (error, code) => reject(new CompactionModelError(error, code)),
+        onUsage: (nextUsage) => { usage = nextUsage }
       }).catch(reject)
     })
   }

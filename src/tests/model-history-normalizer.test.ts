@@ -46,6 +46,24 @@ describe('ModelHistoryNormalizer', () => {
     expect(tail.map((item) => item.id)).toEqual(['a1', 'r1', 'a2'])
   })
 
+  it('drops complete protocol rounds during compaction overflow backoff', () => {
+    const history = [
+      message({ id: 'u1', role: 'user', content: 'start', sourceSequence: 1 }),
+      message({ id: 'a1', role: 'assistant', toolCalls: [{ id: 'c1', name: 'Read', arguments: '{}' }], sourceSequence: 2 }),
+      message({ id: 'r1', role: 'tool', toolCallId: 'c1', name: 'Read', content: 'old', sourceSequence: 3 }),
+      message({ id: 'a2', role: 'assistant', toolCalls: [{ id: 'c2', name: 'Edit', arguments: '{}' }], sourceSequence: 4 }),
+      message({ id: 'r2', role: 'tool', toolCallId: 'c2', name: 'Edit', content: 'new', sourceSequence: 5 })
+    ]
+
+    const truncated = ModelHistoryNormalizer.truncateOldestProtocolRounds(
+      history,
+      () => 1
+    )
+
+    expect(truncated?.messages.map((item) => item.id)).toEqual(['a2', 'r2'])
+    expect(truncated?.truncatedThroughSequence).toBe(3)
+  })
+
   it('rejects orphan and duplicate tool results', () => {
     const orphan = [message({ role: 'tool', toolCallId: 'missing', name: 'Read', content: 'x' })]
     expect(() => ModelHistoryNormalizer.assertProtocolInvariant(orphan)).toThrow('orphan tool result')

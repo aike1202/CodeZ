@@ -18,7 +18,7 @@ import {
   LegacySessionMigrationService,
   ModelContextBuilder,
   getContextCoreServices,
-  parseAndValidateSummary,
+  normalizeCompactionSummary,
   evaluateModelDownshiftCompaction,
   readContextFeatureFlags,
   resolveModelContextCapabilities
@@ -279,14 +279,17 @@ export function registerChatIpc(): void {
       })
       const migration = new LegacySessionMigrationService(sessionStore, core.ledger, {
         summarize: async ({ transcript }) => {
-          const raw = await compactionModel.generate({
+          const generated = await compactionModel.generate({
             coveredThroughSequence: 0,
             messages: [{
               id: 'legacy-transcript', turnId: 'legacy-import', role: 'user',
               content: transcript, status: 'complete', createdAt: new Date().toISOString(), sourceSequence: 0
             }]
           })
-          return parseAndValidateSummary(raw, 0)
+          return normalizeCompactionSummary(
+            typeof generated === 'string' ? generated : generated.text,
+            0
+          )
         }
       })
       const commandMetadata = request.input.commandMetadata as { uiMessageId?: string } | undefined
@@ -337,7 +340,9 @@ export function registerChatIpc(): void {
           toolSchemas,
           instructions: reminder ? [reminder] : [],
           workspaceRoot: currentWorkspace,
-          reasoningBudgetTokens
+          reasoningBudgetTokens,
+          providerId: request.providerId,
+          model: request.model
         })
         if (result.status !== 'completed') {
           throw new Error(`切换到 ${request.model} 前无法将历史压缩到新模型预算内：${result.message || result.errorCode}`)
@@ -583,7 +588,9 @@ export function registerChatIpc(): void {
         instructions: reminder ? [reminder] : [],
         manualInstructions: request.instructions,
         workspaceRoot: workspace,
-        reasoningBudgetTokens
+        reasoningBudgetTokens,
+        providerId: scope.lastProviderId,
+        model: scope.lastModel
       })
       return { accepted: result.status === 'completed', result }
     }

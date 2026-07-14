@@ -8,15 +8,19 @@ describe('Reviewer subagent prompt', () => {
     expect(ReviewerSubAgent.description).toContain('Independent read-only reviewer')
     expect(ReviewerSubAgent.whenToUse).toContain('before reporting completion')
     expect(ReviewerSubAgent.whenNotToUse).toContain('General codebase exploration')
-    expect(ReviewerSubAgent.allowShell).toBe(true)
-    expect(ReviewerSubAgent.shellPolicy).toBe('verification')
+    expect(ReviewerSubAgent.allowShell).not.toBe(true)
+    expect(ReviewerSubAgent.shellPolicy).toBeUndefined()
     expect(ReviewerSubAgent.outputSpec?.fields.map(field => field.name)).toEqual(
       expect.arrayContaining([
         'verdict',
+        'reviewCycleId',
+        'reviewMode',
         'report',
         'conclusion',
         'confidence',
-        'findings',
+        'blockingFindings',
+        'risks',
+        'resolvedFindingIds',
         'checksRun',
         'filesExamined',
         'unresolvedCount',
@@ -24,12 +28,17 @@ describe('Reviewer subagent prompt', () => {
     )
   })
 
-  it('can inspect and execute checks without exposing file-write tools', () => {
+  it('exposes only dedicated read-only inspection tools', () => {
     const names = ReviewerSubAgent.getTools(new ToolManager()).map(tool => tool.function.name)
 
     expect(names).toEqual(expect.arrayContaining(['Read', 'list_files', 'Glob', 'Grep']))
-    expect(names).toEqual(expect.arrayContaining(['Bash', 'PowerShell']))
-    expect(names).not.toEqual(expect.arrayContaining(['Edit', 'Write', 'NotebookEdit']))
+    expect(names).not.toEqual(expect.arrayContaining([
+      'Bash',
+      'PowerShell',
+      'Edit',
+      'Write',
+      'NotebookEdit',
+    ]))
   })
 
   it('requires the original goal, changed files, independent checks, and a verdict', async () => {
@@ -42,6 +51,8 @@ describe('Reviewer subagent prompt', () => {
         'Files changed: src/drafts.ts, src/drafts.test.ts.',
       ].join('\n'),
       parentPrompt: 'Review the completed draft persistence change.',
+      reviewMode: 'initial',
+      reviewCycleId: 'draft-persistence',
       context: 'Primary verification: npm test passed. Known risk: malformed legacy data.',
       apiConfig: {
         baseUrl: 'https://example.invalid',
@@ -53,36 +64,109 @@ describe('Reviewer subagent prompt', () => {
     })
 
     expect(prompt).toContain('# Using tools')
-    expect(prompt).toContain('independent implementation reviewer')
+    expect(prompt).toContain('independent implementation acceptance reviewer')
     expect(prompt).toContain('Original user goal and acceptance criteria')
     expect(prompt).toContain('Complete list of files changed')
     expect(prompt).toContain('Verification commands already run')
-    expect(prompt).toContain('at least one relevant adversarial probe')
+    expect(prompt).toContain('Blocking evidence threshold')
+    expect(prompt).toContain('not to maximize findings')
+    expect(prompt).toContain('Do not add new completion criteria')
     expect(prompt).toContain('Do not create, edit, delete, move, or copy project files')
     expect(prompt).toContain('Call submit_result exactly once')
-    expect(prompt).toContain('PASS, FAIL, or PARTIAL')
+    expect(prompt).toContain('PASS, PASS_WITH_RISKS, or BLOCKED')
     expect(prompt).toContain('malformed legacy data')
+    expect(prompt).not.toContain('Bash')
+    expect(prompt).not.toContain('PowerShell')
+    expect(prompt).not.toContain('run focused tests')
   })
 
   it('rejects invalid verdicts and evidence-free submissions', () => {
     const validate = ReviewerSubAgent.validateStructuredOutput!
+    const initialContext = {
+      reviewMode: 'initial' as const,
+      reviewCycleId: 'draft-persistence',
+    } as any
     const base = {
+      reviewCycleId: 'draft-persistence',
+      reviewMode: 'initial',
       report: 'Review report',
       conclusion: 'Review conclusion',
       confidence: 'high' as const,
-      findings: [],
+      blockingFindings: [],
+      risks: [],
+      resolvedFindingIds: [],
       checksRun: ['npm test: passed'],
       filesExamined: ['src/drafts.ts'],
       unresolvedCount: 0,
     }
 
-    expect(validate({ ...base, verdict: 'OK' } as any)).toContain('verdict')
-    expect(validate({ ...base, verdict: 'PASS', checksRun: [] } as any)).toContain('checksRun')
-    expect(validate({ ...base, verdict: 'PASS', filesExamined: [] } as any)).toContain('filesExamined')
-    expect(validate({ ...base, verdict: 'PASS', findings: ['P2 defect'] } as any)).toContain('PASS')
-    expect(validate({ ...base, verdict: 'PASS', unresolvedCount: 1 } as any)).toContain('unresolvedCount')
-    expect(validate({ ...base, verdict: 'FAIL' } as any)).toContain('FAIL')
-    expect(validate({ ...base, verdict: 'PARTIAL' } as any)).toContain('PARTIAL')
-    expect(validate({ ...base, verdict: 'PASS' } as any)).toBeUndefined()
+    expect(validate({ ...base, verdict: 'OK' } as any, initialContext)).toContain('verdict')
+    expect(validate({ ...base, verdict: 'PASS', checksRun: [] } as any, initialContext)).toContain('checksRun')
+    expect(validate({ ...base, verdict: 'PASS', filesExamined: [] } as any, initialContext)).toContain('filesExamined')
+    expect(validate({ ...base, verdict: 'PASS', risks: ['P2 hardening'] } as any, initialContext)).toContain('PASS')
+    expect(validate({ ...base, verdict: 'PASS', unresolvedCount: 1 } as any, initialContext)).toContain('PASS')
+    expect(validate({ ...base, verdict: 'PASS_WITH_RISKS' } as any, initialContext)).toContain('risk')
+    expect(validate({ ...base, verdict: 'BLOCKED' } as any, initialContext)).toContain('blocking')
+    expect(validate({ ...base, verdict: 'PASS' } as any, initialContext)).toBeUndefined()
+    expect(validate({
+      ...base,
+      verdict: 'PASS_WITH_RISKS',
+      risks: ['P2: malformed legacy data was not independently executed.'],
+    } as any, initialContext)).toBeUndefined()
+  })
+
+  it('allows only evidence-backed P0/P1 blockers and closes the same IDs', () => {
+    const validate = ReviewerSubAgent.validateStructuredOutput!
+    const finding = {
+      id: 'F-001',
+      criterionId: 'AC-1',
+      severity: 'P1',
+      location: 'src/drafts.ts:42',
+      expected: 'Draft survives restart.',
+      actual: 'Draft is held only in memory.',
+      reproduction: 'Create a draft, restart, and load the draft list.',
+      evidence: 'src/drafts.ts:42 stores drafts in a module-level Map.',
+      confidence: 'high',
+    }
+    const base = {
+      reviewCycleId: 'draft-persistence',
+      report: 'Review report',
+      conclusion: 'Review conclusion',
+      confidence: 'high',
+      risks: [],
+      checksRun: ['Read src/drafts.ts.'],
+      filesExamined: ['src/drafts.ts'],
+      unresolvedCount: 0,
+    }
+
+    expect(validate({
+      ...base,
+      reviewMode: 'initial',
+      verdict: 'BLOCKED',
+      blockingFindings: [finding],
+      resolvedFindingIds: [],
+    } as any, {
+      reviewMode: 'initial', reviewCycleId: 'draft-persistence',
+    } as any)).toBeUndefined()
+
+    const closureContext = {
+      reviewMode: 'closure',
+      reviewCycleId: 'draft-persistence',
+      previousFindingIds: ['F-001'],
+    } as any
+    expect(validate({
+      ...base,
+      reviewMode: 'closure',
+      verdict: 'PASS',
+      blockingFindings: [],
+      resolvedFindingIds: ['F-001'],
+    } as any, closureContext)).toBeUndefined()
+    expect(validate({
+      ...base,
+      reviewMode: 'closure',
+      verdict: 'BLOCKED',
+      blockingFindings: [{ ...finding, id: 'F-NEW' }],
+      resolvedFindingIds: ['F-001'],
+    } as any, closureContext)).toContain('new finding IDs')
   })
 })

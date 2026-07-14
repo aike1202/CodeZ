@@ -148,7 +148,7 @@ export async function normalizeMcpResourceResult(
       workspaceRoot: context.workspaceRoot,
       sessionId: context.sessionId,
       serverName,
-      toolName: 'ReadMcpResource',
+      toolName: 'ReadMcpResourceTool',
       mimeType: base.mimeType || 'application/octet-stream',
       bytes
     })

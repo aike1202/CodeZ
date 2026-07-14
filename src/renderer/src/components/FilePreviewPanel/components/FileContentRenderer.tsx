@@ -7,6 +7,7 @@ import CodeMirror from '@uiw/react-codemirror'
 import { vscodeDark } from '@uiw/codemirror-theme-vscode'
 import { languages } from '@codemirror/language-data'
 import { Extension } from '@codemirror/state'
+import { Code2, Eye } from 'lucide-react'
 
 interface FileContentRendererProps {
   code: string
@@ -14,7 +15,7 @@ interface FileContentRendererProps {
   onFileClick: (path: string) => void
 }
 
-function getLanguageFromPath(filePath: string): string {
+export function getLanguageFromPath(filePath: string): string {
   const ext = filePath.split('.').pop()?.toLowerCase() || ''
   const mapping: Record<string, string> = {
     js: 'javascript',
@@ -43,12 +44,46 @@ function getLanguageFromPath(filePath: string): string {
   return mapping[ext] || 'text'
 }
 
+const READ_ONLY_EDITOR_SETUP = {
+  lineNumbers: true,
+  highlightActiveLineGutter: true,
+  highlightActiveLine: true,
+  foldGutter: true
+} as const
+
+function ReadOnlyCodeView({
+  code,
+  extensions,
+  className = ''
+}: {
+  code: string
+  extensions: Extension[]
+  className?: string
+}): React.ReactElement {
+  const isDark = document.documentElement.classList.contains('dark')
+
+  return (
+    <div className={`preview-pre-wrapper ${className}`}>
+      <CodeMirror
+        value={code}
+        height="100%"
+        theme={isDark ? vscodeDark : 'light'}
+        extensions={extensions}
+        readOnly
+        basicSetup={READ_ONLY_EDITOR_SETUP}
+        style={{ height: '100%' }}
+      />
+    </div>
+  )
+}
+
 export function FileContentRenderer({
   code,
   filePath,
   onFileClick
 }: FileContentRendererProps): React.ReactElement {
   const [copied, setCopied] = useState(false)
+  const [markdownView, setMarkdownView] = useState<'source' | 'preview'>('preview')
   const language = getLanguageFromPath(filePath)
   const [langExtension, setLangExtension] = useState<Extension[]>([])
 
@@ -87,13 +122,50 @@ export function FileContentRenderer({
 
   if (language === 'markdown') {
     return (
-      <div className="preview-markdown-container">
-        <MessageBody content={code} onFileClick={onFileClick} />
+      <div className="preview-markdown-viewer">
+        <div className="preview-markdown-toolbar">
+          <div
+            className="preview-markdown-mode-switch"
+            role="group"
+            aria-label="Markdown 查看方式"
+          >
+            <button
+              type="button"
+              className={`preview-markdown-mode-button ${markdownView === 'source' ? 'preview-markdown-mode-button--active' : ''}`}
+              aria-pressed={markdownView === 'source'}
+              title="查看 Markdown 原格式"
+              onClick={() => setMarkdownView('source')}
+            >
+              <Code2 size={14} aria-hidden="true" />
+              <span>原格式</span>
+            </button>
+            <button
+              type="button"
+              className={`preview-markdown-mode-button ${markdownView === 'preview' ? 'preview-markdown-mode-button--active' : ''}`}
+              aria-pressed={markdownView === 'preview'}
+              title="查看 Markdown 可视化内容"
+              onClick={() => setMarkdownView('preview')}
+            >
+              <Eye size={14} aria-hidden="true" />
+              <span>可视化</span>
+            </button>
+          </div>
+        </div>
+
+        {markdownView === 'preview' ? (
+          <div className="preview-markdown-container">
+            <MessageBody content={code} onFileClick={onFileClick} />
+          </div>
+        ) : (
+          <ReadOnlyCodeView
+            code={code}
+            extensions={langExtension}
+            className="preview-markdown-source"
+          />
+        )}
       </div>
     )
   }
-
-  const isDark = document.documentElement.classList.contains('dark')
 
   return (
     <div className="preview-code-container" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -120,22 +192,7 @@ export function FileContentRenderer({
         </Button>
       </div>
 
-      <div className="preview-pre-wrapper" style={{ flex: 1, overflow: 'auto' }}>
-        <CodeMirror
-          value={code}
-          height="100%"
-          theme={isDark ? vscodeDark : 'light'}
-          extensions={langExtension}
-          readOnly={true}
-          basicSetup={{
-            lineNumbers: true,
-            highlightActiveLineGutter: true,
-            highlightActiveLine: true,
-            foldGutter: true
-          }}
-          style={{ height: '100%' }}
-        />
-      </div>
+      <ReadOnlyCodeView code={code} extensions={langExtension} />
     </div>
   )
 }

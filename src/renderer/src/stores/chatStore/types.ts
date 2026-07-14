@@ -1,6 +1,6 @@
 import type { TaskItem } from '../../../../shared/types/task'
 import type { PermissionApprovalResponse, PermissionRequest } from '../../../../shared/types/permission'
-import type { ContextBudgetSnapshot } from '../../../../shared/types/context'
+import type { CompactionTrigger, ContextBudgetSnapshot } from '../../../../shared/types/context'
 import type { ImageAttachment, PendingPromptDraft } from '../../../../shared/types/attachment'
 import type { SessionRuntimeStatusChanged, SubAgentHandoff } from '../../../../shared/types/subagent'
 import type { QueuedPrompt } from '../../../../shared/types/queuedPrompt'
@@ -69,7 +69,25 @@ export interface TextTimelineItem {
   sequence: number
 }
 
-export type ExecutionTimelineItem = ReasoningTimelineItem | ToolTimelineItem | TextTimelineItem
+export interface CompactionTimelineItem {
+  id: string
+  type: 'compaction'
+  trigger?: CompactionTrigger
+  status: 'running' | 'success' | 'error'
+  tokensBefore?: number
+  tokensAfter?: number
+  error?: string
+  startedAt: number
+  updatedAt: number
+  completedAt?: number
+  sequence: number
+}
+
+export type ExecutionTimelineItem =
+  | ReasoningTimelineItem
+  | ToolTimelineItem
+  | TextTimelineItem
+  | CompactionTimelineItem
 
 /** 子 Agent 调用记录 — 与主 Agent 时间线分离，由 SubAgentCard 消费 */
 export interface SubAgentRecord {
@@ -169,7 +187,7 @@ export interface ChatSession {
 
 export interface CompactionUiState {
   status: 'idle' | 'running' | 'completed' | 'failed'
-  trigger?: string
+  trigger?: CompactionTrigger
   tokensBefore?: number
   tokensAfter?: number
   error?: string
@@ -255,6 +273,7 @@ export interface ChatState {
   updateAgentState: (msgId: string, stateId: string, updates: Partial<AgentState>) => void
   appendReasoningTimelineChunk: (msgId: string, delta: string) => void
   completeReasoningTimeline: (msgId: string) => void
+  updateCompactionTimeline: (msgId: string, state: CompactionUiState) => void
   startToolCall: (msgId: string, toolCall: Omit<ToolCallState, 'status' | 'startedAt' | 'sequence'>) => void
   finishToolCall: (msgId: string, toolCallId: string, result: string) => void
 

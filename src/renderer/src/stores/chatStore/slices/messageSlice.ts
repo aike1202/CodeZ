@@ -7,6 +7,8 @@ import type {
   ToolTimelineItem,
   ReasoningTimelineItem,
   TextTimelineItem,
+  CompactionTimelineItem,
+  CompactionUiState,
   SubAgentRecord,
   ChatSession,
   PendingInternalContinuation
@@ -68,6 +70,7 @@ export interface MessageSlice {
   updateAgentState: (msgId: string, stateId: string, updates: Partial<AgentState>) => void
   appendReasoningTimelineChunk: (msgId: string, delta: string) => void
   completeReasoningTimeline: (msgId: string) => void
+  updateCompactionTimeline: (msgId: string, state: CompactionUiState) => void
   startToolCall: (msgId: string, toolCall: Omit<ToolCallState, 'status' | 'startedAt' | 'sequence'>) => void
   finishToolCall: (msgId: string, toolCallId: string, result: string) => void
   startSubAgent: (
@@ -179,6 +182,72 @@ export function removeMessagesFromState(
       ? { ...session, messages }
       : session)
   }
+}
+
+export function applyCompactionTimelineUpdate(
+  message: ChatMessage,
+  state: CompactionUiState,
+  now = Date.now(),
+  itemId = `compaction_${genId()}`
+): ChatMessage {
+  if (state.status === 'idle') return message
+
+  const timeline = message.executionTimeline || []
+  if (state.status === 'running') {
+    const item: CompactionTimelineItem = {
+      id: itemId,
+      type: 'compaction',
+      trigger: state.trigger,
+      status: 'running',
+      tokensBefore: state.tokensBefore,
+      startedAt: now,
+      updatedAt: now,
+      sequence: timeline.length
+    }
+    return { ...message, executionTimeline: [...timeline, item] }
+  }
+
+  let runningIndex = -1
+  for (let index = timeline.length - 1; index >= 0; index--) {
+    const item = timeline[index]
+    if (item.type === 'compaction' && item.status === 'running') {
+      runningIndex = index
+      break
+    }
+  }
+
+  const status = state.status === 'completed' ? 'success' as const : 'error' as const
+  if (runningIndex >= 0) {
+    const current = timeline[runningIndex] as CompactionTimelineItem
+    const updated: CompactionTimelineItem = {
+      ...current,
+      trigger: state.trigger ?? current.trigger,
+      status,
+      tokensBefore: state.tokensBefore ?? current.tokensBefore,
+      tokensAfter: state.tokensAfter ?? current.tokensAfter,
+      error: state.error ?? current.error,
+      updatedAt: now,
+      completedAt: now
+    }
+    const nextTimeline = timeline.slice()
+    nextTimeline[runningIndex] = updated
+    return { ...message, executionTimeline: nextTimeline }
+  }
+
+  const item: CompactionTimelineItem = {
+    id: itemId,
+    type: 'compaction',
+    trigger: state.trigger,
+    status,
+    tokensBefore: state.tokensBefore,
+    tokensAfter: state.tokensAfter,
+    error: state.error,
+    startedAt: now,
+    updatedAt: now,
+    completedAt: now,
+    sequence: timeline.length
+  }
+  return { ...message, executionTimeline: [...timeline, item] }
 }
 
 /** 在指定消息内更新某个 sub-agent record；未找到时返回原状态（no-op） */
@@ -493,6 +562,13 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
         )
       }
     }))
+  },
+
+  updateCompactionTimeline: (msgId, state) => {
+    set((s) => updateMessageInState(s, msgId, (message) =>
+      applyCompactionTimelineUpdate(message, state)
+    ))
+    schedulePersist(get)
   },
 
   startToolCall: (msgId: string, toolCall: Omit<ToolCallState, 'status' | 'startedAt' | 'sequence'>) => {

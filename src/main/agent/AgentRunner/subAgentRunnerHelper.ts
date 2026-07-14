@@ -4,12 +4,163 @@ import { createHash } from 'crypto'
 import { IPC_CHANNELS } from '../../../shared/ipc/channels'
 import type { AgentRunConfig, AgentRunnerCallbacks } from './types'
 import type { SubAgentHandoff } from '../../../shared/types/subagent'
+import { contextScopeForSubAgent } from '../../../shared/types/context'
 
 function truncateBridgeText(value: string, maxLength: number): string {
   const normalized = value.trim()
   return normalized.length <= maxLength
     ? normalized
     : `${normalized.slice(0, maxLength)}\n...[truncated]`
+}
+
+async function validateReviewerClosureReference(
+  parsed: {
+    review_mode?: 'initial' | 'closure'
+    review_cycle_id?: string
+    previous_finding_ids?: string[]
+    resume_subagent_id?: string
+  },
+  config: AgentRunConfig
+): Promise<string | null> {
+  if (
+    parsed.review_mode !== 'closure' ||
+    !parsed.resume_subagent_id ||
+    !config.runtimeCoordinator ||
+    !config.sessionId
+  ) {
+    return null
+  }
+
+  const scope = await config.runtimeCoordinator.getScopeView(
+    config.sessionId,
+    contextScopeForSubAgent(parsed.resume_subagent_id)
+  )
+  if (!scope) return 'Reviewer closure could not find the referenced durable Reviewer context.'
+
+  const submitCalls = scope.activeMessages
+    .filter((message) => message.role === 'assistant')
+    .flatMap((message) => message.toolCalls || [])
+    .filter((call) => call.name === 'submit_result')
+  const previous = [...submitCalls].reverse().map((call) => {
+    try {
+      return JSON.parse(call.arguments || '{}') as Record<string, unknown>
+    } catch {
+      return null
+    }
+  }).find((value) => value !== null)
+
+  if (!previous) return 'Reviewer closure could not recover the initial structured verdict.'
+  if (previous.reviewMode !== 'initial') {
+    return 'Reviewer closure must continue an initial review, not another closure.'
+  }
+  if (previous.reviewCycleId !== parsed.review_cycle_id) {
+    return 'Reviewer closure review_cycle_id does not match the initial review.'
+  }
+  if (previous.verdict !== 'BLOCKED') {
+    return 'Reviewer closure is only valid after an initial BLOCKED verdict.'
+  }
+
+  const priorIds = Array.isArray(previous.blockingFindings)
+    ? previous.blockingFindings
+        .map((finding) => finding && typeof finding === 'object'
+          ? String((finding as Record<string, unknown>).id || '')
+          : '')
+        .filter(Boolean)
+        .sort()
+    : []
+  const suppliedIds = [...(parsed.previous_finding_ids || [])].sort()
+  if (
+    priorIds.length === 0 ||
+    priorIds.length !== suppliedIds.length ||
+    priorIds.some((id, index) => id !== suppliedIds[index])
+  ) {
+    return 'Reviewer closure previous_finding_ids must exactly match the initial blocking findings.'
+  }
+  return null
+}
+
+function unwrapSubAgentResult(content: string): Record<string, unknown> | null {
+  let value: unknown = content
+  for (let depth = 0; depth < 4; depth++) {
+    if (typeof value === 'string') {
+      try {
+        value = JSON.parse(value)
+      } catch {
+        return null
+      }
+      continue
+    }
+    if (!value || typeof value !== 'object') return null
+    const record = value as Record<string, unknown>
+    if (typeof record.status === 'string' && typeof record.subagent_type === 'string') {
+      return record
+    }
+    if (record.data !== undefined) {
+      value = record.data
+      continue
+    }
+    return null
+  }
+  return null
+}
+
+async function validateReviewerInitialCycle(
+  parsed: {
+    review_mode?: 'initial' | 'closure'
+    review_cycle_id?: string
+  },
+  config: AgentRunConfig,
+  currentToolCallId: string
+): Promise<string | null> {
+  if (
+    parsed.review_mode !== 'initial' ||
+    !parsed.review_cycle_id ||
+    !config.runtimeCoordinator ||
+    !config.runtimeTurn ||
+    !config.sessionId
+  ) {
+    return null
+  }
+
+  const scope = await config.runtimeCoordinator.getScopeView(
+    config.sessionId,
+    config.runtimeTurn.contextScopeId
+  )
+  if (!scope) return null
+  const matchingCallIds = new Set<string>()
+  for (const message of scope.activeMessages) {
+    if (message.role !== 'assistant') continue
+    for (const call of message.toolCalls || []) {
+      if (call.name !== 'SubAgentRunner' || call.id === currentToolCallId) continue
+      try {
+        const args = JSON.parse(call.arguments || '{}')
+        if (
+          args.subagent_type === 'Reviewer' &&
+          args.review_mode === 'initial' &&
+          args.review_cycle_id === parsed.review_cycle_id
+        ) {
+          matchingCallIds.add(call.id)
+        }
+      } catch {}
+    }
+  }
+  if (matchingCallIds.size === 0) return null
+
+  const hasCompletedCycle = scope.activeMessages.some((message) => {
+    if (
+      message.role !== 'tool' ||
+      message.name !== 'SubAgentRunner' ||
+      !message.toolCallId ||
+      !matchingCallIds.has(message.toolCallId)
+    ) {
+      return false
+    }
+    const result = unwrapSubAgentResult(message.content || '')
+    return result?.status === 'completed'
+  })
+  return hasCompletedCycle
+    ? `Reviewer cycle '${parsed.review_cycle_id}' already has a completed initial review. Resume that Reviewer for closure instead of starting a fresh Reviewer.`
+    : null
 }
 
 /**
@@ -41,6 +192,9 @@ export async function handleSubAgentRunnerSpawn(
     scope?: { directories?: string[]; excludeGlobs?: string[] }
     depth?: 'quick' | 'normal' | 'exhaustive'
     resume_subagent_id?: string
+    review_mode?: 'initial' | 'closure'
+    review_cycle_id?: string
+    previous_finding_ids?: string[]
   } = {}
   try {
     parsed = JSON.parse(rawArgs || '{}')
@@ -74,6 +228,58 @@ export async function handleSubAgentRunnerSpawn(
     return { role: 'tool' as const, tool_call_id: toolCallId, name, content: errMsg }
   }
 
+  if (def.type === 'Reviewer') {
+    const reviewMode = parsed.review_mode
+    const reviewCycleId = parsed.review_cycle_id?.trim() || ''
+    const criteria = parsed.expectations?.questions || []
+    const previousFindingIds = parsed.previous_finding_ids || []
+    if (!['initial', 'closure'].includes(reviewMode || '')) {
+      const errMsg = JSON.stringify({
+        ok: false,
+        error: 'Reviewer requires review_mode="initial" or review_mode="closure".'
+      })
+      callbacks.onToolEnd?.(toolCallId, errMsg)
+      return { role: 'tool' as const, tool_call_id: toolCallId, name, content: errMsg }
+    }
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/.test(reviewCycleId)) {
+      const errMsg = JSON.stringify({
+        ok: false,
+        error: 'Reviewer requires a stable review_cycle_id using 1-120 letters, numbers, dot, underscore, colon, or dash.'
+      })
+      callbacks.onToolEnd?.(toolCallId, errMsg)
+      return { role: 'tool' as const, tool_call_id: toolCallId, name, content: errMsg }
+    }
+    if (criteria.length === 0 || criteria.some((criterion) => !criterion.trim())) {
+      const errMsg = JSON.stringify({
+        ok: false,
+        error: 'Reviewer requires a non-empty frozen acceptance list in expectations.questions.'
+      })
+      callbacks.onToolEnd?.(toolCallId, errMsg)
+      return { role: 'tool' as const, tool_call_id: toolCallId, name, content: errMsg }
+    }
+    if (reviewMode === 'initial' && previousFindingIds.length > 0) {
+      const errMsg = JSON.stringify({ ok: false, error: 'Initial review cannot include previous_finding_ids.' })
+      callbacks.onToolEnd?.(toolCallId, errMsg)
+      return { role: 'tool' as const, tool_call_id: toolCallId, name, content: errMsg }
+    }
+    if (
+      reviewMode === 'closure' &&
+      (!parsed.resume_subagent_id || previousFindingIds.length === 0)
+    ) {
+      const errMsg = JSON.stringify({
+        ok: false,
+        error: 'Reviewer closure requires resume_subagent_id and the complete previous_finding_ids list.'
+      })
+      callbacks.onToolEnd?.(toolCallId, errMsg)
+      return { role: 'tool' as const, tool_call_id: toolCallId, name, content: errMsg }
+    }
+    if (new Set(previousFindingIds).size !== previousFindingIds.length) {
+      const errMsg = JSON.stringify({ ok: false, error: 'previous_finding_ids must not contain duplicates.' })
+      callbacks.onToolEnd?.(toolCallId, errMsg)
+      return { role: 'tool' as const, tool_call_id: toolCallId, name, content: errMsg }
+    }
+  }
+
   const resumeSubAgentId = parsed.resume_subagent_id?.trim()
   const typeToken = def.type.replace(/[^A-Za-z0-9._:-]/g, '_')
   const resumeFingerprint = createHash('sha256').update(JSON.stringify({
@@ -92,21 +298,38 @@ export async function handleSubAgentRunnerSpawn(
           excludeGlobs: parsed.scope.excludeGlobs || []
         }
       : null,
-    depth: parsed.depth || null
+    depth: parsed.depth || null,
+    reviewMode: parsed.review_mode || null,
+    reviewCycleId: parsed.review_cycle_id || null,
+    previousFindingIds: parsed.previous_finding_ids || []
   })).digest('hex').slice(0, 16)
   const resumePrefix = `subagent_${typeToken}_${resumeFingerprint}_`
+  const isReviewerClosure = def.type === 'Reviewer' && parsed.review_mode === 'closure'
   if (
     resumeSubAgentId &&
     (
       resumeSubAgentId.length > 512 ||
       /[\u0000-\u001f]/.test(resumeSubAgentId) ||
-      !resumeSubAgentId.startsWith(resumePrefix)
+      !resumeSubAgentId.startsWith(isReviewerClosure ? `subagent_${typeToken}_` : resumePrefix)
     )
   ) {
     const errMsg = JSON.stringify({
       ok: false,
       error: `SubAgentRunner \`resume_subagent_id\` is invalid for subagent type '${def.type}'.`
     })
+    callbacks.onToolEnd?.(toolCallId, errMsg)
+    return { role: 'tool' as const, tool_call_id: toolCallId, name, content: errMsg }
+  }
+
+  const closureReferenceError = await validateReviewerClosureReference(parsed, config)
+  if (closureReferenceError) {
+    const errMsg = JSON.stringify({ ok: false, error: closureReferenceError })
+    callbacks.onToolEnd?.(toolCallId, errMsg)
+    return { role: 'tool' as const, tool_call_id: toolCallId, name, content: errMsg }
+  }
+  const initialCycleError = await validateReviewerInitialCycle(parsed, config, toolCallId)
+  if (initialCycleError) {
+    const errMsg = JSON.stringify({ ok: false, error: initialCycleError })
     callbacks.onToolEnd?.(toolCallId, errMsg)
     return { role: 'tool' as const, tool_call_id: toolCallId, name, content: errMsg }
   }
@@ -127,6 +350,9 @@ export async function handleSubAgentRunnerSpawn(
     expectations: parsed.expectations,
     context: parsed.context,
     scope: parsed.scope,
+    reviewMode: parsed.review_mode,
+    reviewCycleId: parsed.review_cycle_id,
+    previousFindingIds: parsed.previous_finding_ids,
     parentToolCallId: toolCallId
   })
 
@@ -141,6 +367,9 @@ export async function handleSubAgentRunnerSpawn(
         parentPrompt: parsed.task || prompt || '',
         subAgentId,
         resumeSubAgentId,
+        reviewMode: parsed.review_mode,
+        reviewCycleId: parsed.review_cycle_id,
+        previousFindingIds: parsed.previous_finding_ids,
         expectations: parsed.expectations,
         context: parsed.context,
         scope: parsed.scope,
@@ -196,8 +425,19 @@ export async function handleSubAgentRunnerSpawn(
       filesExamined: result.filesExamined?.slice(-20).map((value) =>
         truncateBridgeText(value, 240)
       ),
+      subagent_id: subAgentId,
+      review_mode: parsed.review_mode,
+      review_cycle_id: parsed.review_cycle_id,
       handoff: result.handoff,
-      resume_subagent_id: result.handoff?.canResume || result.status === 'interrupted'
+      resume_subagent_id: (
+        result.handoff?.canResume ||
+        result.status === 'interrupted' ||
+        (
+          def.type === 'Reviewer' &&
+          parsed.review_mode === 'initial' &&
+          (result.structuredOutput as Record<string, unknown> | undefined)?.verdict === 'BLOCKED'
+        )
+      )
         ? subAgentId
         : undefined,
     }

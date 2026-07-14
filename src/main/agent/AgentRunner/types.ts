@@ -21,6 +21,9 @@ export interface SubAgentStartMeta {
   expectations?: { questions: string[]; outOfScope?: string[] }
   context?: string
   scope?: { directories?: string[]; excludeGlobs?: string[] }
+  reviewMode?: 'initial' | 'closure'
+  reviewCycleId?: string
+  previousFindingIds?: string[]
   parentToolCallId: string
 }
 

@@ -1,221 +1,294 @@
-import React, { useEffect, useMemo, useState } from 'react'
-import { IconAdd, IconServer, IconTrash } from '../Icons'
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react'
+import {
+  Braces,
+  ChevronRight,
+  Database,
+  LockKeyhole,
+  MessageSquareText,
+  PlugZap,
+  Search,
+  Server,
+  Wrench
+} from 'lucide-react'
 import Button from '../ui/Button'
-import Input from '../ui/Input'
-import Select from '../ui/Select'
+import Switch from '../ui/Switch'
+import McpJsonEditor from './McpJsonEditor'
+import McpServerDetailModal from './McpServerDetailModal'
+import type { McpListPayload, McpServerStatus, ScopedMcpConfig } from './types'
+import {
+  MCP_SCOPE_LABELS,
+  parseUserConfiguration,
+  serializeUserConfiguration,
+  serverDescription,
+  stateLabel
+} from './utils'
 import './SettingsMcpTab.css'
 
-type Transport = 'stdio' | 'http' | 'sse'
-interface ServerConfig {
-  type: Transport
-  enabled?: boolean
-  command?: string
-  args?: string[]
-  cwd?: string
-  env?: Record<string, string>
-  url?: string
-  headers?: Record<string, string>
-  timeoutMs?: number
-  alwaysLoadTools?: string[]
-  samplingPolicy?: 'deny' | 'ask' | 'allow'
-  elicitationPolicy?: 'deny' | 'ask' | 'allow'
-  samplingMaxTokens?: number
-  instructionsPolicy?: 'ignore' | 'tool-hints' | 'approved'
-  resourceSubscriptions?: boolean
+function effectiveServerKey(config: ScopedMcpConfig): string {
+  return `${config.scope}:${config.name}`
 }
-interface ScopedConfig {
-  name: string
-  scope: 'managed' | 'user' | 'project' | 'local' | 'dynamic'
-  config: ServerConfig
-  fingerprint: string
-  trusted: boolean
-  effective: boolean
-  shadowedBy?: ScopedConfig['scope']
-  policyDisabled?: boolean
-}
-interface ServerStatus {
-  name: string
-  state: string
-  transport: Transport
-  toolCount: number
-  resourceCount: number
-  promptCount: number
-  capabilities?: Record<string, unknown>
-  serverInfo?: { name: string; version: string; title?: string }
-  error?: { code: string; message: string }
-  logs: Array<{ timestamp: string; level: string; message: string }>
-}
-
-const emptyConfig = (): ServerConfig => ({ type: 'stdio', enabled: true, command: '', args: [] })
 
 export default function SettingsMcpTab(): React.ReactElement {
-  const [configs, setConfigs] = useState<ScopedConfig[]>([])
-  const [statuses, setStatuses] = useState<ServerStatus[]>([])
-  const [selected, setSelected] = useState<string>('new')
-  const [originalName, setOriginalName] = useState<string>()
-  const [name, setName] = useState('')
-  const [draft, setDraft] = useState<ServerConfig>(emptyConfig())
-  const [argsText, setArgsText] = useState('')
-  const [envText, setEnvText] = useState('')
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [secretKeys, setSecretKeys] = useState<string[]>([])
-  const [secretKey, setSecretKey] = useState('')
-  const [secretValue, setSecretValue] = useState('')
+  const [configs, setConfigs] = useState<ScopedMcpConfig[]>([])
+  const [statuses, setStatuses] = useState<McpServerStatus[]>([])
+  const [jsonText, setJsonText] = useState('{\n  "mcpServers": {}\n}')
+  const [savedJsonText, setSavedJsonText] = useState('{\n  "mcpServers": {}\n}')
+  const [jsonOpen, setJsonOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [selectedKey, setSelectedKey] = useState<string>()
+  const [busyServer, setBusyServer] = useState<string>()
+  const [editorBusy, setEditorBusy] = useState(false)
+  const [actionError, setActionError] = useState('')
+  const deferredQuery = useDeferredValue(query)
 
-  const refresh = async () => {
-    const payload = await window.api.mcp.list()
+  const applyPayload = useCallback((payload: McpListPayload, resetJson: boolean) => {
     setConfigs(payload.configs)
     setStatuses(payload.statuses)
-    setSecretKeys(await window.api.mcp.listSecretKeys().catch(() => []))
-  }
-
-  useEffect(() => {
-    void refresh()
-    return window.api.mcp.onChanged(setStatuses)
+    if (resetJson) {
+      const serialized = serializeUserConfiguration(payload.configs)
+      setJsonText(serialized)
+      setSavedJsonText(serialized)
+    }
   }, [])
 
-  const selectedConfig = configs.find((config) => `${config.scope}:${config.name}` === selected)
-  const selectedStatus = statuses.find((status) => status.name === selectedConfig?.name || status.name === name)
-  const userConfigs = useMemo(() => configs.filter((config) => config.scope === 'user'), [configs])
+  useEffect(() => {
+    let active = true
+    window.api.mcp.list().then((payload: McpListPayload) => {
+      if (!active) return
+      applyPayload(payload, true)
+      if (!payload.configs.some((config) => config.effective)) setJsonOpen(true)
+    }).catch((cause: unknown) => {
+      if (active) setActionError(cause instanceof Error ? cause.message : String(cause))
+    })
+    const dispose = window.api.mcp.onChanged((next: McpServerStatus[]) => {
+      if (active) setStatuses(next)
+    })
+    return () => {
+      active = false
+      dispose()
+    }
+  }, [applyPayload])
 
-  const selectConfig = (config?: ScopedConfig) => {
-    if (!config) {
-      setSelected('new'); setOriginalName(undefined); setName(''); setDraft(emptyConfig()); setArgsText(''); setEnvText(''); setError('')
+  const parsedJson = useMemo(() => {
+    try {
+      return { servers: parseUserConfiguration(jsonText), error: '' }
+    } catch (cause) {
+      return { servers: {}, error: cause instanceof Error ? cause.message : String(cause) }
+    }
+  }, [jsonText])
+
+  const statusByName = useMemo(() => new Map(statuses.map((status) => [status.name, status])), [statuses])
+  const effectiveConfigs = useMemo(() => configs.filter((config) => config.effective), [configs])
+  const filteredConfigs = useMemo(() => {
+    const normalized = deferredQuery.trim().toLowerCase()
+    if (!normalized) return effectiveConfigs
+    return effectiveConfigs.filter((config) => {
+      const status = statusByName.get(config.name)
+      return `${config.name} ${serverDescription(config, status)} ${config.config.type} ${stateLabel(status?.state)}`
+        .toLowerCase()
+        .includes(normalized)
+    })
+  }, [deferredQuery, effectiveConfigs, statusByName])
+
+  const selectedConfig = selectedKey ? configs.find((config) => effectiveServerKey(config) === selectedKey) : undefined
+  const selectedStatus = selectedConfig ? statusByName.get(selectedConfig.name) : undefined
+  const dirty = jsonText !== savedJsonText
+  const connectedCount = statuses.filter((status) => status.state === 'connected').length
+  const enabledCount = effectiveConfigs.filter((config) => config.config.enabled !== false && !config.policyDisabled).length
+
+  const handleCloseJson = () => {
+    if (dirty && !window.confirm('放弃尚未保存的 MCP JSON 修改？')) return
+    setJsonText(savedJsonText)
+    setActionError('')
+    setJsonOpen(false)
+  }
+
+  const handleCloseDetail = useCallback(() => setSelectedKey(undefined), [])
+
+  const handleFormat = () => {
+    try {
+      const servers = parseUserConfiguration(jsonText)
+      setJsonText(JSON.stringify({ mcpServers: servers }, null, 2))
+      setActionError('')
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  const handlePaste = async () => {
+    try {
+      setJsonText(await navigator.clipboard.readText())
+      setActionError('')
+    } catch (cause) {
+      setActionError(`无法读取剪贴板：${cause instanceof Error ? cause.message : String(cause)}`)
+    }
+  }
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(jsonText)
+      setActionError('')
+    } catch (cause) {
+      setActionError(`复制失败：${cause instanceof Error ? cause.message : String(cause)}`)
+    }
+  }
+
+  const handleSaveJson = async () => {
+    setActionError('')
+    let servers
+    try {
+      servers = parseUserConfiguration(jsonText)
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : String(cause))
       return
     }
-    setSelected(`${config.scope}:${config.name}`)
-    setOriginalName(config.name)
-    setName(config.name)
-    setDraft({ ...config.config })
-    setArgsText((config.config.args || []).join('\n'))
-    setEnvText(JSON.stringify(config.config.type === 'stdio' ? config.config.env || {} : config.config.headers || {}, null, 2))
-    setError('')
-  }
-
-  const save = async () => {
-    setError('')
-    if (!name.trim()) { setError('请输入 server 名称。'); return }
+    setEditorBusy(true)
     try {
-      const keyValues = envText.trim() ? JSON.parse(envText) : {}
-      const config: ServerConfig = draft.type === 'stdio'
-        ? { ...draft, command: draft.command?.trim(), args: argsText.split(/\r?\n/).map((value) => value.trim()).filter(Boolean), env: keyValues }
-        : { ...draft, url: draft.url?.trim(), headers: keyValues }
-      const servers = Object.fromEntries(userConfigs.map((item) => [item.name, item.config]))
-      if (originalName && originalName !== name.trim()) delete servers[originalName]
-      servers[name.trim()] = config
-      setBusy(true)
-      const payload = await window.api.mcp.saveUser(servers)
-      setConfigs(payload.configs); setStatuses(payload.statuses)
-      setOriginalName(name.trim()); setSelected(`user:${name.trim()}`)
-    } catch (cause: any) {
-      setError(cause?.message || String(cause))
-    } finally { setBusy(false) }
+      const payload = await window.api.mcp.saveUser(servers) as McpListPayload
+      applyPayload(payload, true)
+      setJsonOpen(false)
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setEditorBusy(false)
+    }
   }
 
-  const remove = async () => {
-    if (!originalName) return
-    const servers = Object.fromEntries(userConfigs.filter((item) => item.name !== originalName).map((item) => [item.name, item.config]))
-    setBusy(true)
-    try { await window.api.mcp.saveUser(servers); selectConfig(); await refresh() } finally { setBusy(false) }
+  const handleToggle = async (config: ScopedMcpConfig, enabled: boolean) => {
+    if (config.scope !== 'user' || !config.effective || config.policyDisabled) return
+    setBusyServer(config.name)
+    setActionError('')
+    try {
+      const payload = await window.api.mcp.setEnabled(config.name, enabled) as McpListPayload
+      applyPayload(payload, true)
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusyServer(undefined)
+    }
   }
 
-  const run = async (action: () => Promise<unknown>) => {
-    setBusy(true); setError('')
-    try { await action(); await refresh() } catch (cause: any) { setError(cause?.message || String(cause)) } finally { setBusy(false) }
+  const runServerAction = async (config: ScopedMcpConfig, action: () => Promise<McpServerStatus[]>) => {
+    setBusyServer(config.name)
+    setActionError('')
+    try {
+      setStatuses(await action())
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusyServer(undefined)
+    }
   }
 
-  const saveSecret = async () => {
-    if (!secretKey.trim() || !secretValue) { setError('请输入 secret key 和值。'); return }
-    await run(async () => {
-      setSecretKeys(await window.api.mcp.setSecret(secretKey.trim(), secretValue))
-      setSecretValue('')
-    })
+  if (jsonOpen) {
+    return (
+      <div className="mcp-settings mcp-settings-editor-mode">
+        <McpJsonEditor
+          value={jsonText}
+          error={parsedJson.error || actionError}
+          dirty={dirty}
+          busy={editorBusy}
+          serverCount={Object.keys(parsedJson.servers).length}
+          onChange={(value) => { setJsonText(value); setActionError('') }}
+          onClose={handleCloseJson}
+          onFormat={handleFormat}
+          onPaste={handlePaste}
+          onCopy={handleCopy}
+          onSave={handleSaveJson}
+        />
+      </div>
+    )
   }
 
   return (
     <div className="mcp-settings">
-      <aside className="mcp-server-list">
-        <div className="mcp-list-header">
-          <div><h1>MCP</h1><p>管理外部工具、资源与 prompts。</p></div>
-          <Button variant="icon" title="添加 MCP server" aria-label="添加 MCP server" icon={<IconAdd />} onClick={() => selectConfig()} />
+      <header className="mcp-page-header">
+        <div>
+          <h1>MCP Servers</h1>
+          <p>通过 JSON 管理配置，在这里控制连接并检查 Server 能力。</p>
         </div>
-        <div className="mcp-list-body">
-          {configs.map((config) => {
-            const status = statuses.find((item) => item.name === config.name)
-            return (
-              <button key={`${config.scope}:${config.name}`} className={`mcp-server-row ${selected === `${config.scope}:${config.name}` ? 'active' : ''}`} onClick={() => selectConfig(config)}>
-                <IconServer />
-                <span className="mcp-server-copy"><strong>{config.name}</strong><small>{config.scope} · {config.config.type}{!config.effective ? ` · 被 ${config.shadowedBy} 覆盖` : ''}{config.policyDisabled ? ' · 策略禁用' : ''}</small></span>
-                <span className={`mcp-state-dot is-${status?.state || 'stopped'}`} title={status?.state || 'stopped'} />
+        <div className="mcp-page-header-actions">
+          <span className="mcp-summary"><strong>{connectedCount}</strong> 已连接 <i /> <strong>{enabledCount}</strong> 已启用</span>
+          <Button type="primary" icon={<Braces size={16} />} onClick={() => setJsonOpen(true)}>编辑 JSON</Button>
+        </div>
+      </header>
+
+      <div className="mcp-list-toolbar">
+        <label className="mcp-search-field">
+          <Search size={16} aria-hidden="true" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、描述或状态" aria-label="搜索 MCP Servers" />
+        </label>
+        <span>{filteredConfigs.length} 个 Server</span>
+      </div>
+
+      {actionError ? <div className="mcp-page-error" role="alert">{actionError}</div> : null}
+
+      <main className="mcp-server-table" aria-label="MCP Server 列表">
+        {filteredConfigs.map((config) => {
+          const status = statusByName.get(config.name)
+          const enabled = config.config.enabled !== false && !config.policyDisabled
+          const canToggle = config.scope === 'user' && config.effective && !config.policyDisabled
+          const isBusy = busyServer === config.name
+          return (
+            <article className={`mcp-server-item ${enabled ? '' : 'is-disabled'}`} key={effectiveServerKey(config)}>
+              <button className="mcp-server-open" onClick={() => setSelectedKey(effectiveServerKey(config))}>
+                <span className="mcp-server-icon" aria-hidden="true"><Server size={19} /></span>
+                <span className="mcp-server-primary">
+                  <span className="mcp-server-name-line">
+                    <strong>{config.name}</strong>
+                    <span className={`mcp-status is-${status?.state || (enabled ? 'stopped' : 'disabled')}`}>
+                      <span className="mcp-status-dot" />{stateLabel(status?.state || (enabled ? 'stopped' : 'disabled'))}
+                    </span>
+                  </span>
+                  <small>{serverDescription(config, status)}</small>
+                </span>
+                <span className="mcp-server-source">
+                  <b>{config.config.type}</b>
+                  <small>{MCP_SCOPE_LABELS[config.scope]}</small>
+                </span>
+                <span className="mcp-server-capabilities">
+                  <span title={`${status?.toolCount || 0} 个工具`}><Wrench size={14} />{status?.toolCount || 0}</span>
+                  <span title={`${status?.resourceCount || 0} 个资源`}><Database size={14} />{status?.resourceCount || 0}</span>
+                  <span title={`${status?.promptCount || 0} 个 Prompts`}><MessageSquareText size={14} />{status?.promptCount || 0}</span>
+                </span>
+                <ChevronRight className="mcp-server-chevron" size={17} aria-hidden="true" />
               </button>
-            )
-          })}
-          {configs.length === 0 && <div className="mcp-empty-list">尚未配置 server</div>}
-        </div>
-      </aside>
+              <div className="mcp-server-toggle" title={canToggle ? `${enabled ? '停用' : '启用'} ${config.name}` : '此配置来源只读，请编辑对应的 JSON 文件'}>
+                {!canToggle ? <LockKeyhole size={14} aria-hidden="true" /> : <PlugZap size={14} aria-hidden="true" />}
+                <Switch
+                  checked={enabled}
+                  onChange={(next) => void handleToggle(config, next)}
+                  disabled={!canToggle || isBusy}
+                  ariaLabel={`${enabled ? '停用' : '启用'} ${config.name}`}
+                />
+              </div>
+            </article>
+          )
+        })}
 
-      <main className="mcp-editor">
-        <header className="mcp-editor-header">
-          <div><h2>{selectedConfig?.scope === 'project' ? selectedConfig.name : originalName || '添加 MCP server'}</h2><p>{selectedStatus?.state || '尚未连接'}</p></div>
-          <div className="mcp-header-actions">
-            {selectedConfig?.scope === 'user' && <Button danger variant="icon" title="删除 server" aria-label="删除 server" icon={<IconTrash />} onClick={remove} disabled={busy} />}
-            {selectedStatus && <Button onClick={() => run(() => window.api.mcp.reconnect(selectedStatus.name))} disabled={busy}>重连</Button>}
-            {selectedStatus?.state === 'needs-auth' && <Button type="primary" onClick={() => run(() => window.api.mcp.authorize(selectedStatus.name))} disabled={busy}>认证</Button>}
-            {selectedStatus?.state === 'connected' && selectedConfig?.config.type !== 'stdio' && <Button onClick={() => run(() => window.api.mcp.logout(selectedStatus.name))} disabled={busy}>退出认证</Button>}
+        {!effectiveConfigs.length ? (
+          <div className="mcp-list-empty">
+            <Braces size={30} aria-hidden="true" />
+            <h2>尚未配置 MCP Server</h2>
+            <Button type="primary" icon={<Braces size={16} />} onClick={() => setJsonOpen(true)}>粘贴 MCP JSON</Button>
           </div>
-        </header>
-
-        {selectedConfig && selectedConfig.scope !== 'user' ? (
-          <section className="mcp-section">
-            <h3>{selectedConfig.scope} 配置</h3>
-            <p className="mcp-trust-copy">此配置由 {selectedConfig.scope} scope 提供，在此页面只读。{selectedConfig.shadowedBy ? `当前被 ${selectedConfig.shadowedBy} scope 覆盖。` : ''}</p>
-            <pre className="mcp-readonly-config">{JSON.stringify(selectedConfig.config, null, 2)}</pre>
-            <code className="mcp-fingerprint">{selectedConfig.fingerprint}</code>
-            {selectedConfig.scope === 'project' && !selectedConfig.trusted && <Button type="primary" onClick={() => run(() => window.api.mcp.trustProject(selectedConfig.fingerprint))}>信任此配置</Button>}
-          </section>
-        ) : (
-          <section className="mcp-section mcp-form">
-            <div className="mcp-field"><label>名称</label><Input value={name} onChange={(event) => setName(event.target.value)} placeholder="github" /></div>
-            <div className="mcp-field"><label>Transport</label><Select value={draft.type} onChange={(event) => setDraft({ ...emptyConfig(), type: event.target.value as Transport })}><option value="stdio">stdio</option><option value="http">Streamable HTTP</option><option value="sse">legacy SSE</option></Select></div>
-            {draft.type === 'stdio' ? <>
-              <div className="mcp-field"><label>命令</label><Input value={draft.command || ''} onChange={(event) => setDraft({ ...draft, command: event.target.value })} placeholder="npx" /></div>
-              <div className="mcp-field"><label>参数（每行一个）</label><textarea value={argsText} onChange={(event) => setArgsText(event.target.value)} placeholder={'-y\n@modelcontextprotocol/server-filesystem'} /></div>
-              <div className="mcp-field"><label>工作目录</label><Input value={draft.cwd || ''} onChange={(event) => setDraft({ ...draft, cwd: event.target.value })} placeholder="留空使用当前工作区" /></div>
-              <div className="mcp-field"><label>环境变量 JSON</label><textarea value={envText} onChange={(event) => setEnvText(event.target.value)} placeholder={'{\n  "TOKEN": "${env:MCP_TOKEN}"\n}'} /></div>
-            </> : <>
-              <div className="mcp-field"><label>URL</label><Input value={draft.url || ''} onChange={(event) => setDraft({ ...draft, url: event.target.value })} placeholder="https://example.com/mcp" /></div>
-              <div className="mcp-field"><label>Headers JSON</label><textarea value={envText} onChange={(event) => setEnvText(event.target.value)} placeholder={'{\n  "Authorization": "Bearer ${env:MCP_TOKEN}"\n}'} /></div>
-            </>}
-            <label className="mcp-check"><input type="checkbox" checked={draft.enabled !== false} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} />启用 server</label>
-            <div className="mcp-field"><label>Sampling</label><Select value={draft.samplingPolicy || 'deny'} onChange={(event) => setDraft({ ...draft, samplingPolicy: event.target.value as ServerConfig['samplingPolicy'] })}><option value="deny">拒绝</option><option value="ask">每次询问</option><option value="allow">允许</option></Select></div>
-            <div className="mcp-field"><label>Sampling 最大 tokens</label><Input type="number" min={1} max={16384} value={String(draft.samplingMaxTokens || 4096)} onChange={(event) => setDraft({ ...draft, samplingMaxTokens: Number(event.target.value) || 4096 })} /></div>
-            <div className="mcp-field"><label>Elicitation</label><Select value={draft.elicitationPolicy || 'deny'} onChange={(event) => setDraft({ ...draft, elicitationPolicy: event.target.value as ServerConfig['elicitationPolicy'] })}><option value="deny">拒绝</option><option value="ask">每次询问</option><option value="allow">允许 URL</option></Select></div>
-            <div className="mcp-field"><label>Server instructions</label><Select value={draft.instructionsPolicy || 'ignore'} onChange={(event) => setDraft({ ...draft, instructionsPolicy: event.target.value as ServerConfig['instructionsPolicy'] })}><option value="ignore">忽略</option><option value="tool-hints">作为外部工具提示</option><option value="approved">已批准的外部说明</option></Select></div>
-            <label className="mcp-check"><input type="checkbox" checked={draft.resourceSubscriptions === true} onChange={(event) => setDraft({ ...draft, resourceSubscriptions: event.target.checked })} />允许 resource subscription</label>
-            {error && <div className="mcp-error">{error}</div>}
-            <div><Button type="primary" onClick={save} loading={busy}>保存并连接</Button></div>
-          </section>
-        )}
-
-        {selectedStatus && <section className="mcp-section">
-          <h3>运行状态</h3>
-          <div className="mcp-metrics"><span><strong>{selectedStatus.toolCount}</strong> 工具</span><span><strong>{selectedStatus.resourceCount}</strong> 资源</span><span><strong>{selectedStatus.promptCount}</strong> prompts</span></div>
-          {selectedStatus.serverInfo && <p className="mcp-trust-copy">{selectedStatus.serverInfo.title || selectedStatus.serverInfo.name} · {selectedStatus.serverInfo.version} · capabilities: {Object.keys(selectedStatus.capabilities || {}).join(', ') || 'none'}</p>}
-          {selectedStatus.error && <div className="mcp-error"><strong>{selectedStatus.error.code}</strong><br />{selectedStatus.error.message}</div>}
-          <h3 className="mcp-log-title">诊断日志</h3>
-          <div className="mcp-logs">{selectedStatus.logs.slice(-30).map((entry, index) => <div key={`${entry.timestamp}-${index}`}><time>{new Date(entry.timestamp).toLocaleTimeString()}</time><b>{entry.level}</b><span>{entry.message}</span></div>)}</div>
-        </section>}
-
-        <section className="mcp-section mcp-form">
-          <h3>安全凭据</h3>
-          <p className="mcp-trust-copy">配置中使用 <code>{'${secret:key}'}</code> 引用。值仅写入系统安全存储，不会返回 renderer。</p>
-          <div className="mcp-field"><label>Secret key</label><Input value={secretKey} onChange={(event) => setSecretKey(event.target.value)} placeholder="github.token" /></div>
-          <div className="mcp-field"><label>Secret value</label><Input type="password" value={secretValue} onChange={(event) => setSecretValue(event.target.value)} /></div>
-          <div><Button type="primary" onClick={saveSecret} disabled={busy}>写入安全存储</Button></div>
-          <div className="mcp-secret-list">{secretKeys.map((key) => <div key={key}><code>{key}</code><Button danger onClick={() => run(async () => setSecretKeys(await window.api.mcp.deleteSecret(key)))} disabled={busy}>删除</Button></div>)}</div>
-        </section>
+        ) : !filteredConfigs.length ? (
+          <div className="mcp-list-empty compact"><Search size={24} aria-hidden="true" /><p>没有匹配的 MCP Server。</p></div>
+        ) : null}
       </main>
+
+      {selectedConfig ? (
+        <McpServerDetailModal
+          config={selectedConfig}
+          status={selectedStatus}
+          busy={busyServer === selectedConfig.name}
+          onClose={handleCloseDetail}
+          onToggle={(enabled) => void handleToggle(selectedConfig, enabled)}
+          onReconnect={() => void runServerAction(selectedConfig, () => window.api.mcp.reconnect(selectedConfig.name))}
+          onAuthorize={() => void runServerAction(selectedConfig, () => window.api.mcp.authorize(selectedConfig.name))}
+          onLogout={() => void runServerAction(selectedConfig, () => window.api.mcp.logout(selectedConfig.name))}
+        />
+      ) : null}
     </div>
   )
 }

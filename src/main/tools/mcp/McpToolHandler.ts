@@ -11,6 +11,19 @@ import { mcpToolName } from '../../services/mcp/normalization'
 import { McpContentNormalizer } from '../../services/mcp/contentNormalization'
 import type { McpRequestGuard } from '../../services/mcp/McpRequestGuard'
 
+export function isMcpHttpSessionExpiredError(error: unknown): boolean {
+  const code = Number((error as any)?.code ?? (error as any)?.status)
+  const message = String((error as any)?.message || '')
+  const sessionNotFound = code === 404 && /"code"\s*:\s*-32001/.test(message)
+  const connectionClosed = code === -32000 && /connection closed/i.test(message)
+  return sessionNotFound || connectionClosed
+}
+
+export function isMcpUnauthorizedError(error: unknown): boolean {
+  const code = Number((error as any)?.code ?? (error as any)?.status)
+  return code === 401 || (error as any)?.name === 'UnauthorizedError'
+}
+
 export class McpToolHandler implements ToolHandler<Record<string, unknown>> {
   readonly descriptor: ToolDescriptor
   private readonly contentNormalizer: McpContentNormalizer
@@ -19,11 +32,13 @@ export class McpToolHandler implements ToolHandler<Record<string, unknown>> {
     private readonly serverName: string,
     private readonly serverIdentity: string,
     private readonly tool: McpSdkTool,
-    private readonly client: Client,
+    private client: Client,
     private readonly requestGuard: McpRequestGuard,
     private readonly timeoutMs = 60_000,
     alwaysLoad = false,
-    private readonly onProgress?: (progress: { progress: number; total?: number; message?: string }) => void
+    private readonly onProgress?: (progress: { progress: number; total?: number; message?: string }) => void,
+    private readonly recoverHttpSession?: (failedClient: Client) => Promise<Client>,
+    private readonly onAuthRequired?: (error: unknown) => void | Promise<void>
   ) {
     const name = mcpToolName(serverName, tool.name)
     this.contentNormalizer = new McpContentNormalizer(serverName, tool.name, tool.outputSchema as Record<string, unknown> | undefined)
@@ -50,10 +65,10 @@ export class McpToolHandler implements ToolHandler<Record<string, unknown>> {
       },
       behavior: {
         readOnly: () => annotations?.readOnlyHint === true,
-        destructive: () => annotations?.destructiveHint !== false && annotations?.readOnlyHint !== true,
+        destructive: () => annotations?.destructiveHint ?? false,
         concurrency: annotations?.readOnlyHint === true ? 'safe' : 'resource-locked',
         interrupt: 'cancel',
-        maxResultChars: 50_000,
+        maxResultChars: 100_000,
         timeoutMs
       },
       planEffects: async (_input: unknown, _context: ToolPlanningContext) => ({
@@ -70,17 +85,33 @@ export class McpToolHandler implements ToolHandler<Record<string, unknown>> {
 
   async execute(input: Record<string, unknown>, context: ToolContext): Promise<ToolExecutionResult> {
     try {
-      const result = await this.requestGuard.run(() => this.client.callTool(
-        { name: this.tool.name, arguments: input },
-        undefined,
+      const call = (client: Client) => this.requestGuard.run(
+        () => client.callTool(
+          {
+            name: this.tool.name,
+            arguments: input,
+            _meta: context.toolCallId ? { 'claudecode/toolUseId': context.toolCallId } : {}
+          },
+          undefined,
+          {
+            signal: context.abortSignal,
+            timeout: this.timeoutMs,
+            onprogress: (progress) => this.onProgress?.(progress)
+          }
+        ),
         {
-          signal: context.abortSignal,
-          timeout: this.timeoutMs,
-          onprogress: (progress) => this.onProgress?.(progress)
+          idempotent: this.tool.annotations?.readOnlyHint === true || this.tool.annotations?.idempotentHint === true
         }
-      ), {
-        idempotent: this.tool.annotations?.readOnlyHint === true || this.tool.annotations?.idempotentHint === true
-      })
+      )
+
+      let result
+      try {
+        result = await call(this.client)
+      } catch (error) {
+        if (!this.recoverHttpSession || !isMcpHttpSessionExpiredError(error)) throw error
+        this.client = await this.recoverHttpSession(this.client)
+        result = await call(this.client)
+      }
       const normalized = await this.contentNormalizer.normalize(result, context)
       const uiContent = JSON.stringify({
         structuredData: normalized.structuredData,
@@ -106,10 +137,16 @@ export class McpToolHandler implements ToolHandler<Record<string, unknown>> {
         uiContent
       }
     } catch (error: any) {
+      const authRequired = isMcpUnauthorizedError(error)
+      if (authRequired) await this.onAuthRequired?.(error)
       return {
         status: context.abortSignal?.aborted ? 'cancelled' : 'error',
         error: {
-          code: context.abortSignal?.aborted ? 'TOOL_CANCELLED' : error?.code || 'MCP_REQUEST_FAILED',
+          code: context.abortSignal?.aborted
+            ? 'TOOL_CANCELLED'
+            : authRequired
+              ? 'MCP_NEEDS_AUTH'
+              : error?.code || 'MCP_REQUEST_FAILED',
           message: error?.message || String(error),
           recoverable: !context.abortSignal?.aborted
         }

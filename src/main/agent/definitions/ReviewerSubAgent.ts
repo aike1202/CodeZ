@@ -3,35 +3,25 @@ import type {
   SubAgentDefinition,
   SubAgentStructuredOutput,
 } from '../SubAgentManager'
-import type { ToolManager } from '../../tools/ToolManager'
 import { buildSharedToolUsePrompt } from '../../services/prompts/SubAgentPrompts'
-import type { ToolDefinition } from '../../../shared/types/provider'
 
-function getReviewerTools(toolManager: ToolManager): ToolDefinition[] {
-  const tools = toolManager.getReadOnlyTools()
-  for (const name of ['Bash', 'PowerShell']) {
-    const tool = toolManager.getTool(name)
-    if (!tool) continue
-    tools.push({
-      type: 'function',
-      function: {
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.parameters_schema,
-      },
-    })
-  }
-  return tools
-}
-
-function validateReviewerOutput(output: SubAgentStructuredOutput): string | undefined {
+function validateReviewerOutput(
+  output: SubAgentStructuredOutput,
+  ctx: SubAgentContext
+): string | undefined {
   const result = output as unknown as Record<string, unknown>
   const verdict = String(result.verdict)
-  if (!['PASS', 'FAIL', 'PARTIAL'].includes(verdict)) {
-    return 'verdict must be exactly "PASS", "FAIL", or "PARTIAL".'
+  if (!['PASS', 'PASS_WITH_RISKS', 'BLOCKED'].includes(verdict)) {
+    return 'verdict must be exactly "PASS", "PASS_WITH_RISKS", or "BLOCKED".'
+  }
+  if (String(result.reviewCycleId) !== ctx.reviewCycleId) {
+    return 'reviewCycleId must exactly match the caller-provided review cycle.'
+  }
+  if (String(result.reviewMode) !== ctx.reviewMode) {
+    return 'reviewMode must exactly match the caller-provided review mode.'
   }
   if (!Array.isArray(result.checksRun) || result.checksRun.length === 0) {
-    return 'checksRun must include at least one executed check or an explicit BLOCKED entry.'
+    return 'checksRun must include at least one read-only inspection or an explicit BLOCKED entry.'
   }
   if (!Array.isArray(result.filesExamined) || result.filesExamined.length === 0) {
     return 'filesExamined must identify the project evidence inspected during review.'
@@ -39,18 +29,78 @@ function validateReviewerOutput(output: SubAgentStructuredOutput): string | unde
   if (!Number.isInteger(result.unresolvedCount) || Number(result.unresolvedCount) < 0) {
     return 'unresolvedCount must be a non-negative integer.'
   }
-  const findings = Array.isArray(result.findings) ? result.findings : []
-  if (verdict === 'PASS' && Number(result.unresolvedCount) !== 0) {
-    return 'PASS requires unresolvedCount to be zero.'
+  const blockingFindings = Array.isArray(result.blockingFindings)
+    ? result.blockingFindings as Array<Record<string, unknown>>
+    : []
+  const risks = Array.isArray(result.risks) ? result.risks as string[] : []
+  const resolvedFindingIds = Array.isArray(result.resolvedFindingIds)
+    ? result.resolvedFindingIds as string[]
+    : []
+  const findingIds = blockingFindings.map((finding) => String(finding.id || ''))
+
+  if (new Set(findingIds).size !== findingIds.length) {
+    return 'blockingFindings must use unique stable IDs.'
   }
-  if (verdict === 'PASS' && findings.length > 0) {
-    return 'PASS cannot include actionable findings; use FAIL or remove non-actionable observations from findings.'
+  for (const finding of blockingFindings) {
+    if (!/^F-[A-Z0-9][A-Z0-9._-]*$/i.test(String(finding.id || ''))) {
+      return 'Each blocking finding id must be stable and start with "F-".'
+    }
+    if (!/^AC-\d+$/.test(String(finding.criterionId || ''))) {
+      return 'Each blocking finding must cite a frozen acceptance criterion such as "AC-1".'
+    }
+    for (const field of ['location', 'expected', 'actual', 'reproduction', 'evidence']) {
+      if (String(finding[field] || '').trim().length < 3) {
+        return `Each blocking finding must include concrete ${field}.`
+      }
+    }
+    if (!['P0', 'P1'].includes(String(finding.severity)) || finding.confidence !== 'high') {
+      return 'Only high-confidence P0/P1 findings may block completion.'
+    }
   }
-  if (verdict === 'FAIL' && findings.length === 0) {
-    return 'FAIL must include at least one actionable finding.'
+
+  if (verdict === 'BLOCKED' && blockingFindings.length === 0) {
+    return 'BLOCKED requires at least one evidence-backed P0/P1 blocking finding.'
   }
-  if (verdict === 'PARTIAL' && Number(result.unresolvedCount) === 0) {
-    return 'PARTIAL must identify at least one unresolved review question.'
+  if (verdict !== 'BLOCKED' && blockingFindings.length > 0) {
+    return `${verdict} cannot include blocking findings.`
+  }
+  if (verdict === 'PASS' && (risks.length > 0 || Number(result.unresolvedCount) !== 0)) {
+    return 'PASS requires no residual risks and unresolvedCount zero.'
+  }
+  if (
+    verdict === 'PASS_WITH_RISKS' &&
+    risks.length === 0 &&
+    Number(result.unresolvedCount) === 0
+  ) {
+    return 'PASS_WITH_RISKS must identify at least one non-blocking risk or unresolved check.'
+  }
+
+  if (resolvedFindingIds.some((id) => !/^F-[A-Z0-9][A-Z0-9._-]*$/i.test(id))) {
+    return 'resolvedFindingIds must contain stable IDs beginning with "F-".'
+  }
+  if (new Set(resolvedFindingIds).size !== resolvedFindingIds.length) {
+    return 'resolvedFindingIds must not contain duplicates.'
+  }
+  if (resolvedFindingIds.some((id) => findingIds.includes(id))) {
+    return 'A finding cannot be both resolved and blocking.'
+  }
+
+  if (ctx.reviewMode === 'initial' && resolvedFindingIds.length > 0) {
+    return 'Initial review cannot resolve findings from an earlier round.'
+  }
+  if (ctx.reviewMode === 'closure') {
+    const previousIds = ctx.previousFindingIds || []
+    if (previousIds.length === 0) {
+      return 'Closure review requires the original blocking finding IDs.'
+    }
+    const previous = new Set(previousIds)
+    const dispositioned = new Set([...findingIds, ...resolvedFindingIds])
+    if ([...dispositioned].some((id) => !previous.has(id))) {
+      return 'Closure review cannot introduce new finding IDs.'
+    }
+    if ([...previous].some((id) => !dispositioned.has(id))) {
+      return 'Closure review must resolve or reopen every original finding ID.'
+    }
   }
   return undefined
 }
@@ -77,15 +127,36 @@ function buildReviewerRolePrompt(ctx: SubAgentContext): string {
       ].filter(Boolean).join('\n')
     : ''
 
+  const reviewModeSection = ctx.reviewMode === 'closure'
+    ? [
+        '## Review Mode: Closure',
+        `- Review cycle: ${ctx.reviewCycleId || '(missing)'}`,
+        `- Original finding IDs: ${(ctx.previousFindingIds || []).join(', ') || '(missing)'}`,
+        '- This is the only follow-up review. Use the existing review history and inspect only the fixes for the original findings plus regressions directly caused by those fixes.',
+        '- For every original finding ID, either place it in resolvedFindingIds or return it in blockingFindings with updated evidence.',
+        '- Do not introduce a new finding ID. A regression caused by a fix reopens the related original finding ID.',
+        '- Do not repeat the full repository audit or broaden the acceptance criteria.',
+      ].join('\n')
+    : [
+        '## Review Mode: Initial',
+        `- Review cycle: ${ctx.reviewCycleId || '(missing)'}`,
+        '- Perform one independent review against the frozen acceptance criteria.',
+        '- Assign stable finding IDs beginning with F-. Leave resolvedFindingIds empty.',
+      ].join('\n')
+
   return [
-    'You are an independent implementation reviewer for CodeZ. Your job is to find defects, omissions, regressions, and unsupported completion claims before the parent Agent reports success.',
+    'You are an independent implementation acceptance reviewer for CodeZ. Your goal is to decide whether the frozen acceptance criteria are met, not to maximize findings or make the solution ideal.',
     '',
     '## Critical: Review only',
+    '- Use only the read-only repository inspection tools provided in this session.',
     '- Do not create, edit, delete, move, or copy project files.',
     '- Do not install dependencies or run Git write operations such as add, commit, checkout, merge, or push.',
     '- Do not delegate to another subagent.',
-    '- You may run focused tests, type checks, builds, linters, and read-only diagnostic commands. Ordinary caches or build artifacts created by those commands are acceptable, but do not intentionally alter source files.',
-    '- Never fix a defect yourself. Report it so the parent Agent can fix it and launch a new review with your findings.',
+    '- Treat caller-supplied verification output as supporting evidence only. Cross-check what the reported checks cover against the implementation and tests you inspect.',
+    '- Never fix a defect yourself.',
+    '- PASS is a normal and desirable result when the supplied evidence supports the frozen criteria. You are not expected to find a problem.',
+    '',
+    reviewModeSection,
     '',
     '## Required caller brief',
     'The task must provide all applicable sections below:',
@@ -94,25 +165,40 @@ function buildReviewerRolePrompt(ctx: SubAgentContext): string {
     '3. Complete list of files changed for this request, distinguishing unrelated pre-existing changes.',
     '4. Verification commands already run and their actual results.',
     '5. Known risks, unresolved items, and any relevant plan or specification path.',
-    'If critical information is missing and cannot be established from repository evidence, return PARTIAL and name exactly what is missing.',
+    'The acceptance criteria are frozen for this review and are identified in order as AC-1, AC-2, and so on. Do not add new completion criteria during review.',
+    'If evidence is incomplete but there is no demonstrated P0/P1 violation, record it as a non-blocking risk and use PASS_WITH_RISKS.',
+    '',
+    '## Blocking evidence threshold',
+    'A blocking finding is valid only when every condition below is met:',
+    '1. It cites one frozen criterion by AC-N identifier.',
+    '2. It is within the supplied changed scope.',
+    '3. It identifies a specific source or contract location.',
+    '4. It states expected versus actual behavior.',
+    '5. It provides a concrete counterexample or reproducible failure path.',
+    '6. It cites observed repository evidence rather than speculation.',
+    '7. It is a high-confidence P0 or P1 correctness defect.',
+    'P2/P3 concerns, hardening ideas, future extensibility, style preferences, theoretical possibilities, and requests for more tests without a demonstrated failure are risks or suggestions. They cannot block completion.',
     '',
     '## Review workflow',
     '1. Restate the success criteria from the original goal. Do not replace them with the implementer\'s summary.',
     '2. Inspect the supplied files and relevant diff. Trace affected callers, contracts, error paths, and tests.',
     '3. Check that the implementation covers the entire requested behavior, not merely the polished happy path.',
-    '4. Independently run the smallest meaningful checks. Do not treat the implementer\'s reported test results as evidence.',
-    '5. Run at least one relevant adversarial probe when behavior changed, such as a boundary, malformed input, idempotency, concurrency, persistence, or failure-path check.',
-    '6. Report actionable findings first, ordered by severity: P0 critical, P1 high, P2 medium, P3 low. Include file and line references when available.',
-    '7. Use PASS only when there are no actionable correctness findings and the evidence supports the original goal. Use FAIL for actionable defects. Use PARTIAL only for concrete environment, tool, or missing-context limitations.',
+    '4. Independently inspect the implementation, tests, fixtures, and configuration with the available read-only tools. Do not claim to have rerun caller-reported commands.',
+    '5. Analyze a relevant adversarial code path only when it is implied by a frozen criterion or the changed behavior.',
+    '6. Classify only proven high-confidence P0/P1 defects as blockingFindings. Put everything else in risks.',
+    '7. Use BLOCKED only for evidence-backed blockingFindings, PASS_WITH_RISKS for non-blocking concerns or incomplete evidence, and PASS when the criteria are supported without residual risk.',
     '',
     '## Submission contract',
     'Call submit_result exactly once the review is complete. Provide:',
-    '- verdict: PASS, FAIL, or PARTIAL.',
+    '- verdict: PASS, PASS_WITH_RISKS, or BLOCKED.',
+    '- reviewCycleId and reviewMode: echo the exact caller-provided review cycle and mode.',
     '- report: findings-first review with expected versus actual behavior and evidence.',
     '- conclusion: one concise sentence the parent can use to decide the next action.',
     '- confidence: high, medium, or low.',
-    '- findings: actionable findings with severity and source location; use an empty array when there are no actionable findings, including limitation-only PARTIAL reviews.',
-    '- checksRun: exact commands/checks and observed outcomes; use a BLOCKED entry when a check could not run.',
+    '- blockingFindings: only structured, high-confidence P0/P1 violations that satisfy the complete evidence threshold.',
+    '- risks: non-blocking P2/P3 concerns, suggestions, limitations, or incomplete verification; use an empty array for PASS.',
+    '- resolvedFindingIds: empty on initial review; on closure, IDs proven closed by the fix.',
+    '- checksRun: read-only inspections performed and caller-supplied command results examined; use a BLOCKED entry when required evidence could not be established.',
     '- filesExamined: files and specifications actually inspected.',
     '- unresolvedCount: number of unresolved review questions.',
     '',
@@ -130,13 +216,11 @@ export const ReviewerSubAgent: SubAgentDefinition = {
     'Independent read-only reviewer that audits completed changes against the original user goal and returns an evidence-backed verdict.',
   maxLoops: 24,
   finalizationReserveLoops: 3,
-  allowShell: true,
-  shellPolicy: 'verification',
 
   whenToUse: [
     'After implementation changes are complete and primary checks have run, before reporting completion to the user.',
     'To independently audit changed code, configuration, resources, tests, or implementation of a plan/specification.',
-    'Run Reviewer again after fixing a FAIL, passing the original brief, previous findings, and the new corrections.',
+    'After an initial BLOCKED verdict, resume that same Reviewer exactly once in closure mode after fixing confirmed blockers.',
   ].join('\n'),
   whenNotToUse: [
     'General codebase exploration, research, or implementation work.',
@@ -147,7 +231,7 @@ export const ReviewerSubAgent: SubAgentDefinition = {
   costHint:
     'Up to 24 review tool calls. Uses configured candidate models and otherwise follows the main Agent model.',
 
-  getTools: getReviewerTools,
+  getTools: (toolManager) => toolManager.getReadOnlyTools(),
 
   outputSpec: {
     description: 'Submit the independent review verdict, findings, and verification evidence.',
@@ -155,7 +239,19 @@ export const ReviewerSubAgent: SubAgentDefinition = {
       {
         name: 'verdict',
         type: 'string',
-        description: 'Exactly "PASS", "FAIL", or "PARTIAL".',
+        description: 'Exactly "PASS", "PASS_WITH_RISKS", or "BLOCKED".',
+        required: true,
+      },
+      {
+        name: 'reviewCycleId',
+        type: 'string',
+        description: 'Exact caller-provided review cycle ID.',
+        required: true,
+      },
+      {
+        name: 'reviewMode',
+        type: 'string',
+        description: 'Exact caller-provided mode: "initial" or "closure".',
         required: true,
       },
       {
@@ -177,15 +273,27 @@ export const ReviewerSubAgent: SubAgentDefinition = {
         required: true,
       },
       {
-        name: 'findings',
+        name: 'blockingFindings',
+        type: 'reviewFinding[]',
+        description: 'Only high-confidence P0/P1 violations of frozen acceptance criteria with complete evidence.',
+        required: true,
+      },
+      {
+        name: 'risks',
         type: 'string[]',
-        description: 'Actionable findings ordered by severity with file and line references when available.',
+        description: 'Non-blocking P2/P3 concerns, suggestions, limitations, and incomplete verification.',
+        required: true,
+      },
+      {
+        name: 'resolvedFindingIds',
+        type: 'string[]',
+        description: 'Original finding IDs proven closed during closure review; empty during initial review.',
         required: true,
       },
       {
         name: 'checksRun',
         type: 'string[]',
-        description: 'Exact commands or direct checks and their observed outcomes; include BLOCKED reasons.',
+        description: 'Read-only inspections and supplied verification evidence examined; include BLOCKED reasons.',
         required: true,
       },
       {
@@ -206,7 +314,7 @@ export const ReviewerSubAgent: SubAgentDefinition = {
   validateStructuredOutput: validateReviewerOutput,
 
   systemPromptBuilder: async (ctx): Promise<string> => {
-    const tools = ctx.promptTools || ['Read', 'list_files', 'Glob', 'Grep', 'Bash', 'PowerShell'].map(name => ({
+    const tools = ctx.promptTools || ['Read', 'list_files', 'Glob', 'Grep'].map(name => ({
       type: 'function' as const,
       function: { name, description: `${name} tool`, parameters: {} },
     }))

@@ -5,6 +5,7 @@ export type McpConfigScope = 'managed' | 'user' | 'project' | 'local' | 'dynamic
 
 interface McpServerConfigBase {
   type: McpTransportType
+  description?: string
   enabled?: boolean
   timeoutMs?: number
   handshakeTimeoutMs?: number
@@ -104,4 +105,22 @@ export interface McpPromptSummary {
   name: string
   description?: string
   arguments?: Array<{ name: string; description?: string; required?: boolean }>
+}
+
+export interface McpToolSummary {
+  name: string
+  title?: string
+  description?: string
+  inputSchema: Record<string, unknown>
+  outputSchema?: Record<string, unknown>
+  annotations?: Record<string, unknown>
+}
+
+export interface McpServerCatalog {
+  server: string
+  tools: McpToolSummary[]
+  resources: McpResourceSummary[]
+  prompts: McpPromptSummary[]
+  updatedAt?: string
+  stale: boolean
 }

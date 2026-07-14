@@ -39,7 +39,9 @@ import type {
   McpLogEntry,
   McpPromptSummary,
   McpResourceSummary,
+  McpServerCatalog,
   McpServerStatus,
+  McpToolSummary,
   ScopedMcpServerConfig
 } from './types'
 import type { McpServerConfig } from './types'
@@ -114,6 +116,8 @@ export class McpConnectionManager {
   private syncPromise?: Promise<void>
   private readonly redactions = new Map<string, Set<string>>()
   private readonly serverIdentities = new Map<string, string>()
+  private readonly catalogCache = new Map<string, McpServerCatalog>()
+  private readonly sessionRecoveryPromises = new Map<string, Promise<Client>>()
 
   constructor(
     private readonly configService = new McpConfigService(),
@@ -143,6 +147,11 @@ export class McpConnectionManager {
 
   async saveUserServers(servers: Record<string, McpServerConfig>): Promise<void> {
     await this.configService.saveUserServers(servers)
+    await this.performSync(this.workspaceRoot)
+  }
+
+  async setUserServerEnabled(name: string, enabled: boolean): Promise<void> {
+    await this.configService.setUserServerEnabled(name, enabled)
     await this.performSync(this.workspaceRoot)
   }
 
@@ -375,7 +384,7 @@ export class McpConnectionManager {
         this.appendLog(scoped.name, 'warning', 'MCP server identity changed after reconnect; the next catalog snapshot will use the new identity.')
       }
       const instructions = client.getInstructions()
-      const instructionsPolicy = scoped.config.instructionsPolicy || 'ignore'
+      const instructionsPolicy = scoped.config.instructionsPolicy || 'tool-hints'
       if (instructions && instructionsPolicy !== 'ignore') {
         getMcpInstructionRegistry().update({
           serverName: scoped.name,
@@ -510,11 +519,65 @@ export class McpConnectionManager {
           'debug',
           `Tool '${tool.name}' progress ${progress.progress}${progress.total ? `/${progress.total}` : ''}`,
           progress.message
-        )
+        ),
+        runtime.scoped.config.type === 'http'
+          ? (failedClient) => this.recoverExpiredHttpSession(runtime.scoped.name, failedClient)
+          : undefined,
+        runtime.scoped.config.type !== 'stdio'
+          ? (error) => this.markAuthRequired(runtime.scoped.name, error)
+          : undefined
       ))
     }
     runtime.status.toolCount = runtime.tools.length
     runtime.status.updatedAt = new Date().toISOString()
+    this.rememberCatalog(runtime)
+    this.emitChanged()
+  }
+
+  private async recoverExpiredHttpSession(name: string, failedClient: Client): Promise<Client> {
+    const current = this.runtimes.get(name)
+    if (current?.client && current.client !== failedClient && current.status.state === 'connected') {
+      return current.client
+    }
+    const pending = this.sessionRecoveryPromises.get(name)
+    if (pending) return pending
+
+    const recovery = (async () => {
+      const stale = this.runtimes.get(name)
+      if (!stale || stale.scoped.config.type !== 'http') {
+        throw new Error(`MCP HTTP server '${name}' is not configured.`)
+      }
+      this.appendLog(name, 'warning', 'MCP HTTP session expired; reconnecting with a fresh session.')
+      await this.connect(stale.scoped)
+      const recovered = this.runtimes.get(name)
+      if (!recovered?.client || recovered.status.state !== 'connected') {
+        throw new Error(`MCP HTTP server '${name}' failed to recover its expired session.`)
+      }
+      this.appendLog(name, 'info', 'MCP HTTP session recovered with a fresh session.')
+      return recovered.client
+    })()
+    this.sessionRecoveryPromises.set(name, recovery)
+    try {
+      return await recovery
+    } finally {
+      if (this.sessionRecoveryPromises.get(name) === recovery) {
+        this.sessionRecoveryPromises.delete(name)
+      }
+    }
+  }
+
+  private markAuthRequired(name: string, error: unknown): void {
+    const runtime = this.runtimes.get(name)
+    if (!runtime || runtime.closing) return
+    runtime.status.state = 'needs-auth'
+    runtime.status.error = {
+      code: 'MCP_NEEDS_AUTH',
+      message: `MCP server '${name}' requires re-authorization.`
+    }
+    runtime.status.updatedAt = new Date().toISOString()
+    this.toolManager.unregisterSource(`mcp:${name}`)
+    getMcpInstructionRegistry().remove(name)
+    this.appendLog(name, 'warning', 'MCP authorization expired; re-authorization is required.', error)
     this.emitChanged()
   }
 
@@ -527,6 +590,7 @@ export class McpConnectionManager {
     }
     runtime.status.resourceCount = runtime.resources.length + runtime.templates.length
     runtime.status.updatedAt = new Date().toISOString()
+    this.rememberCatalog(runtime)
     this.emitChanged()
   }
 
@@ -538,7 +602,60 @@ export class McpConnectionManager {
     }
     runtime.status.promptCount = runtime.prompts.length
     runtime.status.updatedAt = new Date().toISOString()
+    this.rememberCatalog(runtime)
     this.emitChanged()
+  }
+
+  private rememberCatalog(runtime: McpRuntime): void {
+    const tools: McpToolSummary[] = runtime.tools.map((tool) => ({
+      name: tool.name,
+      title: tool.title,
+      description: tool.description,
+      inputSchema: tool.inputSchema as Record<string, unknown>,
+      outputSchema: tool.outputSchema as Record<string, unknown> | undefined,
+      annotations: tool.annotations as Record<string, unknown> | undefined
+    }))
+    this.catalogCache.set(runtime.scoped.name, {
+      server: runtime.scoped.name,
+      tools,
+      resources: [
+        ...runtime.resources.map((resource) => ({ server: runtime.scoped.name, ...resource })),
+        ...runtime.templates.map((template) => ({
+          server: runtime.scoped.name,
+          uri: template.uriTemplate,
+          name: template.name,
+          description: template.description,
+          mimeType: template.mimeType,
+          template: true as const
+        }))
+      ],
+      prompts: runtime.prompts.map((prompt) => ({
+        server: runtime.scoped.name,
+        name: prompt.name,
+        description: prompt.description,
+        arguments: prompt.arguments
+      })),
+      updatedAt: runtime.status.updatedAt,
+      stale: false
+    })
+  }
+
+  getCatalog(name: string): McpServerCatalog {
+    const cached = this.catalogCache.get(name)
+    const runtime = this.runtimes.get(name)
+    if (!cached) {
+      return { server: name, tools: [], resources: [], prompts: [], stale: runtime?.status.state !== 'connected' }
+    }
+    return {
+      ...cached,
+      tools: cached.tools.map((tool) => ({ ...tool })),
+      resources: cached.resources.map((resource) => ({ ...resource })),
+      prompts: cached.prompts.map((prompt) => ({
+        ...prompt,
+        arguments: prompt.arguments?.map((argument) => ({ ...argument }))
+      })),
+      stale: runtime?.status.state !== 'connected'
+    }
   }
 
   private appendLog(name: string, level: McpLogEntry['level'], message: string, data?: unknown): void {
@@ -595,7 +712,12 @@ export class McpConnectionManager {
   }
 
   private scheduleReconnect(runtime: McpRuntime): void {
-    if (runtime.reconnectTimer || runtime.closing || runtime.scoped.config.enabled === false) return
+    if (
+      runtime.reconnectTimer ||
+      runtime.closing ||
+      runtime.status.state === 'needs-auth' ||
+      runtime.scoped.config.enabled === false
+    ) return
     const policy = runtime.scoped.config.reconnect || {
       enabled: true, maxAttempts: 5, baseDelayMs: 1000, maxDelayMs: 30_000
     }

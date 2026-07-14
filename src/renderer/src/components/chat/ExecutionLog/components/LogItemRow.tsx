@@ -8,7 +8,7 @@ import { buildDiffEditInfo } from '../../../../utils/editDiffUtils'
 import ExecutionLogDetail from '../../ExecutionLogDetail'
 import { ThoughtIcon, SearchIcon, CmdIcon, AskIcon } from '../../../svg-icons'
 import IconSkills from '../../../icons/IconSkills'
-import { CircleCheck } from 'lucide-react'
+import { CircleAlert, CircleCheck, Minimize2, RefreshCw } from 'lucide-react'
 import { FileIcon, FolderIcon } from '@react-symbols/icons/utils'
 import './LogItemRow.css'
 
@@ -81,6 +81,11 @@ export function LogItemRow({
 
   const getItemIcon = (item: UnifiedTimelineItem) => {
     if (item.type === 'reasoning') return <ThoughtIcon running={item.status === 'running'} />
+    if (item.type === 'compaction') {
+      if (item.status === 'running') return <RefreshCw className="spin-slow" />
+      if (item.status === 'error') return <CircleAlert />
+      return <Minimize2 />
+    }
     if (item.type === 'command') return <CmdIcon />
     if (item.type === 'edit') return getFileIconComponent(item.fileName)
     if (item.type === 'tool') {
@@ -130,17 +135,21 @@ export function LogItemRow({
             onClick={(e) => hasItemDetail && toggleItemExpand(item.id, e)}
           >
             <Flex align="center" gap={2} className="relative" style={{ flex: 1, minWidth: 0 }}>
-              <span className={`timeline-icon-box${isTaskSummarySkill ? ' timeline-icon-completed' : isSkillItem ? ' timeline-icon-skill' : ''}`}>
+              <span className={`timeline-icon-box${isTaskSummarySkill ? ' timeline-icon-completed' : isSkillItem ? ' timeline-icon-skill' : item.type === 'compaction' ? ` timeline-icon-compaction is-${item.status}` : ''}`}>
                 {getItemIcon(item)}
               </span>
               <span className="timeline-target-truncate-box pr-4">
-                <span
-                  className={`timeline-verb-text timeline-verb-${item.verb.toLowerCase()}${isTaskSummarySkill ? ' timeline-verb-task-completed' : ''}`}
-                  title={isTaskSummarySkill ? '任务总结已生成' : item.toolName ? `调用工具: ${item.toolName}` : undefined}
-                >
-                  {isTaskSummarySkill ? '任务已完成' : VERB_TRANSLATIONS[item.verb] || item.verb}
-                </span>
-                {isTaskSummarySkill ? null : item.verb === 'Searched' || item.verb === 'Searching' ? (
+                {item.type === 'compaction' ? (
+                  <span className="timeline-target-text" title={item.target}>{item.target}</span>
+                ) : (
+                  <span
+                    className={`timeline-verb-text timeline-verb-${item.verb.toLowerCase()}${isTaskSummarySkill ? ' timeline-verb-task-completed' : ''}`}
+                    title={isTaskSummarySkill ? '任务总结已生成' : item.toolName ? `调用工具: ${item.toolName}` : undefined}
+                  >
+                    {isTaskSummarySkill ? '任务已完成' : VERB_TRANSLATIONS[item.verb] || item.verb}
+                  </span>
+                )}
+                {item.type === 'compaction' || isTaskSummarySkill ? null : item.verb === 'Searched' || item.verb === 'Searching' ? (
                   <span className="timeline-target-link" style={{ textDecoration: 'none', cursor: 'default' }}>
                     查找 {item.target}
                   </span>

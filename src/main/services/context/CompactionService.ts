@@ -9,8 +9,12 @@ import type { ModelContextCapabilities } from '../../../shared/types/provider'
 import { ContextBudgetService } from './ContextBudgetService'
 import { FileContextProjector } from './FileContextProjector'
 import { FileContextRestorer } from './FileContextRestorer'
-import type { CompactionModelClient } from './CompactionModelClient'
-import { parseAndValidateSummary, renderCompactionSummary } from './CompactionSummary'
+import type { CompactionGenerationResult, CompactionModelClient } from './CompactionModelClient'
+import {
+  buildCompactionPrompt,
+  normalizeCompactionSummary,
+  renderCompactionSummary
+} from './CompactionSummary'
 import { ModelHistoryNormalizer } from './ModelHistoryNormalizer'
 import { ModelLedgerStore } from './ModelLedgerStore'
 import { ToolOutputPruner } from './ToolOutputPruner'
@@ -20,6 +24,29 @@ import {
   deriveSessionSkillStates,
   renderSessionSkillStateContext
 } from './SessionSkillState'
+
+const MAX_SUMMARY_OVERFLOW_RETRIES = 3
+const MAX_UNUSABLE_SUMMARY_RESPONSES = 2
+
+function generationText(result: string | CompactionGenerationResult): string {
+  return typeof result === 'string' ? result : result.text
+}
+
+function providerErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') return undefined
+  const value = error as { providerCode?: string; code?: string }
+  return value.providerCode || value.code
+}
+
+function parseOverflowTokenGap(message: string): number | undefined {
+  const match = message.match(/(\d[\d,]*)\s*tokens?\s*>\s*(\d[\d,]*)/i)
+  if (!match) return undefined
+  const actual = Number(match[1].replace(/,/g, ''))
+  const limit = Number(match[2].replace(/,/g, ''))
+  return Number.isFinite(actual) && Number.isFinite(limit) && actual > limit
+    ? actual - limit
+    : undefined
+}
 
 export interface CompactionRequest {
   sessionId: string
@@ -32,6 +59,8 @@ export interface CompactionRequest {
   manualInstructions?: string
   workspaceRoot?: string
   reasoningBudgetTokens?: number
+  providerId?: string
+  model?: string
   /** Durable user input that must remain addressable while its turn is active. */
   requiredMessageId?: string
 }
@@ -81,6 +110,7 @@ export class CompactionService {
       code: 'COMPACTION_INSUFFICIENT_REDUCTION',
       message: 'Compaction did not produce a usable reduction'
     }
+    let summaryOverflowRetries = 0
 
     for (let attempt = 0; attempt < 3; attempt++) {
       const state = await this.ledger.load(request.sessionId)
@@ -106,11 +136,19 @@ export class CompactionService {
         sessionSkillState,
         scope.postCompactionFileContext?.content
       ).totalInputTokens
+      const limits = this.budget.resolveLimits(
+        request.capabilities,
+        request.reasoningBudgetTokens
+      )
+      const effectiveHardInputLimit = request.trigger === 'provider_overflow'
+        ? Math.min(limits.hardInputLimit, Math.max(1, Math.floor(tokensBefore * 0.9)))
+        : limits.hardInputLimit
+      const effectiveUsableInputBudget = Math.min(
+        limits.usableInputBudget,
+        Math.max(1, effectiveHardInputLimit - limits.safetyMarginTokens)
+      )
       const baseTailBudget = this.budget.recentTailBudget(
-        this.budget.resolveLimits(
-          request.capabilities,
-          request.reasoningBudgetTokens
-        ).usableInputBudget
+        effectiveUsableInputBudget
       )
       const tailBudget = Math.max(1, Math.floor(baseTailBudget / (attempt + 1)))
       let tail = ModelHistoryNormalizer.selectProtocolSafeTail(
@@ -175,32 +213,64 @@ export class CompactionService {
         tokensBefore
       })
 
-      const usable = this.budget.resolveLimits(
-        request.capabilities,
-        request.reasoningBudgetTokens
-      ).usableInputBudget
       const projectedHead = this.fileProjector.project(head).messages
-      const summaryMessages = new ToolOutputPruner(this.budget).prune(projectedHead, {
-        targetTokens: Math.floor(usable * 0.6),
+      const summaryPromptOverhead = this.budget.estimateStringTokens(buildCompactionPrompt({
+        coveredThroughSequence,
+        messages: [],
+        previousSummary: scope.latestCompaction,
+        resumeState: scope.resumeState,
+        instructions: request.manualInstructions
+      }))
+      const summarySafetyBuffer = Math.min(
+        13_000,
+        Math.max(1_000, Math.floor(effectiveUsableInputBudget * 0.1))
+      )
+      const summaryHistoryBudget = Math.max(1_000, Math.min(
+        Math.floor(effectiveUsableInputBudget * 0.5),
+        effectiveHardInputLimit - summarySafetyBuffer - summaryPromptOverhead
+      ))
+      let summaryMessages = new ToolOutputPruner(this.budget).prune(projectedHead, {
+        targetTokens: summaryHistoryBudget,
         protectedTailStart: projectedHead.length,
-        maxSingleToolTokens: Math.min(8_000, Math.floor(usable * 0.1))
+        maxSingleToolTokens: Math.min(8_000, Math.floor(effectiveUsableInputBudget * 0.1))
       }).messages
-      let summary: ReturnType<typeof parseAndValidateSummary> | undefined
+      let summary: ReturnType<typeof normalizeCompactionSummary> | undefined
       let validationFeedback: string | undefined
-      let previousInvalidOutput: string | undefined
-      for (let schemaAttempt = 0; schemaAttempt < 2; schemaAttempt++) {
+      let unusableResponses = 0
+      let truncatedPrefixThroughSequence: number | undefined
+      while (!summary) {
         let raw: string
         try {
-          raw = await this.model.generate({
+          raw = generationText(await this.model.generate({
             coveredThroughSequence,
             messages: summaryMessages,
             previousSummary: scope.latestCompaction,
             resumeState: scope.resumeState,
             instructions: request.manualInstructions,
-            validationFeedback,
-            previousInvalidOutput
-          })
+            validationFeedback
+          }))
         } catch (error) {
+          if (providerErrorCode(error) === 'CONTEXT_OVERFLOW') {
+            const truncated = summaryOverflowRetries < MAX_SUMMARY_OVERFLOW_RETRIES
+              ? ModelHistoryNormalizer.truncateOldestProtocolRounds(
+                  summaryMessages,
+                  (message) => this.budget.estimateValueTokens(message),
+                  parseOverflowTokenGap(error instanceof Error ? error.message : String(error))
+                )
+              : undefined
+            summaryOverflowRetries++
+            if (truncated) {
+              summaryMessages = truncated.messages
+              truncatedPrefixThroughSequence = truncated.truncatedThroughSequence ??
+                truncatedPrefixThroughSequence
+              continue
+            }
+            return this.fail(
+              request,
+              'PROVIDER_CONTEXT_OVERFLOW',
+              `Compaction input still exceeds the Provider limit after ${Math.min(summaryOverflowRetries, MAX_SUMMARY_OVERFLOW_RETRIES)} retries: ${error instanceof Error ? error.message : String(error)}`
+            )
+          }
           return this.fail(
             request,
             'COMPACTION_SUMMARY_FAILED',
@@ -208,25 +278,22 @@ export class CompactionService {
           )
         }
         try {
-          summary = parseAndValidateSummary(raw, coveredThroughSequence)
-          break
+          summary = normalizeCompactionSummary(raw, coveredThroughSequence, {
+            truncatedPrefixThroughSequence
+          })
         } catch (error) {
-          const schemaError = (error as any)?.code === 'COMPACTION_SCHEMA_INVALID'
-          if (schemaError && schemaAttempt === 0) {
+          unusableResponses++
+          if (unusableResponses < MAX_UNUSABLE_SUMMARY_RESPONSES) {
             validationFeedback = error instanceof Error ? error.message : String(error)
-            previousInvalidOutput = raw.slice(0, 32_000)
             continue
           }
-          const code = schemaError ? 'COMPACTION_SCHEMA_INVALID' : 'COMPACTION_SUMMARY_FAILED'
-          const failure = await this.fail(
+          return this.fail(
             request,
-            code,
+            'COMPACTION_SUMMARY_FAILED',
             error instanceof Error ? error.message : String(error)
           )
-          return failure
         }
       }
-      if (!summary) throw new Error('Compaction summary retry ended without a result')
 
       const latest = await this.ledger.load(request.sessionId)
       if (latest.scopes[request.contextScopeId]?.historyVersion !== sourceHistoryVersion) {
@@ -238,13 +305,9 @@ export class CompactionService {
       }
 
       const renderedSummary = renderCompactionSummary(summary)
-      const limits = this.budget.resolveLimits(
-        request.capabilities,
-        request.reasoningBudgetTokens
-      )
       const restoreTarget = Math.min(
-        limits.hardInputLimit,
-        Math.floor(limits.usableInputBudget * 0.55)
+        effectiveHardInputLimit,
+        Math.floor(effectiveUsableInputBudget * 0.55)
       )
       const bareTokensAfter = this.measure(
         request,
@@ -276,7 +339,7 @@ export class CompactionService {
         existingReferences: scope.postCompactionFileContext?.fileReferences,
         workspaceRoot: request.workspaceRoot,
         maxTotalTokens: Math.max(0, restoreTarget - baseTokensAfter),
-        maxVisibleToolTokens: Math.min(8_000, Math.floor(usable * 0.1))
+        maxVisibleToolTokens: Math.min(8_000, Math.floor(effectiveUsableInputBudget * 0.1))
       })
       const tokensAfter = this.measure(
         request,
@@ -287,14 +350,17 @@ export class CompactionService {
         sessionSkillState,
         restoredFileContext?.content
       ).totalInputTokens
-      if (tokensAfter > limits.hardInputLimit) {
+      if (tokensAfter > effectiveHardInputLimit) {
         lastFailure = {
           code: 'COMPACTION_INSUFFICIENT_REDUCTION',
           message: 'Compaction candidate still exceeds the model hard input limit'
         }
         continue
       }
-      if (tokensAfter > usable * 0.55 && tokensAfter > tokensBefore * 0.8) {
+      if (
+        tokensAfter > effectiveUsableInputBudget * 0.55 &&
+        tokensAfter > tokensBefore * 0.8
+      ) {
         lastFailure = {
           code: 'COMPACTION_INSUFFICIENT_REDUCTION',
           message: 'Compaction candidate did not meet the target budget or minimum reduction'
@@ -322,6 +388,15 @@ export class CompactionService {
           tokensAfter,
           sourceHash,
           summary,
+          ...(request.trigger === 'provider_overflow'
+            ? {
+                observedProviderInputLimit: {
+                  providerId: request.providerId || scope.lastProviderId,
+                  model: request.model || scope.lastModel,
+                  maxInputTokens: effectiveHardInputLimit
+                }
+              }
+            : {}),
           resumeState: scope.resumeState,
           activeMessages: retainedMessages,
           postCompactionFileContext: restoredFileContext,
@@ -403,7 +478,8 @@ export class CompactionService {
       message,
       retryable: code === 'COMPACTION_STALE_VERSION' ||
         code === 'COMPACTION_SUMMARY_FAILED' ||
-        code === 'COMPACTION_SCHEMA_INVALID'
+        code === 'COMPACTION_SCHEMA_INVALID' ||
+        code === 'PROVIDER_CONTEXT_OVERFLOW'
     })
     const result: CompactionResult = { status: 'failed', errorCode: code, message }
     this.observer.onFailed?.({

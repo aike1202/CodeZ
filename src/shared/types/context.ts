@@ -213,6 +213,17 @@ export interface CompactionSummaryV1 {
   coveredThroughSequence: number
 }
 
+export interface CompactionSummaryV2 {
+  version: 2
+  format: 'text'
+  content: string
+  coveredThroughSequence: number
+  /** Oldest source content omitted only as a last-resort Provider overflow recovery. */
+  truncatedPrefixThroughSequence?: number
+}
+
+export type CompactionSummary = CompactionSummaryV1 | CompactionSummaryV2
+
 export type ContextPressureLevel = 'normal' | 'warning' | 'prune' | 'compact' | 'overflow'
 export type ContextEstimateSource = 'provider' | 'tokenizer' | 'heuristic'
 
@@ -304,6 +315,12 @@ export interface CompactionStartedPayload {
   tokensBefore: number
 }
 
+export interface ObservedProviderInputLimit {
+  providerId?: string
+  model?: string
+  maxInputTokens: number
+}
+
 export interface CompactionCompletedPayload {
   trigger: CompactionTrigger
   sourceHistoryVersion: number
@@ -312,7 +329,8 @@ export interface CompactionCompletedPayload {
   tokensBefore: number
   tokensAfter: number
   sourceHash: string
-  summary: CompactionSummaryV1
+  summary: CompactionSummary
+  observedProviderInputLimit?: ObservedProviderInputLimit
   resumeState?: VersionedResumeState
   activeMessages: NormalizedModelMessage[]
   postCompactionFileContext?: PostCompactionFileContext
@@ -341,7 +359,7 @@ export interface LegacyImportCompletedPayload {
   sourceHash: string
   mode: 'summary' | 'recent-text-fallback'
   activeMessages: NormalizedModelMessage[]
-  summary?: CompactionSummaryV1
+  summary?: CompactionSummary
 }
 
 export interface LedgerPayloadByType {
@@ -382,7 +400,8 @@ export type AnyLedgerEvent = {
 export interface SessionRuntimeScopeSnapshot {
   historyVersion: number
   activeMessages: NormalizedModelMessage[]
-  latestCompaction?: CompactionSummaryV1
+  latestCompaction?: CompactionSummary
+  observedProviderInputLimit?: ObservedProviderInputLimit
   resumeState?: VersionedResumeState
   lastCompletedTurnId?: string
   lastInterruptedTurnId?: string

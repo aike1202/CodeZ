@@ -4,7 +4,10 @@ const { z } = require('zod')
 
 const server = new McpServer(
   { name: 'codez-test-server', version: '1.0.0' },
-  { capabilities: { logging: {} } }
+  {
+    capabilities: { logging: {} },
+    instructions: 'Use the echo tool when the user asks to repeat text.'
+  }
 )
 
 server.registerTool('echo', {

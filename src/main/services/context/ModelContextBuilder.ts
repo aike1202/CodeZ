@@ -145,6 +145,25 @@ export class ModelContextBuilder {
     const state = await this.ledger.load(request.sessionId)
     const scope = state.scopes[request.contextScopeId]
     if (!scope) throw new Error(`Context scope not found: ${request.contextScopeId}`)
+    const observedLimit = scope.observedProviderInputLimit
+    const observedLimitMatches = Boolean(
+      observedLimit &&
+      (!observedLimit.providerId || observedLimit.providerId === request.providerRequestProfile?.providerId) &&
+      (!observedLimit.model || observedLimit.model === request.providerRequestProfile?.model)
+    )
+    if (observedLimitMatches && observedLimit) {
+      const configuredHardLimit = this.budgetService.resolveLimits(
+        request.capabilities,
+        request.reasoningBudgetTokens
+      ).hardInputLimit
+      request = {
+        ...request,
+        capabilities: {
+          ...request.capabilities,
+          maxInputTokens: Math.min(configuredHardLimit, observedLimit.maxInputTokens)
+        }
+      }
+    }
 
     const current = scope.activeMessages.find((message) => message.id === request.currentInputMessageId)
     if (!current || current.role !== 'user') throw new Error('Current input is not durably recorded')
@@ -311,6 +330,8 @@ export class ModelContextBuilder {
         instructions: request.instructions,
         workspaceRoot: request.workspaceRoot,
         reasoningBudgetTokens: request.reasoningBudgetTokens,
+        providerId: request.providerRequestProfile?.providerId,
+        model: request.providerRequestProfile?.model,
         requiredMessageId: request.currentInputMessageId
       })
       if (result.status === 'completed') {

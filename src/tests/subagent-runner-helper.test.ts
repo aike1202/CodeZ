@@ -236,7 +236,10 @@ describe('SubAgentRunner result forwarding', () => {
       JSON.stringify({
         subagent_type: 'Reviewer',
         description: 'Review completed change',
-        prompt: 'Review the completed change against the original user goal.'
+        prompt: 'Review the completed change against the original user goal.',
+        review_mode: 'initial',
+        review_cycle_id: 'helper-review',
+        expectations: { questions: ['The completed change satisfies the original user goal.'] }
       }),
       {
         workspaceRoot: process.cwd(), sessionId: 'session-1', baseUrl: 'https://example.invalid',
@@ -248,11 +251,81 @@ describe('SubAgentRunner result forwarding', () => {
     expect(managerMock.spawn).toHaveBeenCalledWith(
       'Reviewer',
       expect.objectContaining({
+        reviewMode: 'initial',
+        reviewCycleId: 'helper-review',
         permissionScope: {
           allowBash: true,
           allowedWriteFiles: [],
           shellPolicy: 'verification'
         }
+      }),
+      expect.anything()
+    )
+  })
+
+  it('binds closure review to the completed Reviewer and its original findings', async () => {
+    managerMock.getDefinition.mockReturnValue({ type: 'Reviewer' })
+    managerMock.listDefinitions.mockReturnValue([{ type: 'Reviewer' }])
+    managerMock.spawn.mockResolvedValue({
+      type: 'Reviewer',
+      status: 'completed',
+      output: 'F-001 is closed.',
+      structuredOutput: { verdict: 'PASS', resolvedFindingIds: ['F-001'] },
+      toolCallCount: 1,
+      filesExamined: ['src/main.ts']
+    })
+    const resumeSubAgentId = 'subagent_Reviewer_original_cycle_tool-initial'
+    const runtimeCoordinator = {
+      getScopeView: vi.fn().mockResolvedValue({
+        activeMessages: [{
+          role: 'assistant',
+          toolCalls: [{
+            name: 'submit_result',
+            arguments: JSON.stringify({
+              verdict: 'BLOCKED',
+              reviewCycleId: 'helper-closure',
+              reviewMode: 'initial',
+              blockingFindings: [{ id: 'F-001' }]
+            })
+          }]
+        }]
+      })
+    }
+
+    const { handleSubAgentRunnerSpawn } = await import('../main/agent/AgentRunner/subAgentRunnerHelper')
+    const result = await handleSubAgentRunnerSpawn(
+      'tool-closure',
+      JSON.stringify({
+        subagent_type: 'Reviewer',
+        description: 'Close original review finding',
+        prompt: 'Verify only the fix for F-001.',
+        review_mode: 'closure',
+        review_cycle_id: 'helper-closure',
+        previous_finding_ids: ['F-001'],
+        resume_subagent_id: resumeSubAgentId,
+        expectations: { questions: ['AC-1 remains the frozen acceptance criterion.'] }
+      }),
+      {
+        workspaceRoot: process.cwd(),
+        sessionId: 'session-closure',
+        baseUrl: 'https://example.invalid',
+        apiKey: 'test-key',
+        apiFormat: 'openai',
+        model: 'test-model',
+        runtimeCoordinator
+      } as any,
+      { onChunk: vi.fn(), onDone: vi.fn(), onError: vi.fn() }
+    )
+
+    expect(JSON.parse(result.content)).toMatchObject({ ok: true })
+    expect(managerMock.spawn).toHaveBeenCalledWith(
+      'Reviewer',
+      expect.objectContaining({
+        subAgentId: resumeSubAgentId,
+        resumeSubAgentId,
+        reviewMode: 'closure',
+        reviewCycleId: 'helper-closure',
+        previousFindingIds: ['F-001']
       }),
       expect.anything()
     )

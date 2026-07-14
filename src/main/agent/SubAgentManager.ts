@@ -107,6 +107,13 @@ export interface SubAgentContext {
   /** 续接此前被中断的 SubAgent；复用其规范化账本作用域与历史。 */
   resumeSubAgentId?: string
 
+  /** Reviewer 首次独立审查或同一上下文中的收口复审。 */
+  reviewMode?: 'initial' | 'closure'
+  /** 同一内容审查周期的稳定标识，由父 Agent 在首次审查时创建。 */
+  reviewCycleId?: string
+  /** 收口复审必须逐项关闭或重开的首次审查问题 ID。 */
+  previousFindingIds?: string[]
+
   /** 验收标准 — 子 Agent 必须逐条回答 */
   expectations?: {
     questions: string[]
@@ -199,7 +206,10 @@ export interface SubAgentDefinition {
   /** Optional per-subagent depth budgets. Omitted entries use the shared defaults. */
   depthLoops?: Partial<Record<'quick' | 'normal' | 'exhaustive', number>>
   /** Reject a parsed structured result that does not meet agent-specific requirements. */
-  validateStructuredOutput?: (output: SubAgentStructuredOutput) => string | undefined
+  validateStructuredOutput?: (
+    output: SubAgentStructuredOutput,
+    ctx: SubAgentContext
+  ) => string | undefined
   /** 是否向该子智能体开放 Shell；每次调用仍须通过统一权限策略。 */
   allowShell?: boolean
   /** 可选的额外 Shell 约束；Reviewer 使用 verification 拒绝直接项目写入命令。 */
@@ -236,6 +246,19 @@ export interface SubAgentStructuredOutput {
   unresolvedCount?: number
 }
 
+/** Reviewer 可阻塞交付的问题。P2/P3 与建议必须进入非阻塞 risks。 */
+export interface ReviewerBlockingFinding {
+  id: string
+  criterionId: string
+  severity: 'P0' | 'P1'
+  location: string
+  expected: string
+  actual: string
+  reproduction: string
+  evidence: string
+  confidence: 'high'
+}
+
 /** 质量摘要 — 框架自动计算 */
 export interface SubAgentQualitySummary {
   coverage: number
@@ -248,7 +271,7 @@ export interface SubAgentQualitySummary {
 /** 子 Agent 输出字段定义 */
 export interface SubAgentOutputField {
   name: string
-  type: 'string' | 'string[]' | 'number' | 'boolean'
+  type: 'string' | 'string[]' | 'number' | 'boolean' | 'reviewFinding[]'
   description: string
   required: boolean
 }
@@ -532,7 +555,7 @@ function replayCompletedSubAgentResult(
       if (toolCall.name !== 'submit_result') continue
       try {
         const candidate = validateAgainstSpec(JSON.parse(toolCall.arguments), def.outputSpec)
-        if (candidate && !def.validateStructuredOutput?.(candidate)) {
+        if (candidate && !def.validateStructuredOutput?.(candidate, ctx)) {
           structuredOutput = candidate
           break
         }
@@ -577,12 +600,14 @@ async function buildExtendedSystemPrompt(def: SubAgentDefinition, ctx: SubAgentC
     parts.push('\nIf you cannot answer a question, state it explicitly in the "unresolved" list with a reason.')
   }
 
-  // 主动发现触发器
-  parts.push('\n\n## Proactive Discovery')
-  parts.push('After your initial exploration (first 2-3 tool calls), review the questions.')
-  parts.push('Ask yourself: "Is there a critical question the caller SHOULD have asked but didn\'t?"')
-  parts.push('If yes, explore and answer it briefly. Include these findings in your report under an "Additional Discoveries" heading.')
-  parts.push('(If it would take more than 3 extra rounds, note it in "unresolved" instead.)')
+  // Reviewer must judge a frozen contract, not invent new completion criteria.
+  if (def.type !== 'Reviewer') {
+    parts.push('\n\n## Proactive Discovery')
+    parts.push('After your initial exploration (first 2-3 tool calls), review the questions.')
+    parts.push('Ask yourself: "Is there a critical question the caller SHOULD have asked but didn\'t?"')
+    parts.push('If yes, explore and answer it briefly. Include these findings in your report under an "Additional Discoveries" heading.')
+    parts.push('(If it would take more than 3 extra rounds, note it in "unresolved" instead.)')
+  }
 
   // 输出指令（如果设置了 outputSpec）
   if (def.outputSpec) {
@@ -798,14 +823,35 @@ export class SubAgentManager {
           throw new Error(`Cannot resume SubAgent '${ctx.resumeSubAgentId}': context was not found.`)
         }
         if (latestTurnId && previousScope.lastCompletedTurnId === latestTurnId) {
-          const replayedResult = replayCompletedSubAgentResult(canonical, def, ctx, previousScope)
-          if (!replayedResult) {
-            throw new Error(`Cannot replay completed SubAgent '${ctx.resumeSubAgentId}': durable result was invalid.`)
+          const isReviewerClosure = canonical === 'Reviewer' && ctx.reviewMode === 'closure'
+          if (!isReviewerClosure) {
+            const replayedResult = replayCompletedSubAgentResult(canonical, def, ctx, previousScope)
+            if (!replayedResult) {
+              throw new Error(`Cannot replay completed SubAgent '${ctx.resumeSubAgentId}': durable result was invalid.`)
+            }
+            return { replayedResult }
           }
-          return { replayedResult }
-        }
-        if (!latestTurnId || previousScope.lastInterruptedTurnId !== latestTurnId) {
-          throw new Error(`Cannot resume SubAgent '${ctx.resumeSubAgentId}': its latest run was not interrupted.`)
+
+          const completedReviewTurns = new Set(
+            previousScope.activeMessages
+              .filter((message) => {
+                if (message.role !== 'tool' || message.name !== 'submit_result') return false
+                try {
+                  return JSON.parse(message.content || '{}')?.ok === true
+                } catch {
+                  return false
+                }
+              })
+              .map((message) => message.turnId)
+              .filter(Boolean)
+          )
+          if (completedReviewTurns.size >= 2) {
+            throw new Error(
+              `Reviewer cycle '${ctx.reviewCycleId || ctx.resumeSubAgentId}' already used its one closure review.`
+            )
+          }
+        } else if (!latestTurnId || previousScope.lastInterruptedTurnId !== latestTurnId) {
+          throw new Error(`Cannot resume SubAgent '${ctx.resumeSubAgentId}': its latest run was neither interrupted nor eligible for closure review.`)
         }
       }
 
@@ -827,7 +873,7 @@ export class SubAgentManager {
         throw new Error('SubAgent requires resolved model context capabilities')
       }
       const contextCapabilities: ModelContextCapabilities = ctx.contextCapabilities
-      const turnInput = ctx.resumeSubAgentId
+      const turnInput = ctx.resumeSubAgentId && ctx.reviewMode !== 'closure'
         ? [
             'Continue the interrupted task from the existing SubAgent history.',
             'Do not restart, re-plan, or repeat completed inspection and tool work.',
@@ -1013,7 +1059,7 @@ export class SubAgentManager {
         let currentContent = ''
         const catalogSnapshot = toolManager.createCatalogSnapshot(agentRole, ctx.workspaceRoot)
         const exposure = exposureForDefinitions(catalogSnapshot, activeTools)
-        const toolCallAssembler = new ToolCallAssembler(`call_${runtimeTurn.turnId}_${loopCount}`)
+        let toolCallAssembler = new ToolCallAssembler(`call_${runtimeTurn.turnId}_${loopCount}`)
         let gotError = false
         let lastError = ''
         let providerErrorCode: ChatProviderErrorCode | undefined
@@ -1075,10 +1121,15 @@ export class SubAgentManager {
             },
             abortController.signal,
             {
-              onRetry: (attempt) => {
+              onRetry: (_attempt, reason, retryNumber) => {
+                if (reason === 'idle') {
+                  currentContent = ''
+                  toolCallAssembler = new ToolCallAssembler(`call_${runtimeTurn.turnId}_${loopCount}`)
+                  thoughtSig = undefined
+                }
                 callbacks.onSubAgentChunk?.(
                   subAgentId,
-                  `\n\n[SubAgent 网络/API 暂无响应，正在自动重试 ${attempt + 1}...]\n\n`,
+                  `\n\n[SubAgent 网络/API 暂无响应，正在自动重试（第 ${retryNumber} 次，${reason === 'idle' ? '响应流中断' : '等待首包超时'}）...]\n\n`,
                   ''
                 )
               },
@@ -1103,12 +1154,19 @@ export class SubAgentManager {
             toolSchemas: activeTools,
             workspaceRoot: ctx.workspaceRoot,
             reasoningBudgetTokens,
+            providerId: ctx.providerId,
+            model: ctx.apiConfig.model,
             requiredMessageId: runtimeTurn.userMessageId
           })
           if (compacted.status === 'completed') {
             loopCount = Math.max(0, loopCount - 1)
             continue
           }
+          const compactFailure = [
+            compacted.errorCode,
+            compacted.message
+          ].filter(Boolean).join(': ')
+          lastError = `SubAgent context compaction failed${compactFailure ? `: ${compactFailure}` : '.'}`
         }
 
         if (gotError || abortController.signal.aborted) {
@@ -1233,7 +1291,7 @@ export class SubAgentManager {
               const args = JSON.parse(submitCall.function.arguments)
               structuredOutput = validateAgainstSpec(args, def.outputSpec)
               if (structuredOutput) {
-                submitValidationMessage = def.validateStructuredOutput?.(structuredOutput)
+                submitValidationMessage = def.validateStructuredOutput?.(structuredOutput, ctx)
                 if (submitValidationMessage) {
                   structuredOutput = undefined
                 }

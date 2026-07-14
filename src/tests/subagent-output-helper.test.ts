@@ -37,6 +37,36 @@ describe('validateAgainstSpec', () => {
   it('rejects data missing required spec fields', () => {
     expect(validateAgainstSpec({ status: 'completed', summary: 'Done' }, workerSpec)).toBeUndefined()
   })
+
+  it('normalizes only fully structured review blockers', () => {
+    const reviewSpec: SubAgentOutputSpec = {
+      description: 'Review evidence.',
+      fields: [{
+        name: 'blockingFindings',
+        type: 'reviewFinding[]',
+        description: 'Evidence-backed blockers.',
+        required: true,
+      }],
+    }
+    const finding = {
+      id: 'F-001',
+      criterionId: 'AC-1',
+      severity: 'P1',
+      location: 'src/main.ts:10',
+      expected: 'Persistent state',
+      actual: 'Memory-only state',
+      reproduction: 'Restart the process',
+      evidence: 'The implementation uses a module-level Map.',
+      confidence: 'high',
+    }
+
+    expect(validateAgainstSpec({ blockingFindings: [finding] }, reviewSpec)).toMatchObject({
+      blockingFindings: [finding],
+    })
+    expect(validateAgainstSpec({
+      blockingFindings: [{ ...finding, reproduction: undefined }],
+    }, reviewSpec)).toBeUndefined()
+  })
 })
 
 describe('formatSubmitResultValidationMessage', () => {

@@ -126,4 +126,53 @@ export class ModelHistoryNormalizer {
       fileReferences: message.fileReferences?.map((reference) => ({ ...reference }))
     }))
   }
+
+  static groupByProtocolRound(
+    messages: NormalizedModelMessage[]
+  ): NormalizedModelMessage[][] {
+    const groups: NormalizedModelMessage[][] = []
+    let current: NormalizedModelMessage[] = []
+    let currentHasAssistant = false
+
+    for (const message of messages) {
+      if (message.role === 'assistant' && currentHasAssistant && current.length > 0) {
+        groups.push(current)
+        current = []
+        currentHasAssistant = false
+      }
+      current.push(message)
+      if (message.role === 'assistant') currentHasAssistant = true
+    }
+    if (current.length > 0) groups.push(current)
+    return groups
+  }
+
+  static truncateOldestProtocolRounds(
+    messages: NormalizedModelMessage[],
+    estimate: (message: NormalizedModelMessage) => number,
+    tokenGap?: number
+  ): { messages: NormalizedModelMessage[]; truncatedThroughSequence?: number } | undefined {
+    const groups = this.groupByProtocolRound(messages)
+    if (groups.length < 2) return undefined
+
+    let dropCount = 0
+    if (tokenGap !== undefined && tokenGap > 0) {
+      let removedTokens = 0
+      while (dropCount < groups.length - 1 && removedTokens < tokenGap) {
+        removedTokens += groups[dropCount].reduce(
+          (total, message) => total + Math.max(0, estimate(message)), 0
+        )
+        dropCount++
+      }
+    } else {
+      dropCount = Math.max(1, Math.floor(groups.length * 0.2))
+    }
+
+    dropCount = Math.min(dropCount, groups.length - 1)
+    const dropped = groups.slice(0, dropCount).flat()
+    return {
+      messages: groups.slice(dropCount).flat(),
+      truncatedThroughSequence: dropped.at(-1)?.sourceSequence
+    }
+  }
 }

@@ -238,7 +238,7 @@ export function useSendMessage() {
         isSystem ? [] : promotedAttachments
       )
 
-      // 前端兜底 watchdog：90s 无首字节提示（后端 60s watchdog 通常先触发，此为兜底）
+      // 前端兜底 watchdog：90s 无首字节提示；后端空闲流 watchdog 为 120s。
       let firstByteTimer: ReturnType<typeof setTimeout> | null = null
       let gotFirstByte = false
       const markResponseActivity = () => {
@@ -350,20 +350,32 @@ export function useSendMessage() {
             useChatStore.getState().setContextBudget(sid, snapshot)
           },
           onCompactionStarted: (payload: any) => {
-            useChatStore.getState().setCompactionState(sid, {
+            markResponseActivity()
+            streamUpdates.flush()
+            const state = {
               status: 'running', trigger: payload?.trigger, tokensBefore: payload?.tokensBefore
-            })
+            } as const
+            useChatStore.getState().setCompactionState(sid, state)
+            useChatStore.getState().updateCompactionTimeline(activeAgentId, state)
           },
           onCompactionCompleted: (payload: any) => {
-            useChatStore.getState().setCompactionState(sid, {
+            streamUpdates.flush()
+            const state = {
               status: 'completed', trigger: payload?.trigger,
               tokensBefore: payload?.tokensBefore, tokensAfter: payload?.tokensAfter
-            })
+            } as const
+            useChatStore.getState().setCompactionState(sid, state)
+            useChatStore.getState().updateCompactionTimeline(activeAgentId, state)
           },
           onCompactionFailed: (payload: any) => {
-            useChatStore.getState().setCompactionState(sid, {
-              status: 'failed', trigger: payload?.trigger, error: payload?.message || payload?.errorCode
-            })
+            markResponseActivity()
+            streamUpdates.flush()
+            const state = {
+              status: 'failed', trigger: payload?.trigger,
+              error: payload?.message || payload?.errorCode || '上下文压缩失败'
+            } as const
+            useChatStore.getState().setCompactionState(sid, state)
+            useChatStore.getState().updateCompactionTimeline(activeAgentId, state)
           },
           onSubAgentStart: (subAgentId: string, meta: any) => {
             markResponseActivity()

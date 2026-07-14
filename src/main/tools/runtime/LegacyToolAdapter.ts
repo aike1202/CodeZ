@@ -15,7 +15,7 @@ import { fingerprint } from './canonicalJson'
 const READ_ONLY = new Set([
   'Read', 'list_files', 'Glob', 'Grep', 'Skill', 'ActivateSkill', 'DeactivateSkill', 'TaskGet', 'TaskList',
   'ExecutionInspect', 'update_resume_state', 'AskUserQuestion', 'ToolSearch', 'ToolResultRead',
-  'ListMcpResources', 'ReadMcpResource', 'GetMcpPrompt'
+  'ListMcpResourcesTool', 'ReadMcpResourceTool', 'GetMcpPrompt'
 ])
 const CORE = new Set(['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash', 'PowerShell'])
 const ALWAYS = new Set(['AskUserQuestion', 'ToolSearch'])
@@ -23,11 +23,15 @@ const DEFERRED = new Set([
   'NotebookEdit', 'PushNotification', 'WebSearch', 'WebFetch',
   'rollback_last_edit', 'SubAgentRunner', 'DelegateTasks',
   'ExecutionControl', 'ExecutionInspect',
-  'ListMcpResources', 'ReadMcpResource', 'GetMcpPrompt', 'McpAuth'
+  'ListMcpResourcesTool', 'ReadMcpResourceTool', 'GetMcpPrompt', 'McpAuth'
 ])
 const EXCLUSIVE = new Set(['AskUserQuestion'])
 const TASK_TOOLS = new Set(['TaskCreate', 'TaskGet', 'TaskList', 'TaskUpdate'])
 const MUTATING_TASK_TOOLS = new Set(['TaskCreate', 'TaskUpdate'])
+const COMPATIBILITY_ALIASES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  ListMcpResourcesTool: ['ListMcpResources'],
+  ReadMcpResourceTool: ['ReadMcpResource']
+})
 
 function exposureFor(name: string): ToolExposure {
   if (ALWAYS.has(name)) return 'always'
@@ -151,7 +155,7 @@ async function planLegacyEffects(
     effects.push({ kind: 'internal', target: name })
   } else if (name === 'rollback_last_edit') {
     effects.push({ kind: 'rollback', target: context.workspaceRoot })
-  } else if (name === 'ListMcpResources' || name === 'ReadMcpResource' || name === 'GetMcpPrompt') {
+  } else if (name === 'ListMcpResourcesTool' || name === 'ReadMcpResourceTool' || name === 'GetMcpPrompt') {
     effects.push({ kind: 'network', target: `mcp:${String(input.server || '*')}` })
   } else if (name === 'McpAuth') {
     effects.push({ kind: 'network', target: `mcp-auth:${String(input.server || 'unknown')}` })
@@ -206,7 +210,7 @@ export class LegacyToolAdapter implements ToolHandler<Record<string, unknown>, u
     const inputSchema = legacyTool.parameters_schema
     this.descriptor = {
       name: legacyTool.name,
-      aliases: [],
+      aliases: COMPATIBILITY_ALIASES[legacyTool.name] || [],
       version: fingerprint({ name: legacyTool.name, description: legacyTool.description, inputSchema }).slice(0, 16),
       source: 'builtin',
       sourceId: 'codez:builtins',
@@ -227,7 +231,9 @@ export class LegacyToolAdapter implements ToolHandler<Record<string, unknown>, u
             ? 'resource-locked'
             : 'safe',
         interrupt: ['Bash', 'PowerShell'].includes(legacyTool.name) ? 'cancel' : 'block',
-        maxResultChars: 50_000
+        maxResultChars: ['ListMcpResourcesTool', 'ReadMcpResourceTool', 'GetMcpPrompt'].includes(legacyTool.name)
+          ? 100_000
+          : 50_000
       },
       planEffects: (input, context) => planLegacyEffects(legacyTool.name, input, context),
       resourceKeys: (input, context) => resourceKeysFor(legacyTool.name, input, context)

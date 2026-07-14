@@ -37,7 +37,7 @@ describe('MCP OAuth security controls', () => {
       'state-test', 'test', { type: 'http', url: 'https://example.test/mcp' }
     )
     await provider.prepareCallback()
-    const rejectedCallback = provider.waitForAuthorizationCode(100).then(
+    const rejectedCallback = provider.waitForAuthorizationCode(2000).then(
       () => undefined,
       (error) => error as Error
     )
@@ -55,7 +55,7 @@ describe('MCP OAuth security controls', () => {
       'cancel-test', 'test', { type: 'http', url: 'https://example.test/mcp' }
     )
     await cancelledProvider.prepareCallback()
-    const cancelled = cancelledProvider.waitForAuthorizationCode(100).then(
+    const cancelled = cancelledProvider.waitForAuthorizationCode(2000).then(
       () => undefined,
       (error) => error as Error
     )

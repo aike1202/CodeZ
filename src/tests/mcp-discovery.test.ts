@@ -39,6 +39,16 @@ describe('MCP capability discovery', () => {
     ]))
   })
 
+  it('keeps distinct long tool names after provider-safe normalization', () => {
+    const prefix = 'read_'.padEnd(90, 'a')
+    const result = isolateMcpTools('server', [
+      { name: `${prefix}_one`, inputSchema: { type: 'object' } },
+      { name: `${prefix}_two`, inputSchema: { type: 'object' } }
+    ])
+    expect(result.tools).toHaveLength(2)
+    expect(result.rejected).toEqual([])
+  })
+
   it('isolates invalid and duplicate resources, templates, and prompts', () => {
     const resources = isolateMcpResources([
       { uri: 'test://one', name: 'one' },

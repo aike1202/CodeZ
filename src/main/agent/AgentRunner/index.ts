@@ -362,7 +362,7 @@ export class AgentRunner {
 
         let currentFullContent = ''
         let currentReasoningContent = ''
-        const toolCallAssembler = new ToolCallAssembler(`call_${runtimeTurn!.turnId}_${loopCount}`)
+        let toolCallAssembler = new ToolCallAssembler(`call_${runtimeTurn!.turnId}_${loopCount}`)
         let thoughtSignatureForThisTurn: string | undefined = undefined
 
         let gotError = false
@@ -451,11 +451,22 @@ export class AgentRunner {
           this.abortController!.signal,
           {
             firstByteTimeoutMs: 30_000,
-            idleTimeoutMs: 60_000,
+            idleTimeoutMs: 120_000,
             maxRetries: 10,
+            maxIdleRetries: 2,
             onFirstByteTimeout: (attempt) => log.error('[AgentRunner] stream first byte timeout', { loopCount, attempt }),
             onIdleTimeout: (attempt) => log.error('[AgentRunner] stream idle timeout', { loopCount, attempt }),
-            onRetry: (attempt) => log.warn('[AgentRunner] retrying stream after first byte timeout', { loopCount, attempt, nextAttempt: attempt + 1 })
+            onRetry: (attempt, reason, retryNumber) => {
+              log.warn('[AgentRunner] retrying stream', { loopCount, attempt, reason, retryNumber })
+              if (reason !== 'idle') return
+
+              currentFullContent = ''
+              currentReasoningContent = ''
+              toolCallAssembler = new ToolCallAssembler(`call_${runtimeTurn!.turnId}_${loopCount}`)
+              thoughtSignatureForThisTurn = undefined
+              currentStopReason = undefined
+              callbacks.onChunk(`\n\n[响应流长时间无新数据，正在自动重试（第 ${retryNumber} 次）...]\n\n`, '')
+            }
           }
         )
 
@@ -480,13 +491,22 @@ export class AgentRunner {
             instructions: runtimeInstructions,
             workspaceRoot: config.workspaceRoot,
             reasoningBudgetTokens,
+            providerId: config.providerId,
+            model: config.model,
             requiredMessageId: runtimeTurn!.userMessageId
           })
           if (compacted.status === 'completed') {
             loopCount--
             continue
           }
-          callbacks.onError('上下文压缩失败，无法从 Provider 上下文溢出中恢复。', 'CONTEXT_OVERFLOW')
+          const compactFailure = [
+            compacted.errorCode,
+            compacted.message
+          ].filter(Boolean).join(': ')
+          callbacks.onError(
+            `上下文压缩失败，无法从 Provider 上下文溢出中恢复${compactFailure ? `：${compactFailure}` : '。'}`,
+            'CONTEXT_OVERFLOW'
+          )
           errorReported = true
         }
 

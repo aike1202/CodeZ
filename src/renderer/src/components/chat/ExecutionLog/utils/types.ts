@@ -17,7 +17,7 @@ export type EditItem = {
 
 export interface UnifiedTimelineItem {
   id: string
-  type: 'reasoning' | 'tool' | 'command' | 'edit' | 'text'
+  type: 'reasoning' | 'tool' | 'command' | 'edit' | 'text' | 'compaction'
   timestamp: number
   completedAt?: number
   batchId?: string
@@ -56,6 +56,9 @@ export interface UnifiedTimelineItem {
     | 'Invoked'
     | 'Deactivating'
     | 'Deactivated'
+    | 'Compacting'
+    | 'Compacted'
+    | 'CompactionFailed'
   target: string
   detail?: string
   args?: string

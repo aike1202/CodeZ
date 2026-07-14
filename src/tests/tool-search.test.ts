@@ -5,7 +5,8 @@ import { LegacyToolAdapter } from '../main/tools/runtime/LegacyToolAdapter'
 const deferred = [
   { name: 'WebSearch', summary: 'Search current web information', searchHint: 'internet documentation' },
   { name: 'mcp__github__create_issue', summary: 'Create a GitHub issue', searchHint: 'repository ticket' },
-  { name: 'NotebookEdit', summary: 'Edit a notebook cell' }
+  { name: 'NotebookEdit', summary: 'Edit a notebook cell' },
+  { name: 'GetMcpPrompt', summary: 'List or explicitly load an MCP prompt' }
 ]
 
 describe('ToolSearchTool', () => {
@@ -26,6 +27,15 @@ describe('ToolSearchTool', () => {
       toolExposure: { deferredTools: deferred, activate: (names) => activated.push(...names) }
     })
     expect(activated).toEqual(['mcp__github__create_issue'])
+  })
+
+  it('discovers the MCP prompt loader by capability text', async () => {
+    const activated: string[] = []
+    await new ToolSearchTool().execute('{"query":"MCP prompt"}', {
+      workspaceRoot: 'C:\\workspace',
+      toolExposure: { deferredTools: deferred, activate: (names) => activated.push(...names) }
+    })
+    expect(activated).toEqual(['GetMcpPrompt'])
   })
 
   it('uses the native typed-result hook through the compatibility adapter', async () => {

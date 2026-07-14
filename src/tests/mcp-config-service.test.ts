@@ -68,6 +68,40 @@ describe('McpConfigService', () => {
     })).rejects.toThrow(/shell command-string/)
   })
 
+  it('updates a user server enabled flag without changing the rest of its JSON config', async () => {
+    const service = new McpConfigService(await temporaryRoot('codez-mcp-toggle-user-'))
+    await service.saveUserServers({
+      filesystem: {
+        type: 'stdio',
+        description: 'Workspace files',
+        command: 'node',
+        args: ['server.cjs'],
+        enabled: true
+      }
+    })
+
+    await service.setUserServerEnabled('filesystem', false)
+
+    const config = (await service.load()).find((item) => item.name === 'filesystem')
+    expect(config?.config).toMatchObject({
+      description: 'Workspace files',
+      command: 'node',
+      args: ['server.cjs'],
+      enabled: false
+    })
+    await expect(service.setUserServerEnabled('missing', true)).rejects.toThrow(/user scope/)
+  })
+
+  it('validates optional server descriptions', async () => {
+    const service = new McpConfigService(await temporaryRoot('codez-mcp-description-user-'))
+    await expect(service.saveUserServers({
+      valid: { type: 'http', url: 'https://example.test/mcp', description: 'Issue tracker tools' }
+    })).resolves.toBeUndefined()
+    await expect(service.saveUserServers({
+      invalid: { type: 'http', url: 'https://example.test/mcp', description: 'x'.repeat(1025) }
+    })).rejects.toThrow(/description/)
+  })
+
   it('writes user configuration atomically and preserves an existing private file mode', async () => {
     const userData = await temporaryRoot('codez-mcp-atomic-user-')
     const service = new McpConfigService(userData)

@@ -4,17 +4,20 @@ export interface StreamRetryOptions {
   firstByteTimeoutMs?: number
   idleTimeoutMs?: number
   maxRetries?: number
+  maxIdleRetries?: number
   retryDelayMs?: number
   onFirstByteTimeout?: (attempt: number) => void
   onIdleTimeout?: (attempt: number) => void
-  onRetry?: (attempt: number) => void
+  onRetry?: (attempt: number, reason: StreamRetryReason, retryNumber: number) => void
 }
 
 export type StreamAttempt = (callbacks: StreamCallbacks, signal: AbortSignal) => Promise<void>
+export type StreamRetryReason = 'first-byte' | 'idle'
 
 const DEFAULT_FIRST_BYTE_TIMEOUT_MS = 30_000
-const DEFAULT_IDLE_TIMEOUT_MS = 60_000
+const DEFAULT_IDLE_TIMEOUT_MS = 120_000
 const DEFAULT_MAX_RETRIES = 10
+const DEFAULT_MAX_IDLE_RETRIES = 2
 
 export function getDefaultRetryDelayMs(retryAttempt: number): number {
   const schedule = [5_000, 10_000, 20_000, 40_000, 60_000, 90_000]
@@ -49,9 +52,14 @@ export async function streamWithTimeoutRetry(
   const firstByteTimeoutMs = options.firstByteTimeoutMs ?? DEFAULT_FIRST_BYTE_TIMEOUT_MS
   const idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS
   const maxRetries = Math.max(0, options.maxRetries ?? DEFAULT_MAX_RETRIES)
+  const maxIdleRetries = Math.max(0, options.maxIdleRetries ?? DEFAULT_MAX_IDLE_RETRIES)
+  let attempt = 0
+  let firstByteRetryCount = 0
+  let idleRetryCount = 0
 
-  for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+  while (true) {
     if (externalSignal.aborted) return
+    attempt++
 
     const attemptController = new AbortController()
     const abortAttempt = () => attemptController.abort()
@@ -92,7 +100,6 @@ export async function streamWithTimeoutRetry(
         suppressCallbacks = true
         clearTimers()
         options.onIdleTimeout?.(attempt)
-        callbacks.onError(`响应流已超时中断（${formatDuration(idleTimeoutMs)} 无新数据），已自动停止。请检查网络连接后重试。`)
         attemptController.abort()
       }, idleTimeoutMs)
     }
@@ -147,11 +154,12 @@ export async function streamWithTimeoutRetry(
       externalSignal.removeEventListener('abort', abortAttempt)
     }
 
-    if (externalSignal.aborted || completed || idleTimedOut) return
+    if (externalSignal.aborted || completed) return
 
     if (timedOutBeforeFirstByte) {
-      if (attempt <= maxRetries) {
-        options.onRetry?.(attempt)
+      if (firstByteRetryCount < maxRetries) {
+        firstByteRetryCount++
+        options.onRetry?.(attempt, 'first-byte', firstByteRetryCount)
         const retryDelayMs = Math.max(0, options.retryDelayMs ?? getDefaultRetryDelayMs(attempt))
         await wait(retryDelayMs, externalSignal)
         continue
@@ -159,6 +167,25 @@ export async function streamWithTimeoutRetry(
 
       callbacks.onError(
         `等待首个响应超时（${formatDuration(firstByteTimeoutMs)}），已重试 ${maxRetries} 次，请检查网络 / Provider / 模型是否可用。`
+      )
+      return
+    }
+
+    if (idleTimedOut) {
+      if (idleRetryCount < maxIdleRetries) {
+        idleRetryCount++
+        options.onRetry?.(attempt, 'idle', idleRetryCount)
+        const retryDelayMs = Math.max(0, options.retryDelayMs ?? getDefaultRetryDelayMs(attempt))
+        await wait(retryDelayMs, externalSignal)
+        continue
+      }
+
+      const retryStatus = maxIdleRetries > 0
+        ? `已自动重试 ${maxIdleRetries} 次，现已停止`
+        : '已自动停止'
+      callbacks.onError(
+        `响应流已超时中断（${formatDuration(idleTimeoutMs)} 无新数据），${retryStatus}。请检查网络连接后重试。`,
+        'NETWORK'
       )
       return
     }

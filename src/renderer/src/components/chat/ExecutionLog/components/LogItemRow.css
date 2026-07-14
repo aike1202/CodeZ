@@ -67,6 +67,15 @@
   }
 }
 
+.timeline-icon-compaction {
+  color: var(--primary-color);
+  background: var(--bg-hover-light);
+  border-radius: 4px;
+}
+
+.timeline-icon-compaction.is-success { color: var(--text-success, #059669); }
+.timeline-icon-compaction.is-error { color: var(--color-error); }
+
 .timeline-verb-text { margin-right: 6px; }
 
 .timeline-target-link {

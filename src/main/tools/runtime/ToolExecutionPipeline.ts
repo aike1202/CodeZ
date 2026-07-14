@@ -328,6 +328,7 @@ export class ToolExecutionPipeline {
             call: item.call,
             canonicalName: item.handler.descriptor.name,
             input: item.input,
+            maxResultChars: item.handler.descriptor.behavior.maxResultChars,
             result
           } satisfies ToolPipelineResult
         } catch (error: any) {
@@ -335,6 +336,7 @@ export class ToolExecutionPipeline {
             call: item.call,
             canonicalName: item.handler.descriptor.name,
             input: item.input,
+            maxResultChars: item.handler.descriptor.behavior.maxResultChars,
             result: errorResult({
               code: toolContext.abortSignal?.aborted ? 'TOOL_CANCELLED' : 'TOOL_EXECUTION_FAILED',
               message: error?.message || String(error),

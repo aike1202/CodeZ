@@ -155,6 +155,8 @@ declare global {
       mcp: {
         list: () => Promise<any>
         saveUser: (servers: Record<string, unknown>) => Promise<any>
+        setEnabled: (name: string, enabled: boolean) => Promise<any>
+        getCatalog: (name: string) => Promise<any>
         reconnect: (name: string) => Promise<any>
         authorize: (name: string) => Promise<any>
         logout: (name: string) => Promise<any>

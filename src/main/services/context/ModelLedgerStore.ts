@@ -38,6 +38,10 @@ function clearProviderUsage(scope: SessionRuntimeScopeSnapshot): void {
   delete scope.lastProviderUsageRequestFingerprint
 }
 
+function clearObservedProviderLimit(scope: SessionRuntimeScopeSnapshot): void {
+  delete scope.observedProviderInputLimit
+}
+
 function applyEvent(state: LoadedSessionRuntime, event: AnyLedgerEvent): void {
   const scope = state.scopes[event.contextScopeId] || emptyScope()
   state.scopes[event.contextScopeId] = scope
@@ -45,6 +49,14 @@ function applyEvent(state: LoadedSessionRuntime, event: AnyLedgerEvent): void {
 
   switch (event.type) {
     case 'user_message':
+      if (
+        (event.payload.providerId && scope.observedProviderInputLimit?.providerId &&
+          event.payload.providerId !== scope.observedProviderInputLimit.providerId) ||
+        (event.payload.model && scope.observedProviderInputLimit?.model &&
+          event.payload.model !== scope.observedProviderInputLimit.model)
+      ) {
+        clearObservedProviderLimit(scope)
+      }
       if (
         (event.payload.providerId && scope.lastProviderId && event.payload.providerId !== scope.lastProviderId) ||
         (event.payload.model && scope.lastModel && event.payload.model !== scope.lastModel) ||
@@ -119,6 +131,9 @@ function applyEvent(state: LoadedSessionRuntime, event: AnyLedgerEvent): void {
         sourceSequence: message.sourceSequence ?? event.sequence
       }))
       scope.latestCompaction = event.payload.summary
+      if (event.payload.observedProviderInputLimit) {
+        scope.observedProviderInputLimit = { ...event.payload.observedProviderInputLimit }
+      }
       scope.postCompactionFileContext = event.payload.postCompactionFileContext
         ? {
             ...event.payload.postCompactionFileContext,
@@ -153,6 +168,7 @@ function applyEvent(state: LoadedSessionRuntime, event: AnyLedgerEvent): void {
       delete scope.postCompactionSkillContext
       delete scope.skillStates
       delete scope.postCompactionSkillStates
+      clearObservedProviderLimit(scope)
       scope.legacyImport = {
         sourceHash: event.payload.sourceHash,
         mode: event.payload.mode,
@@ -176,6 +192,7 @@ function applyEvent(state: LoadedSessionRuntime, event: AnyLedgerEvent): void {
       delete scope.latestCompactionResumeRevision
       delete scope.lastProviderId
       delete scope.lastModel
+      clearObservedProviderLimit(scope)
       clearProviderUsage(scope)
       break
     }
@@ -195,10 +212,54 @@ async function appendDurable(filePath: string, line: string): Promise<void> {
   }
 }
 
+const SESSION_LOCK_TIMEOUT_MS = 15_000
+const ABANDONED_LOCK_AGE_MS = 30_000
+const REPAIRABLE_CONFLICT_TAIL_TYPES = new Set<LedgerEventType>([
+  'user_message',
+  'assistant_message',
+  'tool_result',
+  'skill_state_updated',
+  'turn_completed',
+  'turn_interrupted',
+  'resume_state_updated'
+])
+
+interface SessionFileLock {
+  filePath: string
+  handle: Awaited<ReturnType<typeof fs.open>>
+  token: string
+}
+
+interface LedgerFileSignature {
+  size: number
+  mtimeMs: number
+}
+
+function processIsAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+function cloneRuntime(state: LoadedSessionRuntime): LoadedSessionRuntime {
+  return {
+    ...state,
+    scopes: Object.fromEntries(
+      Object.entries(state.scopes).map(([scopeId, scope]) => [scopeId, cloneScope(scope)])
+    ),
+    warnings: [...state.warnings]
+  }
+}
+
 export class ModelLedgerStore {
   private readonly queues = new Map<string, Promise<void>>()
   private readonly scopeOperationQueues = new Map<string, Promise<void>>()
   private readonly cache = new Map<string, LoadedSessionRuntime>()
+  private readonly cacheLedgerSignatures = new Map<string, LedgerFileSignature | null>()
 
   constructor(public readonly runtimeRoot: string) {}
 
@@ -214,8 +275,14 @@ export class ModelLedgerStore {
     return path.join(this.sessionDirectory(sessionId), 'snapshot.json')
   }
 
+  private lockPath(sessionId: string): string {
+    return path.join(this.sessionDirectory(sessionId), '.writer.lock')
+  }
+
   async load(sessionId: string): Promise<LoadedSessionRuntime> {
-    return this.enqueue(sessionId, () => this.loadUnlocked(sessionId, true))
+    return this.enqueue(sessionId, () =>
+      this.withSessionFileLock(sessionId, () => this.loadUnlocked(sessionId, true))
+    )
   }
 
   /** Serializes long-running maintenance that must not interleave within one scope. */
@@ -251,8 +318,10 @@ export class ModelLedgerStore {
     turnId?: string
   ): Promise<LedgerEvent<TType>> {
     return this.enqueue(sessionId, async () => {
-      const state = await this.loadUnlocked(sessionId)
-      return this.appendUnlocked(state, sessionId, contextScopeId, type, payload, turnId)
+      return this.withSessionFileLock(sessionId, async () => {
+        const state = await this.loadForWriteUnlocked(sessionId)
+        return this.appendUnlocked(state, sessionId, contextScopeId, type, payload, turnId)
+      })
     })
   }
 
@@ -266,11 +335,13 @@ export class ModelLedgerStore {
     turnId?: string
   ): Promise<LedgerEvent<TType> | null> {
     return this.enqueue(sessionId, async () => {
-      const state = await this.loadUnlocked(sessionId)
-      const scope = state.scopes[contextScopeId] || emptyScope()
-      state.scopes[contextScopeId] = scope
-      if (scope.historyVersion !== expectedHistoryVersion) return null
-      return this.appendUnlocked(state, sessionId, contextScopeId, type, payload, turnId)
+      return this.withSessionFileLock(sessionId, async () => {
+        const state = await this.loadForWriteUnlocked(sessionId)
+        const scope = state.scopes[contextScopeId] || emptyScope()
+        state.scopes[contextScopeId] = scope
+        if (scope.historyVersion !== expectedHistoryVersion) return null
+        return this.appendUnlocked(state, sessionId, contextScopeId, type, payload, turnId)
+      })
     })
   }
 
@@ -284,94 +355,118 @@ export class ModelLedgerStore {
   }> {
     if (!targetUiMessageId.trim()) throw new Error('History revert target is empty')
     return this.enqueue(sessionId, async () => {
-      const state = await this.loadUnlocked(sessionId)
-      const scope = state.scopes[contextScopeId]
-      if (!scope) throw new Error(`Context scope not found: ${contextScopeId}`)
+      return this.withSessionFileLock(sessionId, async () => {
+        const state = await this.loadForWriteUnlocked(sessionId)
+        const scope = state.scopes[contextScopeId]
+        if (!scope) throw new Error(`Context scope not found: ${contextScopeId}`)
 
-      let targetMessageId = scope.activeMessages.find((message) =>
-        message.role === 'user' && message.clientMessageId === targetUiMessageId
-      )?.id
-      if (!targetMessageId) {
-        const events = await this.readEvents(sessionId, [])
-        const targetEvent = [...events].reverse().find((event) =>
-          event.contextScopeId === contextScopeId &&
-          event.type === 'user_message' &&
-          (event.payload.commandMetadata as { uiMessageId?: unknown } | undefined)?.uiMessageId ===
-            targetUiMessageId
-        )
-        if (targetEvent?.type === 'user_message') targetMessageId = targetEvent.payload.message.id
-      }
-      const targetIndex = targetMessageId
-        ? scope.activeMessages.findIndex((message) => message.id === targetMessageId)
-        : -1
-      if (targetIndex < 0 || scope.activeMessages[targetIndex]?.role !== 'user') {
-        throw Object.assign(
-          new Error('The requested history point is no longer present after compaction.'),
-          { code: 'HISTORY_REVERT_TARGET_COMPACTED' }
-        )
-      }
-      const targetMessage = scope.activeMessages[targetIndex]
-      if (
-        targetMessage.id.startsWith('legacy:') ||
-        (
-          scope.latestCompaction &&
-          targetMessage.sourceSequence !== undefined &&
-          targetMessage.sourceSequence <= scope.latestCompaction.coveredThroughSequence
-        )
-      ) {
-        throw Object.assign(
-          new Error('The requested history point is represented inside a compacted summary.'),
-          { code: 'HISTORY_REVERT_TARGET_COMPACTED' }
-        )
-      }
-      return {
-        expectedHistoryVersion: scope.historyVersion,
-        payload: {
-          sourceHistoryVersion: scope.historyVersion,
-          targetUiMessageId,
-          targetMessageId: targetMessageId!,
-          activeMessages: scope.activeMessages.slice(0, targetIndex).map((message) => ({
-            ...message,
-            toolCalls: message.toolCalls?.map((call) => ({ ...call })),
-            attachments: message.attachments?.map((attachment) => ({ ...attachment })),
-            fileReferences: message.fileReferences?.map((reference) => ({ ...reference }))
-          })),
-          skillStates: deriveSessionSkillStates({
-            initial: scope.postCompactionSkillStates,
-            postCompaction: scope.postCompactionSkillContext,
-            messages: scope.activeMessages.slice(0, targetIndex)
-          })
+        let targetMessageId = scope.activeMessages.find((message) =>
+          message.role === 'user' && message.clientMessageId === targetUiMessageId
+        )?.id
+        if (!targetMessageId) {
+          const events = await this.readEvents(sessionId, [])
+          const targetEvent = [...events].reverse().find((event) =>
+            event.contextScopeId === contextScopeId &&
+            event.type === 'user_message' &&
+            (event.payload.commandMetadata as { uiMessageId?: unknown } | undefined)?.uiMessageId ===
+              targetUiMessageId
+          )
+          if (targetEvent?.type === 'user_message') targetMessageId = targetEvent.payload.message.id
         }
-      }
+        const targetIndex = targetMessageId
+          ? scope.activeMessages.findIndex((message) => message.id === targetMessageId)
+          : -1
+        if (targetIndex < 0 || scope.activeMessages[targetIndex]?.role !== 'user') {
+          throw Object.assign(
+            new Error('The requested history point is no longer present after compaction.'),
+            { code: 'HISTORY_REVERT_TARGET_COMPACTED' }
+          )
+        }
+        const targetMessage = scope.activeMessages[targetIndex]
+        if (
+          targetMessage.id.startsWith('legacy:') ||
+          (
+            scope.latestCompaction &&
+            targetMessage.sourceSequence !== undefined &&
+            targetMessage.sourceSequence <= scope.latestCompaction.coveredThroughSequence
+          )
+        ) {
+          throw Object.assign(
+            new Error('The requested history point is represented inside a compacted summary.'),
+            { code: 'HISTORY_REVERT_TARGET_COMPACTED' }
+          )
+        }
+        return {
+          expectedHistoryVersion: scope.historyVersion,
+          payload: {
+            sourceHistoryVersion: scope.historyVersion,
+            targetUiMessageId,
+            targetMessageId: targetMessageId!,
+            activeMessages: scope.activeMessages.slice(0, targetIndex).map((message) => ({
+              ...message,
+              toolCalls: message.toolCalls?.map((call) => ({ ...call })),
+              attachments: message.attachments?.map((attachment) => ({ ...attachment })),
+              fileReferences: message.fileReferences?.map((reference) => ({ ...reference }))
+            })),
+            skillStates: deriveSessionSkillStates({
+              initial: scope.postCompactionSkillStates,
+              postCompaction: scope.postCompactionSkillContext,
+              messages: scope.activeMessages.slice(0, targetIndex)
+            })
+          }
+        }
+      })
     })
   }
 
   async writeSnapshot(sessionId: string): Promise<SessionRuntimeSnapshot> {
     return this.enqueue(sessionId, async () => {
-      const state = await this.loadUnlocked(sessionId)
-      const snapshot: SessionRuntimeSnapshot = {
-        schemaVersion: CONTEXT_SCHEMA_VERSION,
-        sessionId,
-        throughSequence: state.throughSequence,
-        createdAt: new Date().toISOString(),
-        scopes: Object.fromEntries(
-          Object.entries(state.scopes).map(([scopeId, scope]) => [scopeId, cloneScope(scope)])
-        )
-      }
-      await atomicWriteJson(this.snapshotPath(sessionId), snapshot)
-      return snapshot
+      return this.withSessionFileLock(sessionId, async () => {
+        const state = await this.loadForWriteUnlocked(sessionId)
+        const snapshot: SessionRuntimeSnapshot = {
+          schemaVersion: CONTEXT_SCHEMA_VERSION,
+          sessionId,
+          throughSequence: state.throughSequence,
+          createdAt: new Date().toISOString(),
+          scopes: Object.fromEntries(
+            Object.entries(state.scopes).map(([scopeId, scope]) => [scopeId, cloneScope(scope)])
+          )
+        }
+        await atomicWriteJson(this.snapshotPath(sessionId), snapshot)
+        return snapshot
+      })
     })
   }
 
   async compactPhysicalLog(sessionId: string): Promise<void> {
     await this.enqueue(sessionId, async () => {
-      const snapshot = await this.readSnapshot(sessionId)
-      if (!snapshot) return
-      const retained = (await this.readEvents(sessionId, []))
-        .filter((event) => event.sequence > snapshot.throughSequence)
-      const content = retained.map((event) => JSON.stringify(event)).join('\n')
-      await atomicWriteFile(this.ledgerPath(sessionId), content ? `${content}\n` : '')
+      await this.withSessionFileLock(sessionId, async () => {
+        const snapshot = await this.readSnapshot(sessionId)
+        if (!snapshot) return
+        const retained = (await this.readEvents(sessionId, []))
+          .filter((event) => event.sequence > snapshot.throughSequence)
+        const content = retained.map((event) => JSON.stringify(event)).join('\n')
+        await atomicWriteFile(this.ledgerPath(sessionId), content ? `${content}\n` : '')
+        await this.rememberLedgerSignature(sessionId)
+      })
     })
+  }
+
+  private async loadForWriteUnlocked(sessionId: string): Promise<LoadedSessionRuntime> {
+    const cached = this.cache.get(sessionId)
+    if (cached) {
+      const remembered = this.cacheLedgerSignatures.get(sessionId)
+      const current = await this.readLedgerSignature(sessionId)
+      if (
+        remembered !== undefined &&
+        remembered?.size === current?.size &&
+        remembered?.mtimeMs === current?.mtimeMs
+      ) {
+        return cached
+      }
+      if (remembered === null && current === null) return cached
+    }
+    return this.loadUnlocked(sessionId, true)
   }
 
   private async loadUnlocked(sessionId: string, force = false): Promise<LoadedSessionRuntime> {
@@ -399,10 +494,16 @@ export class ModelLedgerStore {
           warnings
         }
 
-    const events = await this.readEvents(sessionId, warnings)
+    const snapshotThroughSequence = state.throughSequence
+    const events = await this.normalizeConflictingTail(
+      sessionId,
+      state,
+      await this.readEvents(sessionId, warnings),
+      warnings
+    )
     for (const event of events) {
       if (event.sessionId !== sessionId) throw new Error('LEDGER_CORRUPTED: session id mismatch')
-      if (event.sequence <= state.throughSequence) continue
+      if (event.sequence <= snapshotThroughSequence) continue
       if (event.sequence !== state.throughSequence + 1) throw new Error('LEDGER_CORRUPTED: non-contiguous sequence')
       const scope = state.scopes[event.contextScopeId] || emptyScope()
       const expectedVersion = scope.historyVersion + (eventChangesHistory(event.type) ? 1 : 0)
@@ -421,7 +522,68 @@ export class ModelLedgerStore {
     }
 
     this.cache.set(sessionId, state)
+    await this.rememberLedgerSignature(sessionId)
     return state
+  }
+
+  private async normalizeConflictingTail(
+    sessionId: string,
+    baseState: LoadedSessionRuntime,
+    events: AnyLedgerEvent[],
+    warnings: string[]
+  ): Promise<AnyLedgerEvent[]> {
+    const replayState = cloneRuntime(baseState)
+    const snapshotThroughSequence = baseState.throughSequence
+    let enteredPostSnapshotLog = false
+    let conflictIndex = -1
+
+    for (let index = 0; index < events.length; index++) {
+      const event = events[index]
+      if (event.sessionId !== sessionId) throw new Error('LEDGER_CORRUPTED: session id mismatch')
+      if (!enteredPostSnapshotLog && event.sequence <= snapshotThroughSequence) continue
+      enteredPostSnapshotLog = true
+
+      if (event.sequence > replayState.throughSequence + 1) {
+        throw new Error('LEDGER_CORRUPTED: non-contiguous sequence')
+      }
+      if (event.sequence <= replayState.throughSequence) {
+        conflictIndex = index
+        break
+      }
+      const scope = replayState.scopes[event.contextScopeId] || emptyScope()
+      const expectedVersion = scope.historyVersion + (eventChangesHistory(event.type) ? 1 : 0)
+      if (event.historyVersion !== expectedVersion) {
+        throw new Error('LEDGER_CORRUPTED: invalid history version')
+      }
+      applyEvent(replayState, event)
+    }
+
+    if (conflictIndex < 0) return events
+    const conflictingTail = events.slice(conflictIndex)
+    if (conflictingTail.some((event) => !REPAIRABLE_CONFLICT_TAIL_TYPES.has(event.type))) {
+      throw new Error('LEDGER_CORRUPTED: non-contiguous sequence')
+    }
+
+    const normalized = [...events]
+    for (let index = conflictIndex; index < events.length; index++) {
+      const event = events[index]
+      const scope = replayState.scopes[event.contextScopeId] || emptyScope()
+      const repaired = {
+        ...event,
+        sequence: replayState.throughSequence + 1,
+        historyVersion: scope.historyVersion + (eventChangesHistory(event.type) ? 1 : 0)
+      } as AnyLedgerEvent
+      normalized[index] = repaired
+      applyEvent(replayState, repaired)
+    }
+
+    const ledgerPath = this.ledgerPath(sessionId)
+    const backupPath = `${ledgerPath}.conflict-${Date.now()}-${process.pid}.bak`
+    await fs.copyFile(ledgerPath, backupPath, fs.constants.COPYFILE_EXCL)
+    const content = normalized.map((event) => JSON.stringify(event)).join('\n')
+    await atomicWriteFile(ledgerPath, content ? `${content}\n` : '')
+    warnings.push('REPAIRED_CONFLICTING_TAIL')
+    return normalized
   }
 
   private async readSnapshot(sessionId: string): Promise<SessionRuntimeSnapshot | null> {
@@ -491,7 +653,99 @@ export class ModelLedgerStore {
 
     await appendDurable(this.ledgerPath(sessionId), `${JSON.stringify(event)}\n`)
     applyEvent(state, event as AnyLedgerEvent)
+    await this.rememberLedgerSignature(sessionId)
     return event
+  }
+
+  private async readLedgerSignature(sessionId: string): Promise<LedgerFileSignature | null> {
+    try {
+      const stat = await fs.stat(this.ledgerPath(sessionId))
+      return { size: stat.size, mtimeMs: stat.mtimeMs }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw error
+    }
+  }
+
+  private async rememberLedgerSignature(sessionId: string): Promise<void> {
+    try {
+      this.cacheLedgerSignatures.set(sessionId, await this.readLedgerSignature(sessionId))
+    } catch {
+      this.cacheLedgerSignatures.delete(sessionId)
+    }
+  }
+
+  private async withSessionFileLock<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
+    const lock = await this.acquireSessionFileLock(sessionId)
+    try {
+      return await operation()
+    } finally {
+      await this.releaseSessionFileLock(lock)
+    }
+  }
+
+  private async acquireSessionFileLock(sessionId: string): Promise<SessionFileLock> {
+    const filePath = this.lockPath(sessionId)
+    const token = `${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2, 12)}`
+    const startedAt = Date.now()
+    await fs.mkdir(path.dirname(filePath), { recursive: true })
+
+    while (true) {
+      let handle: Awaited<ReturnType<typeof fs.open>> | undefined
+      try {
+        handle = await fs.open(filePath, 'wx', 0o600)
+        try {
+          await handle.writeFile(JSON.stringify({ token, pid: process.pid, createdAt: Date.now() }), 'utf8')
+          await handle.sync()
+        } catch (error) {
+          await handle.close().catch(() => undefined)
+          await fs.unlink(filePath).catch(() => undefined)
+          throw error
+        }
+        return { filePath, handle, token }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        await this.removeAbandonedSessionFileLock(filePath)
+        if (Date.now() - startedAt >= SESSION_LOCK_TIMEOUT_MS) {
+          throw Object.assign(new Error(`LEDGER_BUSY: timed out waiting for session writer lock '${sessionId}'`), {
+            code: 'LEDGER_BUSY'
+          })
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25))
+      }
+    }
+  }
+
+  private async removeAbandonedSessionFileLock(filePath: string): Promise<void> {
+    try {
+      const [raw, stat] = await Promise.all([
+        fs.readFile(filePath, 'utf8').catch(() => ''),
+        fs.stat(filePath)
+      ])
+      let owner: { pid?: unknown } = {}
+      try {
+        owner = raw ? JSON.parse(raw) as { pid?: unknown } : {}
+      } catch {
+        owner = {}
+      }
+      const ownerPid = typeof owner.pid === 'number' ? owner.pid : 0
+      const ageMs = Date.now() - stat.mtimeMs
+      if (processIsAlive(ownerPid) && ageMs < ABANDONED_LOCK_AGE_MS) return
+      if (!ownerPid && ageMs < ABANDONED_LOCK_AGE_MS) return
+      await fs.unlink(filePath)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return
+    }
+  }
+
+  private async releaseSessionFileLock(lock: SessionFileLock): Promise<void> {
+    await lock.handle.close().catch(() => undefined)
+    try {
+      const owner = JSON.parse(await fs.readFile(lock.filePath, 'utf8')) as { token?: unknown }
+      if (owner.token === lock.token) await fs.unlink(lock.filePath)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
   }
 
   private enqueue<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {

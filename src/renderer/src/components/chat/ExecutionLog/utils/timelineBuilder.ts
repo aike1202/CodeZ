@@ -75,6 +75,40 @@ export function buildUnifiedTimeline(
         target: '',
         detail: item.content
       })
+    } else if (item.type === 'compaction') {
+      const isActuallyRunning = item.status === 'running' && isStreaming !== false
+      const status = isActuallyRunning
+        ? 'running' as const
+        : item.status === 'running'
+          ? 'error' as const
+          : item.status
+      const automatic = item.trigger !== 'manual'
+      const action = automatic ? '自动压缩上下文' : '压缩上下文'
+      const tokenDetail = item.tokensBefore !== undefined && item.tokensAfter !== undefined
+        ? `（${item.tokensBefore.toLocaleString('zh-CN')} → ${item.tokensAfter.toLocaleString('zh-CN')} tokens）`
+        : item.tokensBefore !== undefined
+          ? `（压缩前 ${item.tokensBefore.toLocaleString('zh-CN')} tokens）`
+          : ''
+      const target = status === 'running'
+        ? `正在${action}${tokenDetail}`
+        : status === 'success'
+          ? `已${action}${tokenDetail}`
+          : `${action}失败${item.error ? `：${item.error}` : ''}`
+
+      list.push({
+        id: item.id,
+        type: 'compaction',
+        timestamp: item.startedAt,
+        completedAt: item.completedAt,
+        status,
+        verb: status === 'running'
+          ? 'Compacting'
+          : status === 'success'
+            ? 'Compacted'
+            : 'CompactionFailed',
+        target,
+        detail: item.error
+      })
     } else if (item.type === 'tool') {
       const tc = item.toolCall
       if (tc.name === 'ToolSearch') return
@@ -542,6 +576,8 @@ export function buildUnifiedTimeline(
             ? item.toolCall.status === 'running'
             : item.type === 'text'
               ? item.status === 'running'
+              : item.type === 'compaction'
+                ? item.status === 'running'
               : false
       ) ||
       commands.some((cmd) => cmd.status === 'running')

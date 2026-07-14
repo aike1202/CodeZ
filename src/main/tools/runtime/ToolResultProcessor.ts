@@ -41,11 +41,12 @@ export class ToolResultProcessor {
       .map((item) => ({
         item,
         chars: item.result.status === 'success' ? item.result.modelContent.length : 0,
-        bytes: item.result.status === 'success' ? Buffer.byteLength(item.result.modelContent, 'utf8') : 0
+        bytes: item.result.status === 'success' ? Buffer.byteLength(item.result.modelContent, 'utf8') : 0,
+        softChars: item.maxResultChars ?? this.limits.softChars
       }))
     let batchChars = candidates.reduce((sum, candidate) => sum + candidate.chars, 0)
     const mustPersist = new Set(candidates
-      .filter((candidate) => candidate.chars > this.limits.softChars || candidate.bytes > this.limits.hardBytes)
+      .filter((candidate) => candidate.chars > candidate.softChars || candidate.bytes > this.limits.hardBytes)
       .map((candidate) => candidate.item.call.callId))
     for (const candidate of [...candidates].sort((a, b) => b.chars - a.chars)) {
       if (batchChars <= this.limits.batchChars) break

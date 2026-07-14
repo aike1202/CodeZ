@@ -467,6 +467,10 @@ const api = {
     list: (): Promise<any> => ipcRenderer.invoke(IPC_CHANNELS.MCP_LIST),
     saveUser: (servers: Record<string, unknown>): Promise<any> =>
       ipcRenderer.invoke(IPC_CHANNELS.MCP_SAVE_USER, servers),
+    setEnabled: (name: string, enabled: boolean): Promise<any> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MCP_SET_ENABLED, name, enabled),
+    getCatalog: (name: string): Promise<any> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MCP_GET_CATALOG, name),
     reconnect: (name: string): Promise<any> =>
       ipcRenderer.invoke(IPC_CHANNELS.MCP_RECONNECT, name),
     authorize: (name: string): Promise<any> =>

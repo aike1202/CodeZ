@@ -153,30 +153,24 @@ describe('CompactionService', () => {
     expect(calls).toBe(3)
   })
 
-  it('repairs one invalid schema response and then commits', async () => {
+  it('accepts a non-schema response as host-bounded text', async () => {
     const f = await fixture()
-    let calls = 0
-    const generate = vi.fn(async (input: {
-      coveredThroughSequence: number
-      validationFeedback?: string
-    }) => {
-      calls++
-      return calls === 1
-        ? JSON.stringify({ version: '1', goal: 'continue' })
-        : JSON.stringify(summary(input.coveredThroughSequence))
-    })
+    const generate = vi.fn().mockResolvedValue('Continue the current implementation.')
     const result = await new CompactionService(f.ledger, { generate }).compact({
       sessionId: 's1', contextScopeId: 'main', trigger: 'manual',
       capabilities: { contextWindowTokens: 10_000, maxOutputTokens: 2_000 }, systemPrompt: 'system'
     })
     expect(result.status).toBe('completed')
-    expect(generate).toHaveBeenCalledTimes(2)
-    expect(generate.mock.calls[1][0].validationFeedback).toContain('version must be 1')
+    expect(generate).toHaveBeenCalledTimes(1)
+    expect((await f.ledger.load('s1')).scopes.main.latestCompaction).toMatchObject({
+      version: 2,
+      content: 'Continue the current implementation.'
+    })
   })
 
-  it('allows a later compact request to retry after invalid schema responses', async () => {
+  it('allows a later compact request to retry after empty responses', async () => {
     const f = await fixture()
-    const generate = vi.fn().mockResolvedValue(JSON.stringify({ version: '1', goal: 'continue' }))
+    const generate = vi.fn().mockResolvedValue('')
     const service = new CompactionService(f.ledger, { generate })
     const request = {
       sessionId: 's1', contextScopeId: 'main' as const, trigger: 'manual' as const,
@@ -184,8 +178,8 @@ describe('CompactionService', () => {
     }
     const first = await service.compact(request)
     const second = await service.compact(request)
-    expect(first).toMatchObject({ status: 'failed', errorCode: 'COMPACTION_SCHEMA_INVALID' })
-    expect(second).toMatchObject({ status: 'failed', errorCode: 'COMPACTION_SCHEMA_INVALID' })
+    expect(first).toMatchObject({ status: 'failed', errorCode: 'COMPACTION_SUMMARY_FAILED' })
+    expect(second).toMatchObject({ status: 'failed', errorCode: 'COMPACTION_SUMMARY_FAILED' })
     expect(generate).toHaveBeenCalledTimes(4)
     const events = (await readFile(f.ledger.ledgerPath('s1'), 'utf8'))
       .trim()
@@ -195,6 +189,66 @@ describe('CompactionService', () => {
       .toEqual(expect.arrayContaining([
         expect.objectContaining({ payload: expect.objectContaining({ retryable: true }) })
       ]))
+  })
+
+  it('backs off whole protocol rounds when the compaction request overflows', async () => {
+    const f = await fixture()
+    const generate = vi.fn()
+      .mockRejectedValueOnce(Object.assign(
+        new Error('prompt is too long: 12000 tokens > 10000 maximum'),
+        { providerCode: 'CONTEXT_OVERFLOW' }
+      ))
+      .mockResolvedValueOnce('<summary>Continue after reducing old context.</summary>')
+    const result = await new CompactionService(f.ledger, { generate }).compact({
+      sessionId: 's1', contextScopeId: 'main', trigger: 'manual',
+      capabilities: { contextWindowTokens: 10_000, maxOutputTokens: 2_000 }, systemPrompt: 'system'
+    })
+
+    expect(result.status).toBe('completed')
+    expect(generate).toHaveBeenCalledTimes(2)
+    expect(generate.mock.calls[1][0].messages.length)
+      .toBeLessThan(generate.mock.calls[0][0].messages.length)
+    expect((await f.ledger.load('s1')).scopes.main.latestCompaction).toMatchObject({
+      version: 2,
+      truncatedPrefixThroughSequence: expect.any(Number)
+    })
+  })
+
+  it('persists and reuses an observed Provider input ceiling', async () => {
+    const f = await fixture()
+    const result = await new CompactionService(f.ledger, {
+      generate: vi.fn().mockResolvedValue('<summary>Continue with the current task.</summary>')
+    }).compact({
+      sessionId: 's1', contextScopeId: 'main', trigger: 'provider_overflow',
+      capabilities: { contextWindowTokens: 10_000, maxOutputTokens: 2_000 },
+      systemPrompt: 'system', providerId: 'provider-a', model: 'model-a'
+    })
+    const scope = (await f.ledger.load('s1')).scopes.main
+
+    expect(result.status).toBe('completed')
+    expect(scope.observedProviderInputLimit).toMatchObject({
+      providerId: 'provider-a',
+      model: 'model-a',
+      maxInputTokens: expect.any(Number)
+    })
+    const current = scope.activeMessages.filter((message) => message.role === 'user').at(-1)!
+    const built = await new ModelContextBuilder(f.ledger).build({
+      sessionId: 's1', contextScopeId: 'main',
+      currentInputMessageId: current.id, currentInput: current.content,
+      capabilities: { contextWindowTokens: 1_000_000, maxOutputTokens: 8_192 },
+      providerRequestProfile: { providerId: 'provider-a', model: 'model-a' },
+      systemPrompt: 'system', toolSchemas: [], allowCompaction: false
+    })
+
+    expect(built.budget.hardInputLimit)
+      .toBe(scope.observedProviderInputLimit?.maxInputTokens)
+
+    await f.runtime.beginTurn({
+      sessionId: 's1', contextScopeId: 'main', text: 'switch model',
+      providerId: 'provider-b', model: 'model-b'
+    })
+    expect((await f.ledger.load('s1')).scopes.main.observedProviderInputLimit)
+      .toBeUndefined()
   })
 
   it('compacts an oversized active turn repeatedly while retaining its durable user input', async () => {

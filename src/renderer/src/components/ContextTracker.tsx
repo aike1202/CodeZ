@@ -123,7 +123,6 @@ export default function ContextTracker({ snapshot, compactionState }: ContextTra
                 <Flex justify="between"><span>安全边际</span><span>{formatTokens(snapshot.safetyMarginTokens)}</span></Flex>
                 <Flex justify="between"><span>原始持久化历史</span><span>{formatTokens(snapshot.rawHistoryTokens)}</span></Flex>
                 <Flex justify="between"><span>数据来源</span><span>{SOURCE_LABEL[snapshot.estimateSource]}</span></Flex>
-                {compactionState?.status === 'running' && <div style={{ marginTop: 6, color: '#d97706' }}>正在压缩上下文</div>}
                 {compactionState?.status === 'failed' && <div style={{ marginTop: 6, color: '#dc2626' }}>{compactionState.error || '压缩失败'}</div>}
               </div>
             </>

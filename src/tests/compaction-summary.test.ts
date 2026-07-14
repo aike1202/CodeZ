@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildCompactionPrompt,
+  normalizeCompactionSummary,
   parseAndValidateSummary,
   renderCompactionSummary
 } from '../main/services/context/CompactionSummary'
@@ -39,22 +40,39 @@ describe('CompactionSummary', () => {
       instructions: 'keep migration decisions'
     })
     expect(prompt).toContain('keep migration decisions')
-    expect(prompt).toContain('coveredThroughSequence')
+    expect(prompt).not.toContain('coveredThroughSequence')
     expect(prompt).toContain('ship context ledger')
   })
 
-  it('includes a complete JSON shape and repair feedback', () => {
+  it('requests tagged text and includes repair feedback', () => {
     const prompt = buildCompactionPrompt({
       coveredThroughSequence: 9,
       messages: [],
-      validationFeedback: 'version must be 1',
-      previousInvalidOutput: '{"version":"1"}'
+      validationFeedback: 'summary is empty'
     })
-    expect(prompt).toContain('"version": 1')
-    expect(prompt).toContain('"goal": {')
-    expect(prompt).toContain('"currentObjective":')
-    expect(prompt).toContain('"status": {')
-    expect(prompt).toContain('version must be 1')
-    expect(prompt).toContain('{"version":"1"}')
+    expect(prompt).toContain('<analysis>')
+    expect(prompt).toContain('<summary>')
+    expect(prompt).toContain('summary is empty')
+    expect(prompt).toContain('do not output JSON')
+  })
+
+  it('normalizes tagged or unstructured text while the host owns the boundary', () => {
+    const tagged = normalizeCompactionSummary(
+      '<analysis>draft</analysis><summary>Continue the migration.</summary>',
+      12
+    )
+    const fallback = normalizeCompactionSummary('{"version":"1","goal":"continue"}', 13)
+
+    expect(tagged).toEqual({
+      version: 2,
+      format: 'text',
+      content: 'Continue the migration.',
+      coveredThroughSequence: 12
+    })
+    expect(fallback).toMatchObject({
+      version: 2,
+      content: '{"version":"1","goal":"continue"}',
+      coveredThroughSequence: 13
+    })
   })
 })

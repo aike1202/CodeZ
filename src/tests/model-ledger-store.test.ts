@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { appendFile, mkdtemp, readFile, rm } from 'fs/promises'
+import { appendFile, mkdtemp, readFile, readdir, rm } from 'fs/promises'
 import os from 'os'
 import path from 'path'
 import { ModelLedgerStore } from '../main/services/context/ModelLedgerStore'
@@ -33,6 +33,86 @@ describe('ModelLedgerStore', () => {
       completedAt: '2026-07-10T00:00:01.000Z'
     }, 't1')
     expect(lifecycle.historyVersion).toBe(1)
+  })
+
+  it('serializes appends across independent store instances', async () => {
+    const first = await createStore()
+    const second = new ModelLedgerStore(first.runtimeRoot)
+
+    await Promise.all(Array.from({ length: 12 }, (_, index) => {
+      const store = index % 2 === 0 ? first : second
+      return store.append('s1', 'main', 'user_message', {
+        message: { id: `u${index}`, role: 'user', content: `message ${index}` } as never
+      }, `t${index}`)
+    }))
+
+    const loaded = await new ModelLedgerStore(first.runtimeRoot).load('s1')
+    const events = (await readFile(first.ledgerPath('s1'), 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { sequence: number })
+    expect(events.map((event) => event.sequence)).toEqual(
+      Array.from({ length: 12 }, (_, index) => index + 1)
+    )
+    expect(loaded.throughSequence).toBe(12)
+    expect(loaded.scopes.main.historyVersion).toBe(12)
+  })
+
+  it('backs up and rebases a conflicting repairable ledger tail', async () => {
+    const store = await createStore()
+    await store.append('s1', 'main', 'user_message', {
+      message: { id: 'u1', role: 'user', content: 'start' } as never
+    }, 't1')
+    await store.append('s1', 'main', 'assistant_message', {
+      message: { id: 'a1', role: 'assistant', content: 'first writer' } as never
+    }, 't1')
+
+    const lines = (await readFile(store.ledgerPath('s1'), 'utf8')).trim().split('\n')
+    const duplicate = JSON.parse(lines[1]) as Record<string, unknown> & {
+      payload: { message: { id: string; content: string } }
+    }
+    duplicate.eventId = 's1:2:stale-writer'
+    duplicate.payload.message.id = 'a2'
+    duplicate.payload.message.content = 'stale writer'
+    await appendFile(store.ledgerPath('s1'), `${JSON.stringify(duplicate)}\n`, 'utf8')
+
+    const loaded = await new ModelLedgerStore(store.runtimeRoot).load('s1')
+    const repaired = (await readFile(store.ledgerPath('s1'), 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { sequence: number; historyVersion: number })
+    const sessionFiles = await readdir(store.sessionDirectory('s1'))
+
+    expect(repaired.map((event) => event.sequence)).toEqual([1, 2, 3])
+    expect(repaired.map((event) => event.historyVersion)).toEqual([1, 2, 3])
+    expect(loaded.throughSequence).toBe(3)
+    expect(loaded.scopes.main.activeMessages.map((message) => message.id)).toEqual(['u1', 'a1', 'a2'])
+    expect(loaded.warnings).toContain('REPAIRED_CONFLICTING_TAIL')
+    expect(sessionFiles.some((name) => name.startsWith('ledger.jsonl.conflict-') && name.endsWith('.bak')))
+      .toBe(true)
+  })
+
+  it('does not repair a forward sequence gap', async () => {
+    const store = await createStore()
+    await store.append('s1', 'main', 'user_message', {
+      message: { id: 'u1', role: 'user', content: 'start' } as never
+    }, 't1')
+    const first = JSON.parse((await readFile(store.ledgerPath('s1'), 'utf8')).trim()) as {
+      eventId: string
+      sequence: number
+      historyVersion: number
+      payload: { message: { id: string } }
+    }
+    first.eventId = 's1:3:missing-middle-event'
+    first.sequence = 3
+    first.historyVersion = 2
+    first.payload.message.id = 'u3'
+    await appendFile(store.ledgerPath('s1'), `${JSON.stringify(first)}\n`, 'utf8')
+
+    await expect(new ModelLedgerStore(store.runtimeRoot).load('s1'))
+      .rejects.toThrow('LEDGER_CORRUPTED: non-contiguous sequence')
+    expect((await readdir(store.sessionDirectory('s1'))).some((name) => name.endsWith('.bak')))
+      .toBe(false)
   })
 
   it('ignores a truncated final JSON record', async () => {

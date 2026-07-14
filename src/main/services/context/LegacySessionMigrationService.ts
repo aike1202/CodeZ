@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'crypto'
 import type { SessionStore } from '../SessionStore'
 import type { SessionData } from '../../../shared/types/session'
 import type {
-  CompactionSummaryV1,
+  CompactionSummary,
   NormalizedModelMessage
 } from '../../../shared/types/context'
 import { MAIN_CONTEXT_SCOPE } from '../../../shared/types/context'
@@ -15,7 +15,7 @@ export interface LegacySummaryClient {
     sessionId: string
     transcript: string
     coveredItemCount: number
-  }): Promise<CompactionSummaryV1>
+  }): Promise<CompactionSummary>
 }
 
 export interface LegacyMigrationResult {
@@ -78,7 +78,7 @@ export class LegacySessionMigrationService {
     }
 
     const transcript = serializeLegacyTranscript(session.messages)
-    let summary: CompactionSummaryV1 | undefined
+    let summary: CompactionSummary | undefined
     let mode: LegacyMigrationResult['mode'] = 'summary'
     try {
       if (session.messages.length > 0) {

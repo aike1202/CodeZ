@@ -5,7 +5,7 @@ import * as path from 'path'
 import { ToolExecutionJournal } from '../main/tools/runtime/ToolExecutionJournal'
 import { ToolExecutionPipeline } from '../main/tools/runtime/ToolExecutionPipeline'
 import { ToolRegistry } from '../main/tools/runtime/ToolRegistry'
-import type { ToolHandler } from '../main/tools/runtime/types'
+import type { ToolHandler, ToolPipelineResult } from '../main/tools/runtime/types'
 import { ToolResultProcessor } from '../main/tools/runtime/ToolResultProcessor'
 import { LargeToolResultStore } from '../main/tools/runtime/LargeToolResultStore'
 
@@ -60,7 +60,7 @@ describe('ToolExecutionJournal', () => {
         name: 'LargeJournalResult', aliases: [], version: 'v1', source: 'mcp', sourceId: 'mcp:test',
         summary: 'journal', description: 'journal', inputSchema: { type: 'object', additionalProperties: false },
         availability: { enabled: () => true, roles: '*', exposure: 'core' },
-        behavior: { readOnly: () => true, destructive: () => false, concurrency: 'safe', interrupt: 'cancel', maxResultChars: 1000 },
+        behavior: { readOnly: () => true, destructive: () => false, concurrency: 'safe', interrupt: 'cancel', maxResultChars: 10 },
         planEffects: async () => ({ effects: [{ kind: 'external-effect', target: 'mcp:test' }], analysisStatus: 'parsed' }),
         resourceKeys: async () => []
       },
@@ -93,6 +93,22 @@ describe('ToolExecutionJournal', () => {
     })
     expect(events.find((event) => event.event === 'tool.call.completed').hookDurationMs).toBeGreaterThanOrEqual(1)
     expect(events.find((event) => event.event === 'tool.result.persisted')).toMatchObject({ persistedBytes: 100 })
+  })
+
+  it('honors a tool-specific 100k inline result budget', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codez-tool-result-limit-'))
+    roots.push(root)
+    const content = 'x'.repeat(60_000)
+    const processor = new ToolResultProcessor(new LargeToolResultStore(path.join(root, 'results')))
+    const [processed] = await processor.processBatch([{
+      call: { callId: 'mcp-large', position: 0, name: 'mcp__test__large', rawArguments: '{}' },
+      canonicalName: 'mcp__test__large',
+      maxResultChars: 100_000,
+      result: { status: 'success', modelContent: content }
+    } satisfies ToolPipelineResult], { workspaceRoot: root, sessionId: 's1' })
+    expect(processed.result.status).toBe('success')
+    expect(processed.result.modelContent).toBe(content)
+    expect(processed.result.modelContent).not.toContain('<persisted-tool-result ')
   })
 
   it('rotates journal files at the configured size limit', async () => {

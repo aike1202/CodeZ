@@ -20,6 +20,15 @@ describe('ToolExposurePlanner', () => {
     expect(deferred.has('WebSearch')).toBe(true)
     expect(deferred.has('NotebookEdit')).toBe(true)
     expect(deferred.has('SubAgentRunner')).toBe(true)
+    expect(deferred.has('ListMcpResourcesTool')).toBe(true)
+    expect(deferred.has('ReadMcpResourceTool')).toBe(true)
+    expect(deferred.has('GetMcpPrompt')).toBe(true)
+    expect(manager.getRegistry().resolve('ListMcpResources')).toBe(
+      manager.getRegistry().resolve('ListMcpResourcesTool')
+    )
+    expect(manager.getRegistry().resolve('ReadMcpResource')).toBe(
+      manager.getRegistry().resolve('ReadMcpResourceTool')
+    )
   })
 
   it('activates deferred tools for the next plan', () => {

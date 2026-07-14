@@ -25,6 +25,18 @@ import { registerMcpIpc } from './ipc/mcp.handlers'
 
 let mainWindow: BrowserWindow | null = null
 
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+if (!hasSingleInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  })
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -81,7 +93,7 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(async () => {
+if (hasSingleInstanceLock) void app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.codez.desktop')
 
   const sessionStore = await initializeSessionStore()

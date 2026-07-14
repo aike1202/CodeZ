@@ -1,4 +1,5 @@
 import type {
+  CompactionSummary,
   CompactionSummaryV1,
   NormalizedModelMessage,
   VersionedResumeState
@@ -7,11 +8,10 @@ import type {
 export interface BuildCompactionPromptInput {
   coveredThroughSequence: number
   messages: NormalizedModelMessage[]
-  previousSummary?: CompactionSummaryV1
+  previousSummary?: CompactionSummary
   resumeState?: VersionedResumeState
   instructions?: string
   validationFeedback?: string
-  previousInvalidOutput?: string
 }
 
 function invalid(detail: string): never {
@@ -92,11 +92,59 @@ export function parseAndValidateSummary(
   return root as CompactionSummaryV1
 }
 
+export function normalizeCompactionSummary(
+  raw: string,
+  coveredThroughSequence: number,
+  options: { maxChars?: number; truncatedPrefixThroughSequence?: number } = {}
+): CompactionSummary {
+  const maxChars = options.maxChars ?? 96_000
+  const trimmed = raw.trim()
+  if (!trimmed) invalid('summary is empty')
+  if (trimmed.length > maxChars) invalid('summary exceeds the configured size limit')
+
+  if (trimmed.startsWith('{')) {
+    try {
+      return parseAndValidateSummary(trimmed, coveredThroughSequence, maxChars)
+    } catch (error) {
+      if ((error as any)?.code !== 'COMPACTION_SCHEMA_INVALID') throw error
+    }
+  }
+
+  let content = trimmed.replace(/<analysis>[\s\S]*?<\/analysis>/i, '').trim()
+  const tagged = content.match(/<summary>([\s\S]*?)<\/summary>/i)
+  if (tagged) content = tagged[1].trim()
+  if (content.startsWith('```') && content.endsWith('```')) {
+    content = content.replace(/^```[^\n]*\n?/, '').replace(/\n?```$/, '').trim()
+  }
+  if (!content) invalid('summary is empty after removing analysis')
+
+  return {
+    version: 2,
+    format: 'text',
+    content,
+    coveredThroughSequence,
+    ...(options.truncatedPrefixThroughSequence !== undefined
+      ? { truncatedPrefixThroughSequence: options.truncatedPrefixThroughSequence }
+      : {})
+  }
+}
+
 function list(label: string, values: string[]): string {
   return `${label}: ${values.length ? values.join('; ') : 'none'}`
 }
 
-export function renderCompactionSummary(summary: CompactionSummaryV1): string {
+export function renderCompactionSummary(summary: CompactionSummary): string {
+  if (summary.version === 2) {
+    return [
+      '<compaction_summary version="2">',
+      summary.truncatedPrefixThroughSequence !== undefined
+        ? `[Earlier history through sequence ${summary.truncatedPrefixThroughSequence} was omitted after the Provider rejected the compaction input as too large.]`
+        : '',
+      summary.content,
+      `Covered through sequence: ${summary.coveredThroughSequence}`,
+      '</compaction_summary>'
+    ].filter(Boolean).join('\n')
+  }
   return [
     '<compaction_summary version="1">',
     `Current objective: ${summary.goal.currentObjective}`,
@@ -119,29 +167,6 @@ export function renderCompactionSummary(summary: CompactionSummaryV1): string {
 }
 
 export function buildCompactionPrompt(input: BuildCompactionPromptInput): string {
-  const requiredShape = JSON.stringify({
-    version: 1,
-    goal: {
-      originalRequest: 'optional string',
-      currentObjective: 'string',
-      requirements: ['string'],
-      successCriteria: ['string']
-    },
-    status: {
-      phase: 'string',
-      completed: ['string'],
-      inProgress: ['string'],
-      nextActions: ['string']
-    },
-    decisions: [{ decision: 'string', rationale: 'optional string' }],
-    facts: [{ fact: 'string', evidence: 'optional string' }],
-    files: [{ path: 'string', relevance: 'string', state: 'read|modified|created|deleted|unknown' }],
-    validation: [{ commandOrCheck: 'string', result: 'string', status: 'passed|failed|pending' }],
-    errors: [{ symptom: 'string', cause: 'optional string', resolution: 'optional string' }],
-    openQuestions: ['string'],
-    userInstructions: ['string'],
-    coveredThroughSequence: input.coveredThroughSequence
-  }, null, 2)
   const transcript = input.messages.map((message) => JSON.stringify({
     sequence: message.sourceSequence,
     role: message.role,
@@ -151,15 +176,17 @@ export function buildCompactionPrompt(input: BuildCompactionPromptInput): string
     name: message.name
   })).join('\n')
   return [
-    'Summarize the durable coding-agent history as exactly one JSON object. Do not use Markdown fences.',
-    `Set coveredThroughSequence to exactly ${input.coveredThroughSequence}.`,
-    `Return this exact JSON shape with evidence-based values and no extra keys:\n${requiredShape}`,
-    'Do not claim work completed without evidence. Keep paths and decisions; omit long source text and resolved logs.',
-    input.validationFeedback ? `Previous output failed validation: ${input.validationFeedback}` : '',
-    input.previousInvalidOutput ? `Previous invalid output to repair:\n${input.previousInvalidOutput}` : '',
+    'CRITICAL: Respond with text only. Do not call tools.',
+    'Create a detailed continuation summary of the durable coding-agent history.',
+    'Write a short <analysis> drafting block followed by one <summary> block.',
+    'The <summary> must preserve the user request, requirements, completed and pending work, decisions, files, errors, validation results, and the exact next action.',
+    'Do not claim work completed without evidence. Omit long source text and resolved logs.',
+    'The host records the durable sequence boundary; do not output JSON or sequence metadata.',
+    input.validationFeedback ? `Previous output could not be used: ${input.validationFeedback}` : '',
     input.instructions ? `One-shot retention instructions: ${input.instructions}` : '',
-    input.previousSummary ? `Previous summary:\n${JSON.stringify(input.previousSummary)}` : '',
+    input.previousSummary ? `Previous summary:\n${renderCompactionSummary(input.previousSummary)}` : '',
     input.resumeState ? `Resume state:\n${JSON.stringify(input.resumeState)}` : '',
-    `New history:\n${transcript}`
+    `New history:\n${transcript}`,
+    'REMINDER: Return text only as <analysis>...</analysis> followed by <summary>...</summary>.'
   ].filter(Boolean).join('\n\n')
 }

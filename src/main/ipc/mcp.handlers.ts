@@ -23,6 +23,11 @@ export function registerMcpIpc(): void {
     await manager.saveUserServers(servers)
     return { configs: await manager.getConfiguration(), statuses: manager.getStatuses() }
   })
+  ipcMain.handle(IPC_CHANNELS.MCP_SET_ENABLED, async (_event, name: string, enabled: boolean) => {
+    await manager.setUserServerEnabled(name, enabled)
+    return { configs: await manager.getConfiguration(), statuses: manager.getStatuses() }
+  })
+  ipcMain.handle(IPC_CHANNELS.MCP_GET_CATALOG, (_event, name: string) => manager.getCatalog(name))
   ipcMain.handle(IPC_CHANNELS.MCP_RECONNECT, async (_event, name: string) => {
     await manager.reconnect(name)
     return manager.getStatuses()

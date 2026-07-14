@@ -169,6 +169,7 @@ export interface ToolPipelineResult {
   call: NormalizedToolCall
   canonicalName: string
   input?: Record<string, unknown>
+  maxResultChars?: number
   result: ToolExecutionResult
 }
 

@@ -116,6 +116,8 @@ export const IPC_CHANNELS = {
   // MCP
   MCP_LIST: 'mcp:list',
   MCP_SAVE_USER: 'mcp:save-user',
+  MCP_SET_ENABLED: 'mcp:set-enabled',
+  MCP_GET_CATALOG: 'mcp:get-catalog',
   MCP_RECONNECT: 'mcp:reconnect',
   MCP_AUTHORIZE: 'mcp:authorize',
   MCP_LOGOUT: 'mcp:logout',

@@ -48,6 +48,37 @@ function buildFieldSchema(field: SubAgentOutputField): Record<string, any> {
       return { type: 'number', description: field.description }
     case 'boolean':
       return { type: 'boolean', description: field.description }
+    case 'reviewFinding[]':
+      return {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            id: { type: 'string', description: 'Stable finding ID, for example F-001.' },
+            criterionId: { type: 'string', description: 'Frozen acceptance criterion ID, for example AC-1.' },
+            severity: { type: 'string', enum: ['P0', 'P1'] },
+            location: { type: 'string', description: 'Specific file and line, symbol, or contract location.' },
+            expected: { type: 'string' },
+            actual: { type: 'string' },
+            reproduction: { type: 'string', description: 'Concrete counterexample or reproducible failure path.' },
+            evidence: { type: 'string', description: 'Observed repository evidence supporting the blocker.' },
+            confidence: { type: 'string', enum: ['high'] }
+          },
+          required: [
+            'id',
+            'criterionId',
+            'severity',
+            'location',
+            'expected',
+            'actual',
+            'reproduction',
+            'evidence',
+            'confidence'
+          ]
+        },
+        description: field.description
+      }
     default:
       return { type: 'string', description: field.description }
   }
@@ -120,6 +151,23 @@ function normalizeFieldValue(value: unknown, field: SubAgentOutputField): unknow
       return typeof value === 'number' ? value : undefined
     case 'boolean':
       return typeof value === 'boolean' ? value : undefined
+    case 'reviewFinding[]':
+      if (!Array.isArray(value)) return undefined
+      return value.every((item) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return false
+        const finding = item as Record<string, unknown>
+        return (
+          typeof finding.id === 'string' &&
+          typeof finding.criterionId === 'string' &&
+          (finding.severity === 'P0' || finding.severity === 'P1') &&
+          typeof finding.location === 'string' &&
+          typeof finding.expected === 'string' &&
+          typeof finding.actual === 'string' &&
+          typeof finding.reproduction === 'string' &&
+          typeof finding.evidence === 'string' &&
+          finding.confidence === 'high'
+        )
+      }) ? value : undefined
     default:
       return undefined
   }

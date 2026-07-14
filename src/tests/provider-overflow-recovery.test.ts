@@ -104,4 +104,41 @@ describe('AgentRunner provider overflow recovery', () => {
     expect(onError).toHaveBeenCalledWith('still too many tokens', 'CONTEXT_OVERFLOW')
     expect((await f.ledger.load('s1')).scopes.main.lastInterruptedTurnId).toBe(f.turn.turnId)
   })
+
+  it('reports the concrete compaction failure instead of a generic overflow message', async () => {
+    const f = await fixture()
+    const chatService = {
+      streamChat: vi.fn(async (_config: unknown, callbacks: any) => {
+        callbacks.onError('too many tokens', 'CONTEXT_OVERFLOW')
+      }),
+      abort: vi.fn()
+    }
+    const compact = vi.fn().mockResolvedValue({
+      status: 'failed',
+      errorCode: 'COMPACTION_SUMMARY_FAILED',
+      message: 'summary is empty'
+    })
+    const onError = vi.fn()
+    const runner = new AgentRunner({
+      chatService: chatService as any,
+      toolManager: { getToolDefinitions: () => [] } as any,
+      editTransactionService: {
+        beginTransaction: async () => 'tx1', rollback: vi.fn()
+      } as any
+    })
+
+    await runner.run({
+      baseUrl: 'https://example.invalid', apiKey: 'key', model: 'm1', workspaceRoot: f.root,
+      runtimeTurn: f.turn, runtimeCoordinator: f.coordinator, contextBuilder: f.builder,
+      compactionService: { compact } as any,
+      contextCapabilities: { contextWindowTokens: 10_000, maxOutputTokens: 2_000 },
+      systemPrompt: 'system'
+    }, { onChunk: vi.fn(), onDone: vi.fn(), onError })
+
+    expect(chatService.streamChat).toHaveBeenCalledTimes(1)
+    expect(onError).toHaveBeenCalledWith(
+      '上下文压缩失败，无法从 Provider 上下文溢出中恢复：COMPACTION_SUMMARY_FAILED: summary is empty',
+      'CONTEXT_OVERFLOW'
+    )
+  })
 })

@@ -165,13 +165,16 @@ describe('SystemPromptService', () => {
     const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
 
     expect(prompt).toContain('## Independent review gate')
-    expect(prompt).toContain('you MUST invoke Reviewer')
+    expect(prompt).toContain('you MUST invoke one fresh Reviewer')
     expect(prompt).toContain('Do not use Explore')
-    expect(prompt).toContain('Original user goal and acceptance criteria')
+    expect(prompt).toContain('Original user goal and a frozen, numbered acceptance-criteria list')
     expect(prompt).toContain('Actual changes and implementation approach')
     expect(prompt).toContain('Complete changed-file list')
     expect(prompt).toContain('Verification commands already run and their actual results')
-    expect(prompt).toContain('On FAIL, fix the findings and launch Reviewer again')
+    expect(prompt).toContain('frozen, numbered acceptance-criteria list')
+    expect(prompt).toContain('resume the same completed Reviewer exactly once')
+    expect(prompt).toContain('Closure is terminal')
+    expect(prompt).not.toContain('repeat until PASS')
   })
 
   it('keeps the Reviewer gate in the default exposure where SubAgentRunner is deferred', async () => {
@@ -182,7 +185,7 @@ describe('SystemPromptService', () => {
     expect(prompt).toContain('- SubAgentRunner:')
     expect(prompt).toContain('<subagent_guidance>')
     expect(prompt).toContain('## Independent review gate')
-    expect(prompt).toContain('you MUST invoke Reviewer')
+    expect(prompt).toContain('you MUST invoke one fresh Reviewer')
   })
 
   it('does not emit the legacy duplicate system reminder', async () => {

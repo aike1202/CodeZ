@@ -57,6 +57,10 @@ function validateServer(name: string, raw: unknown): McpServerConfig {
   if (!name.trim() || name.length > 128 || /[\u0000-\u001f]/.test(name)) throw new Error('MCP server name is invalid')
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`${name}: config must be an object`)
   const value = raw as Record<string, unknown>
+  if (value.description !== undefined &&
+      (typeof value.description !== 'string' || value.description.length > 1024 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value.description))) {
+    throw new Error(`${name}: description must be a string of at most 1024 characters`)
+  }
   if (value.enabled !== undefined && typeof value.enabled !== 'boolean') throw new Error(`${name}: enabled must be a boolean`)
   if (value.autoStart !== undefined && typeof value.autoStart !== 'boolean') throw new Error(`${name}: autoStart must be a boolean`)
   if (value.resourceSubscriptions !== undefined && typeof value.resourceSubscriptions !== 'boolean') {
@@ -259,6 +263,15 @@ export class McpConfigService {
   async saveUserServers(servers: Record<string, McpServerConfig>): Promise<void> {
     for (const [name, config] of Object.entries(servers)) validateServer(name, config)
     await atomicWriteSecureJson(this.userConfigPath, { mcpServers: servers })
+  }
+
+  async setUserServerEnabled(name: string, enabled: boolean): Promise<void> {
+    const source = await readConfigFile(this.userConfigPath)
+    const servers = { ...(source.mcpServers || source.servers || {}) }
+    const current = servers[name]
+    if (!current) throw new Error(`MCP server '${name}' is not configured in the user scope.`)
+    servers[name] = { ...validateServer(name, current), enabled }
+    await this.saveUserServers(servers)
   }
 
   setDynamicServer(name: string, config: McpServerConfig): void {
