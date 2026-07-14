@@ -467,8 +467,7 @@ describe('EditTransactionService mutation safety', () => {
 
     const result = await new EditTool().execute(JSON.stringify({
       file_path: target,
-      old_string: 'before',
-      new_string: 'after'
+      edits: [{ old_string: 'before', new_string: 'after' }]
     }), {
       workspaceRoot: root,
       sessionId: 'session-metadata-failure',
@@ -504,7 +503,10 @@ describe('EditTransactionService mutation safety', () => {
           workspaceRoot: workspace,
           sessionId
         })
-        args = JSON.stringify({ file_path: target, old_string: 'before', new_string: 'after' })
+        args = JSON.stringify({
+          file_path: target,
+          edits: [{ old_string: 'before', new_string: 'after' }]
+        })
         tool = new EditTool()
       } else if (toolName === 'Write') {
         target = path.join(parent, 'created.txt')

@@ -16,7 +16,7 @@ export const ToolPolicyModule: PromptModule = {
       lines.push('- Use the available search and Read tools for repository inspection; their schemas define batching and range behavior.')
     }
     if (names.has('Edit') || names.has('Write')) {
-      lines.push('- Prefer Edit for targeted changes and Write for new files or intentional full replacements.')
+      lines.push('- Prefer one Edit call with an ordered edits array for all known targeted changes to the same existing file. Use Write for new files or intentional full replacements.')
     }
     if (names.has('Bash') || names.has('PowerShell')) {
       lines.push('- Use a shell for commands and operations that dedicated tools cannot express.')

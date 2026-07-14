@@ -130,8 +130,7 @@ describe('compaction file working-set recovery', () => {
     store.replaceScopeDeliveries('s1', 'main', built.items.map((item) => item.message))
     const editArguments = JSON.stringify({
       file_path: filePath,
-      old_string: 'value = 2',
-      new_string: 'value = 3'
+      edits: [{ old_string: 'value = 2', new_string: 'value = 3' }]
     })
     await runtime.recordAssistant(nextTurn, {
       content: '',

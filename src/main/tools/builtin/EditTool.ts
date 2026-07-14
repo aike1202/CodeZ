@@ -18,16 +18,15 @@ import {
   assertStableWorkspacePathSync
 } from '../../services/permission/PathImpactAnalyzer'
 
-interface EditArgs {
-  file_path?: string
+interface EditOperation {
   old_string?: string
   new_string?: string
   replace_all?: boolean
 }
 
-/** 剥除 Read 输出的 `行号\t` 前缀（逐行）。 */
-function stripLinePrefix(s: string): string {
-  return s.replace(/^(\d+)\t/gm, '')
+interface EditArgs {
+  file_path?: string
+  edits?: EditOperation[]
 }
 
 export class EditTool extends Tool {
@@ -36,23 +35,46 @@ export class EditTool extends Tool {
   }
 
   get summary() {
-    return 'Make exact string replacements in a file.'
+    return 'Make atomic exact string replacements in a file.'
   }
 
   get description() {
-    return 'Performs exact string replacement in a file. You MUST Read the file in this conversation before editing, or the call fails. old_string must match exactly (including indentation) and be unique — the edit fails otherwise; the Read line prefix (line number + tab) is stripped automatically before matching. Use replace_all: true to replace every occurrence. For creating files or full rewrites use Write instead.'
+    return 'Performs atomic exact string replacements in one existing file. You MUST Read the current file in this agent context before editing, or the call fails. Put every known targeted change for the same file in one edits array; edits are applied in order to an in-memory copy and the file is written only if every edit succeeds. Copy content after the Read line-number prefix and preserve its exact indentation; NEVER include any part of the line-number prefix in old_string or new_string. Each old_string must be non-empty, differ from new_string, match exactly, and be unique unless replace_all is true. Use the smallest old_string that is clearly unique, and use replace_all for replacing or renaming the same text throughout the file. Use Write for new files or intentional full rewrites.'
   }
 
   get parameters_schema() {
     return {
       type: 'object',
+      additionalProperties: false,
       properties: {
         file_path: { type: 'string', description: 'Absolute (or workspace-relative) path of the file to edit.' },
-        old_string: { type: 'string', description: 'Exact text to find. Must be unique unless replace_all is true.' },
-        new_string: { type: 'string', description: 'Text to replace it with.' },
-        replace_all: { type: 'boolean', description: 'If true, replace every occurrence. Default false.' }
+        edits: {
+          type: 'array',
+          minItems: 1,
+          description: 'Ordered exact replacements for this file. All edits succeed or the file remains unchanged.',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              old_string: {
+                type: 'string',
+                minLength: 1,
+                description: 'Exact text to find, without any Read line-number prefix. Must be unique unless replace_all is true.'
+              },
+              new_string: {
+                type: 'string',
+                description: 'Exact replacement text. Must differ from old_string.'
+              },
+              replace_all: {
+                type: 'boolean',
+                description: 'If true, replace every occurrence of old_string. Default false.'
+              }
+            },
+            required: ['old_string', 'new_string']
+          }
+        }
       },
-      required: ['file_path', 'old_string', 'new_string']
+      required: ['file_path', 'edits']
     }
   }
 
@@ -60,12 +82,27 @@ export class EditTool extends Tool {
     try {
       const parsed = JSON.parse(args) as EditArgs
       if (!parsed.file_path) return 'Error: file_path is required.'
-      if (typeof parsed.old_string !== 'string' || typeof parsed.new_string !== 'string') {
-        return 'Error: old_string and new_string are required.'
+      if (!Array.isArray(parsed.edits) || parsed.edits.length === 0) {
+        return 'Error: edits must be a non-empty array.'
       }
       const filePath = parsed.file_path
-      const oldString = parsed.old_string
-      const newString = parsed.new_string
+      const edits = parsed.edits
+
+      for (let index = 0; index < edits.length; index++) {
+        const edit = edits[index]
+        if (!edit || typeof edit.old_string !== 'string' || typeof edit.new_string !== 'string') {
+          return `Error: Edit ${index + 1}: old_string and new_string are required.`
+        }
+        if (edit.old_string.length === 0) {
+          return `Error: Edit ${index + 1}: old_string must not be empty. Use Write for new files or full rewrites.`
+        }
+        if (edit.old_string === edit.new_string) {
+          return `Error: Edit ${index + 1}: old_string and new_string must be different.`
+        }
+        if (edit.replace_all !== undefined && typeof edit.replace_all !== 'boolean') {
+          return `Error: Edit ${index + 1}: replace_all must be a boolean.`
+        }
+      }
 
       const requestedPath = path.isAbsolute(filePath)
         ? filePath
@@ -102,21 +139,40 @@ export class EditTool extends Tool {
           return 'Error: You must Read the current version of this file in this agent context before editing it.'
         }
 
-        const target = stripLinePrefix(oldString.replace(/\r\n/g, '\n'))
-        const replacement = newString.replace(/\r\n/g, '\n')
         const working = fileContent.replace(/\r\n/g, '\n')
-        const occurrences = working.split(target).length - 1
+        let updated = working
+        const appliedNewStrings: string[] = []
 
-        if (occurrences === 0) {
-          return 'Error: old_string not found. Ensure exact match including whitespace; re-Read the relevant range before retrying.'
-        }
-        if (occurrences > 1 && !parsed.replace_all) {
-          return `Error: old_string is not unique (${occurrences} matches). Use replace_all: true or expand old_string to be unique.`
+        for (let index = 0; index < edits.length; index++) {
+          const edit = edits[index]
+          const target = edit.old_string!.replace(/\r\n/g, '\n')
+          const replacement = edit.new_string!.replace(/\r\n/g, '\n')
+          const targetWithoutTrailingNewlines = target.replace(/\n+$/, '')
+
+          if (
+            targetWithoutTrailingNewlines &&
+            appliedNewStrings.some((previous) => previous.includes(targetWithoutTrailingNewlines))
+          ) {
+            return `Error: Edit ${index + 1}: old_string is a substring of new_string from a previous edit.`
+          }
+
+          const occurrences = updated.split(target).length - 1
+          if (occurrences === 0) {
+            return `Error: Edit ${index + 1}: old_string not found. Ensure an exact match without Read line-number prefixes; re-Read the relevant range before retrying.`
+          }
+          if (occurrences > 1 && !edit.replace_all) {
+            return `Error: Edit ${index + 1}: old_string is not unique (${occurrences} matches). Use replace_all: true or expand old_string to be unique.`
+          }
+
+          updated = edit.replace_all
+            ? updated.split(target).join(replacement)
+            : updated.replace(target, () => replacement)
+          appliedNewStrings.push(replacement)
         }
 
-        const updated = parsed.replace_all
-          ? working.split(target).join(replacement)
-          : working.replace(target, replacement)
+        if (updated === working) {
+          return 'Error: The edit batch produces no net change.'
+        }
 
         let stagedBackup = false
         if (context.editTransactionService && context.transactionId) {
@@ -178,7 +234,7 @@ export class EditTool extends Tool {
         return JSON.stringify({
           changedFiles: [rel],
           diff,
-          summary: `Edited ${rel}`,
+          summary: `Edited ${rel} with ${edits.length} replacement${edits.length === 1 ? '' : 's'}`,
           fileHashAfter: newSha
         }, null, 2)
         }, context.abortSignal)

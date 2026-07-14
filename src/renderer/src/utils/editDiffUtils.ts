@@ -52,8 +52,24 @@ export function computeEditStats(toolName: string, args: string): EditStats {
       additions = `+${argsObj.newContent.split('\n').length}`
     }
   } else if (toolName === 'Edit') {
-    if (typeof argsObj.new_string === 'string') additions = `+${argsObj.new_string.split('\n').length}`
-    if (typeof argsObj.old_string === 'string') deletions = `-${argsObj.old_string.split('\n').length}`
+    if (Array.isArray(argsObj.edits)) {
+      let totalAdds = 0
+      let totalDels = 0
+      argsObj.edits.forEach((edit: any) => {
+        if (typeof edit?.new_string === 'string' && edit.new_string.length > 0) {
+          totalAdds += edit.new_string.split('\n').length
+        }
+        if (typeof edit?.old_string === 'string' && edit.old_string.length > 0) {
+          totalDels += edit.old_string.split('\n').length
+        }
+      })
+      additions = `+${totalAdds}`
+      deletions = `-${totalDels}`
+    } else {
+      // Preserve rendering for sessions recorded before Edit adopted edits[].
+      if (typeof argsObj.new_string === 'string') additions = `+${argsObj.new_string.split('\n').length}`
+      if (typeof argsObj.old_string === 'string') deletions = `-${argsObj.old_string.split('\n').length}`
+    }
   } else if (toolName === 'Write') {
     if (typeof argsObj.content === 'string') additions = `+${argsObj.content.split('\n').length}`
   } else if (toolName === 'NotebookEdit') {
@@ -125,6 +141,24 @@ export function buildDiffEditInfo(toolName: string, args: string): DiffEditInfo 
   }
 
   if (toolName === 'Edit') {
+    if (Array.isArray(argsObj.edits) && argsObj.edits.length > 0) {
+      if (argsObj.edits.length === 1) {
+        const [edit] = argsObj.edits
+        return {
+          type: 'replace',
+          targetContent: typeof edit?.old_string === 'string' ? edit.old_string : '',
+          replacementContent: typeof edit?.new_string === 'string' ? edit.new_string : ''
+        }
+      }
+      const targetContent = argsObj.edits
+        .map((edit: any, index: number) => `--- Edit ${index + 1} ---\n${edit?.old_string || ''}`)
+        .join('\n\n')
+      const replacementContent = argsObj.edits
+        .map((edit: any, index: number) => `--- Edit ${index + 1} ---\n${edit?.new_string || ''}`)
+        .join('\n\n')
+      return { type: 'replace', targetContent, replacementContent }
+    }
+    // Preserve rendering for sessions recorded before Edit adopted edits[].
     return { type: 'replace', targetContent: argsObj.old_string || '', replacementContent: argsObj.new_string || '' }
   }
   if (toolName === 'Write') {

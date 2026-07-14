@@ -30,6 +30,18 @@ async function readFirst(fp: string) {
   await new ReadTool().execute(JSON.stringify({ files: [{ file_path: fp }] }), { workspaceRoot: root, sessionId: SESSION })
 }
 
+function singleEditArgs(
+  filePath: string,
+  oldString: string,
+  newString: string,
+  replaceAll = false
+): string {
+  return JSON.stringify({
+    file_path: filePath,
+    edits: [{ old_string: oldString, new_string: newString, replace_all: replaceAll }]
+  })
+}
+
 describe('EditTool', () => {
   beforeEach(async () => {
     await setup()
@@ -41,7 +53,7 @@ describe('EditTool', () => {
     const fp = path.join(root, 'a.txt')
     await fs.writeFile(fp, 'hello world')
     const tool = new EditTool()
-    const result = await tool.execute(JSON.stringify({ file_path: fp, old_string: 'hello', new_string: 'hi' }), { workspaceRoot: root, sessionId: SESSION })
+    const result = await tool.execute(singleEditArgs(fp, 'hello', 'hi'), { workspaceRoot: root, sessionId: SESSION })
     expect(result.startsWith('Error:')).toBe(true)
     expect(result).toContain('Read')
     expect(await fs.readFile(fp, 'utf-8')).toBe('hello world')
@@ -52,7 +64,7 @@ describe('EditTool', () => {
     await fs.writeFile(fp, 'hello world')
     await readFirst(fp)
     const tool = new EditTool()
-    const result = await tool.execute(JSON.stringify({ file_path: fp, old_string: 'missing', new_string: 'x' }), { workspaceRoot: root, sessionId: SESSION })
+    const result = await tool.execute(singleEditArgs(fp, 'missing', 'x'), { workspaceRoot: root, sessionId: SESSION })
     expect(result).toContain('not found')
   })
 
@@ -61,7 +73,7 @@ describe('EditTool', () => {
     await fs.writeFile(fp, 'foo foo')
     await readFirst(fp)
     const tool = new EditTool()
-    const result = await tool.execute(JSON.stringify({ file_path: fp, old_string: 'foo', new_string: 'bar' }), { workspaceRoot: root, sessionId: SESSION })
+    const result = await tool.execute(singleEditArgs(fp, 'foo', 'bar'), { workspaceRoot: root, sessionId: SESSION })
     expect(result).toContain('not unique')
   })
 
@@ -71,7 +83,7 @@ describe('EditTool', () => {
     await readFirst(fp)
     const tx = new MemoryEditTransactionService()
     const tool = new EditTool()
-    const result = await tool.execute(JSON.stringify({ file_path: fp, old_string: 'hello', new_string: 'hi' }), {
+    const result = await tool.execute(singleEditArgs(fp, 'hello', 'hi'), {
       workspaceRoot: root, sessionId: SESSION, transactionId: 'tx1', editTransactionService: tx as unknown as EditTransactionService
     })
     const parsed = JSON.parse(result)
@@ -80,6 +92,90 @@ describe('EditTool', () => {
     expect(parsed.fileHashAfter).toMatch(/^[0-9a-f]{64}$/)
     expect(await fs.readFile(fp, 'utf-8')).toBe('hi world')
     expect(tx.backedUp.has(fp)).toBe(true)
+  })
+
+  it('在一次原子提交中按顺序应用同一文件的全部 edits', async () => {
+    const fp = path.join(root, 'batch.txt')
+    await fs.writeFile(fp, 'alpha beta gamma')
+    await readFirst(fp)
+    const backupFile = vi.fn(async () => true)
+    const tx = { backupFile, getDiff: async () => [] }
+
+    const result = await new EditTool().execute(JSON.stringify({
+      file_path: fp,
+      edits: [
+        { old_string: 'alpha', new_string: 'ALPHA' },
+        { old_string: 'gamma', new_string: 'GAMMA' }
+      ]
+    }), {
+      workspaceRoot: root,
+      sessionId: SESSION,
+      transactionId: 'tx-batch',
+      editTransactionService: tx as unknown as EditTransactionService
+    })
+
+    expect(result.startsWith('Error:')).toBe(false)
+    expect(JSON.parse(result).summary).toContain('2 replacements')
+    expect(await fs.readFile(fp, 'utf-8')).toBe('ALPHA beta GAMMA')
+    expect(backupFile).toHaveBeenCalledTimes(1)
+  })
+
+  it('任一 edit 失败时整批不备份也不写盘', async () => {
+    const fp = path.join(root, 'atomic-failure.txt')
+    await fs.writeFile(fp, 'alpha beta')
+    await readFirst(fp)
+    const backupFile = vi.fn(async () => true)
+    const tx = { backupFile, getDiff: async () => [] }
+
+    const result = await new EditTool().execute(JSON.stringify({
+      file_path: fp,
+      edits: [
+        { old_string: 'alpha', new_string: 'ALPHA' },
+        { old_string: 'missing', new_string: 'MISSING' }
+      ]
+    }), {
+      workspaceRoot: root,
+      sessionId: SESSION,
+      transactionId: 'tx-atomic-failure',
+      editTransactionService: tx as unknown as EditTransactionService
+    })
+
+    expect(result).toContain('Edit 2')
+    expect(result).toContain('not found')
+    expect(await fs.readFile(fp, 'utf-8')).toBe('alpha beta')
+    expect(backupFile).not.toHaveBeenCalled()
+  })
+
+  it('拒绝旧的顶层单编辑协议', async () => {
+    const fp = path.join(root, 'legacy-input.txt')
+    await fs.writeFile(fp, 'before')
+    await readFirst(fp)
+
+    const result = await new EditTool().execute(JSON.stringify({
+      file_path: fp,
+      old_string: 'before',
+      new_string: 'after'
+    }), { workspaceRoot: root, sessionId: SESSION })
+
+    expect(result).toContain('edits must be a non-empty array')
+    expect(await fs.readFile(fp, 'utf-8')).toBe('before')
+  })
+
+  it('拒绝后续 old_string 匹配先前 edit 新插入的内容', async () => {
+    const fp = path.join(root, 'dependent-edits.txt')
+    await fs.writeFile(fp, 'alpha')
+    await readFirst(fp)
+
+    const result = await new EditTool().execute(JSON.stringify({
+      file_path: fp,
+      edits: [
+        { old_string: 'alpha', new_string: 'beta marker' },
+        { old_string: 'marker', new_string: 'value' }
+      ]
+    }), { workspaceRoot: root, sessionId: SESSION })
+
+    expect(result).toContain('substring of new_string from a previous edit')
+    expect(await fs.readFile(fp, 'utf-8')).toBe('alpha')
   })
 
   it('uses canonical path identity when attaching the transaction diff', async () => {
@@ -98,8 +194,7 @@ describe('EditTool', () => {
 
     const result = await new EditTool().execute(JSON.stringify({
       file_path: fp,
-      old_string: 'before',
-      new_string: 'after'
+      edits: [{ old_string: 'before', new_string: 'after' }]
     }), {
       workspaceRoot: root,
       sessionId: SESSION,
@@ -120,7 +215,7 @@ describe('EditTool', () => {
     })
 
     const result = await new EditTool().execute(
-      JSON.stringify({ file_path: fp, old_string: 'before', new_string: 'after' }),
+      singleEditArgs(fp, 'before', 'after'),
       {
         workspaceRoot: root,
         sessionId: SESSION,
@@ -137,7 +232,7 @@ describe('EditTool', () => {
     await fs.writeFile(fp, 'foo foo foo')
     await readFirst(fp)
     const tool = new EditTool()
-    const result = await tool.execute(JSON.stringify({ file_path: fp, old_string: 'foo', new_string: 'bar', replace_all: true }), { workspaceRoot: root, sessionId: SESSION })
+    const result = await tool.execute(singleEditArgs(fp, 'foo', 'bar', true), { workspaceRoot: root, sessionId: SESSION })
     const parsed = JSON.parse(result)
     expect(parsed.summary).toContain('Edited')
     expect(await fs.readFile(fp, 'utf-8')).toBe('bar bar bar')
@@ -150,10 +245,10 @@ describe('EditTool', () => {
     const tool = new EditTool()
 
     const [first, second] = await Promise.all([
-      tool.execute(JSON.stringify({ file_path: fp, old_string: 'alpha', new_string: 'ALPHA' }), {
+      tool.execute(singleEditArgs(fp, 'alpha', 'ALPHA'), {
         workspaceRoot: root, sessionId: SESSION
       }),
-      tool.execute(JSON.stringify({ file_path: fp, old_string: 'beta', new_string: 'BETA' }), {
+      tool.execute(singleEditArgs(fp, 'beta', 'BETA'), {
         workspaceRoot: root, sessionId: SESSION
       })
     ])
@@ -177,9 +272,7 @@ describe('EditTool', () => {
       getDiff: async () => []
     }
 
-    const result = await new EditTool().execute(JSON.stringify({
-      file_path: fp, old_string: 'before', new_string: 'after'
-    }), {
+    const result = await new EditTool().execute(singleEditArgs(fp, 'before', 'after'), {
       workspaceRoot: root,
       sessionId: SESSION,
       transactionId: 'tx-stale',
@@ -206,9 +299,7 @@ describe('EditTool', () => {
       getDiff: async () => []
     }
 
-    const result = await new EditTool().execute(JSON.stringify({
-      file_path: fp, old_string: 'before', new_string: 'after'
-    }), {
+    const result = await new EditTool().execute(singleEditArgs(fp, 'before', 'after'), {
       workspaceRoot: root,
       sessionId: SESSION,
       transactionId: 'tx-aborted',
@@ -221,15 +312,14 @@ describe('EditTool', () => {
     expect(discardBackup).toHaveBeenCalledWith('tx-aborted', fp)
   })
 
-  it('old_string 含 Read 行号前缀：自动剥除后仍能匹配', async () => {
+  it('old_string 含 Read 行号前缀时严格拒绝且不写入', async () => {
     const fp = path.join(root, 'a.txt')
     await fs.writeFile(fp, 'alpha\nbeta\n')
     await readFirst(fp)
     const tool = new EditTool()
-    const result = await tool.execute(JSON.stringify({ file_path: fp, old_string: '1\talpha\n2\tbeta', new_string: '1\tALPHA\n2\tBETA' }), { workspaceRoot: root, sessionId: SESSION })
-    const parsed = JSON.parse(result)
-    expect(parsed.summary).toContain('Edited')
-    expect(await fs.readFile(fp, 'utf-8')).toBe('1\tALPHA\n2\tBETA\n')
+    const result = await tool.execute(singleEditArgs(fp, '1\talpha\n2\tbeta', 'ALPHA\nBETA'), { workspaceRoot: root, sessionId: SESSION })
+    expect(result).toContain('line-number prefixes')
+    expect(await fs.readFile(fp, 'utf-8')).toBe('alpha\nbeta\n')
   })
 
   it('workspace 外：拒绝', async () => {
@@ -238,7 +328,7 @@ describe('EditTool', () => {
     try {
       await readFirst(outside)
       const tool = new EditTool()
-      const result = await tool.execute(JSON.stringify({ file_path: outside, old_string: 'x', new_string: 'y' }), { workspaceRoot: root, sessionId: SESSION })
+      const result = await tool.execute(singleEditArgs(outside, 'x', 'y'), { workspaceRoot: root, sessionId: SESSION })
       expect(result.startsWith('Error:')).toBe(true)
     } finally {
       await fs.rm(outside, { force: true })
@@ -256,7 +346,7 @@ describe('EditTool', () => {
       const linkedFile = path.join(link, 'target.txt')
       await readFirst(linkedFile)
       const result = await new EditTool().execute(
-        JSON.stringify({ file_path: linkedFile, old_string: 'before', new_string: 'after' }),
+        singleEditArgs(linkedFile, 'before', 'after'),
         { workspaceRoot: root, sessionId: SESSION }
       )
 
@@ -278,7 +368,7 @@ describe('EditTool', () => {
     await readFirst(linkedFile)
 
     const result = await new EditTool().execute(
-      JSON.stringify({ file_path: linkedFile, old_string: 'before', new_string: 'after' }),
+      singleEditArgs(linkedFile, 'before', 'after'),
       { workspaceRoot: root, sessionId: SESSION }
     )
 

@@ -378,8 +378,8 @@ describe('legacy edit execution log', () => {
       { id: 'legacy-edit-1', type: 'edit', title: '已编辑 src/App.tsx', detail: '+1 -1', timestamp: 100 },
       { id: 'legacy-edit-2', type: 'edit', title: '已编辑 src/App.tsx', detail: '+2 -2', timestamp: 101 }
     ], [
-      { id: 'tool-edit-1', name: 'Edit', args: JSON.stringify({ file_path: 'src/App.tsx', old_string: 'a', new_string: 'b' }), status: 'success', startedAt: 100, sequence: 0 },
-      { id: 'tool-edit-2', name: 'Edit', args: JSON.stringify({ file_path: 'src/App.tsx', old_string: 'c', new_string: 'd' }), status: 'success', startedAt: 101, sequence: 1 }
+      { id: 'tool-edit-1', name: 'Edit', args: JSON.stringify({ file_path: 'src/App.tsx', edits: [{ old_string: 'a', new_string: 'b' }] }), status: 'success', startedAt: 100, sequence: 0 },
+      { id: 'tool-edit-2', name: 'Edit', args: JSON.stringify({ file_path: 'src/App.tsx', edits: [{ old_string: 'c', new_string: 'd' }] }), status: 'success', startedAt: 101, sequence: 1 }
     ])
 
     const items = buildUnifiedTimeline([], [], edits, undefined, false)

@@ -63,7 +63,10 @@ describe('chat store sub-agent session restore', () => {
               }, {
                 id: 'edit-running',
                 name: 'Edit',
-                args: JSON.stringify({ file_path: 'src/maybe.ts', old_string: 'a', new_string: 'b' }),
+                args: JSON.stringify({
+                  file_path: 'src/maybe.ts',
+                  edits: [{ old_string: 'a', new_string: 'b' }]
+                }),
                 status: 'running',
                 startedAt: 1300,
                 sequence: 1
