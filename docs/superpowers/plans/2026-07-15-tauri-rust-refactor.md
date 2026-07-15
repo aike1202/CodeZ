@@ -175,7 +175,7 @@ src/renderer/src/desktop/
 ### 7.1 Workspace 和搜索
 
 - [ ] 迁移目录选择、最近项目、项目识别、文件树和受限读取。
-- [ ] 实现统一 `SafeWorkspacePath`，处理规范化、大小写、符号链接和 TOCTOU 复检。
+- [x] 实现统一 `SafeWorkspacePath`，处理规范化、大小写、符号链接和 TOCTOU 复检；`codez-core::WorkspaceRoot`/`SafeWorkspacePath` 使用私有字段保存 canonical root 与规范化相对路径，拒绝绝对相对值、父级逃逸和工作区外 canonical target，并为 Windows 提供大小写不敏感 identity key。`codez-platform::NativeFileSystem` 绑定单一 root 身份，用户路径只在最近存在祖先 canonicalize 后构造值对象，内部 symlink 折叠到物理目标、外部 symlink 失败关闭；`FileSystem` port 仅接受 `SafeWorkspacePath`。metadata/有界 read/原子 write 在 I/O 前复核 root、路径、父目录和既有目标身份，read 还比较打开句柄，Windows 真实测试覆盖 case variant、symlink 逃逸及验证后重定向。
 - [ ] 迁移文件忽略、Glob/Grep/List/Read 与项目分析；先按 D-07 决定 `rg` 或纯 Rust。
 - [ ] 迁移编辑器/资源管理器打开、Git 上下文和 worktree。
 

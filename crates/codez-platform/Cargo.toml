@@ -7,7 +7,10 @@ license.workspace = true
 
 [dependencies]
 codez-core.workspace = true
+same-file.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]

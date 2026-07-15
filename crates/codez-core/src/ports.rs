@@ -2,12 +2,12 @@ use std::{
     collections::BTreeMap,
     ffi::OsString,
     future::Future,
-    path::{Path, PathBuf},
+    path::PathBuf,
     pin::Pin,
     time::{Duration, SystemTime},
 };
 
-use crate::{AppError, CancellationToken};
+use crate::{AppError, CancellationToken, SafeWorkspacePath};
 
 /// Boxed asynchronous port result used at dynamic adapter boundaries.
 pub type PortFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, AppError>> + Send + 'a>>;
@@ -30,11 +30,19 @@ pub struct FileMetadata {
 
 /// Bounded filesystem operations supplied by storage or platform adapters.
 pub trait FileSystem: Send + Sync {
-    fn metadata<'a>(&'a self, path: &'a Path) -> PortFuture<'a, FileMetadata>;
+    fn metadata<'a>(&'a self, path: &'a SafeWorkspacePath) -> PortFuture<'a, FileMetadata>;
 
-    fn read_bounded<'a>(&'a self, path: &'a Path, max_bytes: u64) -> PortFuture<'a, Vec<u8>>;
+    fn read_bounded<'a>(
+        &'a self,
+        path: &'a SafeWorkspacePath,
+        max_bytes: u64,
+    ) -> PortFuture<'a, Vec<u8>>;
 
-    fn write_atomic<'a>(&'a self, path: &'a Path, bytes: &'a [u8]) -> PortFuture<'a, ()>;
+    fn write_atomic<'a>(
+        &'a self,
+        path: &'a SafeWorkspacePath,
+        bytes: &'a [u8],
+    ) -> PortFuture<'a, ()>;
 }
 
 /// Fully explicit request passed to a process adapter.

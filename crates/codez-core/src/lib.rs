@@ -7,6 +7,7 @@ mod identifiers;
 mod ports;
 mod redaction;
 mod system;
+mod workspace_path;
 
 pub use app_paths::{AppPathError, AppPaths};
 pub use error::{AppError, AppErrorKind};
@@ -19,3 +20,4 @@ pub use ports::{
 pub use redaction::{RedactedText, redact_sensitive_text, redact_sensitive_value};
 pub use system::SystemHealth;
 pub use tokio_util::sync::CancellationToken;
+pub use workspace_path::{SafeWorkspacePath, WorkspacePathError, WorkspaceRoot};

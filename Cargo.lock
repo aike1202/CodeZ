@@ -664,9 +664,12 @@ version = "0.1.0"
 dependencies = [
  "codez-core",
  "portable-pty",
+ "same-file",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
+ "tokio",
  "tree-sitter",
  "tree-sitter-bash",
  "tree-sitter-powershell",
