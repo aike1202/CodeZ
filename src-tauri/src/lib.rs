@@ -103,6 +103,7 @@ pub fn run() -> Result<(), tauri::Error> {
             tracing::debug!(
                 data_path_ready = state.paths.data_directory().is_absolute(),
                 max_document_bytes = state.storage.max_document_bytes(),
+                credential_service = state.credentials.service_name(),
                 "storage composition initialized"
             );
             if let Err(error) = state.resources.validate_required() {

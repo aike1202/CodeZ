@@ -6,7 +6,7 @@
 
 - Phase 0：Windows x64 基线已闭环。D-01 至 D-08 已按 ADR 0001 冻结；六项高风险 spike、88 个 `window.api` 方法语义、23 类持久化数据、183 个测试文件分类、79 条 FR/NFR 追踪矩阵和性能基线均已有可重复证据。macOS/Linux safeStorage、PTY、资源与性能验证仍由目标平台 CI 完成，Phase 9 的签名主体和升级 feed 仍未冻结。
 - Phase 1：基座已闭环。Cargo workspace、依赖方向门禁、三平台 CI、Tauri v2 宿主、typed command、前端 `shared/desktop`、统一错误/脱敏诊断、迁移期启动页和有界四阶段安全退出已经建立；Tauri debug build、聚焦 host 测试和非视觉 smoke 通过。
-- Phase 2：进行中。`AppPaths` 已统一应用数据、缓存、日志、资源、临时和工作区状态根并由 Tauri composition root 注入；`AtomicFileStore` 已提供按资源串行的原子 JSON/JSONL、同步落盘、大小限制、故障注入、安全权限和损坏 quarantine/有效前缀恢复。`codez-storage` 现已定义 19 个版本化 schema family，并按 23 类持久化清单实现只读发现、脱敏 manifest、源文件复核、幂等 no-clobber 精确备份及脱敏 `legacy-data-v0` fixtures。迁移 transform、语义引用验证、credentials 迁移/重新录入决策、原子完成标记、滚动日志、通用 ports 与取消树仍未完成。
+- Phase 2：进行中。`AppPaths` 已统一应用数据、缓存、日志、资源、临时和工作区状态根并由 Tauri composition root 注入；`AtomicFileStore` 已提供按资源串行的原子 JSON/JSONL、同步落盘、大小限制、故障注入、安全权限和损坏 quarantine/有效前缀恢复。`codez-storage` 现已定义 19 个版本化 schema family，并按 23 类持久化清单实现只读发现、脱敏 manifest、源文件复核、幂等 no-clobber 精确备份及脱敏 `legacy-data-v0` fixtures；类型安全的 `CredentialStore` port 与 Windows Credential Manager/macOS Keychain/Linux Secret Service adapter 已注入 Tauri composition root，secret 不实现 `Debug`/`Serialize` 并在 drop 时清零。迁移 transform、语义引用验证、旧 Provider/MCP/OAuth 凭据迁移/重新录入决策、原子完成标记、滚动日志、其他通用 ports 与取消树仍未完成。
 - Phase 3 至 Phase 10：未开始。
 - Electron 基线：完整保留，禁止提前删除。
 

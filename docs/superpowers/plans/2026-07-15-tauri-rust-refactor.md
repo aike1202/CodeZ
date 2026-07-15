@@ -157,7 +157,7 @@ src/renderer/src/desktop/
 
 ### 6.2 密钥与日志
 
-- [ ] 实现 OS 凭据存储 adapter，区分“不存在”“不可用”“权限拒绝”“密文损坏”。
+- [x] 实现 OS 凭据存储 adapter，区分“不存在”“不可用”“权限拒绝”“密文损坏”；`codez-storage` 以 `CredentialId`/`SecretValue`/`CredentialStore` 隔离持久化引用与明文生命周期，`OsCredentialStore` 通过 `keyring 3.6.3` 分别接入 Windows Credential Manager、macOS Keychain 和 Linux Secret Service，并串行化底层访问。Windows workspace 测试和 Tauri debug build 已通过，macOS/Linux 编译与真实 keychain smoke 由目标平台 CI/Phase 9 承接。
 - [ ] 实现旧 Provider/MCP/OAuth 密钥迁移或明确的重新录入标记。
 - [ ] 禁止 Base64/明文 fallback；为日志和错误加入结构化脱敏测试。
 - [ ] 以 `tracing` 实现滚动日志、日志等级和 session/stream/tool span。

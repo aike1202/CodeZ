@@ -23,6 +23,7 @@ codez-core = { path = "crates/codez-core" }
 codez-platform = { path = "crates/codez-platform" }
 codez-runtime = { path = "crates/codez-runtime" }
 codez-storage = { path = "crates/codez-storage" }
+keyring = { version = "3.6.3", default-features = false }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 regex = "1.12.2"
@@ -33,6 +34,7 @@ tokio = { version = "1.49.0", features = ["macros", "rt", "sync", "time"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["fmt"] }
 ts-rs = { version = "12.0.1", features = ["serde-compat"] }
+zeroize = "1.8.2"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
