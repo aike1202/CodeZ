@@ -378,7 +378,7 @@ OS filesystem, processes, credential store, network
 | D-03 | 是否继续使用 `com.codez.desktop` | 保留 | 影响安装升级、数据路径和系统权限 |
 | D-04 | 初期持久化格式 | 保持 JSON/目录兼容 | 避免把框架迁移与数据库迁移耦合 |
 | D-05 | Provider 密钥是否继续回传前端明文 | 建议改为仅替换、不回显 | 更安全，但需要小幅调整设置 UI 与契约 |
-| D-06 | MCP Rust 实现策略 | spike 后决定 | 取决于 SDK 对 stdio/HTTP/SSE/OAuth/反向请求的覆盖 |
+| D-06 | MCP Rust 实现策略 | `rmcp 2.2.0` 协议核心 + CodeZ 兼容/安全 adapters | spike 已验证 stdio、Streamable HTTP、OAuth、订阅和反向请求；legacy SSE 与严格 `-32001` 恢复由 CodeZ 补齐，见 ADR 0002 |
 | D-07 | 搜索实现 | 先保留随包 `rg`，后评估纯 Rust | 先保证行为和性能一致 |
 | D-08 | Electron 旧数据保留期 | 至少跨一个稳定版本，默认不自动删 | 决定磁盘占用和回退窗口 |
 

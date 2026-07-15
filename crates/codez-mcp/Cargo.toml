@@ -8,5 +8,27 @@ license.workspace = true
 [dependencies]
 codez-core.workspace = true
 
+[dev-dependencies]
+async-trait = "0.1.89"
+rmcp = { version = "=2.2.0", default-features = false, features = [
+  "auth",
+  "client",
+  "elicitation",
+  "reqwest",
+  "server",
+  "transport-child-process",
+  "transport-streamable-http-client-reqwest",
+] }
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls"] }
+serde_json.workspace = true
+tokio = { version = "1.49.0", features = [
+  "io-util",
+  "macros",
+  "process",
+  "rt-multi-thread",
+  "sync",
+  "time",
+] }
+
 [lints]
 workspace = true
