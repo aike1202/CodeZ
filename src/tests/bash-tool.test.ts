@@ -46,11 +46,39 @@ describe.skipIf(!bashOk)('BashTool', () => {
     expect(parsed.background).toBe(false)
   }, 30000)
 
-  it('timeout：timedOut true', async () => {
+  it('timeout yields, then the Agent can wait for completion', async () => {
     const tool = new BashTool()
-    const result = await tool.execute(JSON.stringify({ command: 'sleep 5', timeout: 500 }), { workspaceRoot: root, sessionId: 'b2' })
-    const parsed = JSON.parse(result)
-    expect(parsed.timedOut).toBe(true)
+    const yielded = JSON.parse(await tool.execute(
+      JSON.stringify({ command: 'sleep 1; echo finished', timeout: 250 }),
+      { workspaceRoot: root, sessionId: 'b2', toolCallId: 'bash-start' }
+    ))
+    expect(yielded).toMatchObject({ status: 'running', waitTimedOut: true, timedOut: false })
+
+    const completed = JSON.parse(await tool.execute(
+      JSON.stringify({ task_id: yielded.taskId, action: 'wait', timeout: 5_000 }),
+      { workspaceRoot: root, sessionId: 'b2', toolCallId: 'bash-wait' }
+    ))
+    expect(completed).toMatchObject({ status: 'completed', exitCode: 0 })
+    expect(completed.stdout).toContain('finished')
+  }, 15000)
+
+  it('rejects cross-session control and allows the owner to interrupt', async () => {
+    const tool = new BashTool()
+    const yielded = JSON.parse(await tool.execute(
+      JSON.stringify({ command: 'sleep 5', timeout: 250 }),
+      { workspaceRoot: root, sessionId: 'bash-owner', toolCallId: 'bash-owner-call' }
+    ))
+    const denied = await tool.execute(
+      JSON.stringify({ task_id: yielded.taskId, action: 'interrupt' }),
+      { workspaceRoot: root, sessionId: 'bash-other' }
+    )
+    expect(denied).toContain('Access denied')
+
+    const interrupted = JSON.parse(await tool.execute(
+      JSON.stringify({ task_id: yielded.taskId, action: 'interrupt' }),
+      { workspaceRoot: root, sessionId: 'bash-owner', toolCallId: 'bash-interrupt' }
+    ))
+    expect(interrupted.status).toBe('interrupted')
   }, 15000)
 
   it('background：立即返回 pid/stdoutFile', async () => {

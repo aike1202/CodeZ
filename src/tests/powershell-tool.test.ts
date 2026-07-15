@@ -43,11 +43,19 @@ describe.skipIf(!isWindows)('PowerShellTool', () => {
     expect(parsed.stdout).toContain('hi')
   }, 30000)
 
-  it('timeout：timedOut true', async () => {
+  it('timeout yields and can be interrupted explicitly', async () => {
     const tool = new PowerShellTool()
-    const result = await tool.execute(JSON.stringify({ command: 'Start-Sleep -Seconds 5', timeout: 500 }), { workspaceRoot: root, sessionId: 'p2' })
-    const parsed = JSON.parse(result)
-    expect(parsed.timedOut).toBe(true)
+    const yielded = JSON.parse(await tool.execute(
+      JSON.stringify({ command: 'Start-Sleep -Seconds 5', timeout: 250 }),
+      { workspaceRoot: root, sessionId: 'p2', toolCallId: 'ps-start' }
+    ))
+    expect(yielded).toMatchObject({ status: 'running', waitTimedOut: true, timedOut: false })
+
+    const interrupted = JSON.parse(await tool.execute(
+      JSON.stringify({ task_id: yielded.taskId, action: 'interrupt' }),
+      { workspaceRoot: root, sessionId: 'p2', toolCallId: 'ps-interrupt' }
+    ))
+    expect(interrupted.status).toBe('interrupted')
   }, 15000)
 
   it('background：立即返回 pid/stdoutFile', async () => {

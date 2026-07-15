@@ -32,7 +32,7 @@ CodeZ 已有 `SubAgentManager` 框架,支持 `Research`(只读)与 `Plan` 两种
 
 ### 参考:Claude Code 的做法
 
-来自 `ClaudeCodelogs/` 的分析,Claude Code 把多智能体并行分两层:
+根据此前对 Claude Code 行为的分析,Claude Code 把多智能体并行分两层:
 
 1. **轻量并行** —— 靠系统提示词引导模型"在同一条回复里发多个 `Agent` 工具调用",harness 并发执行。并行是**行为习惯**而非独立功能。并行写的隔离答案是 `isolation: "worktree"`。
 2. **重度确定性编排** —— `Workflow` 工具(JS 脚本,`parallel` 屏障 / `pipeline` 流水线),需用户显式 opt-in。官方倾向 `pipeline` 而非屏障,因为屏障浪费快任务的等待时间。

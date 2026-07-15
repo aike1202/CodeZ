@@ -521,11 +521,11 @@ export function registerChatIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.CHAT_TOOL_INTERRUPT, (_event, toolCallId: string) => {
+  ipcMain.handle(IPC_CHANNELS.CHAT_TOOL_INTERRUPT, async (_event, toolCallId: string) => {
     if (typeof toolCallId !== 'string' || !toolCallId.trim() || toolCallId.length > 512) {
       return { ok: false, error: 'A valid tool call id is required.' }
     }
-    const result = getCommandTaskRegistry().interruptByToolCallId(toolCallId)
+    const result = await getCommandTaskRegistry().interruptByToolCallId(toolCallId)
     if (!result) return { ok: false, error: 'The command is no longer running.' }
     return {
       ok: result.status === 'interrupted',

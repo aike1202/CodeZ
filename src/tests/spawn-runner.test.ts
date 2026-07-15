@@ -2,7 +2,12 @@
 import { describe, it, expect } from 'vitest'
 import * as path from 'path'
 import * as fs from 'fs'
-import { SpawnRunner, truncateOutput, getBackgroundTaskRegistry } from '../main/tools/SpawnRunner'
+import {
+  SpawnRunner,
+  truncateOutput,
+  getBackgroundTaskRegistry,
+  getCommandTaskRegistry
+} from '../main/tools/SpawnRunner'
 
 const SHELL = process.platform === 'win32' ? 'powershell' : 'bash'
 const EXEC = process.platform === 'win32' ? 'powershell.exe' : 'bash'
@@ -41,11 +46,41 @@ describe('SpawnRunner', () => {
     expect(result.stdout).toContain('hello')
   }, 30000)
 
-  it('timeout：返回 timedOut true', async () => {
+  it('wait timeout yields control without terminating the command', async () => {
     const runner = new SpawnRunner()
     const result = await runner.run({ command: sleepCmd(), cwd, shell: SHELL, executable: EXEC, timeout: 500 })
-    expect(result.timedOut).toBe(true)
+    expect(result).toMatchObject({ status: 'running', waitTimedOut: true, timedOut: false })
+    expect(result.taskId).toBeTruthy()
+    const interrupted = await runner.interrupt(result.taskId!)
+    expect(interrupted?.status).toBe('interrupted')
   }, 15000)
+
+  it('waits again for the same task and returns its final output', async () => {
+    const runner = new SpawnRunner()
+    const command = SHELL === 'powershell'
+      ? 'Start-Sleep -Milliseconds 700; Write-Output finished'
+      : 'sleep 0.7; echo finished'
+    const yielded = await runner.run({ command, cwd, shell: SHELL, executable: EXEC, timeout: 250 })
+    expect(yielded.status).toBe('running')
+
+    const completed = await runner.wait(yielded.taskId!, 5_000)
+    expect(completed).toMatchObject({ status: 'completed', exitCode: 0, waitTimedOut: false })
+    expect(completed?.stdout).toContain('finished')
+  }, 15000)
+
+  it('interrupts only the task bound to a tool call id', async () => {
+    const runner = new SpawnRunner()
+    const first = await runner.run({
+      command: sleepCmd(), cwd, shell: SHELL, executable: EXEC, timeout: 250, toolCallId: 'tool-first'
+    })
+    const second = await runner.run({
+      command: echoCmd(), cwd, shell: SHELL, executable: EXEC, timeout: 15_000, toolCallId: 'tool-second'
+    })
+
+    const interrupted = await getCommandTaskRegistry().interruptByToolCallId('tool-first')
+    expect(interrupted?.status).toBe('interrupted')
+    expect(second.status).toBe('completed')
+  }, 30000)
 
   it('background：立即返回 pid/stdoutFile 并登记注册表', async () => {
     const registry = getBackgroundTaskRegistry()

@@ -98,7 +98,7 @@ export class PowerShellTool extends Tool {
         if (task.shellType !== 'powershell') return 'Error: This command task was not started by PowerShell.'
         registry.bindToolCall(parsed.task_id, context.toolCallId)
         const result = parsed.action === 'interrupt'
-          ? runner.interrupt(parsed.task_id)
+          ? await runner.interrupt(parsed.task_id)
           : await runner.wait(parsed.task_id, resolveTimeout(parsed.timeout))
         return result ? formatResult(result) : `Error: Command task '${parsed.task_id}' was not found.`
       }

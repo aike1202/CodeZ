@@ -62,30 +62,58 @@ interface ManagedCommandTask extends CommandTaskEntry {
   stderr: string
   abortSignal?: AbortSignal
   abortProcess?: () => void
+  interruptionRequested: boolean
   toolCallIds: Set<string>
   waiters: Set<() => void>
 }
 
-function terminateProcess(proc: ChildProcess, detached = false): void {
+async function terminateProcess(proc: ChildProcess, detached = false): Promise<void> {
   if (typeof proc.pid !== 'number') return
   if (process.platform === 'win32') {
-    try {
-      const killer = spawn('taskkill.exe', ['/pid', String(proc.pid), '/T', '/F'], {
-        windowsHide: true,
-        stdio: 'ignore'
-      })
-      killer.on('error', () => {
+    await new Promise<void>((resolve) => {
+      try {
+        const killer = spawn('taskkill.exe', ['/pid', String(proc.pid), '/T', '/F'], {
+          windowsHide: true,
+          stdio: 'ignore'
+        })
+        let settled = false
+        const finish = (fallback: boolean) => {
+          if (settled) return
+          settled = true
+          if (fallback) {
+            try { proc.kill('SIGKILL') } catch {}
+          }
+          resolve()
+        }
+        killer.on('error', () => finish(true))
+        killer.on('close', (code) => finish(code !== 0))
+        killer.unref()
+      } catch {
         try { proc.kill('SIGKILL') } catch {}
-      })
-      killer.unref()
-      return
-    } catch {}
+        resolve()
+      }
+    })
+    return
   }
   try {
     process.kill(detached ? -proc.pid : proc.pid, 'SIGKILL')
   } catch {
     try { proc.kill('SIGKILL') } catch {}
   }
+}
+
+const LIVE_OUTPUT_LIMIT = 1_000_000
+const LIVE_OUTPUT_HEAD = 200_000
+const LIVE_OUTPUT_TAIL = 800_000
+
+function appendLiveOutput(current: string, chunk: string): string {
+  const combined = current + chunk
+  if (combined.length <= LIVE_OUTPUT_LIMIT) return combined
+  return [
+    combined.slice(0, LIVE_OUTPUT_HEAD),
+    '\n\n[System Note: Live command output capped while the process continues.]\n\n',
+    combined.slice(-LIVE_OUTPUT_TAIL)
+  ].join('')
 }
 
 export function truncateOutput(text: string, head = 1000, tail = 3000): { text: string; truncated: boolean } {
@@ -145,13 +173,18 @@ export class CommandTaskRegistry {
       stdout: '',
       stderr: '',
       abortSignal: opts.abortSignal,
+      interruptionRequested: false,
       toolCallIds: new Set(opts.toolCallId ? [opts.toolCallId] : []),
       waiters: new Set()
     }
     this.tasks.set(taskId, task)
 
-    proc.stdout?.on('data', (data) => { task.stdout += data.toString() })
-    proc.stderr?.on('data', (data) => { task.stderr += data.toString() })
+    proc.stdout?.on('data', (data) => {
+      task.stdout = appendLiveOutput(task.stdout, data.toString())
+    })
+    proc.stderr?.on('data', (data) => {
+      task.stderr = appendLiveOutput(task.stderr, data.toString())
+    })
 
     const finish = (status: CommandTaskEntry['status'], exitCode: number | null) => {
       if (task.status !== 'running') return
@@ -163,12 +196,15 @@ export class CommandTaskRegistry {
       task.waiters.clear()
     }
     proc.on('error', (error) => {
-      task.stderr += `${task.stderr ? '\n' : ''}${error.message}`
+      task.stderr = appendLiveOutput(task.stderr, `${task.stderr ? '\n' : ''}${error.message}`)
       finish('failed', 1)
     })
-    proc.on('close', (code) => finish(code === 0 ? 'completed' : 'failed', code))
+    proc.on('close', (code) => finish(
+      task.interruptionRequested ? 'interrupted' : code === 0 ? 'completed' : 'failed',
+      code
+    ))
 
-    task.abortProcess = () => this.interrupt(taskId)
+    task.abortProcess = () => { void this.interrupt(taskId) }
     opts.abortSignal?.addEventListener('abort', task.abortProcess, { once: true })
     if (opts.abortSignal?.aborted) task.abortProcess()
     return taskId
@@ -191,11 +227,11 @@ export class CommandTaskRegistry {
     return true
   }
 
-  interruptByToolCallId(toolCallId: string): SpawnResult | undefined {
+  interruptByToolCallId(toolCallId: string): Promise<SpawnResult | undefined> {
     for (const task of this.tasks.values()) {
       if (task.toolCallIds.has(toolCallId)) return this.interrupt(task.taskId)
     }
-    return undefined
+    return Promise.resolve(undefined)
   }
 
   async wait(taskId: string, timeoutMs: number): Promise<SpawnResult | undefined> {
@@ -219,16 +255,20 @@ export class CommandTaskRegistry {
     return this.result(task)
   }
 
-  interrupt(taskId: string): SpawnResult | undefined {
+  async interrupt(taskId: string): Promise<SpawnResult | undefined> {
     const task = this.tasks.get(taskId)
     if (!task) return undefined
     if (task.status === 'running') {
-      task.status = 'interrupted'
-      task.completedAt = Date.now()
-      if (task.abortProcess) task.abortSignal?.removeEventListener('abort', task.abortProcess)
-      terminateProcess(task.process, task.detached)
-      for (const wake of task.waiters) wake()
-      task.waiters.clear()
+      task.interruptionRequested = true
+      await terminateProcess(task.process, task.detached)
+      const result = await this.wait(taskId, 5_000)
+      if (result?.status === 'running') {
+        task.stderr = appendLiveOutput(
+          task.stderr,
+          `${task.stderr ? '\n' : ''}Failed to confirm that the command process exited after interruption.`
+        )
+      }
+      return this.result(task)
     }
     return this.result(task)
   }
@@ -330,7 +370,7 @@ export class SpawnRunner {
     return getCommandTaskRegistry().wait(taskId, timeoutMs)
   }
 
-  interrupt(taskId: string): SpawnResult | undefined {
+  interrupt(taskId: string): Promise<SpawnResult | undefined> {
     return getCommandTaskRegistry().interrupt(taskId)
   }
 
@@ -369,7 +409,7 @@ export class SpawnRunner {
     const taskId = registry.add({ pid, stdoutFile, stderrFile, startedAt: Date.now(), shellType: opts.shell })
     const abortProcess = () => {
       registry.remove(taskId)
-      terminateProcess(proc, true)
+      void terminateProcess(proc, true)
     }
     opts.abortSignal?.addEventListener('abort', abortProcess, { once: true })
     if (opts.abortSignal?.aborted) abortProcess()
