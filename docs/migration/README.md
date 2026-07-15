@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-- Phase 0：进行中。D-01 至 D-08 已按 ADR 0001 冻结；六项高风险 spike 和清单语义复核尚未完成。
+- Phase 0：进行中。D-01 至 D-08 已按 ADR 0001 冻结；Windows safeStorage、Rust MCP SDK 和 Windows PTY/进程树 spike 已完成，macOS/Linux 验证及其余高风险 spike 和清单语义复核尚未完成。
 - Phase 1：基座进行中。Cargo workspace、依赖方向门禁、三平台 CI、Tauri v2 宿主、typed command、前端 `shared/desktop` 和迁移期启动页已经建立；主题、日志、退出协调和自动化桌面 smoke 尚未完成。
 - Phase 2 至 Phase 10：未开始。
 - Electron 基线：完整保留，禁止提前删除。
@@ -20,6 +20,8 @@
 - `npm.cmd run dev:tauri`：真实 Windows 进程启动并保持响应，renderer 使用 `http://localhost:1420/tauri.html`；Electron 占用全局快捷键时降级为告警而不终止 Tauri。
 - 迁移清单重复生成 SHA-256 稳定，当前 119 个声明 channel、0 个未声明 transport 引用。
 - Windows `safeStorage` sentinel spike：通过，确认旧密文需要 `Local State` DPAPI 主密钥 + Chromium `v10` AES-256-GCM 只读兼容层；见 `docs/migration/spikes/windows-safe-storage.md`。
+- Rust MCP SDK spike：通过，采用 `rmcp 2.2.0` 作为协议核心，legacy SSE、严格 session recovery 和安全策略由 CodeZ adapter 负责；见 `docs/migration/spikes/rust-mcp-sdk.md`。
+- Windows PTY/进程树 spike：6 项真实 ConPTY 测试通过，采用 `portable-pty 0.9.0` 作为 PTY 原语，树级终止和有界输出由 CodeZ adapter 负责；见 `docs/migration/spikes/rust-pty.md`。
 
 ## 生成清单
 

@@ -303,7 +303,7 @@ OS filesystem, processes, credential store, network
 - Schema：`schemars` + 支持所需 Draft 的 JSON Schema validator。
 - 文件检索：`ignore`/`globset`/`regex`，或继续以资源方式分发 `rg`。
 - Shell 解析：Rust `tree-sitter` 及 Bash/PowerShell grammar，先做语料兼容验证。
-- PTY：`portable-pty` 或平台专用实现，必须先通过 Windows ConPTY 验证。
+- PTY：固定 `portable-pty 0.9.0` 作为 PTY 原语；Windows ConPTY 已通过中文、resize、Ctrl+C、kill tree 与退出清理验证，进程树和有界输出由 CodeZ adapter 负责，见 ADR 0003。
 - 密钥：系统 credential store 或平台 API；旧 Electron 密文需要单独兼容探针。
 - MCP：优先评估成熟 Rust SDK；若能力不完整，以协议兼容和测试覆盖为选择标准，不能只比较 API 表面。
 

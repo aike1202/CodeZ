@@ -96,7 +96,7 @@ interface DesktopEvent<T> {
 5. **Tauri 流：** 持续高吞吐聊天/终端事件，验证顺序、取消、背压、组件卸载和内存上限。
 6. **资源与打包：** 验证 builtin skills、parser grammar/资源、`rg` 和安装后路径定位。
 
-当前进展：Windows `safeStorage` sentinel 已验证为 `Local State` 用户 DPAPI 主密钥 + Chromium `v10` AES-256-GCM envelope，可实现只读 legacy reader；MCP 已选定 `rmcp 2.2.0` 作为协议核心，并确认 legacy SSE、严格 `-32001` session recovery 与安全策略由 CodeZ adapters 承担。证据见 `docs/migration/spikes/windows-safe-storage.md`、`docs/migration/spikes/rust-mcp-sdk.md` 和 ADR 0002。macOS/Linux safeStorage 兼容性及 PTY、Shell parser、Tauri 流、资源打包四项 spike 仍待完成。
+当前进展：Windows `safeStorage` sentinel 已验证为 `Local State` 用户 DPAPI 主密钥 + Chromium `v10` AES-256-GCM envelope，可实现只读 legacy reader；MCP 已选定 `rmcp 2.2.0` 作为协议核心，并确认 legacy SSE、严格 `-32001` session recovery 与安全策略由 CodeZ adapters 承担；Windows PTY/进程树已用 6 项真实 ConPTY 测试验证，选定 `portable-pty 0.9.0` 作为 PTY 原语，树级终止、有界输出和控制序列顺序由 CodeZ adapter 负责。证据见 `docs/migration/spikes/windows-safe-storage.md`、`docs/migration/spikes/rust-mcp-sdk.md`、`docs/migration/spikes/rust-pty.md`、ADR 0002 和 ADR 0003。macOS/Linux safeStorage 与 PTY runtime 验证，以及 Shell parser、Tauri 流、资源打包 spike 仍待完成。
 
 ### 4.4 性能与质量基线
 
