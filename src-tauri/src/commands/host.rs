@@ -25,6 +25,7 @@ fn validate_external_url(target: &str) -> Result<Url, AppError> {
 }
 
 #[tauri::command]
+#[tracing::instrument(name = "desktop.command", skip_all, fields(command = "window_control"))]
 pub fn window_control(
     window: WebviewWindow,
     state: State<'_, AppState>,
@@ -54,6 +55,7 @@ pub fn window_control(
 }
 
 #[tauri::command]
+#[tracing::instrument(name = "desktop.command", skip_all, fields(command = "open_external"))]
 pub fn open_external(
     app: tauri::AppHandle,
     state: State<'_, AppState>,

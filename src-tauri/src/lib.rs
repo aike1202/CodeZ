@@ -65,7 +65,6 @@ fn toggle_window_visibility(window: &WebviewWindow) {
 ///
 /// Returns a Tauri startup error when the application cannot be built.
 pub fn run() -> Result<(), tauri::Error> {
-    logging::initialize();
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {

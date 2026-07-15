@@ -70,11 +70,13 @@ pub(crate) fn emit_theme_changed(window: &Window) {
 }
 
 #[tauri::command]
+#[tracing::instrument(name = "desktop.command", skip_all, fields(command = "theme_get"))]
 pub fn theme_get(window: Window, state: State<'_, AppState>) -> Result<ThemeInfo, CommandError> {
     command_result(&state.errors, read_theme_info(&window, &state))
 }
 
 #[tauri::command]
+#[tracing::instrument(name = "desktop.command", skip_all, fields(command = "theme_set"))]
 pub fn theme_set(
     window: Window,
     state: State<'_, AppState>,

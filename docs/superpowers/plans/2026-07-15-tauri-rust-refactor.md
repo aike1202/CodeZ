@@ -160,7 +160,7 @@ src/renderer/src/desktop/
 - [x] 实现 OS 凭据存储 adapter，区分“不存在”“不可用”“权限拒绝”“密文损坏”；`codez-storage` 以 `CredentialId`/`SecretValue`/`CredentialStore` 隔离持久化引用与明文生命周期，`OsCredentialStore` 通过 `keyring 3.6.3` 分别接入 Windows Credential Manager、macOS Keychain 和 Linux Secret Service，并串行化底层访问。Windows workspace 测试和 Tauri debug build 已通过，macOS/Linux 编译与真实 keychain smoke 由目标平台 CI/Phase 9 承接。
 - [x] 实现旧 Provider/MCP/OAuth 密钥迁移或明确的重新录入标记；`codez-storage` 只从与 manifest 匹配且逐文件复核 SHA-256 的备份读取旧凭据，Windows migration-only reader 通过 `Local State` 的 user-scoped DPAPI key 解开 Chromium `v10` AES-256-GCM envelope，成功后直接写入 `CredentialStore`。Base64/明文 Provider、非 Windows 未验证平台、Local State/用户上下文/认证/JSON/ID 失败均写入不含密文、明文、绝对路径或底层错误的 `requires_reentry` 决策；OS 凭据库故障中止并支持幂等重试，不伪装为重录成功。
 - [x] 禁止 Base64/明文 fallback；为日志和错误加入结构化脱敏测试；`SecretValue` 继续不实现 `Debug`/`Serialize`/`Clone`，compile-fail rustdoc 锁定其不可 JSON 持久化，架构检查禁止 `codez-storage` 在 migration-only `legacy_safe_storage` 之外导入 Base64。`codez-core::RedactedText` 会清零传入缓冲并让 `Display`/`Debug` 只能看到脱敏值，`AppError` 以私有字段在构造时同时脱敏用户消息与诊断；真实 `tracing-subscriber` 输出测试覆盖 Authorization 与 OAuth token，Electron 冻结基线不在 Phase 10 前修改。
-- [ ] 以 `tracing` 实现滚动日志、日志等级和 session/stream/tool span。
+- [x] 以 `tracing` 实现滚动日志、日志等级和 session/stream/tool span；Tauri composition root 在已验证的 `AppPaths::log_directory` 初始化每日 UTC JSONL appender，最多保留 8 个文件并以 8,192 行有界非阻塞队列写入，`CODEZ_LOG` 支持自有 `codez_*` target 的 level/target 指令且无效值回退 `info`，第三方 target 在 file/console layer 均被拒绝以避免依赖内部诊断泄密。全部 Tauri command 以 `skip_all` span 防止 DTO 自动进入日志，`codez-runtime` 提供 typed session/stream/tool span，tool span 显式携带三层 ID；等级过滤、第三方 target 隔离、span JSON 字段与只清理匹配日志文件已有行为测试。后续 Provider、Agent、Process 与 MCP 实现仍须在各自阶段接入对应 span，不能将本项完成视为全链路可观测性已完成。
 
 ### 6.3 通用平台 trait
 

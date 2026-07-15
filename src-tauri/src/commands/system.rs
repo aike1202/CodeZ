@@ -7,6 +7,7 @@ use tauri::{State, ipc::Channel};
 use crate::{error::command_result, state::AppState};
 
 #[tauri::command]
+#[tracing::instrument(name = "desktop.command", skip_all, fields(command = "system_health"))]
 pub fn system_health(state: State<'_, AppState>) -> Result<HealthResponse, CommandError> {
     let health = state.system.health();
 
@@ -18,6 +19,11 @@ pub fn system_health(state: State<'_, AppState>) -> Result<HealthResponse, Comma
 }
 
 #[tauri::command]
+#[tracing::instrument(
+    name = "desktop.command",
+    skip_all,
+    fields(command = "system_probe_channel")
+)]
 pub fn system_probe_channel(
     state: State<'_, AppState>,
     events: Channel<DesktopEvent<SystemProbeEvent>>,

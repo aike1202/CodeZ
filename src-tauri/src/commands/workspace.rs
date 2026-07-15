@@ -6,6 +6,11 @@ use tauri_plugin_dialog::DialogExt;
 use crate::{error::command_result, state::AppState};
 
 #[tauri::command]
+#[tracing::instrument(
+    name = "desktop.command",
+    skip_all,
+    fields(command = "workspace_open_directory")
+)]
 pub fn workspace_open_directory(
     app: AppHandle,
     state: State<'_, AppState>,

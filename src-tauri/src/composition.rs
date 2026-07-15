@@ -7,7 +7,11 @@ use codez_storage::{AtomicFileStore, OsCredentialStore};
 use tauri::{App, Manager};
 use thiserror::Error;
 
-use crate::{error::ErrorReporter, state::AppState};
+use crate::{
+    error::ErrorReporter,
+    logging::{self, LoggingError},
+    state::AppState,
+};
 
 #[derive(Debug, Error)]
 pub(crate) enum CompositionError {
@@ -18,6 +22,8 @@ pub(crate) enum CompositionError {
     },
     #[error(transparent)]
     InvalidPaths(#[from] AppPathError),
+    #[error(transparent)]
+    Logging(#[from] LoggingError),
 }
 
 pub(crate) fn compose_app_state(app: &App) -> Result<AppState, CompositionError> {
@@ -37,6 +43,7 @@ pub(crate) fn compose_app_state(app: &App) -> Result<AppState, CompositionError>
         temporary_directory,
         home_directory,
     )?);
+    let logging = logging::initialize(paths.log_directory())?;
 
     Ok(AppState {
         system: Arc::new(SystemService::new()),
@@ -48,6 +55,7 @@ pub(crate) fn compose_app_state(app: &App) -> Result<AppState, CompositionError>
         credentials: Arc::new(OsCredentialStore::default()),
         shutdown: Arc::new(ShutdownCoordinator::default()),
         errors: Arc::new(ErrorReporter::default()),
+        _logging: logging,
         paths,
     })
 }

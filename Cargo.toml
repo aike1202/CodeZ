@@ -35,7 +35,8 @@ tempfile = "3.27.0"
 thiserror = "2.0.18"
 tokio = { version = "1.49.0", features = ["macros", "rt", "sync", "time"] }
 tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.22", features = ["fmt"] }
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt", "json"] }
 ts-rs = { version = "12.0.1", features = ["serde-compat"] }
 zeroize = "1.8.2"
 windows-dpapi = "0.2.0"
