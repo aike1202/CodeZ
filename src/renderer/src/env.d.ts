@@ -65,6 +65,12 @@ declare global {
           sessionId: string,
           input: import('@shared/types/queuedPrompt').ChatSteerInput
         ) => Promise<import('@shared/types/queuedPrompt').ChatSteerResult>
+        interruptTool: (toolCallId: string) => Promise<{
+          ok: boolean
+          status?: 'running' | 'completed' | 'failed' | 'interrupted'
+          taskId?: string
+          error?: string
+        }>
         stream: (
           providerId: string,
           model: string,

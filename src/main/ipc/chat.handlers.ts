@@ -43,6 +43,7 @@ import {
 import { ToolManager } from '../tools/ToolManager'
 import { getMcpConnectionManager } from '../services/mcp'
 import { getWorkspacePermissionStore } from '../services/permission/workspacePermissionStore'
+import { getCommandTaskRegistry } from '../tools/SpawnRunner'
 
 function applyRequestReasoningReserve(
   capabilities: ModelContextCapabilities,
@@ -514,6 +515,20 @@ export function registerChatIpc(): void {
       finishStream(streamId)
     } else {
       rememberPendingStop(streamId)
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.CHAT_TOOL_INTERRUPT, async (_event, toolCallId: string) => {
+    if (typeof toolCallId !== 'string' || !toolCallId.trim() || toolCallId.length > 512) {
+      return { ok: false, error: 'A valid tool call id is required.' }
+    }
+    const result = await getCommandTaskRegistry().interruptByToolCallId(toolCallId)
+    if (!result) return { ok: false, error: 'The command is no longer running.' }
+    return {
+      ok: result.status === 'interrupted',
+      status: result.status,
+      taskId: result.taskId,
+      error: result.status === 'interrupted' ? undefined : 'The command is no longer running.'
     }
   })
 

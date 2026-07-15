@@ -779,13 +779,15 @@ export class AgentRunner {
               if (['Edit', 'Write', 'NotebookEdit'].includes(tr.name)) {
                 filesModifiedInSession = true
               } else if (tr.name === 'Bash' || tr.name === 'PowerShell') {
-                const cmdStr = String(item.input?.command || item.input?.commandLine || '')
+                let cmdData: any = item.result.data
+                if (typeof cmdData === 'string') {
+                  try { cmdData = JSON.parse(cmdData) } catch {}
+                }
+                const cmdStr = String(
+                  item.input?.command || item.input?.commandLine || cmdData?.command || ''
+                )
                 if (/(test|typecheck|build|lint)/.test(cmdStr)) {
-                  let cmdData: any = item.result.data
-                  if (typeof cmdData === 'string') {
-                    try { cmdData = JSON.parse(cmdData) } catch {}
-                  }
-                  if (cmdData && typeof cmdData === 'object') {
+                  if (cmdData && typeof cmdData === 'object' && cmdData.status !== 'running') {
                     lastVerificationResult = {
                       success: cmdData.exitCode === 0 && !cmdData.timedOut,
                       command: cmdStr

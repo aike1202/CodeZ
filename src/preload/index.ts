@@ -140,6 +140,13 @@ const api = {
     steer: (sessionId: string, input: ChatSteerInput): Promise<ChatSteerResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.CHAT_STREAM_STEER, sessionId, input),
 
+    interruptTool: (toolCallId: string): Promise<{
+      ok: boolean
+      status?: 'running' | 'completed' | 'failed' | 'interrupted'
+      taskId?: string
+      error?: string
+    }> => ipcRenderer.invoke(IPC_CHANNELS.CHAT_TOOL_INTERRUPT, toolCallId),
+
     /**
      * 发起流式聊天请求，并接收 tool call 日志。
      */

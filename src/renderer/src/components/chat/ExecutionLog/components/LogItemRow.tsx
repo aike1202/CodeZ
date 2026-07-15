@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import Flex from '../../../ui/Flex'
 import {
   type UnifiedTimelineItem,
@@ -8,7 +8,7 @@ import { buildDiffEditInfo } from '../../../../utils/editDiffUtils'
 import ExecutionLogDetail from '../../ExecutionLogDetail'
 import { ThoughtIcon, SearchIcon, CmdIcon, AskIcon } from '../../../svg-icons'
 import IconSkills from '../../../icons/IconSkills'
-import { CircleAlert, CircleCheck, Minimize2, RefreshCw } from 'lucide-react'
+import { CircleAlert, CircleCheck, Loader2, Minimize2, RefreshCw, Square } from 'lucide-react'
 import { FileIcon, FolderIcon } from '@react-symbols/icons/utils'
 import './LogItemRow.css'
 
@@ -72,6 +72,7 @@ export function LogItemRow({
   onFileClick,
   onDiffClick
 }: LogItemRowProps): React.ReactElement {
+  const [isStopping, setIsStopping] = useState(false)
   const isSkillItem =
     item.type === 'tool' && (
       item.toolName === 'Skill' || item.toolName === 'ActivateSkill' ||
@@ -104,6 +105,12 @@ export function LogItemRow({
     item.type === 'edit' || (item.type === 'tool' && item.verb === 'Analyzed' && item.fileName)
   const isEditItem = item.type === 'edit'
   const canOpenEditDiff = isEditItem && Boolean(item.args?.trim()) && Boolean(onDiffClick)
+  const canStopCommand = item.status === 'running' && (
+    item.verb === 'Terminal' ||
+    item.toolName === 'Bash' ||
+    item.toolName === 'PowerShell' ||
+    item.toolName === 'run_command'
+  )
 
   const openFile = (event: React.MouseEvent) => {
     event.stopPropagation()
@@ -114,6 +121,19 @@ export function LogItemRow({
     event.stopPropagation()
     const diffInfo = buildDiffEditInfo(item.toolName || '', item.args || '')
     onDiffClick?.(item.realPath || item.target, diffInfo)
+  }
+
+  const stopCommand = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    if (isStopping) return
+    setIsStopping(true)
+    try {
+      const result = await window.api.chat.interruptTool(item.id)
+      if (!result.ok) setIsStopping(false)
+    } catch (error) {
+      console.warn('Failed to stop command:', error)
+      setIsStopping(false)
+    }
   }
 
   return (
@@ -179,6 +199,20 @@ export function LogItemRow({
                 </button>
               ) : null}
             </Flex>
+            {canStopCommand ? (
+              <button
+                type="button"
+                className="timeline-command-stop-button"
+                aria-label="停止命令"
+                title={isStopping ? '正在停止命令' : '停止命令'}
+                disabled={isStopping}
+                onClick={stopCommand}
+              >
+                {isStopping
+                  ? <Loader2 size={12} aria-hidden="true" />
+                  : <Square size={10} fill="currentColor" aria-hidden="true" />}
+              </button>
+            ) : null}
           </Flex>
 
           {hasItemDetail && isItemExpanded && (

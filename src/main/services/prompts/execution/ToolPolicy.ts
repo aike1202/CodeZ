@@ -20,6 +20,7 @@ export const ToolPolicyModule: PromptModule = {
     }
     if (names.has('Bash') || names.has('PowerShell')) {
       lines.push('- Use a shell for commands and operations that dedicated tools cannot express.')
+      lines.push('- For shell commands, set the wait timeout from the expected runtime. If a command returns status=running, choose wait with a new timeout or interrupt using its task_id; never rerun the original command.')
     }
     lines.push('- Use tool names and capabilities from the current schema only; this guidance does not grant unavailable tools.')
     return lines.join('\n')
