@@ -159,7 +159,7 @@ src/renderer/src/desktop/
 
 - [x] 实现 OS 凭据存储 adapter，区分“不存在”“不可用”“权限拒绝”“密文损坏”；`codez-storage` 以 `CredentialId`/`SecretValue`/`CredentialStore` 隔离持久化引用与明文生命周期，`OsCredentialStore` 通过 `keyring 3.6.3` 分别接入 Windows Credential Manager、macOS Keychain 和 Linux Secret Service，并串行化底层访问。Windows workspace 测试和 Tauri debug build 已通过，macOS/Linux 编译与真实 keychain smoke 由目标平台 CI/Phase 9 承接。
 - [x] 实现旧 Provider/MCP/OAuth 密钥迁移或明确的重新录入标记；`codez-storage` 只从与 manifest 匹配且逐文件复核 SHA-256 的备份读取旧凭据，Windows migration-only reader 通过 `Local State` 的 user-scoped DPAPI key 解开 Chromium `v10` AES-256-GCM envelope，成功后直接写入 `CredentialStore`。Base64/明文 Provider、非 Windows 未验证平台、Local State/用户上下文/认证/JSON/ID 失败均写入不含密文、明文、绝对路径或底层错误的 `requires_reentry` 决策；OS 凭据库故障中止并支持幂等重试，不伪装为重录成功。
-- [ ] 禁止 Base64/明文 fallback；为日志和错误加入结构化脱敏测试。
+- [x] 禁止 Base64/明文 fallback；为日志和错误加入结构化脱敏测试；`SecretValue` 继续不实现 `Debug`/`Serialize`/`Clone`，compile-fail rustdoc 锁定其不可 JSON 持久化，架构检查禁止 `codez-storage` 在 migration-only `legacy_safe_storage` 之外导入 Base64。`codez-core::RedactedText` 会清零传入缓冲并让 `Display`/`Debug` 只能看到脱敏值，`AppError` 以私有字段在构造时同时脱敏用户消息与诊断；真实 `tracing-subscriber` 输出测试覆盖 Authorization 与 OAuth token，Electron 冻结基线不在 Phase 10 前修改。
 - [ ] 以 `tracing` 实现滚动日志、日志等级和 session/stream/tool span。
 
 ### 6.3 通用平台 trait

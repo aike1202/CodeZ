@@ -193,7 +193,8 @@ impl ShutdownCoordinator {
     ///
     /// # Errors
     ///
-    /// Returns [`AppError::Conflict`] after shutdown has been claimed.
+    /// Returns an [`AppError`] with [`codez_core::AppErrorKind::Conflict`] after
+    /// shutdown has been claimed.
     pub fn register(&self, hook: Arc<dyn ShutdownHook>) -> Result<(), AppError> {
         if self.state() != ShutdownState::Running {
             return Err(AppError::conflict(

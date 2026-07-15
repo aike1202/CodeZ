@@ -114,6 +114,16 @@ impl<'de> Deserialize<'de> for CredentialId {
 }
 
 /// Owned secret text that is never serializable or printable and clears on drop.
+///
+/// Secret persistence is only available through [`CredentialStore`]; JSON,
+/// Base64, and plaintext file fallbacks are intentionally not representable.
+///
+/// ```compile_fail
+/// use codez_storage::SecretValue;
+///
+/// let secret = SecretValue::new("fixture-secret").expect("fixture is non-empty");
+/// let _serialized = serde_json::to_string(&secret);
+/// ```
 pub struct SecretValue(String);
 
 impl SecretValue {

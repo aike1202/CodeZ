@@ -7,7 +7,7 @@ mod lifecycle;
 mod logging;
 mod state;
 
-use codez_core::{AppError, redact_sensitive_text};
+use codez_core::{AppError, RedactedText};
 use tauri::{Manager, WebviewWindow};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
@@ -22,7 +22,7 @@ fn log_window_error(window: &WebviewWindow, operation: &str, source: impl std::f
     } else {
         tracing::error!(
             error_code = error.kind().as_str(),
-            diagnostic = %redact_sensitive_text(error.diagnostic().unwrap_or("window operation failed")),
+            diagnostic = %error.diagnostic().unwrap_or("window operation failed"),
             "desktop operation failed before application state initialization"
         );
     }
@@ -139,8 +139,9 @@ pub fn run() -> Result<(), tauri::Error> {
     let app = builder
         .build(tauri::generate_context!())
         .inspect_err(|error| {
+            let diagnostic = RedactedText::new(error.to_string());
             tracing::error!(
-                diagnostic = %redact_sensitive_text(&error.to_string()),
+                %diagnostic,
                 "failed to build the CodeZ Tauri application"
             );
         })?;

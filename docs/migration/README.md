@@ -6,15 +6,15 @@
 
 - Phase 0：Windows x64 基线已闭环。D-01 至 D-08 已按 ADR 0001 冻结；六项高风险 spike、88 个 `window.api` 方法语义、23 类持久化数据、183 个测试文件分类、79 条 FR/NFR 追踪矩阵和性能基线均已有可重复证据。macOS/Linux safeStorage、PTY、资源与性能验证仍由目标平台 CI 完成，Phase 9 的签名主体和升级 feed 仍未冻结。
 - Phase 1：基座已闭环。Cargo workspace、依赖方向门禁、三平台 CI、Tauri v2 宿主、typed command、前端 `shared/desktop`、统一错误/脱敏诊断、迁移期启动页和有界四阶段安全退出已经建立；Tauri debug build、聚焦 host 测试和非视觉 smoke 通过。
-- Phase 2：进行中。`AppPaths` 已统一应用数据、缓存、日志、资源、临时和工作区状态根并由 Tauri composition root 注入；`AtomicFileStore` 已提供按资源串行的原子 JSON/JSONL、同步落盘、大小限制、故障注入、安全权限和损坏 quarantine/有效前缀恢复。`codez-storage` 现已定义 19 个版本化 schema family，并按 23 类持久化清单实现只读发现、脱敏 manifest、源文件复核、幂等 no-clobber 精确备份及脱敏 `legacy-data-v0` fixtures；类型安全的 `CredentialStore` port 与 Windows Credential Manager/macOS Keychain/Linux Secret Service adapter 已注入 Tauri composition root，secret 不实现 `Debug`/`Serialize` 并在 drop 时清零。旧 Provider/MCP secret/MCP OAuth 迁移现已绑定已验证备份：Windows 通过 DPAPI + AES-256-GCM 只读旧 `safeStorage`，成功值直接进入 OS 凭据库，无法安全迁移的条目只写脱敏 `requires_reentry` 决策。迁移 transform、语义引用验证、原子完成标记、滚动日志、其他通用 ports 与取消树仍未完成。
+- Phase 2：进行中。`AppPaths` 已统一应用数据、缓存、日志、资源、临时和工作区状态根并由 Tauri composition root 注入；`AtomicFileStore` 已提供按资源串行的原子 JSON/JSONL、同步落盘、大小限制、故障注入、安全权限和损坏 quarantine/有效前缀恢复。`codez-storage` 现已定义 19 个版本化 schema family，并按 23 类持久化清单实现只读发现、脱敏 manifest、源文件复核、幂等 no-clobber 精确备份及脱敏 `legacy-data-v0` fixtures；类型安全的 `CredentialStore` port 与 Windows Credential Manager/macOS Keychain/Linux Secret Service adapter 已注入 Tauri composition root，secret 不实现 `Debug`/`Serialize`/`Clone` 并在 drop 时清零。旧 Provider/MCP secret/MCP OAuth 迁移现已绑定已验证备份：Windows 通过 DPAPI + AES-256-GCM 只读旧 `safeStorage`，成功值直接进入 OS 凭据库，无法安全迁移的条目只写脱敏 `requires_reentry` 决策。Base64 依赖现由架构门禁限制在 migration-only reader；`RedactedText` 与私有字段 `AppError` 在错误构造时清零原始缓冲并完成结构化脱敏，真实 `tracing` 输出已有防泄密回归。迁移 transform、语义引用验证、原子完成标记、滚动日志、其他通用 ports 与取消树仍未完成。
 - Phase 3 至 Phase 10：未开始。
 - Electron 基线：完整保留，禁止提前删除。
 
 ## 首轮验证
 
 - `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings -D clippy::perf`：通过。
-- `cargo test --workspace --locked`：通过，共 70 项 Rust 测试；其中 storage 27 项覆盖路径、原子替换、备份、凭据适配、三类旧凭据迁移、重录决策、脱敏、幂等与篡改阻断。
-- `cargo test -p codez-desktop --all-targets --all-features --locked`：通过，8 项 desktop 单元测试与 2 项有界流集成测试通过。
+- `cargo test --workspace --locked`：通过，共 73 项 Rust 单元/集成测试；其中 storage 27 项覆盖路径、原子替换、备份、凭据适配、三类旧凭据迁移、重录决策、脱敏、幂等与篡改阻断，另有 1 项 `SecretValue` 不可序列化的 compile-fail rustdoc。
+- `cargo test -p codez-desktop --all-targets --all-features --locked`：通过，9 项 desktop 单元测试与 2 项有界流集成测试通过。
 - `npm.cmd run typecheck`：通过。
 - `npm.cmd run check:architecture`：通过，8 个 workspace package 依赖方向有效。
 - `npm.cmd test -- --run`：183 个文件、1,166 项测试通过。
