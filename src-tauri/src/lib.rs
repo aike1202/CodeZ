@@ -20,7 +20,6 @@ fn toggle_window_visibility(window: &WebviewWindow) {
 
 pub fn run() {
     let builder = tauri::Builder::default()
-        .manage(state::AppState::new())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
@@ -46,6 +45,14 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            let resource_directory = app.path().resource_dir()?;
+            let state = state::AppState::new(resource_directory);
+            if let Err(error) = state.resources.validate_required() {
+                eprintln!("CodeZ bundled resources are not ready: {error}");
+            }
+            if !app.manage(state) {
+                return Err("CodeZ application state was already initialized".into());
+            }
             let shortcut_result = app.global_shortcut().on_shortcut(
                 "CommandOrControl+Shift+Space",
                 |app, _shortcut, event| {

@@ -36,8 +36,8 @@
       "../build/icon-512.png",
       "../build/icon.ico"
     ],
-    "resources": [
-      "../resources/builtin-skills/**/*"
-    ]
+    "resources": {
+      "../resources/builtin-skills/": "builtin-skills/"
+    }
   }
 }

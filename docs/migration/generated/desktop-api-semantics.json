@@ -1,0 +1,2164 @@
+{
+  "methods": [
+    {
+      "method": "attachment.discardDrafts",
+      "file": "src/preload/index.ts",
+      "line": 111,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "draftIds",
+          "type": "string[]",
+          "optional": false
+        }
+      ],
+      "output": "Promise<void>",
+      "channels": [
+        "attachment:discard-drafts"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "attachment.importDraft",
+      "file": "src/preload/index.ts",
+      "line": 95,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "input",
+          "type": "{\r\n      name: string\r\n      declaredMimeType: string\r\n      bytes: Uint8Array\r\n    }",
+          "optional": false
+        }
+      ],
+      "output": "Promise<DraftImageAttachment>",
+      "channels": [
+        "attachment:import-draft"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "attachment.promoteDrafts",
+      "file": "src/preload/index.ts",
+      "line": 102,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "attachments",
+          "type": "ComposerImageAttachment[]",
+          "optional": false
+        }
+      ],
+      "output": "Promise<ImageAttachment[]>",
+      "channels": [
+        "attachment:promote-drafts"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "attachment.readPreview",
+      "file": "src/preload/index.ts",
+      "line": 114,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "attachment",
+          "type": "ComposerImageAttachment",
+          "optional": false
+        },
+        {
+          "name": "variant",
+          "type": "'thumbnail' | 'original'",
+          "optional": false
+        }
+      ],
+      "output": "Promise<AttachmentPreviewBytes>",
+      "channels": [
+        "attachment:read-preview"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "attachment.rollbackPromotion",
+      "file": "src/preload/index.ts",
+      "line": 108,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "attachmentIds",
+          "type": "string[]",
+          "optional": false
+        }
+      ],
+      "output": "Promise<void>",
+      "channels": [
+        "attachment:rollback-promotion"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "chat.acceptFile",
+      "file": "src/preload/index.ts",
+      "line": 362,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "txId",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "filePath",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<boolean>",
+      "channels": [
+        "chat:accept-file"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "chat.compact",
+      "file": "src/preload/index.ts",
+      "line": 359,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "instructions",
+          "type": "string",
+          "optional": true
+        }
+      ],
+      "output": "Promise<any>",
+      "channels": [
+        "chat:compact:start"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "chat.getDiff",
+      "file": "src/preload/index.ts",
+      "line": 368,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "txId",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<Array<{ path: string; diff: string }>>",
+      "channels": [
+        "chat:get-diff"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "chat.getRuntimeStatus",
+      "file": "src/preload/index.ts",
+      "line": 127,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<SessionRuntimeStatus>",
+      "channels": [
+        "chat:runtime:status"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "chat.interruptTool",
+      "file": "src/preload/index.ts",
+      "line": 143,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "toolCallId",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<{\n      ok: boolean\n      status?: 'running' | 'completed' | 'failed' | 'interrupted'\n      taskId?: string\n      error?: string\n    }>",
+      "channels": [
+        "chat:tool:interrupt"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "Explicit remote interruption by toolCallId; the returned status confirms the resulting task state.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "chat.onRuntimeStatusChanged",
+      "file": "src/preload/index.ts",
+      "line": 130,
+      "kind": "subscription",
+      "inputs": [
+        {
+          "name": "callback",
+          "type": "(payload: SessionRuntimeStatusChanged) => void",
+          "optional": false
+        }
+      ],
+      "output": "(() => void)",
+      "channels": [
+        "chat:runtime:status-changed"
+      ],
+      "errors": "Listener registration is synchronous; payload or callback failures remain local to the renderer callback.",
+      "cancellation": "The returned disposer cancels renderer delivery only; it does not stop the producer.",
+      "events": "Each event from chat:runtime:status-changed is forwarded to the supplied callback.",
+      "unsubscribe": "Required; the returned stop/disposer removes all 1 registered listener(s).",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "chat.predictNextInput",
+      "file": "src/preload/index.ts",
+      "line": 122,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "request",
+          "type": "PromptPredictionRequest",
+          "optional": false
+        }
+      ],
+      "output": "Promise<PromptPredictionResponse>",
+      "channels": [
+        "chat:predict-next-input"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "chat.rejectFile",
+      "file": "src/preload/index.ts",
+      "line": 365,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "txId",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "filePath",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<boolean>",
+      "channels": [
+        "chat:reject-file"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "chat.respondAskUser",
+      "file": "src/preload/index.ts",
+      "line": 374,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "requestId",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "answers",
+          "type": "any",
+          "optional": false
+        }
+      ],
+      "output": "Promise<void>",
+      "channels": [
+        "`${IPC_CHANNELS.CHAT_ASK_USER_RESPONSE}:${requestId}`"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "chat.respondToApproval",
+      "file": "src/preload/index.ts",
+      "line": 371,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "requestId",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "response",
+          "type": "import('../shared/types/permission').PermissionApprovalResponse",
+          "optional": false
+        }
+      ],
+      "output": "Promise<void>",
+      "channels": [
+        "`${IPC_CHANNELS.CHAT_APPROVAL_RESPONSE}:${requestId}`"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "chat.steer",
+      "file": "src/preload/index.ts",
+      "line": 140,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "input",
+          "type": "ChatSteerInput",
+          "optional": false
+        }
+      ],
+      "output": "Promise<ChatSteerResult>",
+      "channels": [
+        "chat:stream:steer"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "chat.stream",
+      "file": "src/preload/index.ts",
+      "line": 153,
+      "kind": "stream",
+      "inputs": [
+        {
+          "name": "providerId",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "model",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "sessionId",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "input",
+          "type": "StreamRequestV2['input']",
+          "optional": false
+        },
+        {
+          "name": "callbacks",
+          "type": "{\r\n        onChunk: (delta: string, reasoningDelta?: string) => void\r\n        onDone: (fullContent: string, stopReason?: string, txId?: string) => void\r\n        onError: (error: string) => void\r\n        onSteerConsumed?: (input: ChatSteerInput) => void\r\n        onToolStart?: (\r\n          toolCallId: string,\r\n          name: string,\r\n          args: string,\r\n          thoughtSignature?: string,\r\n          batch?: ToolBatchMeta\r\n        ) => void\r\n        onToolEnd?: (toolCallId: string, result: string) => void\r\n        onPermissionRequest?: (request: any) => void\r\n        onAskUserRequest?: (request: any) => void\r\n        onSubAgentStart?: (subAgentId: string, meta: any) => void\r\n        onSubAgentEnd?: (subAgentId: string, result: any) => void\r\n        onSubAgentChunk?: (subAgentId: string, delta: string, reasoningDelta: string) => void\r\n        onSubAgentToolStart?: (subAgentId: string, toolCallId: string, name: string, args: string, thoughtSignature?: string) => void\r\n        onSubAgentToolEnd?: (subAgentId: string, toolCallId: string, result: string) => void\r\n        onContextBudget?: (snapshot: import('../shared/types/context').ContextBudgetSnapshot) => void\r\n        onCompactionStarted?: (payload: any) => void\r\n        onCompactionCompleted?: (payload: any) => void\r\n        onCompactionFailed?: (payload: any) => void\r\n      }",
+          "optional": false
+        }
+      ],
+      "output": "ChatStreamHandle",
+      "channels": [
+        "`${IPC_CHANNELS.CHAT_APPROVAL_RESPONSE}:${request.id}`",
+        "`${IPC_CHANNELS.CHAT_ASK_USER_RESPONSE}:${request.id}`",
+        "chat:compaction-completed",
+        "chat:compaction-failed",
+        "chat:compaction-started",
+        "chat:context-budget-updated",
+        "chat:request-approval",
+        "chat:request-ask-user",
+        "chat:stream:chunk",
+        "chat:stream:end",
+        "chat:stream:error",
+        "chat:stream:start",
+        "chat:stream:steer-consumed",
+        "chat:stream:stop",
+        "chat:stream:subagent:chunk",
+        "chat:stream:subagent:end",
+        "chat:stream:subagent:start",
+        "chat:stream:subagent:tool-end",
+        "chat:stream:subagent:tool-start",
+        "chat:stream:tool-end",
+        "chat:stream:tool-start"
+      ],
+      "errors": "The started Promise rejects on start failure; terminal runtime failures arrive on the stream error callback.",
+      "cancellation": "stop() sends chat:stream:stop for the active stream and disposes every listener; cleanup is idempotent.",
+      "events": "Events are filtered by streamId; end/error are terminal and trigger cleanup before invoking the callback.",
+      "unsubscribe": "Required; the returned stop/disposer removes all 17 registered listener(s).",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "logger.debug",
+      "file": "src/preload/index.ts",
+      "line": 573,
+      "kind": "fire-and-forget",
+      "inputs": [
+        {
+          "name": "args",
+          "type": "any[]",
+          "optional": false
+        }
+      ],
+      "output": "inferred from implementation",
+      "channels": [
+        "app:log"
+      ],
+      "errors": "No result channel; delivery and main-process failures are not observable by the caller.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "logger.error",
+      "file": "src/preload/index.ts",
+      "line": 572,
+      "kind": "fire-and-forget",
+      "inputs": [
+        {
+          "name": "args",
+          "type": "any[]",
+          "optional": false
+        }
+      ],
+      "output": "inferred from implementation",
+      "channels": [
+        "app:log"
+      ],
+      "errors": "No result channel; delivery and main-process failures are not observable by the caller.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "logger.info",
+      "file": "src/preload/index.ts",
+      "line": 570,
+      "kind": "fire-and-forget",
+      "inputs": [
+        {
+          "name": "args",
+          "type": "any[]",
+          "optional": false
+        }
+      ],
+      "output": "inferred from implementation",
+      "channels": [
+        "app:log"
+      ],
+      "errors": "No result channel; delivery and main-process failures are not observable by the caller.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "logger.warn",
+      "file": "src/preload/index.ts",
+      "line": 571,
+      "kind": "fire-and-forget",
+      "inputs": [
+        {
+          "name": "args",
+          "type": "any[]",
+          "optional": false
+        }
+      ],
+      "output": "inferred from implementation",
+      "channels": [
+        "app:log"
+      ],
+      "errors": "No result channel; delivery and main-process failures are not observable by the caller.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "mcp.authorize",
+      "file": "src/preload/index.ts",
+      "line": 483,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "name",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<any>",
+      "channels": [
+        "mcp:authorize"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "mcp.deleteSecret",
+      "file": "src/preload/index.ts",
+      "line": 492,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "key",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<string[]>",
+      "channels": [
+        "mcp:secret-delete"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "mcp.getCatalog",
+      "file": "src/preload/index.ts",
+      "line": 479,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "name",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<any>",
+      "channels": [
+        "mcp:get-catalog"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "mcp.list",
+      "file": "src/preload/index.ts",
+      "line": 474,
+      "kind": "request",
+      "inputs": [],
+      "output": "Promise<any>",
+      "channels": [
+        "mcp:list"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "mcp.listSecretKeys",
+      "file": "src/preload/index.ts",
+      "line": 489,
+      "kind": "request",
+      "inputs": [],
+      "output": "Promise<string[]>",
+      "channels": [
+        "mcp:secret-keys"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "mcp.logout",
+      "file": "src/preload/index.ts",
+      "line": 485,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "name",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<any>",
+      "channels": [
+        "mcp:logout"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "mcp.onChanged",
+      "file": "src/preload/index.ts",
+      "line": 494,
+      "kind": "subscription",
+      "inputs": [
+        {
+          "name": "callback",
+          "type": "(statuses: any[]) => void",
+          "optional": false
+        }
+      ],
+      "output": "(() => void)",
+      "channels": [
+        "mcp:changed"
+      ],
+      "errors": "Listener registration is synchronous; payload or callback failures remain local to the renderer callback.",
+      "cancellation": "The returned disposer cancels renderer delivery only; it does not stop the producer.",
+      "events": "Each event from mcp:changed is forwarded to the supplied callback.",
+      "unsubscribe": "Required; the returned stop/disposer removes all 1 registered listener(s).",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "mcp.reconnect",
+      "file": "src/preload/index.ts",
+      "line": 481,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "name",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<any>",
+      "channels": [
+        "mcp:reconnect"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "mcp.saveUser",
+      "file": "src/preload/index.ts",
+      "line": 475,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "servers",
+          "type": "Record<string, unknown>",
+          "optional": false
+        }
+      ],
+      "output": "Promise<any>",
+      "channels": [
+        "mcp:save-user"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "mcp.setEnabled",
+      "file": "src/preload/index.ts",
+      "line": 477,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "name",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "enabled",
+          "type": "boolean",
+          "optional": false
+        }
+      ],
+      "output": "Promise<any>",
+      "channels": [
+        "mcp:set-enabled"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "mcp.setSecret",
+      "file": "src/preload/index.ts",
+      "line": 490,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "key",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<string[]>",
+      "channels": [
+        "mcp:secret-set"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "mcp.trustProject",
+      "file": "src/preload/index.ts",
+      "line": 487,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "fingerprint",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<any>",
+      "channels": [
+        "mcp:trust-project"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "parallel.subscribe",
+      "file": "src/preload/index.ts",
+      "line": 529,
+      "kind": "subscription",
+      "inputs": [
+        {
+          "name": "callbacks",
+          "type": "{\r\n      onStarted?: (payload: { planSlug: string; waves: any[]; isolation: string; rationale: string }) => void\r\n      onWaveUpdate?: (payload: { waveIndex: number; status: string; stepResults: any[] }) => void\r\n      onDone?: (payload: { report: any }) => void\r\n      onExecutionEvent?: (payload: import('../shared/types/parallel').ParallelExecutionEvent) => void\r\n    }",
+          "optional": false
+        }
+      ],
+      "output": "(() => void)",
+      "channels": [
+        "execution:event",
+        "parallel:exec-done",
+        "parallel:exec-started",
+        "parallel:wave-update"
+      ],
+      "errors": "Listener registration is synchronous; payload or callback failures remain local to the renderer callback.",
+      "cancellation": "The returned disposer cancels renderer delivery only; it does not stop the producer.",
+      "events": "Each event from execution:event, parallel:exec-done, parallel:exec-started, parallel:wave-update is forwarded to the supplied callback.",
+      "unsubscribe": "Required; the returned stop/disposer removes all 4 registered listener(s).",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "permission.getMode",
+      "file": "src/preload/index.ts",
+      "line": 69,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "rootPath",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "inferred from implementation",
+      "channels": [
+        "permission:mode:get"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "permission.setMode",
+      "file": "src/preload/index.ts",
+      "line": 70,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "rootPath",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "mode",
+          "type": "'auto' | 'full-access'",
+          "optional": false
+        }
+      ],
+      "output": "inferred from implementation",
+      "channels": [
+        "permission:mode:set"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "plan.getActive",
+      "file": "src/preload/index.ts",
+      "line": 520,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "workspaceRoot",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<any>",
+      "channels": [
+        "plan:get-active"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "plan.list",
+      "file": "src/preload/index.ts",
+      "line": 516,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "workspaceRoot",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<any[]>",
+      "channels": [
+        "plan:list"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "plan.load",
+      "file": "src/preload/index.ts",
+      "line": 518,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "workspaceRoot",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "slug",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<any>",
+      "channels": [
+        "plan:load"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "provider.add",
+      "file": "src/preload/index.ts",
+      "line": 78,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "form",
+          "type": "ProviderFormData",
+          "optional": false
+        }
+      ],
+      "output": "Promise<ProviderInfo>",
+      "channels": [
+        "provider:add"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "provider.list",
+      "file": "src/preload/index.ts",
+      "line": 75,
+      "kind": "request",
+      "inputs": [],
+      "output": "Promise<ProviderInfo[]>",
+      "channels": [
+        "provider:list"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "provider.remove",
+      "file": "src/preload/index.ts",
+      "line": 84,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "id",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<boolean>",
+      "channels": [
+        "provider:remove"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "provider.setActive",
+      "file": "src/preload/index.ts",
+      "line": 90,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "id",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<void>",
+      "channels": [
+        "provider:set-active"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "provider.testConnection",
+      "file": "src/preload/index.ts",
+      "line": 87,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "id",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<ConnectionTestResult>",
+      "channels": [
+        "provider:test"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "provider.update",
+      "file": "src/preload/index.ts",
+      "line": 81,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "id",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "form",
+          "type": "Partial<ProviderFormData>",
+          "optional": false
+        }
+      ],
+      "output": "Promise<ProviderInfo | null>",
+      "channels": [
+        "provider:update"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "rules.delete",
+      "file": "src/preload/index.ts",
+      "line": 460,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "rulePath",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<boolean>",
+      "channels": [
+        "rules:delete"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "rules.getList",
+      "file": "src/preload/index.ts",
+      "line": 456,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "workspaces",
+          "type": "any[]",
+          "optional": false
+        }
+      ],
+      "output": "Promise<any[]>",
+      "channels": [
+        "rules:get-list"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "rules.rename",
+      "file": "src/preload/index.ts",
+      "line": 462,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "oldPath",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "newFilename",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "workspaceRoot",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "scope",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<boolean>",
+      "channels": [
+        "rules:rename"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "rules.save",
+      "file": "src/preload/index.ts",
+      "line": 458,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "rule",
+          "type": "any",
+          "optional": false
+        },
+        {
+          "name": "workspaceRoot",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<boolean>",
+      "channels": [
+        "rules:save"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "session.delete",
+      "file": "src/preload/index.ts",
+      "line": 388,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<void>",
+      "channels": [
+        "session:delete"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "session.get",
+      "file": "src/preload/index.ts",
+      "line": 382,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<SessionData | null>",
+      "channels": [
+        "session:get"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "session.list",
+      "file": "src/preload/index.ts",
+      "line": 379,
+      "kind": "request",
+      "inputs": [],
+      "output": "Promise<SessionData[]>",
+      "channels": [
+        "session:list"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "session.save",
+      "file": "src/preload/index.ts",
+      "line": 385,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "session",
+          "type": "SessionData",
+          "optional": false
+        }
+      ],
+      "output": "Promise<void>",
+      "channels": [
+        "session:save"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "settings.get",
+      "file": "src/preload/index.ts",
+      "line": 467,
+      "kind": "request",
+      "inputs": [],
+      "output": "Promise<any>",
+      "channels": [
+        "settings:get"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "settings.save",
+      "file": "src/preload/index.ts",
+      "line": 469,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "settings",
+          "type": "any",
+          "optional": false
+        }
+      ],
+      "output": "Promise<void>",
+      "channels": [
+        "settings:save"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "skill.checkExternal",
+      "file": "src/preload/index.ts",
+      "line": 443,
+      "kind": "request",
+      "inputs": [],
+      "output": "Promise<{ hasUpdates: boolean, totalCount: number, sources: { sourceName: string, count: number }[] }>",
+      "channels": [
+        "skill:check-external"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "skill.getAll",
+      "file": "src/preload/index.ts",
+      "line": 439,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "workspaceRoot",
+          "type": "string | null",
+          "optional": false
+        }
+      ],
+      "output": "Promise<any[]>",
+      "channels": [
+        "skill:get-all"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "skill.importExternal",
+      "file": "src/preload/index.ts",
+      "line": 445,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "sourceName",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "customPath",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "forceOverwrite",
+          "type": "boolean",
+          "optional": true
+        }
+      ],
+      "output": "Promise<boolean>",
+      "channels": [
+        "skill:import-external"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "skill.importSingle",
+      "file": "src/preload/index.ts",
+      "line": 449,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "sourceName",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "dirName",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<boolean>",
+      "channels": [
+        "skill:import-single"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "skill.listExternal",
+      "file": "src/preload/index.ts",
+      "line": 447,
+      "kind": "request",
+      "inputs": [],
+      "output": "Promise<any[]>",
+      "channels": [
+        "skill:list-external"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "skill.remove",
+      "file": "src/preload/index.ts",
+      "line": 451,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "id",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<boolean>",
+      "channels": [
+        "skill:delete"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "skill.toggle",
+      "file": "src/preload/index.ts",
+      "line": 441,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "workspaceRoot",
+          "type": "string | null",
+          "optional": false
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "enabled",
+          "type": "boolean",
+          "optional": false
+        }
+      ],
+      "output": "Promise<void>",
+      "channels": [
+        "skill:toggle"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "subAgent.getDetail",
+      "file": "src/preload/index.ts",
+      "line": 506,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "type",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<any | null>",
+      "channels": [
+        "subagent:get-detail"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "subAgent.list",
+      "file": "src/preload/index.ts",
+      "line": 502,
+      "kind": "request",
+      "inputs": [],
+      "output": "Promise<any[]>",
+      "channels": [
+        "subagent:list"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "subAgent.setModel",
+      "file": "src/preload/index.ts",
+      "line": 508,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "type",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "selections",
+          "type": "import('../shared/types/subagent').SubAgentModelSelection[]",
+          "optional": false
+        }
+      ],
+      "output": "Promise<void>",
+      "channels": [
+        "subagent:set-model"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "subAgent.toggle",
+      "file": "src/preload/index.ts",
+      "line": 504,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "type",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "enabled",
+          "type": "boolean",
+          "optional": false
+        }
+      ],
+      "output": "Promise<void>",
+      "channels": [
+        "subagent:toggle"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "task.subscribe",
+      "file": "src/preload/index.ts",
+      "line": 558,
+      "kind": "subscription",
+      "inputs": [
+        {
+          "name": "callback",
+          "type": "(payload: { sessionId: string; tasks: any[] }) => void",
+          "optional": false
+        }
+      ],
+      "output": "(() => void)",
+      "channels": [
+        "task:updated"
+      ],
+      "errors": "Listener registration is synchronous; payload or callback failures remain local to the renderer callback.",
+      "cancellation": "The returned disposer cancels renderer delivery only; it does not stop the producer.",
+      "events": "Each event from task:updated is forwarded to the supplied callback.",
+      "unsubscribe": "Required; the returned stop/disposer removes all 1 registered listener(s).",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "terminal.kill",
+      "file": "src/preload/index.ts",
+      "line": 402,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "workspaceId",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<void>",
+      "channels": [
+        "terminal:kill"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "Explicitly terminates the terminal identified by workspaceId.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "terminal.onExit",
+      "file": "src/preload/index.ts",
+      "line": 415,
+      "kind": "subscription",
+      "inputs": [
+        {
+          "name": "callback",
+          "type": "(workspaceId: string) => void",
+          "optional": false
+        }
+      ],
+      "output": "(() => void)",
+      "channels": [
+        "terminal:exit"
+      ],
+      "errors": "Listener registration is synchronous; payload or callback failures remain local to the renderer callback.",
+      "cancellation": "The returned disposer cancels renderer delivery only; it does not stop the producer.",
+      "events": "Each event from terminal:exit is forwarded to the supplied callback.",
+      "unsubscribe": "Required; the returned stop/disposer removes all 1 registered listener(s).",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "terminal.onOutput",
+      "file": "src/preload/index.ts",
+      "line": 405,
+      "kind": "subscription",
+      "inputs": [
+        {
+          "name": "callback",
+          "type": "(workspaceId: string, data: string) => void",
+          "optional": false
+        }
+      ],
+      "output": "(() => void)",
+      "channels": [
+        "terminal:output"
+      ],
+      "errors": "Listener registration is synchronous; payload or callback failures remain local to the renderer callback.",
+      "cancellation": "The returned disposer cancels renderer delivery only; it does not stop the producer.",
+      "events": "Each event from terminal:output is forwarded to the supplied callback.",
+      "unsubscribe": "Required; the returned stop/disposer removes all 1 registered listener(s).",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "terminal.resize",
+      "file": "src/preload/index.ts",
+      "line": 399,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "workspaceId",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "cols",
+          "type": "number",
+          "optional": false
+        },
+        {
+          "name": "rows",
+          "type": "number",
+          "optional": false
+        }
+      ],
+      "output": "Promise<void>",
+      "channels": [
+        "terminal:resize"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "terminal.start",
+      "file": "src/preload/index.ts",
+      "line": 393,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "workspaceId",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "rootPath",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<void>",
+      "channels": [
+        "terminal:start"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "terminal.write",
+      "file": "src/preload/index.ts",
+      "line": 396,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "workspaceId",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "text",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<void>",
+      "channels": [
+        "terminal:write"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "theme.get",
+      "file": "src/preload/index.ts",
+      "line": 427,
+      "kind": "request",
+      "inputs": [],
+      "output": "Promise<{ shouldUseDarkColors: boolean; themeSource: 'system' | 'light' | 'dark' }>",
+      "channels": [
+        "theme:get"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "theme.onUpdated",
+      "file": "src/preload/index.ts",
+      "line": 431,
+      "kind": "subscription",
+      "inputs": [
+        {
+          "name": "callback",
+          "type": "(info: { shouldUseDarkColors: boolean; themeSource: 'system' | 'light' | 'dark' }) => void",
+          "optional": false
+        }
+      ],
+      "output": "(() => void)",
+      "channels": [
+        "theme:updated"
+      ],
+      "errors": "Listener registration is synchronous; payload or callback failures remain local to the renderer callback.",
+      "cancellation": "The returned disposer cancels renderer delivery only; it does not stop the producer.",
+      "events": "Each event from theme:updated is forwarded to the supplied callback.",
+      "unsubscribe": "Required; the returned stop/disposer removes all 1 registered listener(s).",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "theme.set",
+      "file": "src/preload/index.ts",
+      "line": 429,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "source",
+          "type": "'system' | 'light' | 'dark'",
+          "optional": false
+        }
+      ],
+      "output": "Promise<{ shouldUseDarkColors: boolean; themeSource: 'system' | 'light' | 'dark' }>",
+      "channels": [
+        "theme:set"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "workspace.addRecentProject",
+      "file": "src/preload/index.ts",
+      "line": 49,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "project",
+          "type": "unknown",
+          "optional": false
+        }
+      ],
+      "output": "Promise<void>",
+      "channels": [
+        "workspace:add-recent-project"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "workspace.detectInstalledEditors",
+      "file": "src/preload/index.ts",
+      "line": 64,
+      "kind": "request",
+      "inputs": [],
+      "output": "Promise<any[]>",
+      "channels": [
+        "workspace:detect-installed-editors"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": true,
+      "review": "reviewed"
+    },
+    {
+      "method": "workspace.detectProject",
+      "file": "src/preload/index.ts",
+      "line": 43,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "rootPath",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<unknown>",
+      "channels": [
+        "workspace:detect-project"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "workspace.getAllPaths",
+      "file": "src/preload/index.ts",
+      "line": 37,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "rootPath",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<Array<{ name: string; path: string; isDir: boolean }>>",
+      "channels": [
+        "workspace:get-all-paths"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "workspace.getRecentProjects",
+      "file": "src/preload/index.ts",
+      "line": 46,
+      "kind": "request",
+      "inputs": [],
+      "output": "Promise<unknown>",
+      "channels": [
+        "workspace:get-recent-projects"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "workspace.openDirectory",
+      "file": "src/preload/index.ts",
+      "line": 31,
+      "kind": "request",
+      "inputs": [],
+      "output": "Promise<string | null>",
+      "channels": [
+        "workspace:open-directory"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "workspace.openInEditor",
+      "file": "src/preload/index.ts",
+      "line": 55,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "rootPath",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "editorId",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "exePath",
+          "type": "string | null",
+          "optional": false
+        }
+      ],
+      "output": "Promise<boolean>",
+      "channels": [
+        "workspace:open-in-editor"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "workspace.openInExplorer",
+      "file": "src/preload/index.ts",
+      "line": 58,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "rootPath",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<boolean>",
+      "channels": [
+        "workspace:open-in-explorer"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "workspace.readFile",
+      "file": "src/preload/index.ts",
+      "line": 40,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "filePath",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "rootPath",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<unknown>",
+      "channels": [
+        "workspace:read-file"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "workspace.removeRecentProject",
+      "file": "src/preload/index.ts",
+      "line": 52,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "id",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<void>",
+      "channels": [
+        "workspace:remove-recent-project"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "workspace.renameRecentProject",
+      "file": "src/preload/index.ts",
+      "line": 61,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "id",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "newName",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<void>",
+      "channels": [
+        "workspace:rename-recent-project"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    },
+    {
+      "method": "workspace.scanFileTree",
+      "file": "src/preload/index.ts",
+      "line": 34,
+      "kind": "request",
+      "inputs": [
+        {
+          "name": "rootPath",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "output": "Promise<unknown>",
+      "channels": [
+        "workspace:scan-file-tree"
+      ],
+      "errors": "Returned Promise rejects when the main-process handler throws or IPC serialization fails.",
+      "cancellation": "None; the request has no independent cancellation token.",
+      "events": "None.",
+      "unsubscribe": "Not applicable.",
+      "containsUnsafeAny": false,
+      "review": "reviewed"
+    }
+  ]
+}

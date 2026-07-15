@@ -224,8 +224,10 @@ CodeZ 停止继续扩展 Electron 版本，桌面容器最终直接替换为 Tau
 
 - 在 Phase 0 记录 Electron 的冷启动、空闲内存、首屏、文件树、搜索、首 Token、PTY 吞吐和安装包体积基线。
 - Tauri 候选版在典型项目上的关键交互 P95 不得比基线退化超过 10%，除非有书面例外。
-- 聊天和终端流采用有界队列、批量 UI 更新或 channel 背压，持续输出不能导致 WebView 内存无界增长。
+- 聊天和终端流采用有界上游队列、最大 4 KiB delta frame、累计 ACK 窗口和显式 cancel；Tauri Channel 只作为 wire transport，持续输出不能导致 WebView 内存无界增长，见 ADR 0005。
 - 大文件、搜索结果、工具输出和 MCP 内容继续执行既有大小限制。
+
+Phase 0 Windows x64 证据记录在 `docs/migration/generated/performance-baseline.win32-x64.json`：3 次隔离 Electron 启动中位数为 `ready-to-show 597.71 ms`、首个 animation frame `661.66 ms`，4 个进程合计工作集 `444,391,424 bytes`；当前 NSIS 安装包 `94,487,081 bytes`。文件树、搜索、无网络合成首 Token 和 PTY 吞吐使用同一文件中的明确方法口径，Phase 9 必须用相同探针比较 Tauri release 构建。
 
 ### NFR-PORT 跨平台
 
@@ -239,6 +241,8 @@ CodeZ 停止继续扩展 Electron 版本，桌面容器最终直接替换为 Tau
 - Rust 核心逻辑以单元/性质测试覆盖；文件、进程、网络、MCP 与持久化以集成测试覆盖；关键用户流程以桌面 E2E 覆盖。
 - 危险命令语料、Provider 协议样例、工具 Schema 和旧数据样例应转成不依赖 Electron 的 golden fixtures。
 - 所有平台的发布构建必须从干净环境产生，安装后执行资源和数据迁移 smoke test。
+
+Phase 0 的兼容证据入口为 `src/tests/fixtures/migration/`、`docs/migration/generated/desktop-api-semantics.json`、`persistence-inventory.json`、`test-migration.csv` 和 `traceability.csv`。生成器必须保持 0 个未复核测试分类和 0 条缺失阶段、owner、测试或平台的追踪行。
 
 ### NFR-MAINT 可维护性
 
@@ -287,7 +291,7 @@ OS filesystem, processes, credential store, network
 ### 7.1 前后端通信
 
 - 短请求：Tauri `command`，统一 `{ ok, data }`/稳定错误结构或等价 typed result。
-- 高频流：优先使用 Tauri channel；聊天、子 Agent、工具和终端事件不得为每种回调动态注册 command。
+- 高频流：使用 Tauri channel + 应用级累计 ACK/cancel；聊天、子 Agent、工具和终端事件不得为每种回调动态注册 command，也不得把 Channel 成功返回视为前端已消费。
 - 全局低频状态：主题、MCP 状态等使用 event。
 - 每个订阅返回可释放句柄；会话切换、组件卸载和流结束必须解除订阅。
 - 前端新增单一 `desktopApi` adapter，组件与 store 不直接散布 `invoke()` 字符串。
@@ -302,7 +306,7 @@ OS filesystem, processes, credential store, network
 - 日志：`tracing`、`tracing-subscriber`、滚动文件 appender。
 - Schema：`schemars` + 支持所需 Draft 的 JSON Schema validator。
 - 文件检索：`ignore`/`globset`/`regex`，或继续以资源方式分发 `rg`。
-- Shell 解析：Rust `tree-sitter` 及 Bash/PowerShell grammar，先做语料兼容验证。
+- Shell 解析：固定 `tree-sitter 0.25.10`、Bash grammar `0.25.0` 和 PowerShell grammar `0.25.10` 作为迁移起点；必须移植现有等长 masks、原生 PowerShell AST fallback 和失败安全语义，见 ADR 0004。
 - PTY：固定 `portable-pty 0.9.0` 作为 PTY 原语；Windows ConPTY 已通过中文、resize、Ctrl+C、kill tree 与退出清理验证，进程树和有界输出由 CodeZ adapter 负责，见 ADR 0003。
 - 密钥：系统 credential store 或平台 API；旧 Electron 密文需要单独兼容探针。
 - MCP：优先评估成熟 Rust SDK；若能力不完整，以协议兼容和测试覆盖为选择标准，不能只比较 API 表面。
@@ -379,7 +383,7 @@ OS filesystem, processes, credential store, network
 | D-04 | 初期持久化格式 | 保持 JSON/目录兼容 | 避免把框架迁移与数据库迁移耦合 |
 | D-05 | Provider 密钥是否继续回传前端明文 | 建议改为仅替换、不回显 | 更安全，但需要小幅调整设置 UI 与契约 |
 | D-06 | MCP Rust 实现策略 | `rmcp 2.2.0` 协议核心 + CodeZ 兼容/安全 adapters | spike 已验证 stdio、Streamable HTTP、OAuth、订阅和反向请求；legacy SSE 与严格 `-32001` 恢复由 CodeZ 补齐，见 ADR 0002 |
-| D-07 | 搜索实现 | 先保留随包 `rg`，后评估纯 Rust | 先保证行为和性能一致 |
+| D-07 | 搜索实现 | 保留 `@vscode/ripgrep` 平台包并映射到 `$RESOURCE/tools/rg(.exe)`，后评估纯 Rust | Windows x64 bundle 输入、固定路径和可执行性已验证，见 ADR 0006 |
 | D-08 | Electron 旧数据保留期 | 至少跨一个稳定版本，默认不自动删 | 决定磁盘占用和回退窗口 |
 
 这些决策未确认前可以进行只读盘点、契约提取和技术 spike，但不应开始大规模 Rust 业务迁移。

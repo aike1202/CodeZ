@@ -1,23 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import type { PermissionCapability, PermissionCheck } from '../shared/types/permission'
 import { PermissionDecisionEngine } from '../main/services/permission/PermissionDecisionEngine'
+import permissionGolden from './fixtures/migration/permission-runtime-golden.json'
 
 describe('PermissionDecisionEngine', () => {
   const engine = new PermissionDecisionEngine()
 
-  it.each([
-    ['read', 'allow'],
-    ['edit', 'allow'],
-    ['shell', 'allow'],
-    ['network', 'ask'],
-    ['external_effect', 'ask'],
-    ['external_directory', 'ask'],
-    ['delete', 'ask'],
-    ['rollback', 'ask'],
-    ['shell_unparsed', 'ask'],
-    ['unknown', 'ask']
-  ] as const)('uses the auto default for %s', (permission, action) => {
-    expect(engine.decide({ mode: 'auto', permission }).action).toBe(action)
+  it.each(permissionGolden.autoDefaults)('uses the auto default for $permission', ({ permission, action }) => {
+    expect(engine.decide({ mode: 'auto', permission: permission as PermissionCapability }).action).toBe(action)
+  })
+
+  it.each(permissionGolden.precedenceCases)('keeps the precedence rule $id stable', ({ input, action }) => {
+    expect(engine.decide({
+      mode: input.mode as 'auto' | 'full-access',
+      permission: input.permission as PermissionCapability,
+      explicitRule: input.explicitRule as 'allow' | 'deny' | undefined,
+      approvalPreference: input.approvalPreference as 'auto' | 'user' | undefined,
+      absoluteRedline: input.absoluteRedline
+    }).action).toBe(action)
   })
 
   it('allows normal capabilities in full-access mode', () => {

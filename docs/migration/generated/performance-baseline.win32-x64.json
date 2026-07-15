@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-07-15T17:20:15.915Z",
+  "commit": "5ee9374da5437695f39f70985f6c8500f0f3b19c",
+  "platform": "win32",
+  "arch": "x64",
+  "node": "v22.12.0",
+  "methodology": {
+    "startup": "median of 3 isolated Electron userData launches; ready-to-show, did-finish-load and first animation frame; no screenshots",
+    "idleMemory": "sum of Electron app.getAppMetrics().memory.workingSetSize after 2 seconds",
+    "workspaceTree": "median of 5 WorkspaceService.getAllPaths runs on this repository",
+    "search": "median of 5 bundled-rg searches for window.api in renderer TypeScript",
+    "firstToken": "median of 7 in-memory OpenAI-compatible SSE parser runs; network excluded",
+    "pty": "one MiB through the legacy node-pty adapter primitive",
+    "package": "latest existing CodeZ installer and win-unpacked directory"
+  },
+  "electron": {
+    "samples": [
+      {
+        "didFinishLoadMs": 678.2709,
+        "readyToShowMs": 678.6437,
+        "firstAnimationFrameMs": 745.9352,
+        "totalWorkingSetBytes": 444391424,
+        "processCount": 4,
+        "rendererResponsive": true
+      },
+      {
+        "didFinishLoadMs": 597.3324,
+        "readyToShowMs": 597.7094,
+        "firstAnimationFrameMs": 661.6634,
+        "totalWorkingSetBytes": 444895232,
+        "processCount": 4,
+        "rendererResponsive": true
+      },
+      {
+        "didFinishLoadMs": 595.4328,
+        "readyToShowMs": 595.7976,
+        "firstAnimationFrameMs": 655.8506,
+        "totalWorkingSetBytes": 443809792,
+        "processCount": 4,
+        "rendererResponsive": true
+      }
+    ],
+    "median": {
+      "didFinishLoadMs": 597.33,
+      "readyToShowMs": 597.71,
+      "firstAnimationFrameMs": 661.66,
+      "totalWorkingSetBytes": 444391424,
+      "processCount": 4,
+      "rendererResponsive": true
+    }
+  },
+  "package": {
+    "installer": {
+      "name": "CodeZ Setup 0.1.0.exe",
+      "bytes": 94487081,
+      "modifiedAt": "2026-07-15T17:18:49.126Z"
+    },
+    "unpackedBytes": 398807412
+  },
+  "workspaceTree": {
+    "paths": 1161,
+    "medianMs": 22.74
+  },
+  "search": {
+    "matches": 113,
+    "medianMs": 29.64
+  },
+  "syntheticFirstToken": {
+    "medianMs": 1.25,
+    "samples": 7
+  },
+  "ptyThroughput": {
+    "bytes": 1153256,
+    "elapsedMs": 1341.52,
+    "mebibytesPerSecond": 0.82
+  }
+}

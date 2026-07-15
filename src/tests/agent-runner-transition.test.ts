@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import { resolveAgentTransition, updateConsecutiveIdleTurns } from '../main/agent/AgentRunner'
-import { TransitionEvent } from '../main/agent/AgentRunner/LoopStateMachine'
+import {
+  AgentState,
+  LoopStateMachine,
+  TransitionEvent
+} from '../main/agent/AgentRunner/LoopStateMachine'
+import agentStateGolden from './fixtures/migration/agent-state-golden.json'
+
+describe('Agent state migration golden', () => {
+  it.each(agentStateGolden.transitions)(
+    'transitions from $from with $event to $to',
+    ({ from, event, to }) => {
+      expect(LoopStateMachine.next(from as AgentState, event as TransitionEvent)).toBe(to)
+    }
+  )
+})
 
 describe('AgentRunner transition resolution', () => {
   it.each(['stop', 'length'] as const)('continues active tasks after a text-only %s response', (stopReason) => {

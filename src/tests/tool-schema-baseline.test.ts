@@ -1,13 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { ToolManager } from '../main/tools/ToolManager'
 import { fingerprint } from '../main/tools/runtime/canonicalJson'
+import schemaGolden from './fixtures/migration/tool-schema-golden.json'
 
-const V1_TOOL_NAMES = [
-  'AskUserQuestion', 'Bash', 'DelegateTasks', 'Edit', 'ExecutionControl', 'ExecutionInspect',
-  'Glob', 'Grep', 'NotebookEdit', 'PowerShell', 'PushNotification', 'Read', 'Skill',
-  'SubAgentRunner', 'TaskCreate', 'TaskGet', 'TaskList', 'TaskUpdate', 'WebFetch', 'WebSearch',
-  'Write', 'list_files', 'rollback_last_edit', 'update_resume_state'
-].sort((a, b) => a.localeCompare(b))
+const V1_TOOL_NAMES = [...schemaGolden.canonicalToolNames].sort((a, b) => a.localeCompare(b))
 
 describe('V1/V2 tool schema baseline', () => {
   it('locks the approval-aware 24-tool canonical schema fingerprint', () => {
@@ -21,7 +17,7 @@ describe('V1/V2 tool schema baseline', () => {
       }))
       .sort((a, b) => a.name.localeCompare(b.name))
     expect(baseline.map((item) => item.name)).toEqual(V1_TOOL_NAMES)
-    expect(fingerprint(baseline)).toBe('168d0046b51a07c8dc73b55a304b642e33d52676f1bc5814e2f500376a9dfc92')
+    expect(fingerprint(baseline)).toBe(schemaGolden.canonicalSchemaSha256)
   })
 
   it('records a comparable default eager-schema budget', () => {
@@ -38,13 +34,11 @@ describe('V1/V2 tool schema baseline', () => {
       v1Bytes: expect.any(Number), v2Bytes: expect.any(Number), reduction: expect.any(Number)
     })
     expect(v2Bytes).toBeLessThan(v1Bytes)
-    expect(1 - v2Bytes / v1Bytes).toBeGreaterThanOrEqual(0.2)
+    expect(1 - v2Bytes / v1Bytes).toBeGreaterThanOrEqual(schemaGolden.minimumDeferredSchemaReduction)
   })
 
   it('exposes session skill lifecycle tools while retaining the legacy Skill tool', () => {
     const names = new Set(new ToolManager().createCatalogSnapshot().descriptors.map((tool) => tool.name))
-    expect(names.has('ActivateSkill')).toBe(true)
-    expect(names.has('DeactivateSkill')).toBe(true)
-    expect(names.has('Skill')).toBe(true)
+    expect(schemaGolden.requiredSessionLifecycleTools.every((name) => names.has(name))).toBe(true)
   })
 })

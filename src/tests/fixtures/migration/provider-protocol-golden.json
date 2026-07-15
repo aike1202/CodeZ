@@ -1,0 +1,200 @@
+{
+  "redactionPolicy": {
+    "secretPlaceholder": "[REDACTED]",
+    "rawSecretValuesStored": false
+  },
+  "fixtures": [
+    {
+      "provider": "openai",
+      "apiFormat": "openai",
+      "baseUrl": "https://provider.example/v1",
+      "model": "model-fixture",
+      "tool": {
+        "type": "function",
+        "function": {
+          "name": "Read",
+          "description": "Read files",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "files": {
+                "type": "array"
+              }
+            },
+            "required": ["files"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "expectedRequest": {
+        "url": "https://provider.example/v1/chat/completions",
+        "headers": {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer [REDACTED]"
+        },
+        "body": {
+          "model": "model-fixture",
+          "messages": [
+            { "role": "system", "content": "You are a fixture." },
+            { "role": "user", "content": "use a tool" }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "Read",
+                "description": "Read files",
+                "parameters": {
+                  "type": "object",
+                  "properties": { "files": { "type": "array" } },
+                  "required": ["files"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ],
+          "stream": true,
+          "stream_options": { "include_usage": true },
+          "max_tokens": 256
+        }
+      },
+      "streamLines": [
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"openai-call\",\"function\":{\"name\":\"Read\",\"arguments\":\"{\\\"files\\\":\"}}]}}]}",
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"[{\\\"file_path\\\":\\\"a.ts\\\"}]}\"}}]},\"finish_reason\":\"tool_calls\"}]}",
+        "data: [DONE]",
+        ""
+      ],
+      "expectedCanonicalCall": {
+        "name": "Read",
+        "input": { "files": [{ "file_path": "a.ts" }] }
+      },
+      "expectedStopReason": "tool_calls"
+    },
+    {
+      "provider": "anthropic",
+      "apiFormat": "anthropic",
+      "baseUrl": "https://provider.example",
+      "model": "model-fixture",
+      "tool": {
+        "type": "function",
+        "function": {
+          "name": "Glob",
+          "description": "Find files",
+          "parameters": {
+            "type": "object",
+            "properties": { "pattern": { "type": "string" } },
+            "required": ["pattern"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "expectedRequest": {
+        "url": "https://provider.example/v1/messages",
+        "headers": {
+          "Content-Type": "application/json",
+          "x-api-key": "[REDACTED]",
+          "anthropic-version": "2023-06-01"
+        },
+        "body": {
+          "model": "model-fixture",
+          "messages": [{ "role": "user", "content": "use a tool" }],
+          "max_tokens": 256,
+          "stream": true,
+          "system": [
+            {
+              "type": "text",
+              "text": "You are a fixture.",
+              "cache_control": { "type": "ephemeral" }
+            }
+          ],
+          "tools": [
+            {
+              "name": "Glob",
+              "description": "Find files",
+              "input_schema": {
+                "type": "object",
+                "properties": { "pattern": { "type": "string" } },
+                "required": ["pattern"],
+                "additionalProperties": false
+              },
+              "cache_control": { "type": "ephemeral" }
+            }
+          ]
+        }
+      },
+      "streamLines": [
+        "event: content_block_start",
+        "data: {\"content_block\":{\"type\":\"tool_use\",\"id\":\"anthropic-call\",\"name\":\"Glob\"}}",
+        "",
+        "event: content_block_delta",
+        "data: {\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"pattern\\\":\\\"**/*.ts\\\"}\"}}",
+        "",
+        "event: content_block_stop",
+        "data: {}",
+        "",
+        "event: message_delta",
+        "data: {\"delta\":{\"stop_reason\":\"tool_use\"}}",
+        ""
+      ],
+      "expectedCanonicalCall": {
+        "name": "Glob",
+        "input": { "pattern": "**/*.ts" }
+      },
+      "expectedStopReason": "tool_calls"
+    },
+    {
+      "provider": "gemini",
+      "apiFormat": "gemini",
+      "baseUrl": "https://provider.example/v1",
+      "model": "model-fixture",
+      "tool": {
+        "type": "function",
+        "function": {
+          "name": "Grep",
+          "description": "Search text",
+          "parameters": {
+            "type": "object",
+            "properties": { "pattern": { "type": "string" } },
+            "required": ["pattern"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "expectedRequest": {
+        "url": "https://provider.example/v1beta/models/model-fixture:streamGenerateContent?key=[REDACTED]&alt=sse",
+        "headers": { "Content-Type": "application/json" },
+        "body": {
+          "systemInstruction": { "parts": [{ "text": "You are a fixture." }] },
+          "contents": [{ "role": "user", "parts": [{ "text": "use a tool" }] }],
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "name": "Grep",
+                  "description": "Search text",
+                  "parameters": {
+                    "type": "object",
+                    "properties": { "pattern": { "type": "string" } },
+                    "required": ["pattern"],
+                    "additionalProperties": false
+                  }
+                }
+              ]
+            }
+          ],
+          "generationConfig": { "maxOutputTokens": 256 }
+        }
+      },
+      "streamLines": [
+        "data: {\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"name\":\"Grep\",\"args\":{\"pattern\":\"needle\"}},\"thoughtSignature\":\"sig\"}]},\"finishReason\":\"STOP\"}]}",
+        "data: [DONE]",
+        ""
+      ],
+      "expectedCanonicalCall": {
+        "name": "Grep",
+        "input": { "pattern": "needle" }
+      },
+      "expectedStopReason": "stop"
+    }
+  ]
+}

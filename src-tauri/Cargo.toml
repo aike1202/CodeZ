@@ -16,6 +16,7 @@ tauri-build = { version = "2.5.3", features = [] }
 [dependencies]
 codez-contracts.workspace = true
 codez-core.workspace = true
+codez-platform.workspace = true
 codez-runtime.workspace = true
 serde.workspace = true
 tauri = { version = "2.11.5", features = [] }

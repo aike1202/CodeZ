@@ -1,0 +1,176 @@
+[
+  {
+    "id": "powershell-script-block",
+    "shell": "powershell",
+    "expectedValid": true,
+    "command": "if (Test-Path a) { Get-Content a } else { Remove-Item a -Recurse }"
+  },
+  {
+    "id": "powershell-option-terminator",
+    "shell": "powershell",
+    "expectedValid": true,
+    "command": "git status --short -- src-tauri/Cargo.toml src-tauri/src/lib.rs"
+  },
+  {
+    "id": "powershell-cargo-failure-guards",
+    "shell": "powershell",
+    "expectedValid": true,
+    "command": "cargo fmt --all -- --check; if (-not $?) { exit 1 }; cargo clippy --workspace --all-targets -- -D warnings; if (-not $?) { exit 1 }; cargo test --workspace"
+  },
+  {
+    "id": "powershell-dynamic-cmd-wrapper",
+    "shell": "powershell",
+    "expectedValid": true,
+    "command": "cmd /c \"$env:ComSpec /c del C:/tmp/x & rem\" -- src/a/b"
+  },
+  {
+    "id": "powershell-nested-argument-lists",
+    "shell": "powershell",
+    "expectedValid": true,
+    "command": "Select-String -Path (Get-ChildItem -Path docs,.codez -Recurse -Include '*.md','*.json' -File).FullName -Pattern 'runtime|version' -Context 2,4"
+  },
+  {
+    "id": "powershell-new-item-list",
+    "shell": "powershell",
+    "expectedValid": true,
+    "command": "New-Item -ItemType Directory -Force src/main,src/preload,src/renderer | Out-Null"
+  },
+  {
+    "id": "powershell-format-list",
+    "shell": "powershell",
+    "expectedValid": true,
+    "command": "Get-Process CodeZ* -ErrorAction SilentlyContinue | Select-Object ProcessName,Id,Path,StartTime | Format-List"
+  },
+  {
+    "id": "powershell-native-long-options",
+    "shell": "powershell",
+    "expectedValid": true,
+    "command": "rg -n --glob '*.ts' 'ReadTool' src/main"
+  },
+  {
+    "id": "powershell-static-invocation",
+    "shell": "powershell",
+    "expectedValid": true,
+    "command": "& \"F:\\tools\\python.exe\" script.py --mode full --apply"
+  },
+  {
+    "id": "powershell-dynamic-invocation",
+    "shell": "powershell",
+    "expectedValid": true,
+    "command": "& $command --mode full"
+  },
+  {
+    "id": "powershell-native-ast-fallback",
+    "shell": "powershell",
+    "expectedValid": true,
+    "command": "$data = Get-Content -Raw sessions.json | ConvertFrom-Json; $data.sessions | Sort-Object { [double]($_.id -replace '_.*$','') } -Descending | Select-Object -First 10 id,summary,@{n='messages';e={$_.messages.Count}} | Format-List"
+  },
+  {
+    "id": "powershell-maven-wrapper",
+    "shell": "powershell",
+    "expectedValid": true,
+    "command": ".\\mvnw.cmd -pl :app -am verify -DskipTests=false --batch-mode"
+  },
+  {
+    "id": "powershell-gradle-wrapper",
+    "shell": "powershell",
+    "expectedValid": true,
+    "command": ".\\gradlew.bat clean test --no-daemon --stacktrace -Penv=ci -x integrationTest"
+  },
+  {
+    "id": "powershell-hardline-delete",
+    "shell": "powershell",
+    "expectedValid": true,
+    "command": "Remove-Item -Recurse -Force C:\\Users\\*"
+  },
+  {
+    "id": "powershell-incomplete-quote",
+    "shell": "powershell",
+    "expectedValid": false,
+    "command": "git status -- \"src-tauri/Cargo.toml"
+  },
+  {
+    "id": "powershell-trailing-list-comma",
+    "shell": "powershell",
+    "expectedValid": false,
+    "command": "New-Item -Path src/main,"
+  },
+  {
+    "id": "bash-compound-pipeline",
+    "shell": "bash",
+    "expectedValid": true,
+    "command": "git status && npm test | tee result.txt"
+  },
+  {
+    "id": "bash-windows-path-after-assignment",
+    "shell": "bash",
+    "expectedValid": true,
+    "command": "PYTHONPATH=. F:/tools/python.exe -m pytest tests/test_schemas.py -v"
+  },
+  {
+    "id": "bash-maven-wrapper",
+    "shell": "bash",
+    "expectedValid": true,
+    "command": "./mvnw -pl :app -am verify -DskipTests=false --batch-mode"
+  },
+  {
+    "id": "bash-gradle-wrapper",
+    "shell": "bash",
+    "expectedValid": true,
+    "command": "./gradlew clean test --no-daemon --stacktrace -Penv=ci -x integrationTest"
+  },
+  {
+    "id": "bash-composer-install",
+    "shell": "bash",
+    "expectedValid": true,
+    "command": "composer install --no-interaction --prefer-dist"
+  },
+  {
+    "id": "bash-terraform-plan",
+    "shell": "bash",
+    "expectedValid": true,
+    "command": "terraform plan -out=tfplan"
+  },
+  {
+    "id": "bash-multiple-assignments",
+    "shell": "bash",
+    "expectedValid": true,
+    "command": "CI=1 NODE_ENV=test npm run build"
+  },
+  {
+    "id": "bash-command-substitution",
+    "shell": "bash",
+    "expectedValid": true,
+    "command": "printf '%s\\n' \"$(git rev-parse --show-toplevel)\""
+  },
+  {
+    "id": "bash-dynamic-wrapper",
+    "shell": "bash",
+    "expectedValid": true,
+    "command": "bash -c \"$RUNNER --mode full\""
+  },
+  {
+    "id": "bash-here-document",
+    "shell": "bash",
+    "expectedValid": true,
+    "command": "cat <<'EOF' > result.txt\nhello\nEOF"
+  },
+  {
+    "id": "bash-output-redirect",
+    "shell": "bash",
+    "expectedValid": true,
+    "command": "cargo metadata --no-deps > metadata.json"
+  },
+  {
+    "id": "bash-hardline-delete",
+    "shell": "bash",
+    "expectedValid": true,
+    "command": "rm -rf /tmp/codez-spike"
+  },
+  {
+    "id": "bash-incomplete-quote",
+    "shell": "bash",
+    "expectedValid": false,
+    "command": "git status -- 'src/main/index.ts"
+  }
+]

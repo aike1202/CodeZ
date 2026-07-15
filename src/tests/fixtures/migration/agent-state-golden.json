@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "states": ["Running", "WaitingUser", "Suspended", "Terminated"],
+  "transitions": [
+    { "from": "Running", "event": "ToolExecuted", "to": "Running" },
+    { "from": "Running", "event": "RetryRequested", "to": "Running" },
+    { "from": "Running", "event": "OutputTruncated", "to": "Running" },
+    { "from": "Running", "event": "SchedulerContinue", "to": "Running" },
+    { "from": "Running", "event": "MaxIdleReached", "to": "WaitingUser" },
+    { "from": "Running", "event": "RepeatedFailure", "to": "WaitingUser" },
+    { "from": "Running", "event": "WaitingInput", "to": "WaitingUser" },
+    { "from": "Running", "event": "Completed", "to": "Terminated" },
+    { "from": "Running", "event": "Failed", "to": "Terminated" },
+    { "from": "WaitingUser", "event": "SchedulerContinue", "to": "Running" },
+    { "from": "WaitingUser", "event": "Cancelled", "to": "Terminated" },
+    { "from": "Suspended", "event": "SchedulerContinue", "to": "Running" },
+    { "from": "Suspended", "event": "Cancelled", "to": "Terminated" }
+  ],
+  "invalidTransitionPolicy": "Return a typed invalid-transition error in Rust; Electron currently throws an Error.",
+  "recoveryPolicy": "Persisted running work without a live executor must recover to an explicit non-running state and must not replay side effects."
+}

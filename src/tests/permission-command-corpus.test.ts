@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { classifyKnownCommand } from '../main/services/permission/commandPolicies'
+import permissionGolden from './fixtures/migration/permission-runtime-golden.json'
 
 const commands = [
   'git status', 'git diff', 'git log -5', 'git show HEAD', 'git commit -m test', 'git fetch', 'git push', 'git reset --hard',
@@ -16,6 +17,13 @@ const commands = [
 ]
 
 describe('permission common command corpus', () => {
+  it.each(permissionGolden.dangerousCommands)(
+    'keeps the migration golden decision for $command',
+    ({ command, permission, riskLevel }) => {
+      expect(classifyKnownCommand(command.split(/\s+/))).toMatchObject({ permission, riskLevel })
+    }
+  )
+
   it('classifies at least 95 percent without unknown fallback', () => {
     const classified = commands.filter((command) => classifyKnownCommand(command.split(/\s+/))).length
     expect(classified / commands.length).toBeGreaterThanOrEqual(0.95)

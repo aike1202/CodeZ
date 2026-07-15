@@ -69,7 +69,7 @@ Phase 4-7 可在接口稳定后局部并行，但 Phase 2 的数据/平台契约
 
 ### 4.2 契约清单
 
-- [ ] 为现有 `window.api` 生成方法清单：输入、输出、错误、取消、事件和订阅释放语义。
+- [x] 为现有 `window.api` 生成方法清单：输入、输出、错误、取消、事件和订阅释放语义；88 个方法的复核结果见 `docs/migration/generated/desktop-api-semantics.json`。
 - [x] 记录所有 `ipcMain.handle/on` 与 `webContents.send`，并清除未定义在 `IPC_CHANNELS` 的静态散落字符串；动态请求响应 channel 已单独标记。
 - [x] 为 Chat、Tool、SubAgent、Permission、AskUser、Terminal 和 MCP 事件定义稳定 envelope：
 
@@ -83,9 +83,9 @@ interface DesktopEvent<T> {
 }
 ```
 
-- [ ] 记录 Provider 协议请求/响应 golden fixtures，必须脱敏。
-- [ ] 记录工具 Schema、权限决策、危险命令语料和 Agent 状态转换 fixtures。
-- [ ] 记录每类持久化数据的路径、schema、最大体积、写入者、引用关系和恢复语义。
+- [x] 记录 Provider 协议请求/响应 golden fixtures，必须脱敏；三种协议的请求、流片段、canonical tool call 和 stop reason 已由 `provider-protocol-golden.json` 锁定并通过现有适配器验证。
+- [x] 记录工具 Schema、权限决策、危险命令语料和 Agent 状态转换 fixtures；fixtures 位于 `src/tests/fixtures/migration/`，共享 Shell parser 语料位于 `src/tests/fixtures/permission-shell-corpus.json`。
+- [x] 记录每类持久化数据的路径、schema、最大体积、写入者、引用关系和恢复语义；23 类复核结果见 `docs/migration/generated/persistence-inventory.json`。
 
 ### 4.3 必做 spike
 
@@ -96,13 +96,15 @@ interface DesktopEvent<T> {
 5. **Tauri 流：** 持续高吞吐聊天/终端事件，验证顺序、取消、背压、组件卸载和内存上限。
 6. **资源与打包：** 验证 builtin skills、parser grammar/资源、`rg` 和安装后路径定位。
 
-当前进展：Windows `safeStorage` sentinel 已验证为 `Local State` 用户 DPAPI 主密钥 + Chromium `v10` AES-256-GCM envelope，可实现只读 legacy reader；MCP 已选定 `rmcp 2.2.0` 作为协议核心，并确认 legacy SSE、严格 `-32001` session recovery 与安全策略由 CodeZ adapters 承担；Windows PTY/进程树已用 6 项真实 ConPTY 测试验证，选定 `portable-pty 0.9.0` 作为 PTY 原语，树级终止、有界输出和控制序列顺序由 CodeZ adapter 负责。证据见 `docs/migration/spikes/windows-safe-storage.md`、`docs/migration/spikes/rust-mcp-sdk.md`、`docs/migration/spikes/rust-pty.md`、ADR 0002 和 ADR 0003。macOS/Linux safeStorage 与 PTY runtime 验证，以及 Shell parser、Tauri 流、资源打包 spike 仍待完成。
+当前进展：Windows `safeStorage` sentinel 已验证为 `Local State` 用户 DPAPI 主密钥 + Chromium `v10` AES-256-GCM envelope，可实现只读 legacy reader；MCP 已选定 `rmcp 2.2.0` 作为协议核心，并确认 legacy SSE、严格 `-32001` session recovery 与安全策略由 CodeZ adapters 承担；Windows PTY/进程树已用 6 项真实 ConPTY 测试验证，选定 `portable-pty 0.9.0` 作为 PTY 原语，树级终止、有界输出和控制序列顺序由 CodeZ adapter 负责；Shell parser 已用 29 条共享语料完成差异报告，固定同版本 Rust tree-sitter 起点，并确认必须迁移 Bash/PowerShell masks 和原生 PowerShell AST fallback；Tauri 流已用 2.56 MiB 慢消费者与卸载模型验证，固定有界上游、4 KiB frame、累计 ACK 窗口和显式 cancel；Windows x64 资源已验证 20 个 builtin skill 文件、`rg 15.0.0`、固定安装 target 和 Tauri debug 构建。证据见 `docs/migration/spikes/windows-safe-storage.md`、`docs/migration/spikes/rust-mcp-sdk.md`、`docs/migration/spikes/rust-pty.md`、`docs/migration/spikes/rust-shell-parser.md`、`docs/migration/spikes/tauri-stream-backpressure.md`、`docs/migration/spikes/tauri-resource-packaging.md`、ADR 0002 至 ADR 0006。六项 spike 在 Windows x64 均有可执行结论；macOS/Linux safeStorage、PTY 和资源映射仍待目标平台验证。
 
 ### 4.4 性能与质量基线
 
-- [ ] 记录冷启动、首屏、空闲内存、安装包、文件树、搜索、首 Token 和 PTY 吞吐。
-- [ ] 将 1,165 个测试按 `port-to-rust`、`keep-frontend`、`replace-contract`、`replace-e2e`、`obsolete-electron` 分类。
-- [ ] 建立 FR/NFR -> 测试 -> 平台的追踪矩阵。
+- [x] 记录冷启动、首屏、空闲内存、安装包、文件树、搜索、首 Token 和 PTY 吞吐；可重复探针与 Windows x64 结果见 `scripts/tauri/measure-performance-baseline.ts` 和 `docs/migration/generated/performance-baseline.win32-x64.json`。
+- [x] 将 183 个现有测试文件按 `port-to-rust`、`keep-frontend`、`replace-contract`、`replace-e2e`、`obsolete-electron` 分类，所有行均已标记 `reviewed=true`。
+- [x] 建立 FR/NFR -> 阶段/owner -> 测试 -> 平台的 79 行追踪矩阵，见 `docs/migration/generated/traceability.csv`。
+
+Windows x64 Electron 基线中位数：`ready-to-show 597.71 ms`、首个 animation frame `661.66 ms`、4 个进程合计工作集 `444,391,424 bytes`；当前 NSIS 安装包 `94,487,081 bytes`，仓库文件树 `22.74 ms`，`rg` 搜索 `29.64 ms`，无网络合成首 Token `1.25 ms`，legacy `node-pty` 吞吐 `0.82 MiB/s`。首 Token 数值明确排除网络，只用于比较 Provider 流解析路径。
 
 **Phase 0 出口：** D-01 至 D-08 已确认；六个高风险领域均有可执行结论；不存在“等实现后再确认”的密钥、MCP 或 PTY 阻断项。
 

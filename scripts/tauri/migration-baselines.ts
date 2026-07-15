@@ -1,0 +1,326 @@
+export type PersistenceEntry = {
+  id: string
+  location: string
+  format: string
+  schema: string
+  legacyLimit: string
+  writer: string
+  readers: string[]
+  references: string[]
+  recovery: string
+  sensitivity: 'public' | 'user-data' | 'secret'
+}
+
+export const PERSISTENCE_INVENTORY: readonly PersistenceEntry[] = [
+  {
+    id: 'providers',
+    location: '$USER_DATA/providers.json',
+    format: 'JSON',
+    schema: '{ providers: ProviderConfig[]; activeProviderId: string | null }; at most 20 providers',
+    legacyLimit: '20 records; byte size is not bounded',
+    writer: 'src/main/services/ProviderService.ts',
+    readers: ['ProviderService', 'provider IPC', 'ChatProviderFactory'],
+    references: ['provider.id -> sessions/provider usage', 'activeProviderId -> providers[].id'],
+    recovery: 'Parse failure resets the in-memory list. Phase 2 must quarantine the corrupt file and migrate from a pre-write backup.',
+    sensitivity: 'secret'
+  },
+  {
+    id: 'sessions',
+    location: '$USER_DATA/sessions.json',
+    format: 'JSON',
+    schema: '{ sessions: SessionData[] }; task, tool runtime and agent runtime are embedded',
+    legacyLimit: '50 sessions; message and embedded runtime byte size is not bounded',
+    writer: 'src/main/services/SessionStore.ts',
+    readers: ['SessionStore', 'TaskStore', 'AgentCollaborationRuntime', 'SessionRuntimeCoordinator'],
+    references: ['session.id -> attachments', 'session.id -> session-runtime', 'session.id -> executions'],
+    recovery: 'Atomic replacement is already used. Parse failure currently returns an empty list; Phase 2 must preserve and quarantine the original.',
+    sensitivity: 'user-data'
+  },
+  {
+    id: 'settings',
+    location: '$USER_DATA/settings.json',
+    format: 'JSON',
+    schema: 'GeneralSettings with default-based field migration',
+    legacyLimit: 'byte size is not bounded',
+    writer: 'src/main/services/SettingsService.ts',
+    readers: ['SettingsService', 'theme IPC', 'MCP and search configuration'],
+    references: ['subAgentModels[].providerId -> providers[].id'],
+    recovery: 'Parse failure restores defaults. Phase 2 must quarantine the invalid file before writing defaults.',
+    sensitivity: 'user-data'
+  },
+  {
+    id: 'recent-projects',
+    location: '$USER_DATA/recent-projects.json',
+    format: 'JSON',
+    schema: '{ projects: RecentProject[] }',
+    legacyLimit: 'record and byte size are not bounded',
+    writer: 'src/main/services/RecentProjectsStore.ts',
+    readers: ['RecentProjectsStore', 'workspace IPC'],
+    references: ['project.id is consumed by sessions and UI workspace state'],
+    recovery: 'Missing or invalid data becomes an empty list; Phase 2 must preserve a corrupt copy.',
+    sensitivity: 'user-data'
+  },
+  {
+    id: 'permission-rules',
+    location: '$USER_DATA/permission-rules.json',
+    format: 'JSON',
+    schema: '{ rules: PermissionRule[] }',
+    legacyLimit: 'record and byte size are not bounded',
+    writer: 'src/main/services/permission/PermissionRuleStore.ts',
+    readers: ['PermissionRuleStore', 'PermissionManager'],
+    references: ['workspace and operation scopes refer to normalized paths and tool identities'],
+    recovery: 'Invalid data must fail closed; retain the source and start with no allow rules.',
+    sensitivity: 'user-data'
+  },
+  {
+    id: 'workspace-permissions',
+    location: '$USER_DATA/workspace-permissions.json',
+    format: 'JSON',
+    schema: 'Record<canonicalWorkspacePath, PermissionMode>',
+    legacyLimit: 'record and byte size are not bounded',
+    writer: 'src/main/services/permission/workspacePermissionStore.ts',
+    readers: ['workspacePermissionStore', 'permission IPC'],
+    references: ['keys are canonical workspace paths'],
+    recovery: 'Invalid data must fall back to auto mode and preserve the source for recovery.',
+    sensitivity: 'user-data'
+  },
+  {
+    id: 'permission-audit',
+    location: '$USER_DATA/permission-audit.jsonl',
+    format: 'JSONL',
+    schema: 'redacted PermissionAuditEvent per line',
+    legacyLimit: 'byte size and retention are not bounded',
+    writer: 'src/main/services/permission/PermissionAuditLog.ts',
+    readers: ['diagnostics and migration audit'],
+    references: ['session, tool call, rule and workspace identifiers when present'],
+    recovery: 'Keep valid lines through the first malformed line and quarantine malformed suffixes; never replay decisions.',
+    sensitivity: 'user-data'
+  },
+  {
+    id: 'mcp-user-config',
+    location: '$USER_DATA/mcp.json',
+    format: 'JSON',
+    schema: 'user MCP server definitions and enabled state',
+    legacyLimit: 'server count and byte size are not bounded',
+    writer: 'src/main/services/mcp/McpConfigService.ts',
+    readers: ['McpConfigService', 'McpConnectionManager'],
+    references: ['secret expressions -> mcp-secrets', 'server name -> OAuth and connection state'],
+    recovery: 'Invalid user configuration is isolated; project and managed layers remain independently loadable.',
+    sensitivity: 'user-data'
+  },
+  {
+    id: 'mcp-project-trust',
+    location: '$USER_DATA/mcp-project-trust.json',
+    format: 'JSON',
+    schema: 'trusted project configuration fingerprints',
+    legacyLimit: 'record and byte size are not bounded',
+    writer: 'src/main/services/mcp/McpConfigService.ts',
+    readers: ['McpConfigService', 'McpProjectTrust'],
+    references: ['fingerprint -> project .mcp.json or .codez/mcp.local.json'],
+    recovery: 'Invalid or missing entries are untrusted by default and must never be reconstructed as trusted.',
+    sensitivity: 'user-data'
+  },
+  {
+    id: 'mcp-secrets',
+    location: '$USER_DATA/mcp-secrets.secure',
+    format: 'Electron safeStorage envelope',
+    schema: 'encrypted Record<secretName, secretValue>',
+    legacyLimit: 'record and byte size are not bounded',
+    writer: 'src/main/services/mcp/McpSecretStore.ts',
+    readers: ['McpSecretStore', 'MCP secret expression resolver'],
+    references: ['${secret:NAME} expressions in MCP configuration'],
+    recovery: 'Use the read-only legacy decryptor. Unavailable or corrupt ciphertext becomes requires_reentry; plaintext fallback is forbidden.',
+    sensitivity: 'secret'
+  },
+  {
+    id: 'mcp-oauth',
+    location: '$USER_DATA/mcp-oauth.secure',
+    format: 'Electron safeStorage envelope',
+    schema: 'encrypted OAuth client and token records keyed by server',
+    legacyLimit: 'record and byte size are not bounded',
+    writer: 'src/main/services/mcp/McpOAuthProvider.ts',
+    readers: ['McpOAuthProvider', 'MCP transports'],
+    references: ['server name -> MCP configuration'],
+    recovery: 'Use the read-only legacy decryptor. Decryption failures require reauthorization and cannot silently discard refresh state.',
+    sensitivity: 'secret'
+  },
+  {
+    id: 'mcp-content',
+    location: '$USER_DATA/mcp-content-v2/**',
+    format: 'binary objects plus metadata',
+    schema: 'mcp-content:// handle, media type, byte length and immutable payload',
+    legacyLimit: '25 MiB per binary payload',
+    writer: 'src/main/services/mcp/McpContentStore.ts',
+    readers: ['McpContentStore', 'MCP content normalization and UI preview'],
+    references: ['mcp-content:// handle embedded in normalized MCP results'],
+    recovery: 'Missing objects invalidate only their handles; orphaned objects may be removed after reference inventory.',
+    sensitivity: 'user-data'
+  },
+  {
+    id: 'attachments',
+    location: '$USER_DATA/attachments/{drafts|sessions}/**/{original,thumbnail,meta.json}',
+    format: 'binary files plus JSON metadata',
+    schema: 'AttachmentMetadata { attachment: ComposerImageAttachment; createdAt: number }',
+    legacyLimit: '100 MiB import safety limit; provider-specific request limits apply later',
+    writer: 'src/main/services/AttachmentService.ts',
+    readers: ['AttachmentService', 'SessionStore', 'Provider image resolvers'],
+    references: ['storageKey and sessionId embedded in SessionData messages'],
+    recovery: 'Writes use temporary directories and rename. Remove stale drafts after 24 hours and session orphans only after live-session inventory.',
+    sensitivity: 'user-data'
+  },
+  {
+    id: 'context-ledger',
+    location: '$USER_DATA/session-runtime/<sessionId>/ledger.jsonl',
+    format: 'append-only JSONL',
+    schema: 'versioned canonical model ledger records',
+    legacyLimit: 'byte size is not bounded',
+    writer: 'src/main/services/context/ModelLedgerStore.ts',
+    readers: ['ModelLedgerStore', 'SessionRuntimeCoordinator', 'ModelContextBuilder'],
+    references: ['sessionId, turnId, messageId, toolCallId and scope identifiers'],
+    recovery: 'Validate records and sequence, preserve conflict backups, and rebuild from the last valid snapshot plus suffix without replaying effects.',
+    sensitivity: 'user-data'
+  },
+  {
+    id: 'context-snapshot',
+    location: '$USER_DATA/session-runtime/<sessionId>/snapshot.json',
+    format: 'JSON',
+    schema: 'versioned compacted ledger snapshot and recovery cursors',
+    legacyLimit: 'byte size is not bounded',
+    writer: 'src/main/services/context/ModelLedgerStore.ts',
+    readers: ['ModelLedgerStore', 'SessionRuntimeCoordinator'],
+    references: ['ledger sequence and session runtime reference in sessions.json'],
+    recovery: 'Ignore an invalid snapshot and rebuild from a validated ledger; never replace a valid ledger with an older snapshot.',
+    sensitivity: 'user-data'
+  },
+  {
+    id: 'edit-backups',
+    location: '$USER_DATA/edit-backups/<sessionId>/<txId>/{metadata.json,files...}',
+    format: 'JSON metadata plus original file bytes',
+    schema: 'transaction metadata with path, SHA-256, mode and expected post-mutation state',
+    legacyLimit: 'transaction count and byte size are not bounded',
+    writer: 'src/main/services/EditTransactionService.ts',
+    readers: ['EditTransactionService', 'diff and accept/reject IPC'],
+    references: ['sessionId, transactionId and absolute workspace file paths'],
+    recovery: 'Atomic metadata writes; an incomplete transaction stays recoverable and must require fingerprint verification before rollback.',
+    sensitivity: 'user-data'
+  },
+  {
+    id: 'tool-journal',
+    location: '$USER_DATA/tool-execution-journal.jsonl{,.1-.4}',
+    format: 'rotating JSONL',
+    schema: 'redacted ToolJournalEvent',
+    legacyLimit: '10 MiB per file, 5 files, 30 day rotated-file age',
+    writer: 'src/main/tools/runtime/ToolExecutionJournal.ts',
+    readers: ['runtime diagnostics and migration audit'],
+    references: ['sessionId, turnId, callId, schema fingerprint and permission rule id'],
+    recovery: 'Skip malformed lines without replaying tools; rotation files are independent evidence segments.',
+    sensitivity: 'user-data'
+  },
+  {
+    id: 'large-tool-results',
+    location: '$USER_DATA/tool-results-v2/projects/<hash>/sessions/<hash>/*.{txt,json}',
+    format: 'UTF-8 text plus JSON metadata',
+    schema: 'ToolResultMetadata with handle, hashes, byte counts and SHA-256',
+    legacyLimit: 'persisted payload is not bounded; reads are capped at 50,000 characters',
+    writer: 'src/main/tools/runtime/LargeToolResultStore.ts',
+    readers: ['LargeToolResultStore', 'ToolResultProcessor', 'ReadToolResult'],
+    references: ['tool-result:// handle in ledger/tool results'],
+    recovery: 'Verify metadata ownership and content SHA-256; missing pairs invalidate only the handle and must not affect other results.',
+    sensitivity: 'user-data'
+  },
+  {
+    id: 'parallel-executions',
+    location: '$WORKSPACE/.codez/executions/<sessionId>/<executionId>.json',
+    format: 'atomic JSON replacement',
+    schema: 'ParallelExecutionSnapshot with sequence and control epoch',
+    legacyLimit: 'execution count and byte size are not bounded',
+    writer: 'src/main/services/execution/ExecutionController.ts',
+    readers: ['ExecutionController', 'TaskStore', 'parallel UI'],
+    references: ['sessionId, plan slug, task step id, worktree and executor ids'],
+    recovery: 'Corrupt snapshots are isolated. Nonterminal executors recover as lost/decision_required and are never automatically replayed.',
+    sensitivity: 'user-data'
+  },
+  {
+    id: 'plans',
+    location: '$HOME/.codez/projects/<workspaceHash>/plans/<slug>.md',
+    format: 'Markdown with YAML front matter',
+    schema: 'Plan metadata plus ordered PlanStep sections',
+    legacyLimit: 'plan count and byte size are not bounded',
+    writer: 'src/main/services/PlanStore.ts',
+    readers: ['PlanStore', 'PlanService', 'Agent plan-mode flow'],
+    references: ['projectId, workspace hash, plan slug and task step ids'],
+    recovery: 'One malformed plan is skipped without affecting other plans; source Markdown remains user recoverable.',
+    sensitivity: 'user-data'
+  },
+  {
+    id: 'skills-config',
+    location: '$HOME/.codez/skills-config.json and $WORKSPACE/.codez-cache/skills-config.json',
+    format: 'JSON',
+    schema: 'enabled/disabled skill identifiers by global or workspace scope',
+    legacyLimit: 'record and byte size are not bounded',
+    writer: 'src/main/services/SkillManager.ts',
+    readers: ['SkillManager', 'SessionSkillState'],
+    references: ['skill id -> builtin, external or workspace skill directories'],
+    recovery: 'Invalid configuration falls back to discovered defaults while preserving the source for inspection.',
+    sensitivity: 'user-data'
+  },
+  {
+    id: 'project-analysis-cache',
+    location: '$WORKSPACE/.codez-cache/project-snapshots.json',
+    format: 'JSON cache',
+    schema: 'project fingerprint -> ProjectSnapshot',
+    legacyLimit: 'record and byte size are not bounded',
+    writer: 'src/main/services/ProjectAnalysisService/snapshotCache.ts',
+    readers: ['ProjectAnalysisService'],
+    references: ['workspace paths and package fingerprints'],
+    recovery: 'Disposable cache: invalid or stale entries are deleted and rebuilt from the workspace.',
+    sensitivity: 'user-data'
+  },
+  {
+    id: 'workspace-rules-memory',
+    location: '$WORKSPACE/.codez/{rules,memory}/** and $HOME/.codez/{rules,memory}/**',
+    format: 'Markdown and JSON configuration',
+    schema: 'Rules, memory entries and front matter defined by RulesResolver and MemoryService',
+    legacyLimit: 'file count and byte size are bounded only by workspace scanning limits',
+    writer: 'src/main/ipc/rules.handlers.ts and src/main/services/MemoryService.ts',
+    readers: ['RulesResolver', 'MemoryService', 'prompt pipeline'],
+    references: ['workspace root, rule path and prompt source identifiers'],
+    recovery: 'User-authored files are authoritative and never rewritten during discovery; malformed files are reported and skipped.',
+    sensitivity: 'user-data'
+  }
+] as const
+
+export const OBSOLETE_ELECTRON_TESTS = new Set([
+  'src/tests/legacy-tool-adapter.test.ts',
+  'src/tests/legacy-tool-execution-pipeline.test.ts',
+  'src/tests/tool-runtime-feature-flags.test.ts',
+  'src/tests/tool-runtime-v1-v2-baseline.test.ts'
+])
+
+export type RequirementRoute = {
+  phase: string
+  owner: string
+  testStrategy: string
+  platforms: string
+  keywords: readonly string[]
+}
+
+export const REQUIREMENT_ROUTES: Readonly<Record<string, RequirementRoute>> = {
+  'FR-APP': { phase: 'Phase 1, Phase 8 and Phase 9', owner: 'codez-desktop', testStrategy: 'Tauri command/host integration and installed-app smoke', platforms: 'windows-x64; macos; linux', keywords: ['smoke', 'theme', 'runtime-ipc'] },
+  'FR-WS': { phase: 'Phase 3 and Phase 8', owner: 'codez-platform', testStrategy: 'Rust filesystem/process contract tests plus frontend adapter coverage', platforms: 'windows-x64; macos; linux', keywords: ['workspace', 'project-analysis', 'glob', 'grep', 'read-tool', 'git-context', 'worktree'] },
+  'FR-DATA': { phase: 'Phase 2 and Phase 9', owner: 'codez-storage', testStrategy: 'Rust migration fixtures, corruption injection and idempotence tests', platforms: 'windows-x64; macos; linux', keywords: ['migration', 'store', 'ledger', 'attachment', 'secret'] },
+  'FR-PROVIDER': { phase: 'Phase 4 and Phase 8', owner: 'codez-providers', testStrategy: 'Redacted request/stream golden fixtures and cancellation tests', platforms: 'all-desktop', keywords: ['provider', 'image', 'reasoning', 'overflow', 'retry'] },
+  'FR-CHAT': { phase: 'Phase 4, Phase 6 and Phase 8', owner: 'codez-runtime', testStrategy: 'Deterministic stream/context state-machine and frontend contract tests', platforms: 'all-desktop', keywords: ['chat', 'context', 'compaction', 'session', 'resume'] },
+  'FR-TOOL': { phase: 'Phase 3 and Phase 5', owner: 'codez-runtime', testStrategy: 'Rust tool schema/effect golden fixtures, filesystem and process integration', platforms: 'windows-x64; macos; linux', keywords: ['tool', 'edit', 'write', 'spawn', 'execution', 'fingerprint'] },
+  'FR-PERM': { phase: 'Phase 5', owner: 'codez-runtime', testStrategy: 'Shared dangerous-command corpus, decision matrix and TOCTOU tests', platforms: 'windows-x64; macos; linux', keywords: ['permission', 'shell-parser', 'critical-guard', 'reviewer-shell'] },
+  'FR-AGENT': { phase: 'Phase 6 and Phase 8', owner: 'codez-runtime', testStrategy: 'Fake provider/clock/tool runner state-machine and crash recovery tests', platforms: 'all-desktop', keywords: ['agent', 'subagent', 'parallel', 'task', 'plan'] },
+  'FR-MCP': { phase: 'Phase 7 and Phase 8', owner: 'codez-mcp', testStrategy: 'Rust SDK contract, fixture servers, transport and OAuth security tests', platforms: 'windows-x64; macos; linux', keywords: ['mcp'] },
+  'FR-TERM': { phase: 'Phase 3, Phase 7 and Phase 8', owner: 'codez-platform', testStrategy: 'Real PTY/process integration and resource locator contract tests', platforms: 'windows-x64; macos; linux', keywords: ['powershell', 'bash-tool', 'skill', 'rules', 'memory', 'attachment'] },
+  'FR-MIG': { phase: 'Phase 0 through Phase 10', owner: 'migration', testStrategy: 'Traceability gate, build matrix, upgrade/rollback and deletion audit', platforms: 'windows-x64; macos; linux', keywords: ['legacy', 'migration', 'smoke'] },
+  'NFR-SEC': { phase: 'Phase 2, Phase 3, Phase 5, Phase 7 and Phase 9', owner: 'security', testStrategy: 'Threat-driven negative tests, redaction scans and dependency audit', platforms: 'windows-x64; macos; linux', keywords: ['permission', 'security', 'safe-fetch', 'secret', 'trust'] },
+  'NFR-REL': { phase: 'Phase 2 through Phase 9', owner: 'runtime', testStrategy: 'Failure injection, cancellation, crash recovery and idempotence tests', platforms: 'windows-x64; macos; linux', keywords: ['recovery', 'abort', 'retry', 'runtime'] },
+  'NFR-PERF': { phase: 'Phase 0 and Phase 9', owner: 'performance', testStrategy: 'Release-build startup, memory, throughput and bundle baselines', platforms: 'windows-x64; macos; linux', keywords: ['performance', 'project-analysis', 'grep', 'spawn'] },
+  'NFR-PORT': { phase: 'Phase 1, Phase 3, Phase 7 and Phase 9', owner: 'platform', testStrategy: 'Three-platform CI plus target-specific PTY, credential and packaging probes', platforms: 'windows-x64; macos; linux', keywords: ['powershell', 'bash-tool', 'workspace', 'mcp-network'] },
+  'NFR-TEST': { phase: 'Every phase', owner: 'quality', testStrategy: 'Rust, contract, frontend and installed-app evidence linked by this matrix', platforms: 'windows-x64; macos; linux', keywords: ['smoke', 'contracts', 'baseline'] },
+  'NFR-MAINT': { phase: 'Phase 1 through Phase 10', owner: 'architecture', testStrategy: 'Dependency direction, generated contracts, fmt, clippy and typecheck gates', platforms: 'all-desktop', keywords: ['contracts', 'runtime-registry', 'schema'] }
+}

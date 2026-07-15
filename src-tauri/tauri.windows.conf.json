@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "resources": {
+      "../node_modules/@vscode/ripgrep-win32-x64/bin/rg.exe": "tools/rg.exe"
+    }
+  }
+}

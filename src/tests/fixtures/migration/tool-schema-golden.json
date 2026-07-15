@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "canonicalToolNames": [
+    "AskUserQuestion",
+    "Bash",
+    "DelegateTasks",
+    "Edit",
+    "ExecutionControl",
+    "ExecutionInspect",
+    "Glob",
+    "Grep",
+    "NotebookEdit",
+    "PowerShell",
+    "PushNotification",
+    "Read",
+    "Skill",
+    "SubAgentRunner",
+    "TaskCreate",
+    "TaskGet",
+    "TaskList",
+    "TaskUpdate",
+    "WebFetch",
+    "WebSearch",
+    "Write",
+    "list_files",
+    "rollback_last_edit",
+    "update_resume_state"
+  ],
+  "canonicalSchemaSha256": "168d0046b51a07c8dc73b55a304b642e33d52676f1bc5814e2f500376a9dfc92",
+  "minimumDeferredSchemaReduction": 0.2,
+  "requiredSessionLifecycleTools": [
+    "ActivateSkill",
+    "DeactivateSkill",
+    "Skill"
+  ],
+  "runtimeControlFields": [
+    "approval"
+  ],
+  "notes": "Rust descriptors must reproduce this canonical fingerprint before Electron schema coverage can be retired. Runtime control fields are decorated outside business input and removed before handler execution."
+}

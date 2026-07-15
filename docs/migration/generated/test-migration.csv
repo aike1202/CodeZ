@@ -1,184 +1,184 @@
-file,target,evidence,reviewed
-src/tests/agent-collaboration-runtime.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/agent-collaboration-tools.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/agent-response-wait-warning.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,false
-src/tests/agent-runner-ledger-authoritative.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/agent-runner-plan-mode.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/agent-runner-tool-result.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/agent-runner-transition.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/ask-user-question-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/attachment-preview-bytes.test.ts,replace-contract,Electron IPC or preload behavior requires typed contract coverage.,false
-src/tests/attachment-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/bash-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/chat-compaction-timeline.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,false
-src/tests/chat-message-terminal-status.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/chat-performance.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/chat-provider-usage.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/chat-retry.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/chat-runtime-ipc.test.ts,replace-contract,Electron IPC or preload behavior requires typed contract coverage.,false
-src/tests/chat-runtime-registry-steer.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/chat-runtime-registry.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/chat-runtime-status-slice.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,false
-src/tests/chat-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/chat-stream-v2.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/compaction-file-recovery.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/compaction-model-client.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/compaction-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/compaction-skill-recovery.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/compaction-summary.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/context-budget-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/context-contracts.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/context-crash-recovery.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/context-management-integration.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/context-trigger-policy.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/delegate-tasks-helper.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/edit-approval-acceptance.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/edit-diff-utils.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/edit-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/edit-transaction-service.test.ts,replace-contract,Electron IPC or preload behavior requires typed contract coverage.,false
-src/tests/execution-control-helper.test.ts,replace-contract,Electron IPC or preload behavior requires typed contract coverage.,false
-src/tests/execution-controller.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/execution-log-batch-builder.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/execution-tools.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/executor-subagent-prompt.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/explore-subagent-prompt.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/file-context-projector.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/file-context-restorer.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/file-mutation-coordinator.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/file-preview-markdown.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,false
-src/tests/git-context-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/glob-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/grep-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/history-revert.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/image-capabilities.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/image-composer-state.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/image-message-state.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/image-preview-csp.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,false
-src/tests/image-provider-payload.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/image-session-lifecycle.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/large-tool-result-store.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/legacy-session-migration.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/legacy-tool-adapter.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/legacy-tool-execution-pipeline.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/mcp-config-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/mcp-connection-manager.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/mcp-content-normalization.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/mcp-discovery.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/mcp-instruction-registry.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/mcp-network-transports.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/mcp-normalization.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/mcp-oauth-http.test.ts,replace-contract,Electron IPC or preload behavior requires typed contract coverage.,false
-src/tests/mcp-oauth-security.test.ts,replace-contract,Electron IPC or preload behavior requires typed contract coverage.,false
-src/tests/mcp-project-trust.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/mcp-provider-payload.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/mcp-request-guard.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/mcp-reverse-request-policy.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/mcp-safe-fetch.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/mcp-secret-expressions.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/mcp-secret-store.test.ts,replace-contract,Electron IPC or preload behavior requires typed contract coverage.,false
-src/tests/mcp-settings-json.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/mcp-tool-handler.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/memory-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/model-capabilities.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/model-context-builder.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/model-history-normalizer.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/model-ledger-store.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/notebook-edit-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/parallel-exec-store.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/parallel-orchestrator-control.test.ts,replace-contract,Electron IPC or preload behavior requires typed contract coverage.,false
-src/tests/parallel-orchestrator.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/parallel-wave-group.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,false
-src/tests/pending-approval-broker.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/permission-approval-options.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/permission-approval-viewport.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,false
-src/tests/permission-audit-log.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/permission-command-corpus.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,false
-src/tests/permission-contracts.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/permission-critical-guard.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/permission-decision-engine.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/permission-manager.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,false
-src/tests/permission-operation-analysis.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/permission-rule-store.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,false
-src/tests/permission-shell-parser.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,false
-src/tests/plan-service.test.ts,replace-contract,Electron IPC or preload behavior requires typed contract coverage.,false
-src/tests/plan-state-listener.test.ts,replace-contract,Electron IPC or preload behavior requires typed contract coverage.,false
-src/tests/plan-store.test.ts,replace-contract,Electron IPC or preload behavior requires typed contract coverage.,false
-src/tests/powershell-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/project-analysis-service.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,false
-src/tests/prompt-cache.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/prompt-prediction.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/prompt-submission-state.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/provider-message-adapter.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/provider-output-limits.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/provider-overflow-recovery.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/provider-service-migration.test.ts,replace-contract,Electron IPC or preload behavior requires typed contract coverage.,false
-src/tests/provider-tool-call-fixtures.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/provider-usage-request-fingerprint.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/push-notification-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/push-provider.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/queued-prompt-state.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,false
-src/tests/read-fingerprint-store.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/read-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/reasoning-capabilities.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/resume-state-manager.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/reviewer-runtime-policy.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/reviewer-shell-policy.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/reviewer-subagent-prompt.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/right-workspace-tabs.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/rules-resolver.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/scratch_snapshot.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/search-engines.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/send-message-payload.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/session-list-status.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/session-runtime-coordinator.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/session-runtime-recovery.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/session-skill-lifecycle.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/session-store-runtime.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/settings-subagent-model-migration.test.ts,replace-contract,Electron IPC or preload behavior requires typed contract coverage.,false
-src/tests/skill-context-restorer.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/skill-manager-builtin.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/skill-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/slash-command-skill.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/smoke.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/spawn-runner.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/subagent-context-scope.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/subagent-manager-protocol.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/subagent-manager-recovery.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/subagent-markdown-submit-protocol.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/subagent-model-resolver.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/subagent-output-helper.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/subagent-parent-abort.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/subagent-permission-scope.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/subagent-recovery-helper.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/subagent-runner-helper.test.ts,replace-contract,Electron IPC or preload behavior requires typed contract coverage.,false
-src/tests/subagent-session-restore.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/subagent-shared-tool-policy.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/system-prompt-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/task-capsule-order.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/task-capsule-session-state.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,false
-src/tests/task-capsule-theme-colors.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,false
-src/tests/task-execution-realtime.test.ts,replace-contract,Electron IPC or preload behavior requires typed contract coverage.,false
-src/tests/task-session-restore.test.ts,replace-contract,Electron IPC or preload behavior requires typed contract coverage.,false
-src/tests/task-store-persistence.test.ts,replace-contract,Electron IPC or preload behavior requires typed contract coverage.,false
-src/tests/task-update-detail-render.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,false
-src/tests/tool-approval-policy.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/tool-call-assembler.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/tool-effect-permission.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/tool-execution-journal.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/tool-execution-pipeline.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/tool-exposure-planner.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/tool-output-pruner.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/tool-runtime-feature-flags.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/tool-runtime-properties.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/tool-runtime-registry.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/tool-runtime-v1-v2-baseline.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/tool-runtime-validator.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/tool-scheduler.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/tool-schema-baseline.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/tool-search.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/update-resume-state-ledger.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/verification-strategy-service.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,false
-src/tests/workspace-permission-store.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/workspace-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/worktree-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
-src/tests/write-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,false
+file,target,evidence,reviewed,sourceOwners,classificationRule
+src/tests/agent-collaboration-runtime.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/agent-collaboration-tools.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/agent-response-wait-warning.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
+src/tests/agent-runner-ledger-authoritative.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/agent-runner-plan-mode.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/agent-runner-tool-result.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/agent-runner-transition.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/ask-user-question-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/attachment-preview-bytes.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
+src/tests/attachment-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/bash-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/chat-compaction-timeline.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
+src/tests/chat-message-terminal-status.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
+src/tests/chat-performance.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
+src/tests/chat-provider-usage.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/chat-retry.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/chat-runtime-ipc.test.ts,replace-contract,Electron IPC or preload behavior requires typed contract coverage.,true,external;shared-contract,preload-or-ipc-boundary
+src/tests/chat-runtime-registry-steer.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/chat-runtime-registry.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/chat-runtime-status-slice.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
+src/tests/chat-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/chat-stream-v2.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;shared-contract,default-backend-domain
+src/tests/compaction-file-recovery.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/compaction-model-client.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/compaction-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/compaction-skill-recovery.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/compaction-summary.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/context-budget-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/context-contracts.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/context-crash-recovery.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/context-management-integration.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/context-trigger-policy.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/delegate-tasks-helper.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/edit-approval-acceptance.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
+src/tests/edit-diff-utils.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
+src/tests/edit-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/edit-transaction-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/execution-control-helper.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/execution-controller.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/execution-log-batch-builder.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
+src/tests/execution-tools.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/executor-subagent-prompt.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external,default-backend-domain
+src/tests/explore-subagent-prompt.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/file-context-projector.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/file-context-restorer.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/file-mutation-coordinator.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/file-preview-markdown.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
+src/tests/git-context-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/glob-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/grep-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/history-revert.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/image-capabilities.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;shared-contract,default-backend-domain
+src/tests/image-composer-state.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
+src/tests/image-message-state.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
+src/tests/image-preview-csp.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external,default-backend-domain
+src/tests/image-provider-payload.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/image-session-lifecycle.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-ipc,default-backend-domain
+src/tests/large-tool-result-store.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/legacy-session-migration.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/legacy-tool-adapter.test.ts,obsolete-electron,Legacy V1 pipeline coverage is retained through Phase 9 and may be removed only after canonical V2 parity is linked.,true,external;main-runtime,reviewed-legacy-pipeline-override
+src/tests/legacy-tool-execution-pipeline.test.ts,obsolete-electron,Legacy V1 pipeline coverage is retained through Phase 9 and may be removed only after canonical V2 parity is linked.,true,external;main-runtime,reviewed-legacy-pipeline-override
+src/tests/mcp-config-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/mcp-connection-manager.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/mcp-content-normalization.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/mcp-discovery.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/mcp-instruction-registry.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/mcp-network-transports.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/mcp-normalization.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/mcp-oauth-http.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/mcp-oauth-security.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/mcp-project-trust.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/mcp-provider-payload.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/mcp-request-guard.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/mcp-reverse-request-policy.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/mcp-safe-fetch.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/mcp-secret-expressions.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/mcp-secret-store.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/mcp-settings-json.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
+src/tests/mcp-tool-handler.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/memory-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/model-capabilities.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/model-context-builder.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/model-history-normalizer.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/model-ledger-store.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/notebook-edit-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/parallel-exec-store.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer;shared-contract,renderer-import-or-render-harness
+src/tests/parallel-orchestrator-control.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/parallel-orchestrator.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/parallel-wave-group.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
+src/tests/pending-approval-broker.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-ipc,default-backend-domain
+src/tests/permission-approval-options.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
+src/tests/permission-approval-viewport.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external,default-backend-domain
+src/tests/permission-audit-log.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/permission-command-corpus.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/permission-contracts.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;shared-contract,default-backend-domain
+src/tests/permission-critical-guard.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/permission-decision-engine.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/permission-manager.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/permission-operation-analysis.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/permission-rule-store.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/permission-shell-parser.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/plan-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/plan-state-listener.test.ts,replace-contract,Electron IPC or preload behavior requires typed contract coverage.,true,external,preload-or-ipc-boundary
+src/tests/plan-store.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/powershell-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/project-analysis-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/prompt-cache.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/prompt-prediction.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;main-runtime;renderer,renderer-import-or-render-harness
+src/tests/prompt-submission-state.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer;shared-contract,renderer-import-or-render-harness
+src/tests/provider-message-adapter.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/provider-output-limits.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/provider-overflow-recovery.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/provider-service-migration.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/provider-tool-call-fixtures.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/provider-usage-request-fingerprint.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/push-notification-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/push-provider.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/queued-prompt-state.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
+src/tests/read-fingerprint-store.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/read-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/reasoning-capabilities.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;shared-contract,default-backend-domain
+src/tests/resume-state-manager.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/reviewer-runtime-policy.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external,default-backend-domain
+src/tests/reviewer-shell-policy.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/reviewer-subagent-prompt.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/right-workspace-tabs.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
+src/tests/rules-resolver.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/scratch_snapshot.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/search-engines.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/send-message-payload.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
+src/tests/session-list-status.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
+src/tests/session-runtime-coordinator.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/session-runtime-recovery.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/session-skill-lifecycle.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/session-store-runtime.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/settings-subagent-model-migration.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/skill-context-restorer.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/skill-manager-builtin.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/skill-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/slash-command-skill.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer;shared-contract,renderer-import-or-render-harness
+src/tests/smoke.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external,default-backend-domain
+src/tests/spawn-runner.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/subagent-context-scope.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;shared-contract,default-backend-domain
+src/tests/subagent-manager-protocol.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;shared-contract,default-backend-domain
+src/tests/subagent-manager-recovery.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;shared-contract,default-backend-domain
+src/tests/subagent-markdown-submit-protocol.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/subagent-model-resolver.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/subagent-output-helper.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/subagent-parent-abort.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;shared-contract,default-backend-domain
+src/tests/subagent-permission-scope.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/subagent-recovery-helper.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/subagent-runner-helper.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external,default-backend-domain
+src/tests/subagent-session-restore.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external,default-backend-domain
+src/tests/subagent-shared-tool-policy.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/system-prompt-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/task-capsule-order.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer;shared-contract,renderer-import-or-render-harness
+src/tests/task-capsule-session-state.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer;shared-contract,renderer-import-or-render-harness
+src/tests/task-capsule-theme-colors.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external,default-backend-domain
+src/tests/task-execution-realtime.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external,default-backend-domain
+src/tests/task-session-restore.test.ts,replace-contract,Electron IPC or preload behavior requires typed contract coverage.,true,external;shared-contract,preload-or-ipc-boundary
+src/tests/task-store-persistence.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external,default-backend-domain
+src/tests/task-update-detail-render.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
+src/tests/tool-approval-policy.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/tool-call-assembler.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/tool-effect-permission.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/tool-execution-journal.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/tool-execution-pipeline.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/tool-exposure-planner.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/tool-output-pruner.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/tool-runtime-feature-flags.test.ts,obsolete-electron,Legacy V1 pipeline coverage is retained through Phase 9 and may be removed only after canonical V2 parity is linked.,true,external;main-runtime,reviewed-legacy-pipeline-override
+src/tests/tool-runtime-properties.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/tool-runtime-registry.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/tool-runtime-v1-v2-baseline.test.ts,obsolete-electron,Legacy V1 pipeline coverage is retained through Phase 9 and may be removed only after canonical V2 parity is linked.,true,external;main-runtime,reviewed-legacy-pipeline-override
+src/tests/tool-runtime-validator.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/tool-scheduler.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/tool-schema-baseline.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/tool-search.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/update-resume-state-ledger.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/verification-strategy-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/workspace-permission-store.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/workspace-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/worktree-service.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
+src/tests/write-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain
