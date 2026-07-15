@@ -8,7 +8,7 @@ license.workspace = true
 [dependencies]
 codez-core.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
 sha2.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
@@ -16,19 +16,17 @@ tokio.workspace = true
 zeroize.workspace = true
 
 [target.'cfg(windows)'.dependencies]
+aes.workspace = true
+aes-gcm.workspace = true
+base64.workspace = true
 keyring = { workspace = true, features = ["windows-native"] }
+windows-dpapi.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { workspace = true, features = ["apple-native"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { workspace = true, features = ["async-secret-service", "async-io", "crypto-rust"] }
-
-[target.'cfg(windows)'.dev-dependencies]
-aes-gcm = "0.10.3"
-base64 = "0.22.1"
-serde_json.workspace = true
-windows-dpapi = "0.2.0"
 
 [lints]
 workspace = true

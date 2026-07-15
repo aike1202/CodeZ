@@ -80,6 +80,43 @@ pub(super) fn backup_blocking(
     })
 }
 
+pub(super) fn read_verified_backup(
+    manifest: &MigrationManifest,
+    backup_root: &Path,
+    data_set: LegacyDataSet,
+) -> Result<Option<Vec<u8>>, MigrationError> {
+    verify_manifest_fingerprint(manifest)?;
+    let mut matches = manifest
+        .entries
+        .iter()
+        .filter(|entry| entry.data_set == data_set);
+    let Some(entry) = matches.next() else {
+        return Ok(None);
+    };
+    if matches.next().is_some() {
+        return Err(MigrationError::CatalogCollision {
+            scope: entry.scope,
+            relative_path: entry.relative_path.clone(),
+        });
+    }
+
+    validate_relative_path(&entry.relative_path)?;
+    let run_directory = backup_root.join(manifest.run_id.as_str());
+    let metadata = reject_symlink(&run_directory)?;
+    if !metadata.is_dir() {
+        return Err(MigrationError::UnsupportedFileType(run_directory));
+    }
+    let relative_path = Path::new(&entry.scope.backup_directory_name()).join(&entry.relative_path);
+    reject_symlink_descendants(&run_directory, &relative_path)?;
+    let backup_path = run_directory.join(relative_path);
+    let bytes = read_bounded(&backup_path, entry.byte_length)?;
+    let byte_length = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+    if byte_length != entry.byte_length || sha256_bytes(&bytes) != entry.sha256 {
+        return Err(MigrationError::BackupConflict(backup_path));
+    }
+    Ok(Some(bytes))
+}
+
 struct DiscoveryAccumulator {
     entries: Vec<MigrationManifestEntry>,
     seen_paths: BTreeSet<(ManifestScope, PathBuf)>,

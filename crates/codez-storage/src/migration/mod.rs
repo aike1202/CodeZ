@@ -1,6 +1,10 @@
 mod catalog;
+mod credentials;
 mod filesystem;
+mod legacy_safe_storage;
 
+#[cfg(test)]
+mod credential_tests;
 #[cfg(test)]
 mod tests;
 
@@ -18,6 +22,13 @@ use crate::{AtomicFileStore, SchemaFamily, StorageError};
 pub use catalog::{
     DataSensitivity, DiscoveryRule, LEGACY_DATA_CATALOG, LegacyDataSet, LegacyDataSpec,
     LegacyFormat, RootScope, SchemaSelector, TreeSelector,
+};
+pub use credentials::{
+    CredentialMigrationEntry, CredentialMigrationReason, CredentialMigrationReport,
+    CredentialMigrationStatus,
+};
+pub use legacy_safe_storage::{
+    ElectronSafeStorageReader, LegacyCredentialReadError, LegacyCredentialReader,
 };
 
 const MANIFEST_SCHEMA_VERSION: u32 = 1;
@@ -373,6 +384,53 @@ impl LegacyMigrationService {
             .await?;
         Ok(report)
     }
+
+    /// Migrates legacy Provider, MCP secret, and MCP OAuth credentials from a
+    /// verified backup into the operating-system credential store.
+    ///
+    /// A redacted decision report is written beside the backup completion
+    /// record. Repeated calls are safe because credential writes replace the
+    /// same stable identities and the report is atomically replaced.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MigrationError`] when the backup does not match the manifest,
+    /// a backup file changed, the credential store rejects a write, the worker
+    /// cannot be joined, or the redacted report cannot be persisted.
+    pub async fn migrate_credentials<R, S>(
+        &self,
+        manifest: &MigrationManifest,
+        backup_report: &BackupReport,
+        backup_root: &Path,
+        reader: std::sync::Arc<R>,
+        credential_store: std::sync::Arc<S>,
+    ) -> Result<CredentialMigrationReport, MigrationError>
+    where
+        R: LegacyCredentialReader + 'static,
+        S: crate::CredentialStore + 'static,
+    {
+        validate_root("migration backup", backup_root)?;
+        let worker_manifest = manifest.clone();
+        let worker_backup_report = backup_report.clone();
+        let worker_backup_root = backup_root.to_path_buf();
+        let report = tokio::task::spawn_blocking(move || {
+            credentials::migrate_credentials_blocking(
+                &worker_manifest,
+                &worker_backup_report,
+                &worker_backup_root,
+                reader.as_ref(),
+                credential_store.as_ref(),
+            )
+        })
+        .await
+        .map_err(MigrationError::CredentialTaskJoin)??;
+
+        let report_path = backup_root
+            .join(manifest.run_id.as_str())
+            .join("credential-migration.json");
+        self.store.write_json(&report_path, &report).await?;
+        Ok(report)
+    }
 }
 
 /// Failures that preserve legacy source data and prevent migration commit.
@@ -440,6 +498,15 @@ pub enum MigrationError {
     /// The backup worker could not be joined.
     #[error("legacy backup worker failed")]
     BackupTaskJoin(#[source] tokio::task::JoinError),
+    /// A backup completion record does not authorize this credential run.
+    #[error("credential migration requires a matching completed backup")]
+    CredentialBackupMismatch,
+    /// A secure credential write failed; the run may be retried idempotently.
+    #[error("credential migration could not write to secure storage")]
+    CredentialStore(#[source] crate::CredentialError),
+    /// The credential migration worker could not be joined.
+    #[error("legacy credential migration worker failed")]
+    CredentialTaskJoin(#[source] tokio::task::JoinError),
     /// Atomic report persistence failed.
     #[error(transparent)]
     Storage(#[from] StorageError),
