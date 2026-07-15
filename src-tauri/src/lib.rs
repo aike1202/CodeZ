@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod commands;
+mod composition;
 mod error;
 mod lifecycle;
 mod logging;
@@ -97,9 +98,13 @@ pub fn run() -> Result<(), tauri::Error> {
             }
         })
         .setup(|app| {
-            let resource_directory = app.path().resource_dir()?;
-            let state = state::AppState::new(resource_directory);
+            let state = composition::compose_app_state(app)?;
             lifecycle::register_shutdown_hooks(app.handle(), &state.shutdown)?;
+            tracing::debug!(
+                data_path_ready = state.paths.data_directory().is_absolute(),
+                max_document_bytes = state.storage.max_document_bytes(),
+                "storage composition initialized"
+            );
             if let Err(error) = state.resources.validate_required() {
                 state.errors.log(&AppError::internal(format!(
                     "bundled resource validation: {error}"

@@ -5,13 +5,16 @@
 ## 当前状态
 
 - Phase 0：Windows x64 基线已闭环。D-01 至 D-08 已按 ADR 0001 冻结；六项高风险 spike、88 个 `window.api` 方法语义、23 类持久化数据、183 个测试文件分类、79 条 FR/NFR 追踪矩阵和性能基线均已有可重复证据。macOS/Linux safeStorage、PTY、资源与性能验证仍由目标平台 CI 完成，Phase 9 的签名主体和升级 feed 仍未冻结。
-- Phase 1：基座进行中。Cargo workspace、依赖方向门禁、三平台 CI、Tauri v2 宿主、typed command、前端 `shared/desktop`、统一 `AppError`/`CommandError`、correlation ID、脱敏 stderr `tracing` 和迁移期启动页已经建立；滚动日志、完整退出协调和自动化桌面 smoke 尚未完成。
-- Phase 2 至 Phase 10：未开始。
+- Phase 1：基座已闭环。Cargo workspace、依赖方向门禁、三平台 CI、Tauri v2 宿主、typed command、前端 `shared/desktop`、统一错误/脱敏诊断、迁移期启动页和有界四阶段安全退出已经建立；Tauri debug build、聚焦 host 测试和非视觉 smoke 通过。
+- Phase 2：进行中。`AppPaths` 已统一应用数据、缓存、日志、资源、临时和工作区状态根并由 Tauri composition root 注入；`AtomicFileStore` 已提供按资源串行的原子 JSON/JSONL、同步落盘、大小限制、故障注入、安全权限和损坏 quarantine/有效前缀恢复。版本化 schema、迁移 runner、credentials、滚动日志、通用 ports 与取消树仍未完成。
+- Phase 3 至 Phase 10：未开始。
 - Electron 基线：完整保留，禁止提前删除。
 
 ## 首轮验证
 
-- `npm.cmd run check:rust`：通过，Rust 首批 13 个测试通过。
+- `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings -D clippy::perf`：通过。
+- `cargo test -p codez-core -p codez-storage --all-targets --all-features --locked`：通过，core 9 项、storage 5 项测试验证路径、原子替换、故障保留、单写者和损坏恢复。
+- `cargo test -p codez-desktop --all-targets --all-features --locked`：通过，8 项 desktop 单元测试与 2 项有界流集成测试通过。
 - `npm.cmd run typecheck`：通过。
 - `npm.cmd test -- --run`：183 个文件、1,166 项测试通过。
 - `npm.cmd run build`：Electron main/preload/renderer 生产构建通过。

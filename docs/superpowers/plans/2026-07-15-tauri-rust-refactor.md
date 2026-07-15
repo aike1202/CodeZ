@@ -149,8 +149,8 @@ src/renderer/src/desktop/
 
 ### 6.1 数据基础设施
 
-- [ ] 实现 `AppPaths`，统一应用数据、缓存、日志、资源、临时和工作区状态路径。
-- [ ] 实现原子 JSON/JSONL 读写、权限设置、写队列、故障注入和损坏文件隔离。
+- [x] 实现 `AppPaths`，统一应用数据、缓存、日志、资源、临时和工作区状态路径；路径由 Tauri composition root 解析后以 `codez-core::AppPaths` 注入，core 不读取环境或当前目录，工作区 `.codez`/`.codez-cache` 只从已验证绝对根派生。
+- [x] 实现原子 JSON/JSONL 读写、权限设置、写队列、故障注入和损坏文件隔离；`codez-storage::AtomicFileStore` 使用同目录临时文件、flush/fsync、跨平台原子替换、每资源单写者和 64 MiB 默认上限，JSONL 追加的截断后缀会保留完整 quarantine 并原子恢复有效前缀；Windows 原子替换/故障/隔离测试通过，Unix owner-only `0700/0600` 权限测试由目标平台 CI 执行。
 - [ ] 为 session、settings、provider、permission、MCP、context、execution 等定义版本化 schema。
 - [ ] 实现只读旧数据发现、清单、备份、幂等迁移、验证和完成标记。
 - [ ] 建立真实但脱敏的旧数据 fixtures，覆盖旧版本字段、部分损坏和引用缺失。

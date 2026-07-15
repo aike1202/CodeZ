@@ -596,6 +596,7 @@ dependencies = [
  "codez-core",
  "codez-platform",
  "codez-runtime",
+ "codez-storage",
  "serde",
  "serde_json",
  "tauri",
@@ -604,6 +605,7 @@ dependencies = [
  "tauri-plugin-global-shortcut",
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
+ "thiserror 2.0.18",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -657,7 +659,11 @@ dependencies = [
  "aes-gcm",
  "base64 0.22.1",
  "codez-core",
+ "serde",
  "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
  "windows-dpapi",
 ]
 
