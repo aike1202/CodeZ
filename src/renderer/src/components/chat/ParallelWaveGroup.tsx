@@ -2,6 +2,7 @@ import React, { useId, useState } from 'react'
 import { Loader2, CheckCircle2, CircleDashed, PackageCheck, XCircle, ChevronDown, ChevronRight, Zap } from 'lucide-react'
 import { useParallelExecStore } from '../../stores/parallelExecStore'
 import type { ParallelWaveState } from '../../stores/parallelExecStore'
+import { useChatStore } from '../../stores/chatStore'
 import './ParallelWaveGroup.css'
 
 /**
@@ -11,11 +12,12 @@ import './ParallelWaveGroup.css'
  * 展示波次结构 + 每步状态；Worker 的工具日志详情仍由现有 SubAgentCard 承载。
  */
 export const ParallelWaveGroup: React.FC = () => {
-  const { active, planSlug, isolation, rationale, waves, overallStatus } = useParallelExecStore()
+  const { active, sessionId, planSlug, isolation, rationale, waves, overallStatus } = useParallelExecStore()
+  const activeSessionId = useChatStore((state) => state.activeSessionId)
   const [expanded, setExpanded] = useState(false)
   const detailsId = useId()
 
-  if (!active || waves.length === 0) return null
+  if (!active || !sessionId || sessionId !== activeSessionId || waves.length === 0) return null
 
   const completedSteps = waves.reduce(
     (count, wave) => count + wave.stepResults.filter((result) => result.status === 'completed').length,
