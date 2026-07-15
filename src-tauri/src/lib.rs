@@ -1,30 +1,81 @@
 #![forbid(unsafe_code)]
 
 mod commands;
+mod error;
+mod logging;
 mod state;
 
+use codez_core::{AppError, redact_sensitive_text};
 use tauri::{Manager, WebviewWindow};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
-fn toggle_window_visibility(window: &WebviewWindow) {
-    let is_visible = window.is_visible().unwrap_or(false);
-    let is_focused = window.is_focused().unwrap_or(false);
-
-    if is_visible && is_focused {
-        let _ = window.hide();
+fn log_window_error(window: &WebviewWindow, operation: &str, source: impl std::fmt::Display) {
+    let error = AppError::external(
+        "The desktop window operation failed",
+        format!("{operation}: {source}"),
+        false,
+    );
+    if let Some(state) = window.try_state::<state::AppState>() {
+        state.errors.log(&error);
     } else {
-        let _ = window.show();
-        let _ = window.set_focus();
+        tracing::error!(
+            error_code = error.kind().as_str(),
+            diagnostic = %redact_sensitive_text(error.diagnostic().unwrap_or("window operation failed")),
+            "desktop operation failed before application state initialization"
+        );
     }
 }
 
-pub fn run() {
+fn toggle_window_visibility(window: &WebviewWindow) {
+    let is_visible = match window.is_visible() {
+        Ok(is_visible) => is_visible,
+        Err(source) => {
+            log_window_error(window, "read visibility", source);
+            return;
+        }
+    };
+    let is_focused = match window.is_focused() {
+        Ok(is_focused) => is_focused,
+        Err(source) => {
+            log_window_error(window, "read focus", source);
+            return;
+        }
+    };
+
+    if is_visible && is_focused {
+        if let Err(source) = window.hide() {
+            log_window_error(window, "hide", source);
+        }
+    } else {
+        if let Err(source) = window.show() {
+            log_window_error(window, "show", source);
+            return;
+        }
+        if let Err(source) = window.set_focus() {
+            log_window_error(window, "focus", source);
+        }
+    }
+}
+
+/// Builds and runs the Tauri desktop host.
+///
+/// # Errors
+///
+/// Returns a Tauri startup error when the application cannot be built.
+pub fn run() -> Result<(), tauri::Error> {
+    logging::initialize();
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
+                if let Err(source) = window.unminimize() {
+                    log_window_error(&window, "restore second instance", source);
+                }
+                if let Err(source) = window.show() {
+                    log_window_error(&window, "show second instance", source);
+                }
+                if let Err(source) = window.set_focus() {
+                    log_window_error(&window, "focus second instance", source);
+                }
             }
         }))
         .plugin(tauri_plugin_dialog::init())
@@ -48,7 +99,9 @@ pub fn run() {
             let resource_directory = app.path().resource_dir()?;
             let state = state::AppState::new(resource_directory);
             if let Err(error) = state.resources.validate_required() {
-                eprintln!("CodeZ bundled resources are not ready: {error}");
+                state.errors.log(&AppError::internal(format!(
+                    "bundled resource validation: {error}"
+                )));
             }
             if !app.manage(state) {
                 return Err("CodeZ application state was already initialized".into());
@@ -64,18 +117,30 @@ pub fn run() {
                 },
             );
             if let Err(error) = shortcut_result {
-                eprintln!("CodeZ global shortcut is unavailable: {error}");
+                app.state::<state::AppState>()
+                    .errors
+                    .log(&AppError::external(
+                        "The global shortcut is unavailable",
+                        format!("register global shortcut: {error}"),
+                        false,
+                    ));
             }
             Ok(())
         });
 
     let app = builder
         .build(tauri::generate_context!())
-        .expect("failed to build the CodeZ Tauri application");
+        .inspect_err(|error| {
+            tracing::error!(
+                diagnostic = %redact_sensitive_text(&error.to_string()),
+                "failed to build the CodeZ Tauri application"
+            );
+        })?;
     app.run(|app_handle, event| {
         if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
             let state = app_handle.state::<state::AppState>();
             let _ = state.shutdown.begin_shutdown();
         }
     });
+    Ok(())
 }

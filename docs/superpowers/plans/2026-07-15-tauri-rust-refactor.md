@@ -101,7 +101,7 @@ interface DesktopEvent<T> {
 ### 4.4 性能与质量基线
 
 - [x] 记录冷启动、首屏、空闲内存、安装包、文件树、搜索、首 Token 和 PTY 吞吐；可重复探针与 Windows x64 结果见 `scripts/tauri/measure-performance-baseline.ts` 和 `docs/migration/generated/performance-baseline.win32-x64.json`。
-- [x] 将 183 个现有测试文件按 `port-to-rust`、`keep-frontend`、`replace-contract`、`replace-e2e`、`obsolete-electron` 分类，所有行均已标记 `reviewed=true`。
+- [x] 将当前 184 个测试文件按 `port-to-rust`、`keep-frontend`、`replace-contract`、`replace-e2e`、`obsolete-electron` 分类，所有行均已标记 `reviewed=true`；生成器会随新增测试持续更新。
 - [x] 建立 FR/NFR -> 阶段/owner -> 测试 -> 平台的 79 行追踪矩阵，见 `docs/migration/generated/traceability.csv`。
 
 Windows x64 Electron 基线中位数：`ready-to-show 597.71 ms`、首个 animation frame `661.66 ms`、4 个进程合计工作集 `444,391,424 bytes`；当前 NSIS 安装包 `94,487,081 bytes`，仓库文件树 `22.74 ms`，`rg` 搜索 `29.64 ms`，无网络合成首 Token `1.25 ms`，legacy `node-pty` 吞吐 `0.82 MiB/s`。首 Token 数值明确排除网络，只用于比较 Provider 流解析路径。
@@ -137,7 +137,7 @@ src/renderer/src/desktop/
 - [x] 为 workspace 增加依赖方向检查，禁止 core/runtime 反向依赖 Tauri 或具体平台 adapter。
 - [x] 配置 Tauri v2、Vite dev/build、应用 ID、无边框窗口、最小尺寸和 CSP。
 - [x] 建立 `AppState` 生命周期，只存放服务句柄，不把领域逻辑写入 command。
-- [ ] 建立统一 Rust 错误枚举、稳定错误码、脱敏日志和前端错误映射。
+- [x] 建立统一 Rust 错误枚举、稳定错误码、脱敏日志和前端错误映射；`codez-core::AppError` 将用户消息与诊断分离，desktop `ErrorReporter` 生成 correlation ID 并映射为 `CommandError`，前端拒绝展示非结构化原始异常。
 - [x] 选择并落地 `ts-rs` Rust -> TypeScript 类型生成方案，生成结果由 `npm run contracts:generate` 维护。
 - [x] 建立前端 `desktopApi`，Tauri 迁移代码只通过该 adapter 调用 command。
 - [ ] 实现最小窗口、主题、外链、目录选择、单实例、快捷键和安全退出 smoke。

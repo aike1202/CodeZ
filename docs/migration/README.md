@@ -5,7 +5,7 @@
 ## 当前状态
 
 - Phase 0：Windows x64 基线已闭环。D-01 至 D-08 已按 ADR 0001 冻结；六项高风险 spike、88 个 `window.api` 方法语义、23 类持久化数据、183 个测试文件分类、79 条 FR/NFR 追踪矩阵和性能基线均已有可重复证据。macOS/Linux safeStorage、PTY、资源与性能验证仍由目标平台 CI 完成，Phase 9 的签名主体和升级 feed 仍未冻结。
-- Phase 1：基座进行中。Cargo workspace、依赖方向门禁、三平台 CI、Tauri v2 宿主、typed command、前端 `shared/desktop` 和迁移期启动页已经建立；主题、日志、退出协调和自动化桌面 smoke 尚未完成。
+- Phase 1：基座进行中。Cargo workspace、依赖方向门禁、三平台 CI、Tauri v2 宿主、typed command、前端 `shared/desktop`、统一 `AppError`/`CommandError`、correlation ID、脱敏 stderr `tracing` 和迁移期启动页已经建立；滚动日志、完整退出协调和自动化桌面 smoke 尚未完成。
 - Phase 2 至 Phase 10：未开始。
 - Electron 基线：完整保留，禁止提前删除。
 
@@ -43,7 +43,7 @@ npm.cmd run analyze:tauri-migration
 - `desktop-api-semantics.json`：88 个 `window.api` 方法的输入、输出、错误、取消、事件、channel 和订阅释放语义。
 - `persistence-literals.json`：旧主进程中的持久化文件、目录和 `userData` 字面量候选。
 - `persistence-inventory.json`：23 类持久化数据的路径、格式、schema、现有限额、写入者、引用与恢复策略。
-- `test-migration.csv`：183 个测试文件的五类迁移归属，当前为 150 个 `port-to-rust`、26 个 `keep-frontend`、3 个 `replace-contract`、0 个 `replace-e2e` 和 4 个候选 `obsolete-electron`，无未复核行。0 个现有 E2E 是 Phase 8 必须补齐的测试缺口，不代表无需 E2E。
+- `test-migration.csv`：184 个测试文件的五类迁移归属，当前为 150 个 `port-to-rust`、27 个 `keep-frontend`、3 个 `replace-contract`、0 个 `replace-e2e` 和 4 个候选 `obsolete-electron`，无未复核行。0 个现有 E2E 是 Phase 8 必须补齐的测试缺口，不代表无需 E2E。
 - `traceability.csv`：79 条 FR/NFR 到阶段、owner、实现、测试和平台证据的追踪入口。
 - `performance-baseline.win32-x64.json`：当前 Electron 构建的无截图 Windows x64 性能与包体积基线。
 - `inventory-summary.md`：当前统计摘要。

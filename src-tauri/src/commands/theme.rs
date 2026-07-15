@@ -1,13 +1,17 @@
 use codez_contracts::{
     CONTRACT_VERSION, CommandError, DesktopEvent, THEME_CHANGED_EVENT, ThemeInfo, ThemeSource,
 };
-use codez_core::HostThemeSource;
+use codez_core::{AppError, HostThemeSource};
 use tauri::{Emitter, Manager, State, Theme, Window};
 
-use crate::state::AppState;
+use crate::{error::command_result, state::AppState};
 
-fn host_error(operation: &str) -> CommandError {
-    CommandError::internal(format!("Theme operation failed: {operation}"))
+fn host_error(operation: &str, source: impl std::fmt::Display) -> AppError {
+    AppError::external(
+        "The theme operation failed",
+        format!("{operation}: {source}"),
+        false,
+    )
 }
 
 fn to_contract_source(source: HostThemeSource) -> ThemeSource {
@@ -34,8 +38,10 @@ fn window_theme(source: ThemeSource) -> Option<Theme> {
     }
 }
 
-fn read_theme_info(window: &Window, state: &AppState) -> Result<ThemeInfo, CommandError> {
-    let effective = window.theme().map_err(|_| host_error("read theme"))?;
+fn read_theme_info(window: &Window, state: &AppState) -> Result<ThemeInfo, AppError> {
+    let effective = window
+        .theme()
+        .map_err(|source| host_error("read theme", source))?;
     Ok(ThemeInfo {
         should_use_dark_colors: effective == Theme::Dark,
         theme_source: to_contract_source(state.host_preferences.theme_source()),
@@ -44,8 +50,12 @@ fn read_theme_info(window: &Window, state: &AppState) -> Result<ThemeInfo, Comma
 
 pub(crate) fn emit_theme_changed(window: &Window) {
     let state = window.state::<AppState>();
-    let Ok(payload) = read_theme_info(window, &state) else {
-        return;
+    let payload = match read_theme_info(window, &state) {
+        Ok(payload) => payload,
+        Err(error) => {
+            state.errors.log(&error);
+            return;
+        }
     };
     let event = DesktopEvent {
         version: CONTRACT_VERSION,
@@ -54,12 +64,14 @@ pub(crate) fn emit_theme_changed(window: &Window) {
         kind: "themeChanged".to_string(),
         payload,
     };
-    let _ = window.emit(THEME_CHANGED_EVENT, event);
+    if let Err(source) = window.emit(THEME_CHANGED_EVENT, event) {
+        state.errors.log(&host_error("emit theme event", source));
+    }
 }
 
 #[tauri::command]
 pub fn theme_get(window: Window, state: State<'_, AppState>) -> Result<ThemeInfo, CommandError> {
-    read_theme_info(&window, &state)
+    command_result(&state.errors, read_theme_info(&window, &state))
 }
 
 #[tauri::command]
@@ -68,15 +80,18 @@ pub fn theme_set(
     state: State<'_, AppState>,
     source: ThemeSource,
 ) -> Result<ThemeInfo, CommandError> {
-    window
-        .set_theme(window_theme(source))
-        .map_err(|_| host_error("set theme"))?;
-    state
-        .host_preferences
-        .set_theme_source(to_host_source(source));
-    let info = read_theme_info(&window, &state)?;
-    emit_theme_changed(&window);
-    Ok(info)
+    let result = (|| {
+        window
+            .set_theme(window_theme(source))
+            .map_err(|error| host_error("set theme", error))?;
+        state
+            .host_preferences
+            .set_theme_source(to_host_source(source));
+        let info = read_theme_info(&window, &state)?;
+        emit_theme_changed(&window);
+        Ok(info)
+    })();
+    command_result(&state.errors, result)
 }
 
 #[cfg(test)]

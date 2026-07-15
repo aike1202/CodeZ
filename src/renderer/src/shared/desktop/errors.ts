@@ -18,7 +18,19 @@ function isCommandError(value: unknown): value is CommandError {
   return typeof candidate.code === 'string' &&
     ERROR_CODES.has(candidate.code as ErrorCode) &&
     typeof candidate.message === 'string' &&
-    typeof candidate.retryable === 'boolean'
+    typeof candidate.retryable === 'boolean' &&
+    (candidate.correlationId === null || typeof candidate.correlationId === 'string')
+}
+
+function parseCommandError(value: unknown): CommandError | null {
+  if (isCommandError(value)) return value
+  if (typeof value !== 'string') return null
+  try {
+    const parsed: unknown = JSON.parse(value)
+    return isCommandError(parsed) ? parsed : null
+  } catch {
+    return null
+  }
 }
 
 export class DesktopCommandError extends Error {
@@ -37,15 +49,8 @@ export class DesktopCommandError extends Error {
 
 export function normalizeDesktopError(value: unknown): DesktopCommandError {
   if (value instanceof DesktopCommandError) return value
-  if (isCommandError(value)) return new DesktopCommandError(value)
-  if (value instanceof Error) {
-    return new DesktopCommandError({
-      code: 'INTERNAL',
-      message: value.message,
-      retryable: false,
-      correlationId: null
-    })
-  }
+  const commandError = parseCommandError(value)
+  if (commandError) return new DesktopCommandError(commandError)
   return new DesktopCommandError({
     code: 'INTERNAL',
     message: 'Desktop command failed',

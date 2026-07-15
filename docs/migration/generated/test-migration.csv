@@ -32,6 +32,7 @@ src/tests/context-crash-recovery.test.ts,port-to-rust,Backend behavior or domain
 src/tests/context-management-integration.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
 src/tests/context-trigger-policy.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
 src/tests/delegate-tasks-helper.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime;shared-contract,default-backend-domain
+src/tests/desktop-error-mapping.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
 src/tests/edit-approval-acceptance.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
 src/tests/edit-diff-utils.test.ts,keep-frontend,Renderer/store behavior remains in React and TypeScript.,true,external;renderer,renderer-import-or-render-harness
 src/tests/edit-tool.test.ts,port-to-rust,Backend behavior or domain logic requires Rust equivalent coverage.,true,external;main-runtime,default-backend-domain

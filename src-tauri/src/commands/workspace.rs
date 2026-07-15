@@ -1,16 +1,25 @@
 use codez_contracts::CommandError;
-use tauri::AppHandle;
+use codez_core::AppError;
+use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
+use crate::{error::command_result, state::AppState};
+
 #[tauri::command]
-pub fn workspace_open_directory(app: AppHandle) -> Result<Option<String>, CommandError> {
+pub fn workspace_open_directory(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, CommandError> {
     let selected = app.dialog().file().blocking_pick_folder();
     let Some(selected) = selected else {
         return Ok(None);
     };
-    let path = selected
-        .into_path()
-        .map_err(|_| CommandError::validation("Selected directory is not a local path"))?;
+    let path = command_result(
+        &state.errors,
+        selected
+            .into_path()
+            .map_err(|_| AppError::validation("Selected directory is not a local path")),
+    )?;
 
     Ok(Some(path.to_string_lossy().into_owned()))
 }

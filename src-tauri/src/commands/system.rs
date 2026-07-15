@@ -1,9 +1,10 @@
 use codez_contracts::{
     CONTRACT_VERSION, CommandError, DesktopEvent, HealthResponse, SystemProbeEvent,
 };
+use codez_core::AppError;
 use tauri::{State, ipc::Channel};
 
-use crate::state::AppState;
+use crate::{error::command_result, state::AppState};
 
 #[tauri::command]
 pub fn system_health(state: State<'_, AppState>) -> Result<HealthResponse, CommandError> {
@@ -18,8 +19,14 @@ pub fn system_health(state: State<'_, AppState>) -> Result<HealthResponse, Comma
 
 #[tauri::command]
 pub fn system_probe_channel(
+    state: State<'_, AppState>,
     events: Channel<DesktopEvent<SystemProbeEvent>>,
 ) -> Result<(), CommandError> {
+    let result = send_system_probe(&events);
+    command_result(&state.errors, result)
+}
+
+fn send_system_probe(events: &Channel<DesktopEvent<SystemProbeEvent>>) -> Result<(), AppError> {
     const LABELS: [&str; 3] = ["commandReady", "channelReady", "completed"];
     for (index, label) in LABELS.into_iter().enumerate() {
         let event = DesktopEvent {
@@ -33,9 +40,13 @@ pub fn system_probe_channel(
                 label: label.to_string(),
             },
         };
-        events
-            .send(event)
-            .map_err(|_| CommandError::internal("System probe channel closed"))?;
+        events.send(event).map_err(|source| {
+            AppError::external(
+                "The desktop event channel closed",
+                format!("system probe channel: {source}"),
+                true,
+            )
+        })?;
     }
     Ok(())
 }
@@ -47,7 +58,7 @@ mod tests {
     use codez_contracts::{DesktopEvent, SystemProbeEvent};
     use tauri::ipc::{Channel, InvokeResponseBody};
 
-    use super::system_probe_channel;
+    use super::send_system_probe;
 
     #[test]
     fn system_probe_sends_three_ordered_channel_events() {
@@ -63,7 +74,7 @@ mod tests {
             Ok(())
         });
 
-        system_probe_channel(channel).expect("probe channel must remain open");
+        send_system_probe(&channel).expect("probe channel must remain open");
         let events = received
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
