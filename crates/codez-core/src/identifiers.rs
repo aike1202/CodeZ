@@ -38,6 +38,8 @@ macro_rules! identifier {
 identifier!(SessionId);
 identifier!(StreamId);
 identifier!(ToolCallId);
+identifier!(AgentRunId);
+identifier!(ProcessId);
 
 #[cfg(test)]
 mod tests {

@@ -617,6 +617,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tokio-util",
  "zeroize",
 ]
 
@@ -669,6 +670,7 @@ dependencies = [
  "tree-sitter",
  "tree-sitter-bash",
  "tree-sitter-powershell",
+ "uuid",
 ]
 
 [[package]]
@@ -4918,6 +4920,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]

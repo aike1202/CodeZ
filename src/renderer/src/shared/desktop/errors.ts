@@ -6,6 +6,7 @@ const ERROR_CODES = new Set<ErrorCode>([
   'NOT_FOUND',
   'CONFLICT',
   'EXTERNAL',
+  'PROCESS_FAILED',
   'CANCELLED',
   'TIMEOUT',
   'STORAGE',

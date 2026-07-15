@@ -164,9 +164,9 @@ src/renderer/src/desktop/
 
 ### 6.3 通用平台 trait
 
-- [ ] 定义 `FileSystem`、`ProcessRunner`、`CredentialStore`、`EventSink`、`Clock`、`IdGenerator` 等可测试边界。
-- [ ] 区分用户取消、超时、进程失败、输入错误、权限拒绝与内部错误。
-- [ ] 使用 `CancellationToken` 建立应用 -> session -> agent -> tool/process 的取消树。
+- [x] 定义 `FileSystem`、`ProcessRunner`、`CredentialStore`、`EventSink`、`Clock`、`IdGenerator` 等可测试边界；`codez-core` 提供不依赖 Tauri 的有界文件、显式进程请求、泛型领域事件、时间和 ID ports，`ProcessRunner` 强制绝对 executable/cwd、完整显式环境、超时、输出上限和取消 token。`codez-storage::CredentialStore` 继续隔离 secret 生命周期，`codez-platform` 已提供 `SystemClock` 与 UUID v4 adapter；Native 文件/进程 adapter 随 Phase 3 的路径和进程监管边界落地，避免提前提供绕过 workspace policy 的通用实现。
+- [x] 区分用户取消、超时、进程失败、输入错误、权限拒绝与内部错误；`AppErrorKind` 和生成的 TypeScript `ErrorCode` 已分别提供 `CANCELLED`、`TIMEOUT`、`PROCESS_FAILED`、`VALIDATION`、`PERMISSION_DENIED`、`INTERNAL`，Tauri adapter 具有穷举映射测试，前端错误归一化只接受声明内错误码。
+- [x] 使用 `CancellationToken` 建立应用 -> session -> agent -> tool/process 的取消树；`codez-runtime::CancellationTree` 以 typed owner scope 单向向下传播，session registry 支持唯一注册、单会话取消和完成释放，admission 与 registry 共锁避免 shutdown 竞态。Tauri composition root 注入唯一树，`StopAccepting` 阶段封闭新 session，`Cancel` 阶段取消应用根；父子隔离、session 隔离、ID 释放和 shutdown 行为已有测试。
 
 **Phase 2 出口：** 迁移可重复执行且不会修改旧数据；故障注入下无半写文件；密钥不降级；应用异常退出后能识别未完成迁移和未完成运行状态。
 

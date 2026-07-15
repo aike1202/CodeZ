@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use codez_core::AppError;
 use codez_runtime::{
-    ShutdownCoordinator, ShutdownFuture, ShutdownHook, ShutdownPhase, ShutdownReport,
+    CancellationTree, ShutdownCoordinator, ShutdownFuture, ShutdownHook, ShutdownPhase,
+    ShutdownReport,
 };
 use tauri::{AppHandle, Manager, RunEvent};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
@@ -12,7 +13,9 @@ use crate::{error::ErrorReporter, state::AppState};
 pub(crate) fn register_shutdown_hooks(
     app_handle: &AppHandle,
     shutdown: &ShutdownCoordinator,
+    cancellation: &Arc<CancellationTree>,
 ) -> Result<(), AppError> {
+    shutdown.register(Arc::clone(cancellation) as Arc<dyn ShutdownHook>)?;
     shutdown.register(Arc::new(GlobalShortcutShutdown {
         app_handle: app_handle.clone(),
     }))

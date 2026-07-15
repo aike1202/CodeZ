@@ -2,7 +2,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use codez_core::{AppPathError, AppPaths};
 use codez_platform::ResourceLocator;
-use codez_runtime::{HostPreferences, ShutdownCoordinator, SystemService};
+use codez_runtime::{CancellationTree, HostPreferences, ShutdownCoordinator, SystemService};
 use codez_storage::{AtomicFileStore, OsCredentialStore};
 use tauri::{App, Manager};
 use thiserror::Error;
@@ -53,6 +53,7 @@ pub(crate) fn compose_app_state(app: &App) -> Result<AppState, CompositionError>
         )),
         storage: Arc::new(AtomicFileStore::default()),
         credentials: Arc::new(OsCredentialStore::default()),
+        cancellation: Arc::new(CancellationTree::new()),
         shutdown: Arc::new(ShutdownCoordinator::default()),
         errors: Arc::new(ErrorReporter::default()),
         _logging: logging,

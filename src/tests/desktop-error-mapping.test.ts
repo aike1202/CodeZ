@@ -31,6 +31,17 @@ describe('desktop error mapping', () => {
     expect(error.code).toBe('PERMISSION_DENIED')
   })
 
+  it('accepts the generated process failure category at runtime', () => {
+    const error = normalizeDesktopError({
+      code: 'PROCESS_FAILED',
+      message: 'The command exited unsuccessfully',
+      retryable: false,
+      correlationId: 'cmd-process-1'
+    })
+
+    expect(error.code).toBe('PROCESS_FAILED')
+  })
+
   it('does not expose messages from unstructured errors', () => {
     const error = normalizeDesktopError(new Error('apiKey=secret-value'))
 

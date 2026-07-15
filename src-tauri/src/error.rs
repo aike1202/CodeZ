@@ -29,7 +29,10 @@ impl ErrorReporter {
         let correlation_id = format!("cmd-{sequence:016x}");
         let diagnostic = diagnostic_for_log(error);
         match error.kind() {
-            AppErrorKind::External | AppErrorKind::Storage | AppErrorKind::Internal => {
+            AppErrorKind::External
+            | AppErrorKind::ProcessFailed
+            | AppErrorKind::Storage
+            | AppErrorKind::Internal => {
                 tracing::error!(
                     correlation_id,
                     error_code = error.kind().as_str(),
@@ -73,6 +76,7 @@ const fn contract_code(kind: AppErrorKind) -> ErrorCode {
         AppErrorKind::NotFound => ErrorCode::NotFound,
         AppErrorKind::Conflict => ErrorCode::Conflict,
         AppErrorKind::External => ErrorCode::External,
+        AppErrorKind::ProcessFailed => ErrorCode::ProcessFailed,
         AppErrorKind::Cancelled => ErrorCode::Cancelled,
         AppErrorKind::Timeout => ErrorCode::Timeout,
         AppErrorKind::Storage => ErrorCode::Storage,
@@ -176,6 +180,7 @@ mod tests {
             (AppErrorKind::NotFound, ErrorCode::NotFound),
             (AppErrorKind::Conflict, ErrorCode::Conflict),
             (AppErrorKind::External, ErrorCode::External),
+            (AppErrorKind::ProcessFailed, ErrorCode::ProcessFailed),
             (AppErrorKind::Cancelled, ErrorCode::Cancelled),
             (AppErrorKind::Timeout, ErrorCode::Timeout),
             (AppErrorKind::Storage, ErrorCode::Storage),

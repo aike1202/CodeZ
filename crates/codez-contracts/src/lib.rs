@@ -15,6 +15,7 @@ pub enum ErrorCode {
     NotFound,
     Conflict,
     External,
+    ProcessFailed,
     Cancelled,
     Timeout,
     Storage,

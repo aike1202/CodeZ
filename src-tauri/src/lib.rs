@@ -98,7 +98,7 @@ pub fn run() -> Result<(), tauri::Error> {
         })
         .setup(|app| {
             let state = composition::compose_app_state(app)?;
-            lifecycle::register_shutdown_hooks(app.handle(), &state.shutdown)?;
+            lifecycle::register_shutdown_hooks(app.handle(), &state.shutdown, &state.cancellation)?;
             tracing::debug!(
                 data_path_ready = state.paths.data_directory().is_absolute(),
                 max_document_bytes = state.storage.max_document_bytes(),

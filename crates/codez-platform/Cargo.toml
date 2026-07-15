@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 codez-core.workspace = true
 thiserror.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 portable-pty = "=0.9.0"

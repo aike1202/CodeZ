@@ -10,6 +10,7 @@ pub enum AppErrorKind {
     NotFound,
     Conflict,
     External,
+    ProcessFailed,
     Cancelled,
     Timeout,
     Storage,
@@ -26,6 +27,7 @@ impl AppErrorKind {
             Self::NotFound => "NOT_FOUND",
             Self::Conflict => "CONFLICT",
             Self::External => "EXTERNAL",
+            Self::ProcessFailed => "PROCESS_FAILED",
             Self::Cancelled => "CANCELLED",
             Self::Timeout => "TIMEOUT",
             Self::Storage => "STORAGE",
@@ -77,6 +79,12 @@ impl AppError {
         retryable: bool,
     ) -> Self {
         Self::with_diagnostic(AppErrorKind::External, message, diagnostic, retryable)
+    }
+
+    /// Creates a non-retryable child process with a non-successful exit status.
+    #[must_use]
+    pub fn process_failed(message: impl Into<String>, diagnostic: impl Into<String>) -> Self {
+        Self::with_diagnostic(AppErrorKind::ProcessFailed, message, diagnostic, false)
     }
 
     /// Creates a user-requested cancellation error.
@@ -197,5 +205,29 @@ mod tests {
     #[test]
     fn error_kinds_keep_stable_wire_spelling() {
         assert_eq!(AppErrorKind::PermissionDenied.as_str(), "PERMISSION_DENIED");
+    }
+
+    #[test]
+    fn operation_failures_keep_distinct_categories() {
+        let failures = [
+            AppError::cancelled("cancelled"),
+            AppError::timeout("timed out"),
+            AppError::process_failed("process failed", "exit code 1"),
+            AppError::validation("invalid input"),
+            AppError::permission_denied("permission denied"),
+            AppError::internal("internal failure"),
+        ];
+
+        assert_eq!(
+            failures.map(|error| error.kind()),
+            [
+                AppErrorKind::Cancelled,
+                AppErrorKind::Timeout,
+                AppErrorKind::ProcessFailed,
+                AppErrorKind::Validation,
+                AppErrorKind::PermissionDenied,
+                AppErrorKind::Internal,
+            ]
+        );
     }
 }
