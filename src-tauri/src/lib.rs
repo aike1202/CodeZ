@@ -2,6 +2,7 @@
 
 mod commands;
 mod error;
+mod lifecycle;
 mod logging;
 mod state;
 
@@ -98,6 +99,7 @@ pub fn run() -> Result<(), tauri::Error> {
         .setup(|app| {
             let resource_directory = app.path().resource_dir()?;
             let state = state::AppState::new(resource_directory);
+            lifecycle::register_shutdown_hooks(app.handle(), &state.shutdown)?;
             if let Err(error) = state.resources.validate_required() {
                 state.errors.log(&AppError::internal(format!(
                     "bundled resource validation: {error}"
@@ -136,11 +138,6 @@ pub fn run() -> Result<(), tauri::Error> {
                 "failed to build the CodeZ Tauri application"
             );
         })?;
-    app.run(|app_handle, event| {
-        if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
-            let state = app_handle.state::<state::AppState>();
-            let _ = state.shutdown.begin_shutdown();
-        }
-    });
+    app.run(lifecycle::handle_run_event);
     Ok(())
 }

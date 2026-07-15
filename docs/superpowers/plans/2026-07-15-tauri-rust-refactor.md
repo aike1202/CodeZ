@@ -140,7 +140,7 @@ src/renderer/src/desktop/
 - [x] 建立统一 Rust 错误枚举、稳定错误码、脱敏日志和前端错误映射；`codez-core::AppError` 将用户消息与诊断分离，desktop `ErrorReporter` 生成 correlation ID 并映射为 `CommandError`，前端拒绝展示非结构化原始异常。
 - [x] 选择并落地 `ts-rs` Rust -> TypeScript 类型生成方案，生成结果由 `npm run contracts:generate` 维护。
 - [x] 建立前端 `desktopApi`，Tauri 迁移代码只通过该 adapter 调用 command。
-- [ ] 实现最小窗口、主题、外链、目录选择、单实例、快捷键和安全退出 smoke。
+- [x] 实现最小窗口、主题、外链、目录选择、单实例、快捷键和安全退出 smoke；`ShutdownCoordinator` 以 `StopAccepting -> Cancel -> ForceCleanup -> Flush` 执行有界分阶段清理，Tauri 首次退出请求会等待唯一 shutdown owner，完成后再放行程序化退出，全局快捷键在 `StopAccepting` 注销；聚焦 Rust 测试、严格 Clippy、前端 typecheck、架构检查和 Tauri debug build 已通过。
 - [x] 建立 Windows/macOS/Linux CI 矩阵；执行依赖方向、fmt、clippy、Rust test、前端 typecheck/test 和 Tauri build check。
 
 **Phase 1 出口：** 干净环境可启动 Tauri React 页面；command、channel、event 和错误传递有自动化测试；capabilities 不授予通用 Shell/文件权限。

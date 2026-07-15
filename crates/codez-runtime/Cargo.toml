@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 codez-core.workspace = true
+tokio.workspace = true
 
 [lints]
 workspace = true
