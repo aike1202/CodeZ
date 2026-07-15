@@ -48,6 +48,32 @@ pub enum SchemaFamily {
 }
 
 impl SchemaFamily {
+    /// Returns the stable serialized identity for this schema family.
+    #[must_use]
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Providers => "providers",
+            Self::Sessions => "sessions",
+            Self::Settings => "settings",
+            Self::RecentProjects => "recent-projects",
+            Self::PermissionRules => "permission-rules",
+            Self::WorkspacePermissions => "workspace-permissions",
+            Self::PermissionAudit => "permission-audit",
+            Self::McpUserConfig => "mcp-user-config",
+            Self::McpProjectTrust => "mcp-project-trust",
+            Self::McpContentMetadata => "mcp-content-metadata",
+            Self::AttachmentMetadata => "attachment-metadata",
+            Self::ContextLedger => "context-ledger",
+            Self::ContextSnapshot => "context-snapshot",
+            Self::EditBackupMetadata => "edit-backup-metadata",
+            Self::ToolJournal => "tool-journal",
+            Self::LargeToolResultMetadata => "large-tool-result-metadata",
+            Self::ParallelExecution => "parallel-execution",
+            Self::SkillsConfig => "skills-config",
+            Self::ProjectAnalysisCache => "project-analysis-cache",
+        }
+    }
+
     /// Returns the current on-disk version for this family.
     #[must_use]
     pub const fn current_version(self) -> u32 {

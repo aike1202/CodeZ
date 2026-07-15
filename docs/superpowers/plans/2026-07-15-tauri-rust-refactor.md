@@ -152,7 +152,7 @@ src/renderer/src/desktop/
 - [x] 实现 `AppPaths`，统一应用数据、缓存、日志、资源、临时和工作区状态路径；路径由 Tauri composition root 解析后以 `codez-core::AppPaths` 注入，core 不读取环境或当前目录，工作区 `.codez`/`.codez-cache` 只从已验证绝对根派生。
 - [x] 实现原子 JSON/JSONL 读写、权限设置、写队列、故障注入和损坏文件隔离；`codez-storage::AtomicFileStore` 使用同目录临时文件、flush/fsync、跨平台原子替换、每资源单写者和 64 MiB 默认上限，JSONL 追加的截断后缀会保留完整 quarantine 并原子恢复有效前缀；Windows 原子替换/故障/隔离测试通过，Unix owner-only `0700/0600` 权限测试由目标平台 CI 执行。
 - [x] 为 session、settings、provider、permission、MCP、context、execution 等定义版本化 schema；`codez-storage` 已提供 19 个稳定 schema family、统一 `schema`/`schemaVersion` envelope、JSON/JSONL 格式映射和 repository family/version 校验。
-- [ ] 实现只读旧数据发现、清单、备份、幂等迁移、验证和完成标记；23 类 catalog 驱动的只读发现、脱敏确定性 manifest、源文件复核、no-clobber 精确备份及三类凭据迁移决策已完成，transform、语义引用验证和原子完成标记仍未实现。
+- [x] 实现只读旧数据发现、清单、备份、幂等迁移、验证和完成标记；23 类 catalog 驱动的只读发现、脱敏确定性 manifest、源文件复核和 no-clobber 精确备份均已完成。transform 为 JSON/JSONL 写入版本头、保留 opaque 数据、剥离 Provider 密文字段并跳过 secret envelope，随后验证 Provider/Session/Settings/Attachment/Ledger/Permission/Execution/MCP 引用和记录数。转换文件、脱敏凭据报告及转换完成报告采用不可变 create-or-reuse 语义；只有重新验证 manifest、backup、目标哈希、凭据报告与 OS 凭据可读性后原子创建的 `migration-commit.json` 才能授权目标仓库，故障后的 staged run 保持非权威且可由 `inspect_phase` 识别安全重试点。
 - [x] 建立真实但脱敏的旧数据 fixtures，覆盖旧版本字段、部分损坏和引用缺失；`legacy-data-v0` 覆盖 Provider/Session/Settings/MCP、部分损坏 JSONL、附件缺失引用、ledger、plan、execution、cache 和 rules，密钥只保留占位 envelope/引用。
 
 ### 6.2 密钥与日志

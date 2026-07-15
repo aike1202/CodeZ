@@ -2,14 +2,18 @@ mod catalog;
 mod credentials;
 mod filesystem;
 mod legacy_safe_storage;
+mod transform;
 
 #[cfg(test)]
 mod credential_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod transform_tests;
 
 use std::{
     error::Error as StdError,
+    fs, io,
     path::{Component, Path, PathBuf},
 };
 
@@ -30,6 +34,7 @@ pub use credentials::{
 pub use legacy_safe_storage::{
     ElectronSafeStorageReader, LegacyCredentialReadError, LegacyCredentialReader,
 };
+pub use transform::{MigrationCommitMarker, TransformReport, TransformedFile};
 
 const MANIFEST_SCHEMA_VERSION: u32 = 1;
 const BACKUP_REPORT_SCHEMA_VERSION: u32 = 1;
@@ -428,9 +433,221 @@ impl LegacyMigrationService {
         let report_path = backup_root
             .join(manifest.run_id.as_str())
             .join("credential-migration.json");
-        self.store.write_json(&report_path, &report).await?;
+        self.store.create_json(&report_path, &report).await?;
         Ok(report)
     }
+
+    /// Transforms a verified backup into one immutable versioned repository run.
+    ///
+    /// Secret envelopes are never copied. Structured JSON and JSONL receive
+    /// explicit schema headers, Provider ciphertext fields are replaced by
+    /// stable credential references, and cross-file references are verified
+    /// before the deterministic report is persisted.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MigrationError`] when the backup prerequisite is invalid,
+    /// source data is structurally blocked, target files conflict, semantic
+    /// references are missing, or the report cannot be persisted atomically.
+    pub async fn transform(
+        &self,
+        roots: &LegacyRoots,
+        manifest: &MigrationManifest,
+        backup_report: &BackupReport,
+        backup_root: &Path,
+        target_root: &Path,
+    ) -> Result<TransformReport, MigrationError> {
+        validate_root("migration backup", backup_root)?;
+        validate_root("migration target", target_root)?;
+        let worker_roots = roots.clone();
+        let worker_manifest = manifest.clone();
+        let worker_backup_report = backup_report.clone();
+        let worker_backup_root = backup_root.to_path_buf();
+        let worker_target_root = target_root.to_path_buf();
+        let report = tokio::task::spawn_blocking(move || {
+            transform::transform_blocking(
+                &worker_roots,
+                &worker_manifest,
+                &worker_backup_report,
+                &worker_backup_root,
+                &worker_target_root,
+            )
+        })
+        .await
+        .map_err(MigrationError::TransformTaskJoin)??;
+
+        let report_path = transform::transform_report_path(target_root, &manifest.run_id);
+        self.store.create_json(&report_path, &report).await?;
+        Ok(report)
+    }
+
+    /// Atomically selects one verified repository after credential validation.
+    ///
+    /// A matching marker is reused on retries. A different existing marker is
+    /// never replaced, so only one migration run can become authoritative.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MigrationError`] when transformed bytes or report fingerprints
+    /// changed, credential decisions are incomplete, a required OS credential
+    /// is unavailable, or the no-clobber marker cannot be created atomically.
+    pub async fn commit<S>(
+        &self,
+        manifest: &MigrationManifest,
+        backup_report: &BackupReport,
+        transform_report: &TransformReport,
+        credential_report: &CredentialMigrationReport,
+        target_root: &Path,
+        credential_store: std::sync::Arc<S>,
+    ) -> Result<MigrationCommitMarker, MigrationError>
+    where
+        S: crate::CredentialStore + 'static,
+    {
+        validate_root("migration target", target_root)?;
+        let worker_manifest = manifest.clone();
+        let worker_backup_report = backup_report.clone();
+        let worker_transform_report = transform_report.clone();
+        let worker_credential_report = credential_report.clone();
+        let worker_target_root = target_root.to_path_buf();
+        let marker = tokio::task::spawn_blocking(move || {
+            transform::prepare_commit_blocking(
+                &worker_manifest,
+                &worker_backup_report,
+                &worker_transform_report,
+                &worker_credential_report,
+                &worker_target_root,
+                credential_store.as_ref(),
+            )
+        })
+        .await
+        .map_err(MigrationError::CommitTaskJoin)??;
+
+        let marker_path = transform::commit_marker_path(target_root);
+        self.store.create_json(&marker_path, &marker).await?;
+        Ok(marker)
+    }
+
+    /// Loads the only marker that can authorize a migrated repository.
+    ///
+    /// Absence means all staged runs remain non-authoritative. A corrupt or
+    /// internally inconsistent marker fails closed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MigrationError`] for invalid target roots, storage failures,
+    /// or a marker whose schema, path, phase, or fingerprint is inconsistent.
+    pub async fn committed_migration(
+        &self,
+        target_root: &Path,
+    ) -> Result<Option<MigrationCommitMarker>, MigrationError> {
+        validate_root("migration target", target_root)?;
+        let marker_path = transform::commit_marker_path(target_root);
+        let Some(marker) = self.store.read_json(&marker_path).await? else {
+            return Ok(None);
+        };
+        transform::validate_commit_marker(&marker)?;
+        let report_path = transform::transform_report_path(target_root, &marker.run_id);
+        let report = self
+            .store
+            .read_json(&report_path)
+            .await?
+            .ok_or(MigrationError::CompletionMarkerMismatch)?;
+        transform::validate_marker_report(&marker, &report)?;
+        Ok(Some(marker))
+    }
+
+    /// Inspects durable evidence for one migration run after restart.
+    ///
+    /// A committed marker has priority. Without it, verified transform and
+    /// credential reports, backup completion, or a partial immutable run
+    /// directory identify the furthest safe retry point.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MigrationError`] when roots are invalid, durable reports are
+    /// corrupt or inconsistent, a run path is unsafe, or inspection fails.
+    pub async fn inspect_phase(
+        &self,
+        backup_root: &Path,
+        target_root: &Path,
+        run_id: &MigrationRunId,
+    ) -> Result<MigrationPhase, MigrationError> {
+        validate_root("migration backup", backup_root)?;
+        validate_root("migration target", target_root)?;
+        if self
+            .committed_migration(target_root)
+            .await?
+            .is_some_and(|marker| marker.run_id == *run_id)
+        {
+            return Ok(MigrationPhase::Committed);
+        }
+
+        let transform_path = transform::transform_report_path(target_root, run_id);
+        let transform_report: Option<TransformReport> =
+            self.store.read_json(&transform_path).await?;
+        if let Some(transform_report) = transform_report {
+            transform::validate_transform_report(&transform_report)?;
+            let credential_path = backup_root
+                .join(run_id.as_str())
+                .join("credential-migration.json");
+            let credential_report: Option<CredentialMigrationReport> =
+                self.store.read_json(&credential_path).await?;
+            if let Some(credential_report) = credential_report {
+                transform::validate_credential_report_metadata(
+                    &transform_report,
+                    &credential_report,
+                )?;
+                return Ok(credential_report.phase);
+            }
+            return Ok(MigrationPhase::Verified);
+        }
+
+        let repository_path = target_root
+            .join("migration-repositories")
+            .join(run_id.as_str())
+            .join("repository");
+        if directory_exists(repository_path).await? {
+            return Ok(MigrationPhase::Transforming);
+        }
+
+        let backup_run = backup_root.join(run_id.as_str());
+        let manifest_path = backup_run.join("migration-manifest.json");
+        let backup_report_path = backup_run.join("backup-complete.json");
+        let manifest: Option<MigrationManifest> = self.store.read_json(&manifest_path).await?;
+        let backup_report: Option<BackupReport> = self.store.read_json(&backup_report_path).await?;
+        match (manifest, backup_report) {
+            (Some(manifest), Some(backup_report)) => {
+                transform::validate_backup_prerequisite(&manifest, &backup_report)?;
+                Ok(MigrationPhase::BackedUp)
+            }
+            (Some(_), None) => Ok(MigrationPhase::Discovered),
+            (None, Some(_)) => Err(MigrationError::TransformBackupMismatch),
+            (None, None) if directory_exists(backup_run).await? => Ok(MigrationPhase::Discovered),
+            (None, None) => Ok(MigrationPhase::NotStarted),
+        }
+    }
+}
+
+async fn directory_exists(path: PathBuf) -> Result<bool, MigrationError> {
+    let error_path = path.clone();
+    tokio::task::spawn_blocking(move || match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            Err(MigrationError::SymbolicLink(path))
+        }
+        Ok(metadata) if metadata.is_dir() => Ok(true),
+        Ok(_) => Err(MigrationError::UnsupportedFileType(path)),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(MigrationError::Io {
+            operation: "inspect migration run directory",
+            path,
+            source,
+        }),
+    })
+    .await
+    .map_err(|source| MigrationError::StatusTaskJoin {
+        path: error_path,
+        source,
+    })?
 }
 
 /// Failures that preserve legacy source data and prevent migration commit.
@@ -481,9 +698,79 @@ pub enum MigrationError {
     /// An existing no-clobber backup has different bytes.
     #[error("existing migration backup conflicts with the manifest: {0}")]
     BackupConflict(PathBuf),
+    /// An immutable transformed target already contains different bytes.
+    #[error("existing transformed target conflicts with this migration: {0}")]
+    TransformConflict(PathBuf),
     /// A backup directory overlaps a source root.
     #[error("migration backup root overlaps legacy source root: {0}")]
     OverlappingBackupRoot(PathBuf),
+    /// A transformed repository could overwrite a source or verified backup.
+    #[error("migration target overlaps protected legacy or backup data: {0}")]
+    OverlappingTargetRoot(PathBuf),
+    /// The backup completion record does not authorize transformation.
+    #[error("data transformation requires a matching completed backup")]
+    TransformBackupMismatch,
+    /// A malformed or partial structured entry cannot be transformed safely.
+    #[error("legacy {data_set:?} data blocks transformation: {relative_path}")]
+    TransformationBlocked {
+        data_set: LegacyDataSet,
+        relative_path: PathBuf,
+    },
+    /// A catalog format and its target schema format are inconsistent.
+    #[error("legacy {data_set:?} format does not match its schema: {relative_path}")]
+    SchemaFormatMismatch {
+        data_set: LegacyDataSet,
+        relative_path: PathBuf,
+    },
+    /// Structured data cannot satisfy the target repository contract.
+    #[error("legacy {data_set:?} data cannot form a valid target: {relative_path}")]
+    InvalidTransformedDocument {
+        data_set: LegacyDataSet,
+        relative_path: PathBuf,
+    },
+    /// Existing schema headers conflict with the current target version.
+    #[error("legacy {data_set:?} schema is unsupported: {relative_path}")]
+    UnsupportedLegacySchema {
+        data_set: LegacyDataSet,
+        relative_path: PathBuf,
+    },
+    /// A Provider ciphertext field reached the transformed repository.
+    #[error("transformed {data_set:?} still contains a legacy secret field: {relative_path}")]
+    SecretFieldPersisted {
+        data_set: LegacyDataSet,
+        relative_path: PathBuf,
+    },
+    /// A transformed JSON value or migration proof could not be serialized.
+    #[error("migration transformation could not serialize a versioned value")]
+    TransformSerialization(#[source] serde_json::Error),
+    /// The transform report no longer matches its immutable repository.
+    #[error("migration transform report does not match its repository")]
+    TransformReportMismatch,
+    /// A required cross-file identifier was not found.
+    #[error("migration reference is missing for {relation}: {value}")]
+    MissingReference {
+        relation: &'static str,
+        value: String,
+    },
+    /// A domain identifier appears more than once in a target repository.
+    #[error("migration target contains duplicate {kind} identifier: {value}")]
+    DuplicateIdentifier { kind: &'static str, value: String },
+    /// An MCP secret expression cannot map to a safe credential identity.
+    #[error("migration target contains an invalid MCP secret reference")]
+    InvalidSecretReference,
+    /// Credential decisions are incomplete or belong to another run.
+    #[error("migration credential report cannot authorize commit")]
+    CredentialReportMismatch,
+    /// A credential marked as migrated is no longer readable from secure storage.
+    #[error("required migrated credential is unavailable: {id:?}")]
+    CredentialUnavailable {
+        id: crate::CredentialId,
+        #[source]
+        source: crate::CredentialError,
+    },
+    /// The authority marker is not internally consistent.
+    #[error("migration completion marker is invalid")]
+    CompletionMarkerMismatch,
     /// A filesystem operation failed.
     #[error("migration I/O failed while attempting to {operation}: {path}")]
     Io {
@@ -507,6 +794,19 @@ pub enum MigrationError {
     /// The credential migration worker could not be joined.
     #[error("legacy credential migration worker failed")]
     CredentialTaskJoin(#[source] tokio::task::JoinError),
+    /// The data transformation worker could not be joined.
+    #[error("legacy data transformation worker failed")]
+    TransformTaskJoin(#[source] tokio::task::JoinError),
+    /// The commit verification worker could not be joined.
+    #[error("legacy migration commit worker failed")]
+    CommitTaskJoin(#[source] tokio::task::JoinError),
+    /// Durable migration phase inspection could not be joined.
+    #[error("legacy migration status inspection failed for {path}")]
+    StatusTaskJoin {
+        path: PathBuf,
+        #[source]
+        source: tokio::task::JoinError,
+    },
     /// Atomic report persistence failed.
     #[error(transparent)]
     Storage(#[from] StorageError),

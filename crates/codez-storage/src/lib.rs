@@ -8,8 +8,8 @@ mod migration;
 mod schema;
 
 pub use atomic_file::{
-    AtomicFileStore, AtomicWriteFaultInjector, AtomicWriteStage, InjectedWriteFault, JsonLinesRead,
-    StorageError,
+    AtomicCreateOutcome, AtomicFileStore, AtomicWriteFaultInjector, AtomicWriteStage,
+    InjectedWriteFault, JsonLinesRead, StorageError,
 };
 pub use credentials::{
     CODEZ_CREDENTIAL_SERVICE, CredentialError, CredentialId, CredentialKind, CredentialStore,
@@ -20,8 +20,8 @@ pub use migration::{
     CredentialMigrationStatus, DataSensitivity, DiscoveryLimits, DiscoveryRule,
     ElectronSafeStorageReader, LEGACY_DATA_CATALOG, LegacyCredentialReadError,
     LegacyCredentialReader, LegacyDataSet, LegacyDataSpec, LegacyFormat, LegacyMigrationService,
-    LegacyRoots, LegacyValidation, ManifestScope, MigrationError, MigrationManifest,
-    MigrationManifestEntry, MigrationPhase, MigrationRunId, RootScope, SchemaSelector,
-    TreeSelector,
+    LegacyRoots, LegacyValidation, ManifestScope, MigrationCommitMarker, MigrationError,
+    MigrationManifest, MigrationManifestEntry, MigrationPhase, MigrationRunId, RootScope,
+    SchemaSelector, TransformReport, TransformedFile, TreeSelector,
 };
 pub use schema::{SchemaError, SchemaFamily, SchemaFormat, VersionedDocument, VersionedRecord};

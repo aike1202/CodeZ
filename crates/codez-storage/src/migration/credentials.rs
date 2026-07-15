@@ -11,7 +11,7 @@ use super::{
 };
 use crate::{CredentialId, CredentialKind, CredentialStore, SecretValue};
 
-const CREDENTIAL_REPORT_SCHEMA_VERSION: u32 = 1;
+pub(super) const CREDENTIAL_REPORT_SCHEMA_VERSION: u32 = 1;
 
 /// Outcome of migrating one credential identity or one whole encrypted source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

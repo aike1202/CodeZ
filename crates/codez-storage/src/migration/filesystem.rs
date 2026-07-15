@@ -100,6 +100,15 @@ pub(super) fn read_verified_backup(
         });
     }
 
+    read_verified_backup_entry(manifest, backup_root, entry).map(Some)
+}
+
+pub(super) fn read_verified_backup_entry(
+    manifest: &MigrationManifest,
+    backup_root: &Path,
+    entry: &MigrationManifestEntry,
+) -> Result<Vec<u8>, MigrationError> {
+    verify_manifest_fingerprint(manifest)?;
     validate_relative_path(&entry.relative_path)?;
     let run_directory = backup_root.join(manifest.run_id.as_str());
     let metadata = reject_symlink(&run_directory)?;
@@ -114,7 +123,93 @@ pub(super) fn read_verified_backup(
     if byte_length != entry.byte_length || sha256_bytes(&bytes) != entry.sha256 {
         return Err(MigrationError::BackupConflict(backup_path));
     }
-    Ok(Some(bytes))
+    Ok(bytes)
+}
+
+pub(super) fn write_immutable_target(path: &Path, bytes: &[u8]) -> Result<(), MigrationError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() {
+                return Err(MigrationError::SymbolicLink(path.to_path_buf()));
+            }
+            if !metadata.is_file() {
+                return Err(MigrationError::UnsupportedFileType(path.to_path_buf()));
+            }
+            if metadata.len() != u64::try_from(bytes.len()).unwrap_or(u64::MAX) {
+                return Err(MigrationError::TransformConflict(path.to_path_buf()));
+            }
+            let existing = fs::read(path)
+                .map_err(|source| io_error("read transformed target", path, source))?;
+            if existing == bytes {
+                return Ok(());
+            }
+            return Err(MigrationError::TransformConflict(path.to_path_buf()));
+        }
+        Err(source) if source.kind() == io::ErrorKind::NotFound => {}
+        Err(source) => return Err(io_error("inspect transformed target", path, source)),
+    }
+
+    let parent = path
+        .parent()
+        .filter(|value| !value.as_os_str().is_empty())
+        .ok_or_else(|| MigrationError::UnsafeRelativePath(path.to_path_buf()))?;
+    create_secure_directory(parent)?;
+    let mut temporary = Builder::new()
+        .prefix(".codez-transform-")
+        .suffix(".tmp")
+        .tempfile_in(parent)
+        .map_err(|source| io_error("create transformed temporary file", path, source))?;
+    set_secure_file_permissions(temporary.as_file(), path)?;
+    temporary
+        .write_all(bytes)
+        .map_err(|source| io_error("write transformed temporary file", path, source))?;
+    temporary
+        .flush()
+        .map_err(|source| io_error("flush transformed temporary file", path, source))?;
+    temporary
+        .as_file()
+        .sync_all()
+        .map_err(|source| io_error("sync transformed temporary file", path, source))?;
+    match temporary.persist_noclobber(path) {
+        Ok(persisted) => {
+            persisted
+                .sync_all()
+                .map_err(|source| io_error("sync transformed target", path, source))?;
+            sync_parent_directory(parent, path)
+        }
+        Err(error) if error.error.kind() == io::ErrorKind::AlreadyExists => {
+            let metadata = inspect_regular_file(path)?;
+            if metadata.len() != u64::try_from(bytes.len()).unwrap_or(u64::MAX) {
+                return Err(MigrationError::TransformConflict(path.to_path_buf()));
+            }
+            let existing = fs::read(path)
+                .map_err(|source| io_error("read raced transformed target", path, source))?;
+            if existing == bytes {
+                Ok(())
+            } else {
+                Err(MigrationError::TransformConflict(path.to_path_buf()))
+            }
+        }
+        Err(error) => Err(io_error(
+            "persist transformed target without clobbering",
+            path,
+            error.error,
+        )),
+    }
+}
+
+pub(super) fn read_verified_target(
+    path: &Path,
+    expected_bytes: u64,
+    expected_sha256: &str,
+) -> Result<Vec<u8>, MigrationError> {
+    let bytes = read_bounded(path, expected_bytes)?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) != expected_bytes
+        || sha256_bytes(&bytes) != expected_sha256
+    {
+        return Err(MigrationError::TransformConflict(path.to_path_buf()));
+    }
+    Ok(bytes)
 }
 
 struct DiscoveryAccumulator {
@@ -784,7 +879,9 @@ fn manifest_fingerprint(
     Ok(sha256_bytes(&bytes))
 }
 
-fn verify_manifest_fingerprint(manifest: &MigrationManifest) -> Result<(), MigrationError> {
+pub(super) fn verify_manifest_fingerprint(
+    manifest: &MigrationManifest,
+) -> Result<(), MigrationError> {
     let actual = manifest_fingerprint(
         &manifest.entries,
         &manifest.absent_data_sets,
@@ -820,7 +917,7 @@ fn ensure_backup_is_disjoint(
     }
 }
 
-fn sha256_bytes(bytes: &[u8]) -> String {
+pub(super) fn sha256_bytes(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     encode_digest(hasher.finalize().as_slice())

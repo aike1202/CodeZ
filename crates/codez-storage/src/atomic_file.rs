@@ -27,6 +27,15 @@ pub enum AtomicWriteStage {
     BeforeCommit,
 }
 
+/// Outcome of atomically creating an immutable JSON document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AtomicCreateOutcome {
+    /// No target existed and the new document was committed.
+    Created,
+    /// An existing regular file contained the same serialized bytes.
+    Reused,
+}
+
 /// Deterministic failure used to verify crash-safe storage behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error("storage fault injected at {stage:?}")]
@@ -83,6 +92,9 @@ pub enum StorageError {
     /// A target is a symlink or another unsupported filesystem object.
     #[error("storage target is not a regular file: {0}")]
     UnsafeFileType(PathBuf),
+    /// An immutable target already exists with different bytes.
+    #[error("immutable storage target already contains different data: {0}")]
+    ImmutableConflict(PathBuf),
     /// A path cannot identify a file within a parent directory.
     #[error("storage target does not have a usable parent and file name: {0}")]
     InvalidPath(PathBuf),
@@ -163,6 +175,7 @@ impl From<StorageError> for AppError {
             StorageError::DocumentTooLarge { .. } => "A local data file is too large",
             StorageError::InvalidDocumentLimit
             | StorageError::UnsafeFileType(_)
+            | StorageError::ImmutableConflict(_)
             | StorageError::InvalidPath(_)
             | StorageError::Io { .. }
             | StorageError::Serialize { .. }
@@ -274,6 +287,30 @@ impl AtomicFileStore {
             source,
         })?;
         self.replace_bytes(path, bytes).await
+    }
+
+    /// Creates one immutable JSON document without replacing an existing value.
+    ///
+    /// Existing identical bytes are reused, making retries idempotent. A
+    /// different existing document returns [`StorageError::ImmutableConflict`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] when serialization, size validation, secure
+    /// temporary persistence, or no-clobber comparison fails.
+    pub async fn create_json<T>(
+        &self,
+        path: &Path,
+        value: &T,
+    ) -> Result<AtomicCreateOutcome, StorageError>
+    where
+        T: Serialize + ?Sized,
+    {
+        let bytes = serde_json::to_vec_pretty(value).map_err(|source| StorageError::Serialize {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        self.create_bytes(path, bytes).await
     }
 
     /// Reads JSONL records and repairs a malformed suffix from the valid prefix.
@@ -407,6 +444,27 @@ impl AtomicFileStore {
         let fault_injector = Arc::clone(&self.fault_injector);
         tokio::task::spawn_blocking(move || {
             atomic_replace_bytes_blocking(&task_path, &bytes, fault_injector.as_ref())
+        })
+        .await
+        .map_err(|source| StorageError::TaskJoin {
+            path: error_path,
+            source,
+        })?
+    }
+
+    async fn create_bytes(
+        &self,
+        path: &Path,
+        bytes: Vec<u8>,
+    ) -> Result<AtomicCreateOutcome, StorageError> {
+        ensure_size(path, bytes.len(), self.max_document_bytes)?;
+        let resource_lock = self.resource_lock(path);
+        let _guard = resource_lock.lock().await;
+        let task_path = path.to_path_buf();
+        let error_path = task_path.clone();
+        let fault_injector = Arc::clone(&self.fault_injector);
+        tokio::task::spawn_blocking(move || {
+            atomic_create_bytes_blocking(&task_path, &bytes, fault_injector.as_ref())
         })
         .await
         .map_err(|source| StorageError::TaskJoin {
@@ -568,6 +626,90 @@ fn atomic_replace_bytes_blocking(
         .sync_all()
         .map_err(|source| io_error("sync replaced target", path, source))?;
     sync_parent_directory(parent, path)
+}
+
+fn atomic_create_bytes_blocking(
+    path: &Path,
+    bytes: &[u8],
+    fault_injector: &dyn AtomicWriteFaultInjector,
+) -> Result<AtomicCreateOutcome, StorageError> {
+    let parent = storage_parent(path)?;
+    create_secure_directory(parent)?;
+    if let Some(outcome) = immutable_existing_outcome(path, bytes)? {
+        return Ok(outcome);
+    }
+    check_fault(fault_injector, AtomicWriteStage::BeforeTemporaryFile, path)?;
+
+    let prefix = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map_or(".codez-storage-", |name| name);
+    let mut temporary = Builder::new()
+        .prefix(prefix)
+        .suffix(".tmp")
+        .tempfile_in(parent)
+        .map_err(|source| io_error("create immutable temporary file", path, source))?;
+    set_secure_file_permissions(temporary.as_file(), path)?;
+    temporary
+        .write_all(bytes)
+        .map_err(|source| io_error("write immutable temporary file", path, source))?;
+    temporary
+        .flush()
+        .map_err(|source| io_error("flush immutable temporary file", path, source))?;
+    temporary
+        .as_file()
+        .sync_all()
+        .map_err(|source| io_error("sync immutable temporary file", path, source))?;
+    check_fault(fault_injector, AtomicWriteStage::BeforeCommit, path)?;
+
+    match temporary.persist_noclobber(path) {
+        Ok(persisted) => {
+            persisted
+                .sync_all()
+                .map_err(|source| io_error("sync immutable target", path, source))?;
+            sync_parent_directory(parent, path)?;
+            Ok(AtomicCreateOutcome::Created)
+        }
+        Err(error) if error.error.kind() == io::ErrorKind::AlreadyExists => {
+            immutable_existing_outcome(path, bytes)?.ok_or_else(|| StorageError::Io {
+                operation: "inspect raced immutable target",
+                path: path.to_path_buf(),
+                source: io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "immutable target disappeared after creation conflict",
+                ),
+            })
+        }
+        Err(error) => Err(io_error(
+            "persist immutable target without clobbering",
+            path,
+            error.error,
+        )),
+    }
+}
+
+fn immutable_existing_outcome(
+    path: &Path,
+    expected: &[u8],
+) -> Result<Option<AtomicCreateOutcome>, StorageError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(io_error("inspect immutable target", path, source)),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(StorageError::UnsafeFileType(path.to_path_buf()));
+    }
+    if metadata.len() != u64::try_from(expected.len()).unwrap_or(u64::MAX) {
+        return Err(StorageError::ImmutableConflict(path.to_path_buf()));
+    }
+    let existing =
+        fs::read(path).map_err(|source| io_error("read immutable target", path, source))?;
+    if existing == expected {
+        Ok(Some(AtomicCreateOutcome::Reused))
+    } else {
+        Err(StorageError::ImmutableConflict(path.to_path_buf()))
+    }
 }
 
 fn append_bytes_blocking(
@@ -813,8 +955,8 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     use super::{
-        AtomicFileStore, AtomicWriteFaultInjector, AtomicWriteStage, InjectedWriteFault,
-        StorageError,
+        AtomicCreateOutcome, AtomicFileStore, AtomicWriteFaultInjector, AtomicWriteStage,
+        InjectedWriteFault, StorageError,
     };
 
     #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -885,6 +1027,40 @@ mod tests {
             matches!(error, StorageError::Injected { .. })
                 && persisted == Some(FixtureRecord { value: 1 })
         );
+    }
+
+    #[tokio::test]
+    async fn immutable_json_creation_reuses_identical_bytes_and_rejects_different_data() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let path = directory.path().join("migration-commit.json");
+        let store = AtomicFileStore::default();
+
+        let created = store
+            .create_json(&path, &FixtureRecord { value: 1 })
+            .await
+            .expect("first immutable create must succeed");
+        let reused = store
+            .create_json(&path, &FixtureRecord { value: 1 })
+            .await
+            .expect("identical immutable create must be reused");
+        let conflict = store
+            .create_json(&path, &FixtureRecord { value: 2 })
+            .await
+            .expect_err("different immutable data must never replace the target");
+        let persisted = store
+            .read_json::<FixtureRecord>(&path)
+            .await
+            .expect("immutable JSON must remain readable");
+
+        assert_eq!(
+            (created, reused, persisted),
+            (
+                AtomicCreateOutcome::Created,
+                AtomicCreateOutcome::Reused,
+                Some(FixtureRecord { value: 1 })
+            )
+        );
+        assert!(matches!(conflict, StorageError::ImmutableConflict(_)));
     }
 
     #[tokio::test]
