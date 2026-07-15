@@ -17,7 +17,8 @@ export class SpawnAgentTool extends InterceptedAgentTool {
     const types = SubAgentManager.listEnabledDefinitions().map((definition) => definition.type).join(', ')
     return [
       'Start a SubAgent asynchronously and return its agent ID and path immediately.',
-      'Use wait_agent before finishing when the delegated result is required.',
+      'If its result is required, use wait_agent only while agent_runtime_state still lists it as queued/running.',
+      'FINAL_ANSWER or a terminal runtime status means it is finished; never wait for it again.',
       `Available types: ${types || '(none)'}.`
     ].join(' ')
   }

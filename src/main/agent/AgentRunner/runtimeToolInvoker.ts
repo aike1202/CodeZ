@@ -31,6 +31,7 @@ function collaborationEnvironment(
     callbacks: { ...input.callbacks, onToolEnd: undefined },
     parentSignal: input.parentSignal,
     parentContextScopeId: context.contextScopeId,
+    parentToolCallId: context.toolCallId,
     parentTransaction: input.parentTransaction
   }
 }

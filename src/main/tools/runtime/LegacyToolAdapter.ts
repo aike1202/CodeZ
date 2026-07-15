@@ -25,14 +25,14 @@ const APPROVAL_NOT_APPLICABLE = new Set([
 ])
 const CORE = new Set(['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash', 'PowerShell'])
 const ALWAYS = new Set([
-  'AskUserQuestion', 'ToolSearch', 'spawn_agent', 'wait_agent'
+  'AskUserQuestion', 'ToolSearch', 'spawn_agent'
 ])
 const DEFERRED = new Set([
   'NotebookEdit', 'PushNotification', 'WebSearch', 'WebFetch',
   'rollback_last_edit', 'SubAgentRunner', 'DelegateTasks',
   'ExecutionControl', 'ExecutionInspect',
   'ListMcpResourcesTool', 'ReadMcpResourceTool', 'GetMcpPrompt', 'McpAuth',
-  'followup_task', 'send_message', 'list_agents', 'interrupt_agent'
+  'followup_task', 'send_message', 'wait_agent', 'list_agents', 'interrupt_agent'
 ])
 const EXCLUSIVE = new Set(['AskUserQuestion'])
 const TASK_TOOLS = new Set(['TaskCreate', 'TaskGet', 'TaskList', 'TaskUpdate'])

@@ -21,6 +21,7 @@ export interface AgentLaunchEnvironment {
   callbacks: AgentRunnerCallbacks
   parentSignal?: AbortSignal
   parentContextScopeId?: ContextScopeId
+  parentToolCallId?: string
   parentTransaction?: { id: string; service: EditTransactionService }
 }
 
@@ -38,6 +39,11 @@ export interface SpawnAgentInput {
 
 interface RunInput extends SpawnAgentInput {
   continuationMode?: 'followup'
+}
+
+export interface AgentWaitResult {
+  messages: AgentMailboxMessage[]
+  outcome: 'updated' | 'no_active_agents' | 'timeout'
 }
 
 const ROOT_AGENT_PATH = '/root'
@@ -95,8 +101,29 @@ export class AgentCollaborationRuntime {
   }
 
   async restoreSession(sessionId: string, snapshot?: AgentRuntimeSnapshot): Promise<void> {
+    const interruptedOnRestore = (snapshot?.agents || [])
+      .filter((agent) => agent.status === 'queued' || agent.status === 'running')
+      .map((agent) => agent.id)
     this.mailbox.restoreSession(sessionId, snapshot?.messages || [])
     await this.registry.restoreSession(sessionId, snapshot?.agents || [])
+    for (const agentId of interruptedOnRestore) {
+      const record = this.registry.get(agentId)
+      if (!record?.result) continue
+      const alreadyReported = this.mailbox.list(sessionId).some((message) =>
+        message.type === 'FINAL_ANSWER' &&
+        message.author === record.path &&
+        message.recipient === record.parentPath &&
+        message.createdAt >= (record.startedAt || record.createdAt)
+      )
+      if (alreadyReported) continue
+      await this.mailbox.post({
+        sessionId,
+        type: 'FINAL_ANSWER',
+        author: record.path,
+        recipient: record.parentPath,
+        payload: record.result.report
+      })
+    }
   }
 
   async spawn(input: SpawnAgentInput, environment: AgentLaunchEnvironment): Promise<AgentRecord> {
@@ -214,9 +241,33 @@ export class AgentCollaborationRuntime {
     recipient: string,
     timeoutMs: number,
     targets?: readonly string[]
-  ): Promise<AgentMailboxMessage[]> {
-    const authors = targets?.map((target) => this.requireAgent(sessionId, target).path)
-    return this.mailbox.waitForUnread(sessionId, recipient, timeoutMs, authors)
+  ): Promise<AgentWaitResult> {
+    const requestedTargets = targets?.filter((target) => target.trim())
+    const targetRecords = requestedTargets?.length
+      ? requestedTargets.map((target) => this.requireAgent(sessionId, target))
+      : undefined
+    const authors = targetRecords?.map((record) => record.path)
+    const unread = this.mailbox.peekUnread(sessionId, recipient, authors)
+    if (unread.length > 0) return { messages: unread, outcome: 'updated' }
+
+    const active = targetRecords || this.registry.listByStatus(sessionId, ['queued', 'running'])
+    if (!active.some((record) => record.status === 'queued' || record.status === 'running')) {
+      return { messages: [], outcome: 'no_active_agents' }
+    }
+
+    const messages = await this.mailbox.waitForUnread(sessionId, recipient, timeoutMs, authors)
+    if (messages.length > 0) return { messages, outcome: 'updated' }
+
+    const stillActive = targetRecords
+      ? targetRecords.some((record) => {
+          const latest = this.registry.get(record.id)
+          return latest?.status === 'queued' || latest?.status === 'running'
+        })
+      : this.registry.listByStatus(sessionId, ['queued', 'running']).length > 0
+    return {
+      messages: [],
+      outcome: stillActive ? 'timeout' : 'no_active_agents'
+    }
   }
 
   async consumeForAgent(sessionId: string, recipient: string): Promise<string[]> {
@@ -274,7 +325,7 @@ export class AgentCollaborationRuntime {
         expectations: input.expectations,
         context: input.context,
         scope: input.scope,
-        parentToolCallId: agentId
+        parentToolCallId: environment.parentToolCallId || agentId
       })
       const definition = SubAgentManager.getDefinition(record.type)!
       const result = await SubAgentManager.spawn(record.type, {

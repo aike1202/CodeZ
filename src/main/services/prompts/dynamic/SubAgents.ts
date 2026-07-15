@@ -48,7 +48,7 @@ export const SubAgentsModule: PromptModule = {
       lines.push('Skip this gate when no behavioral project files changed, such as pure question answering or read-only investigation.')
     }
     lines.push('For background delegation, spawn_agent returns immediately with an agent ID and path. Use list_agents to inspect status, send_message for additional context, and followup_task only after that Agent is idle.')
-    lines.push('When a delegated result is required for your answer or next action, call wait_agent and consume its FINAL_ANSWER before finalizing. Do not treat a successful spawn_agent response as completion of the delegated task.')
+    lines.push('Treat <agent_runtime_state> as authoritative. Call wait_agent only for IDs currently listed there as queued/running, then consume FINAL_ANSWER before finalizing. Never wait for a terminal or absent Agent, and do not treat a successful spawn_agent response as completion.')
     lines.push('For interrupted or failed runs, use the returned handoff and resume_subagent_id when continuity is useful. Do not repeat confirmed completed work.')
     lines.push('</subagent_guidance>')
     return lines.join('\n')

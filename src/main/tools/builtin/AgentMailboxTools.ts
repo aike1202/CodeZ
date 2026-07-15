@@ -76,7 +76,7 @@ export class WaitAgentTool extends Tool {
   get name() { return 'wait_agent' }
   get summary() { return 'Wait for one or more Agent mailbox updates.' }
   get description() {
-    return 'Wait until a selected SubAgent sends MESSAGE or FINAL_ANSWER. The mailbox payload is injected into your next model turn.'
+    return 'Wait until a queued or running SubAgent sends MESSAGE or FINAL_ANSWER. Call this only while at least one selected Agent is queued/running. Do not call after receiving FINAL_ANSWER or when list_agents shows no active Agent. If no target is active, this returns immediately. The mailbox payload is injected into your next model turn.'
   }
   get parameters_schema() {
     return {
@@ -95,12 +95,13 @@ export class WaitAgentTool extends Tool {
       const runtime = getAgentCollaborationRuntime()
       const recipient = runtime.pathForContext(sessionId, context.contextScopeId)
       const timeout = Math.max(0, Math.min(60000, Number(parsed.timeout_ms ?? 30000)))
-      const messages = await runtime.waitForUpdate(sessionId, recipient, timeout, parsed.targets)
+      const result = await runtime.waitForUpdate(sessionId, recipient, timeout, parsed.targets)
       return JSON.stringify({
         ok: true,
         data: {
-          updated: messages.length > 0,
-          messages: messages.map((message) => ({
+          updated: result.messages.length > 0,
+          outcome: result.outcome,
+          messages: result.messages.map((message) => ({
             message_id: message.id,
             type: message.type,
             author: message.author

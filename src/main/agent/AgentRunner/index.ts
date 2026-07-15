@@ -177,6 +177,7 @@ export class AgentRunner {
     const runtimeTurn = config.runtimeTurn
     const runtimeCoordinator = config.runtimeCoordinator
     const sessionId = runtimeTurn?.sessionId || config.sessionId || `session_${Date.now()}`
+    const collaborationRuntime = getAgentCollaborationRuntime()
     const flushPendingSteers = async (): Promise<number> => {
       const pending = this.pendingSteers.splice(0)
       for (const input of pending) {
@@ -186,7 +187,7 @@ export class AgentRunner {
       return pending.length
     }
     const flushAgentMailbox = async (): Promise<number> => {
-      const messages = await getAgentCollaborationRuntime().consumeForAgent(sessionId, '/root')
+      const messages = await collaborationRuntime.consumeForAgent(sessionId, '/root')
       for (const message of messages) {
         await runtimeCoordinator!.recordUserContinuation(runtimeTurn!, message)
       }
@@ -329,11 +330,37 @@ export class AgentRunner {
           .map((descriptor) => descriptor.name)
           .filter((name) => !configuredNames.has(name)))
         if (!runtimeFlags.toolSearch) deniedByConfiguration.add('ToolSearch')
-        const activatedDeferredTools = runtimeFlags.toolSearch
+        const agentRecords = collaborationRuntime.list(sessionId)
+        const activeAgentRecords = agentRecords.filter((agent) =>
+          agent.status === 'queued' || agent.status === 'running'
+        )
+        const activatedDeferredTools = new Set(runtimeFlags.toolSearch
           ? exposureState.get(exposureScopeId)
-          : new Set(catalogSnapshot.descriptors
+          : catalogSnapshot.descriptors
               .filter((descriptor) => descriptor.availability.exposure === 'deferred')
               .map((descriptor) => descriptor.name))
+        if (activeAgentRecords.length > 0) {
+          activatedDeferredTools.add('wait_agent')
+        } else {
+          deniedByConfiguration.add('wait_agent')
+          activatedDeferredTools.delete('wait_agent')
+        }
+        const agentRuntimeInstruction = [
+          '<agent_runtime_state>',
+          activeAgentRecords.length > 0
+            ? `Active background Agents (${activeAgentRecords.length}): ${activeAgentRecords
+                .map((agent) => `${agent.id} ${agent.path} [${agent.status}]`)
+                .join('; ')}. wait_agent may only target these active Agents.`
+            : 'Active background Agents: none. Do not call wait_agent; it is unavailable in this model turn.',
+          agentRecords.length > 0
+            ? `Known terminal/history Agents: ${agentRecords
+                .filter((agent) => agent.status !== 'queued' && agent.status !== 'running')
+                .slice(-20)
+                .map((agent) => `${agent.id} ${agent.path} [${agent.status}]`)
+                .join('; ') || 'none'}.`
+            : 'No SubAgent has been started in this session.',
+          '</agent_runtime_state>'
+        ].join('\n')
         const exposurePlan = runtimeToolManager.createExposurePlan({
           catalog: catalogSnapshot,
           agentRole: 'main',
@@ -351,7 +378,7 @@ export class AgentRunner {
           capabilities: config.contextCapabilities!,
           systemPrompt: config.systemPrompt!,
           toolSchemas: availableTools,
-          instructions: runtimeInstructions,
+          instructions: [...runtimeInstructions, agentRuntimeInstruction],
           providerRequestProfile: {
             providerId: config.providerId,
             model: config.model,
