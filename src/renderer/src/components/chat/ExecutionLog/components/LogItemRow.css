@@ -76,7 +76,31 @@
 .timeline-icon-compaction.is-success { color: var(--text-success, #059669); }
 .timeline-icon-compaction.is-error { color: var(--color-error); }
 
+.timeline-icon-running {
+  color: var(--primary-color);
+
+  svg { animation: timeline-running-spin 1.1s linear infinite; }
+}
+
+@keyframes timeline-running-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timeline-icon-running svg { animation: none; }
+}
+
 .timeline-verb-text { margin-right: 6px; }
+
+.timeline-item-duration {
+  flex-shrink: 0;
+  margin-left: 8px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 
 .timeline-target-link {
   color: var(--text-main);

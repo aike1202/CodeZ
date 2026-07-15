@@ -1,5 +1,12 @@
 import type { StateCreator } from 'zustand'
-import type { ChatMessage, ChatState, ChatSession } from '../types'
+import type {
+  AgentState,
+  ChatMessage,
+  ChatState,
+  ChatSession,
+  ExecutionTimelineItem,
+  ToolCallState
+} from '../types'
 import { useWorkspaceStore } from '../../workspaceStore'
 import type {
   SessionRuntimeStatus,
@@ -43,6 +50,120 @@ function normalizeSession(session: ChatSession): ChatSession {
           status: prompt.status === 'steering' ? 'queued' : prompt.status || 'queued'
         }))
       : []
+  }
+}
+
+const RUNTIME_INTERRUPTED_ERROR =
+  'Error: Execution was interrupted because the session runtime is no longer active.'
+
+function settleRunningToolCalls(
+  toolCalls: ToolCallState[] | undefined,
+  completedAt: number
+): { toolCalls: ToolCallState[] | undefined; changed: boolean } {
+  if (!Array.isArray(toolCalls)) return { toolCalls, changed: false }
+  let changed = false
+  const settled = toolCalls.map((toolCall) => {
+    if (toolCall.status !== 'running') return toolCall
+    changed = true
+    return {
+      ...toolCall,
+      status: 'error' as const,
+      result: toolCall.result || RUNTIME_INTERRUPTED_ERROR,
+      completedAt: toolCall.completedAt || completedAt
+    }
+  })
+  return { toolCalls: changed ? settled : toolCalls, changed }
+}
+
+function settleRunningTimeline(
+  timeline: ExecutionTimelineItem[] | undefined,
+  completedAt: number
+): { timeline: ExecutionTimelineItem[] | undefined; changed: boolean } {
+  if (!Array.isArray(timeline)) return { timeline, changed: false }
+  let changed = false
+  const settled = timeline.map((item): ExecutionTimelineItem => {
+    if (item.type === 'tool') {
+      const toolResult = settleRunningToolCalls([item.toolCall], completedAt)
+      if (!toolResult.changed) return item
+      changed = true
+      return {
+        ...item,
+        toolCall: toolResult.toolCalls![0],
+        updatedAt: completedAt
+      }
+    }
+    if (item.status !== 'running') return item
+    changed = true
+    if (item.type === 'compaction') {
+      return {
+        ...item,
+        status: 'error',
+        error: item.error || RUNTIME_INTERRUPTED_ERROR,
+        updatedAt: completedAt,
+        completedAt: item.completedAt || completedAt
+      }
+    }
+    return {
+      ...item,
+      status: 'success',
+      updatedAt: completedAt,
+      completedAt: item.completedAt || completedAt
+    }
+  })
+  return { timeline: changed ? settled : timeline, changed }
+}
+
+function settleRunningAgentStates(
+  agentStates: AgentState[] | undefined
+): { agentStates: AgentState[] | undefined; changed: boolean } {
+  if (!Array.isArray(agentStates)) return { agentStates, changed: false }
+  let changed = false
+  const settled = agentStates.map((state): AgentState => {
+    if (state.type === 'command_running') {
+      changed = true
+      return {
+        ...state,
+        type: 'command_completed',
+        status: 'error',
+        detail: state.detail || RUNTIME_INTERRUPTED_ERROR
+      }
+    }
+    if (state.type === 'edit' && (
+      state.status === 'pending' || state.title.startsWith('正在编辑')
+    )) {
+      changed = true
+      return {
+        ...state,
+        title: state.title.replace(/^正在编辑\s*/u, '已中断编辑 '),
+        status: 'error',
+        detail: state.detail || RUNTIME_INTERRUPTED_ERROR
+      }
+    }
+    return state
+  })
+  return { agentStates: changed ? settled : agentStates, changed }
+}
+
+function settleRunningExecutionState<
+  T extends {
+    toolCalls?: ToolCallState[]
+    executionTimeline?: ExecutionTimelineItem[]
+    agentStates?: AgentState[]
+  }
+>(owner: T, completedAt: number): { owner: T; changed: boolean } {
+  const tools = settleRunningToolCalls(owner.toolCalls, completedAt)
+  const timeline = settleRunningTimeline(owner.executionTimeline, completedAt)
+  const states = settleRunningAgentStates(owner.agentStates)
+  const changed = tools.changed || timeline.changed || states.changed
+  if (!changed) return { owner, changed: false }
+  return {
+    owner: {
+      ...owner,
+      ...(tools.toolCalls ? { toolCalls: tools.toolCalls } : {}),
+      ...(timeline.timeline ? { executionTimeline: timeline.timeline } : {}),
+      ...(states.agentStates ? { agentStates: states.agentStates } : {})
+    },
+    changed: true
   }
 }
 
@@ -212,30 +333,30 @@ function healInterruptedSubAgents(messages: any[]): {
     ...(Array.isArray(subAgents) ? { subAgents } : {})
   })
   const healedMessages = messages.map((message) => {
-    const subAgents = message.subAgents
+    const completedAt = Date.now()
+    const settledMessage = settleRunningExecutionState(message, completedAt)
+    let baseMessage = settledMessage.owner
+    if (settledMessage.changed) changed = true
+
+    const subAgents = baseMessage.subAgents
     if (!Array.isArray(subAgents)) {
-      if (!message.streaming) return message
+      if (!baseMessage.streaming && !settledMessage.changed) return message
       changed = true
-      return interruptMessage(message)
+      return interruptMessage(baseMessage)
     }
 
     const hasRunningSubAgent = subAgents.some((sub: any) => sub.status === 'running')
     const hasUndeliveredTerminalSubAgent = Boolean(
-      message.streaming && subAgents.some((sub: any) =>
+      baseMessage.streaming && subAgents.some((sub: any) =>
         sub.status === 'completed' || sub.status === 'failed'
       )
     )
-    if (!hasRunningSubAgent && !hasUndeliveredTerminalSubAgent) {
-      if (!message.streaming) return message
-      changed = true
-      return interruptMessage(message)
-    }
-
-    changed = true
     const healedSubAgents = subAgents.map((sub: any) => {
+      const settledSubAgent = settleRunningExecutionState(sub, completedAt)
+      if (settledSubAgent.changed) changed = true
       if (sub.status === 'running') {
         return {
-          ...sub,
+          ...settledSubAgent.owner,
           status: 'interrupted',
           interruptionReason: 'runtime_missing',
           completedAt: sub.completedAt || Date.now(),
@@ -247,9 +368,9 @@ function healInterruptedSubAgents(messages: any[]): {
           }
         }
       }
-      if (message.streaming && (sub.status === 'completed' || sub.status === 'failed')) {
+      if (baseMessage.streaming && (sub.status === 'completed' || sub.status === 'failed')) {
         return {
-          ...sub,
+          ...settledSubAgent.owner,
           interruptionReason: 'parent_delivery_missing',
           result: {
             ...sub.result,
@@ -262,9 +383,24 @@ function healInterruptedSubAgents(messages: any[]): {
           }
         }
       }
-      return sub
+      return settledSubAgent.owner
     })
-    return interruptMessage(message, healedSubAgents)
+    const subAgentExecutionChanged = healedSubAgents.some(
+      (subAgent: any, index: number) => subAgent !== subAgents[index]
+    )
+    if (!hasRunningSubAgent && !hasUndeliveredTerminalSubAgent) {
+      if (!baseMessage.streaming && !settledMessage.changed) {
+        return subAgentExecutionChanged
+          ? { ...baseMessage, subAgents: healedSubAgents }
+          : message
+      }
+      changed = true
+      return interruptMessage(baseMessage, healedSubAgents)
+    }
+
+    changed = true
+    baseMessage = { ...baseMessage, subAgents: healedSubAgents }
+    return interruptMessage(baseMessage, healedSubAgents)
   })
 
   return {

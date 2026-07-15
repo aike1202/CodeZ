@@ -11,10 +11,11 @@ import type {
   PermissionImpact,
   PermissionMode,
   PermissionRequest,
-  PermissionRiskLevel
+  PermissionRiskLevel,
+  ToolApprovalPreference
 } from '../../shared/types/permission'
 import { allowedScopesForDecision } from '../../shared/types/permission'
-import { CriticalOperationGuard } from './permission/CriticalOperationGuard'
+import { CriticalOperationGuard, type CriticalOperationFinding } from './permission/CriticalOperationGuard'
 import { NestedCommandExpander } from './permission/NestedCommandExpander'
 import { PathImpactAnalyzer } from './permission/PathImpactAnalyzer'
 import { PermissionDecisionEngine } from './permission/PermissionDecisionEngine'
@@ -39,6 +40,7 @@ export interface PermissionEvaluationContext {
   agentId?: string
   mode: PermissionMode
   smartApprovalClient?: SmartApprovalClient | null
+  approvalPreference?: ToolApprovalPreference | null
 }
 
 export type PermissionRequestHandler = (request: PermissionRequest) => Promise<boolean | PermissionApprovalResponse>
@@ -79,9 +81,16 @@ function decisionFromChecks(input: {
   hardline?: boolean
   impacts?: PermissionImpact[]
   snapshots?: PermissionDecision['snapshots']
+  modelApprovalPreference?: ToolApprovalPreference | null
+  absoluteRedline?: boolean
 }): PermissionDecision {
-  const hardline = input.hardline ?? false
+  const hardline = input.absoluteRedline ?? input.hardline ?? false
   const primary = input.checks.find((check) => check.action !== 'allow') ?? input.checks[0]
+  const approvalSource = input.action === 'ask'
+    ? hardline
+      ? 'absolute-redline'
+      : input.modelApprovalPreference === 'user' ? 'model-requested' : 'runtime-policy'
+    : undefined
   return {
     action: input.action,
     permission: primary?.permission ?? 'unknown',
@@ -94,7 +103,10 @@ function decisionFromChecks(input: {
     normalizedPattern: input.pattern,
     impacts: input.impacts ?? [],
     snapshots: input.snapshots ?? [],
-    critical: hardline
+    critical: hardline,
+    modelApprovalPreference: input.modelApprovalPreference ?? null,
+    approvalSource,
+    absoluteRedline: hardline
   }
 }
 
@@ -103,7 +115,7 @@ interface ShellScanResult {
   analysisStatus: PermissionAnalysisStatus
   highest: CommandAssessment | null
   snapshots: PermissionDecision['snapshots']
-  critical: PermissionDecision | null
+  critical: CriticalOperationFinding | null
 }
 
 export class PermissionManager {
@@ -222,19 +234,28 @@ export class PermissionManager {
     const action = decisions.some((decision) => decision.action === 'deny')
       ? 'deny'
       : decisions.some((decision) => decision.action === 'ask') ? 'ask' : 'allow'
+    const absoluteRedline = decisions.some((decision) => decision.absoluteRedline)
+    const approvalSource = action === 'ask'
+      ? absoluteRedline
+        ? 'absolute-redline'
+        : context.approvalPreference === 'user' ? 'model-requested' : 'runtime-policy'
+      : undefined
     return {
       action,
       permission: decisions.find((decision) => decision.action === action)?.permission || 'unknown',
       checks: decisions.flatMap((decision) => decision.checks),
       analysisStatus: effectPlan.analysisStatus === 'parsed' ? 'parsed' : 'unparsed',
-      hardline: decisions.some((decision) => decision.hardline),
-      critical: decisions.some((decision) => decision.critical),
+      hardline: absoluteRedline,
+      critical: absoluteRedline,
       riskLevel: Math.max(...decisions.map((decision) => decision.riskLevel)) as PermissionRiskLevel,
       reason: [...new Set(decisions.map((decision) => decision.reason))].join('; '),
       ruleId: 'tool.effect-plan',
       normalizedPattern: toolName,
       impacts: decisions.flatMap((decision) => decision.impacts),
-      snapshots: decisions.flatMap((decision) => decision.snapshots)
+      snapshots: decisions.flatMap((decision) => decision.snapshots),
+      modelApprovalPreference: context.approvalPreference ?? null,
+      approvalSource,
+      absoluteRedline
     }
   }
 
@@ -245,7 +266,7 @@ export class PermissionManager {
     }
     const impact = await this.pathAnalyzer.analyze(target, context.workspaceRoot, context.cwd)
     if (impact.sensitive) {
-      return this.hardlineDecision('critical.credential.access', '修改敏感配置或凭据文件', impact.resolvedPath, [
+      return await this.hardlineDecision('critical.credential.access', '修改敏感配置或凭据文件', impact.resolvedPath, context, [
         { kind: 'credential', target: impact.resolvedPath }
       ])
     }
@@ -273,12 +294,42 @@ export class PermissionManager {
         reason: check.reason,
         ruleId: 'shell.empty-command',
         pattern: toolName,
-        analysisStatus: 'unparsed'
+        analysisStatus: 'unparsed',
+        modelApprovalPreference: context.approvalPreference
       })
     }
     const shell: PermissionShellKind = context.shellKind ?? (toolName === 'PowerShell' ? 'powershell' : 'bash')
     const scan = await this.scanShellCommand(shell, command, context, context.cwd, true, 0, new Set<string>())
-    if (scan.critical) return scan.critical
+    if (scan.critical) {
+      if (scan.critical.enforcement === 'absolute-redline') {
+        return await this.hardlineDecision(
+          scan.critical.ruleId,
+          scan.critical.reason,
+          scan.critical.pattern,
+          context,
+          [scan.critical.impact],
+          scan.snapshots
+        )
+      }
+      const check = await this.createCheck(
+        scan.critical.permission,
+        command,
+        scan.critical.reason,
+        context
+      )
+      return decisionFromChecks({
+        checks: [check],
+        action: check.action,
+        riskLevel: 4,
+        reason: scan.critical.reason,
+        ruleId: scan.critical.ruleId,
+        pattern: command,
+        analysisStatus: scan.critical.permission === 'shell_unparsed' ? 'unparsed' : 'parsed',
+        impacts: [scan.critical.impact],
+        snapshots: scan.snapshots,
+        modelApprovalPreference: context.approvalPreference
+      })
+    }
     const { checks, highest, snapshots } = scan
     let { analysisStatus } = scan
     const uniqueChecks = Array.from(
@@ -299,7 +350,8 @@ export class PermissionManager {
       ruleId: unparsed ? 'shell.unparsed' : highest?.ruleId ?? 'shell.command',
       pattern: command,
       analysisStatus,
-      snapshots
+      snapshots,
+      modelApprovalPreference: context.approvalPreference
     })
   }
 
@@ -362,7 +414,7 @@ export class PermissionManager {
           analysisStatus,
           highest,
           snapshots,
-          critical: { ...nested.critical, snapshots }
+          critical: nested.critical
         }
       }
       checks.push(...nested.checks)
@@ -380,7 +432,12 @@ export class PermissionManager {
     context: PermissionEvaluationContext
   ): Promise<PermissionCheck> {
     const explicitRule = await getPermissionRuleStore().resolve(context.workspaceRoot, context.sessionId, permission, pattern)
-    const { action } = this.decisionEngine.decide({ mode: context.mode, permission, explicitRule })
+    const { action } = this.decisionEngine.decide({
+      mode: context.mode,
+      permission,
+      explicitRule,
+      approvalPreference: context.approvalPreference
+    })
     return { permission, pattern, action, reason }
   }
 
@@ -395,20 +452,40 @@ export class PermissionManager {
     impacts: PermissionImpact[] = []
   ): Promise<PermissionDecision> {
     const check = await this.createCheck(permission, pattern, reason, context)
-    return decisionFromChecks({ checks: [check], action: check.action, riskLevel, reason, ruleId, pattern, analysisStatus, impacts })
-  }
-
-  private hardlineDecision(ruleId: string, reason: string, pattern: string, impacts: PermissionImpact[] = []): PermissionDecision {
-    const check: PermissionCheck = { permission: 'hardline', pattern, action: 'ask', reason }
     return decisionFromChecks({
       checks: [check],
-      action: 'ask',
+      action: check.action,
+      riskLevel,
+      reason,
+      ruleId,
+      pattern,
+      analysisStatus,
+      impacts,
+      modelApprovalPreference: context.approvalPreference
+    })
+  }
+
+  private async hardlineDecision(
+    ruleId: string,
+    reason: string,
+    pattern: string,
+    context: PermissionEvaluationContext,
+    impacts: PermissionImpact[] = [],
+    snapshots: PermissionDecision['snapshots'] = []
+  ): Promise<PermissionDecision> {
+    const check = await this.createCheck('hardline', pattern, reason, context)
+    return decisionFromChecks({
+      checks: [check],
+      action: check.action,
       riskLevel: 4,
       reason,
       ruleId,
       pattern,
       hardline: true,
-      impacts
+      absoluteRedline: true,
+      impacts,
+      snapshots,
+      modelApprovalPreference: context.approvalPreference
     })
   }
 
@@ -463,6 +540,10 @@ export class PermissionManager {
       sessionId: context.sessionId,
       agentId: context.agentId,
       mode: context.mode,
+      modelApprovalPreference: decision.modelApprovalPreference ?? null,
+      approvalSource: decision.approvalSource,
+      effectiveAction: decision.action,
+      ruleId: decision.ruleId,
       decision,
       approvalResponse
     })
@@ -477,7 +558,8 @@ export async function authorizePermissionToolCall(
   smartApprovalClient?: SmartApprovalClient | null,
   sessionId?: string,
   agentId?: string,
-  effectPlan?: ToolEffectPlan
+  effectPlan?: ToolEffectPlan,
+  approvalPreference: ToolApprovalPreference | null = null
 ): Promise<PermissionToolAuthorization> {
   const permissionManager = PermissionManager.getInstance()
   const context: PermissionEvaluationContext = {
@@ -487,6 +569,7 @@ export async function authorizePermissionToolCall(
     shellKind: toolName === 'PowerShell' ? 'powershell' : toolName === 'Bash' ? 'bash' : undefined,
     mode: await getWorkspacePermissionStore().getMode(workspaceRoot),
     smartApprovalClient,
+    approvalPreference,
     sessionId,
     agentId
   }
@@ -565,6 +648,7 @@ export async function evaluatePermissionEffectPlanShadow(
     platform: process.platform,
     shellKind: toolName === 'PowerShell' ? 'powershell' : toolName === 'Bash' ? 'bash' : undefined,
     mode: await getWorkspacePermissionStore().getMode(workspaceRoot),
+    approvalPreference: null,
     sessionId,
     agentId
   }

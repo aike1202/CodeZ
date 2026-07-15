@@ -25,6 +25,7 @@ function handler(name: string, effect: ToolEffect): ToolHandler<Record<string, u
         required: ['path'],
         additionalProperties: false
       },
+      approval: { modelPreference: effect.kind === 'read-file' ? 'not-applicable' : 'required' },
       availability: { enabled: () => true, roles: '*', exposure: 'core' },
       behavior: {
         readOnly: () => effect.kind === 'read-file',
@@ -75,8 +76,8 @@ describe('V1/V2 representative runtime baseline', () => {
   it('keeps read/edit/verify call-result counts, permissions, ordering, and result bytes comparable', async () => {
     const calls: NormalizedToolCall[] = [
       { callId: 'read-1', position: 0, name: 'ReadBaseline', rawArguments: '{"path":"src/input.ts"}' },
-      { callId: 'edit-1', position: 1, name: 'EditBaseline', rawArguments: '{"path":"src/output.ts"}' },
-      { callId: 'verify-1', position: 2, name: 'VerifyBaseline', rawArguments: '{"path":"package.json"}' }
+      { callId: 'edit-1', position: 1, name: 'EditBaseline', rawArguments: '{"path":"src/output.ts","approval":"auto"}' },
+      { callId: 'verify-1', position: 2, name: 'VerifyBaseline', rawArguments: '{"path":"package.json","approval":"auto"}' }
     ]
     const v1 = await run(new LegacyToolExecutionPipeline(), calls)
     const v2 = await run(new ToolExecutionPipeline(), calls)

@@ -25,8 +25,23 @@ interface EditApprovalWidgetProps {
   onFileClick?: (filePath: string) => void
 }
 
+export function acceptPendingEdits(
+  edits: Array<{ filePath: string }>,
+  editStatuses: Record<string, 'accepted' | 'rejected'>,
+  accept: (filePath: string) => void
+): void {
+  const acceptedPaths = new Set<string>()
+  edits.forEach((edit) => {
+    if (!acceptedPaths.has(edit.filePath) && !editStatuses[edit.filePath]) {
+      acceptedPaths.add(edit.filePath)
+      accept(edit.filePath)
+    }
+  })
+}
+
 export default function EditApprovalWidget({ msgId, txId, edits, editStatuses = {}, onDiffClick, onFileClick }: EditApprovalWidgetProps) {
   const setEditStatus = useChatStore((s) => s.setEditStatus)
+  const setEditStatuses = useChatStore((s) => s.setEditStatuses)
   const [loadingFile, setLoadingFile] = useState<string | null>(null)
   const [isExpanded, setIsExpanded] = useState(false)
 
@@ -48,20 +63,9 @@ export default function EditApprovalWidget({ msgId, txId, edits, editStatuses = 
     totalDel += parseInt(edit.deletions.replace('-', '')) || 0;
   });
 
-  const handleAccept = async (filePath: string) => {
+  const handleAccept = (filePath: string) => {
     if (editStatuses[filePath]) return
-    const edit = uniqueEdits.find((item) => item.filePath === filePath)
-    if (!edit?.transactionPath) return
-    setLoadingFile(filePath)
-    try {
-      const accepted = await window.api.chat.acceptFile(txId, edit.transactionPath)
-      if (!accepted) return
-      setEditStatus(msgId, filePath, 'accepted')
-    } catch (err) {
-      console.error('Accept error:', err)
-    } finally {
-      setLoadingFile(null)
-    }
+    setEditStatus(msgId, filePath, 'accepted')
   }
 
   const handleReject = async (filePath: string) => {
@@ -83,13 +87,14 @@ export default function EditApprovalWidget({ msgId, txId, edits, editStatuses = 
     }
   }
 
-  const handleAcceptAll = async (e: React.MouseEvent) => {
+  const handleAcceptAll = (e: React.MouseEvent) => {
     e.stopPropagation()
-    for (const edit of uniqueEdits) {
-      if (!editStatuses[edit.filePath]) {
-        await handleAccept(edit.filePath)
-      }
-    }
+    const accepted = Object.fromEntries(
+      uniqueEdits
+        .filter((edit) => !editStatuses[edit.filePath])
+        .map((edit) => [edit.filePath, 'accepted' as const])
+    )
+    setEditStatuses(msgId, accepted)
   }
 
   const handleRejectAll = async (e: React.MouseEvent) => {
@@ -204,7 +209,7 @@ export default function EditApprovalWidget({ msgId, txId, edits, editStatuses = 
                         <button className="edit-approval-btn-reject" disabled={!hasTransactionPath} onClick={(e) => { e.stopPropagation(); handleReject(edit.filePath); }} title={hasTransactionPath ? 'Reject' : '无法唯一定位事务文件'}>
                           <IconClose width={14} height={14} />
                         </button>
-                        <button className="edit-approval-btn-accept" disabled={!hasTransactionPath} onClick={(e) => { e.stopPropagation(); handleAccept(edit.filePath); }} title={hasTransactionPath ? 'Accept' : '无法唯一定位事务文件'}>
+                        <button className="edit-approval-btn-accept" onClick={(e) => { e.stopPropagation(); handleAccept(edit.filePath); }} title="Accept">
                           <IconCheck width={14} height={14} />
                         </button>
                       </Flex>

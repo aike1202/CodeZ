@@ -1,4 +1,4 @@
-import type { PermissionDecision, PermissionImpact } from '../../../shared/types/permission'
+import type { PermissionCapability, PermissionImpact } from '../../../shared/types/permission'
 import { ShellAnalysisService } from './ShellAnalysisService'
 import type { PermissionShellKind } from './operationTypes'
 import * as os from 'os'
@@ -10,64 +10,88 @@ interface CriticalPattern {
   pattern: RegExp
   reason: string
   impact: PermissionImpact['kind']
+  enforcement: CriticalEnforcement
+  permission: PermissionCapability
+}
+
+export type CriticalEnforcement = 'absolute-redline' | 'model-directed'
+
+export interface CriticalOperationFinding {
+  ruleId: string
+  reason: string
+  pattern: string
+  impact: PermissionImpact
+  enforcement: CriticalEnforcement
+  permission: PermissionCapability
 }
 
 const PATTERNS: CriticalPattern[] = [
-  { id: 'critical.privilege.sudo', pattern: /(?:^|[;&|\n]\s*)sudo\b|\bStart-Process\b[^\n]*-Verb\s+RunAs/i, reason: '请求管理员或根权限', impact: 'system' },
-  { id: 'critical.delete.system-root', pattern: /\brm\s+(?:-[^\s]+\s+)*(?:["']?\/(?:["']?|\s|$)|["']?\/(?:etc|usr|var|bin|sbin|boot|lib)(?:\/|["']|\s|$))/i, reason: '递归删除系统根目录或系统目录', impact: 'system' },
-  { id: 'critical.delete.home', pattern: /\brm\s+(?:-[^\s]+\s+)*(?:["']?(?:~|\$\{?HOME\}?)(?:\/|["']|\s|$))/i, reason: '删除用户主目录', impact: 'credential' },
-  { id: 'critical.disk.format', pattern: /\b(?:mkfs(?:\.\w+)?|format\s+[a-z]:)\b/i, reason: '格式化文件系统', impact: 'system' },
-  { id: 'critical.disk.partition', pattern: /\b(?:diskpart|fdisk|parted)\b/i, reason: '修改磁盘分区', impact: 'system' },
-  { id: 'critical.disk.raw-write', pattern: /\bdd\b[^\n]*\bof=\/dev\/(?:sd|nvme|hd|mmcblk|vd|xvd)|>\s*\/dev\/(?:sd|nvme|hd|mmcblk|vd|xvd)/i, reason: '直接写入块设备', impact: 'system' },
-  { id: 'critical.remote.execute', pattern: /\b(?:curl|wget)\b[^|]*\|\s*(?:bash|sh|zsh)|\b(?:invoke-expression|iex)\b[^\n]*(?:invoke-webrequest|invoke-restmethod|iwr|irm)|\b(?:invoke-webrequest|invoke-restmethod|iwr|irm)\b[^|]*\|\s*(?:invoke-expression|iex)\b/i, reason: '下载或获取远程内容后直接执行', impact: 'network' },
-  { id: 'critical.hidden.encoded-command', pattern: /\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*-(?:encodedcommand|enc|e)\b|\b(?:base64|xxd|openssl)\b[^|]*\|\s*(?:bash|sh|zsh)/i, reason: '编码或解码后隐藏执行', impact: 'system' },
-  { id: 'critical.permission-config.write', pattern: /(?:>|>>|\btee\b|\bset-content\b|\badd-content\b|\bout-file\b|\bremove-item\b|\brm\b|\bdel\b)[^\n]*(?:[\\/]codez[\\/](?:permission-rules|workspace-permissions)\.json)\b/i, reason: '修改 CodeZ 权限配置', impact: 'system' },
-  { id: 'critical.process.host-shutdown', pattern: /(?:^|[;&|\n]\s*)(?:shutdown|reboot|halt|poweroff)\b|systemctl\s+(?:poweroff|reboot|halt)/i, reason: '关闭或重启主机', impact: 'process' },
-  { id: 'critical.process.fork-bomb', pattern: /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, reason: 'Shell fork bomb', impact: 'process' },
-  { id: 'critical.credential.access', pattern: /(?:>|tee\s+|set-content\s+|remove-item\s+).*(?:\.ssh|\.aws|\.npmrc|\.pypirc|\.netrc|\.bashrc|\.zshrc)/i, reason: '修改凭据或启动配置', impact: 'credential' }
+  { id: 'critical.privilege.sudo', pattern: /(?:^|[;&|\n]\s*)sudo\b|\bStart-Process\b[^\n]*-Verb\s+RunAs/i, reason: '请求管理员或根权限', impact: 'system', enforcement: 'absolute-redline', permission: 'hardline' },
+  { id: 'critical.delete.system-root', pattern: /\brm\s+(?:-[^\s]+\s+)*(?:["']?\/(?:["']?|\s|$)|["']?\/(?:etc|usr|var|bin|sbin|boot|lib)(?:\/|["']|\s|$))/i, reason: '递归删除系统根目录或系统目录', impact: 'system', enforcement: 'absolute-redline', permission: 'hardline' },
+  { id: 'critical.delete.home', pattern: /\brm\s+(?:-[^\s]+\s+)*(?:["']?(?:~|\$\{?HOME\}?)(?:\/|["']|\s|$))/i, reason: '删除用户主目录', impact: 'credential', enforcement: 'absolute-redline', permission: 'hardline' },
+  { id: 'critical.disk.format', pattern: /\b(?:mkfs(?:\.\w+)?|format\s+[a-z]:)\b/i, reason: '格式化文件系统', impact: 'system', enforcement: 'absolute-redline', permission: 'hardline' },
+  { id: 'critical.disk.partition', pattern: /\b(?:diskpart|fdisk|parted)\b/i, reason: '修改磁盘分区', impact: 'system', enforcement: 'absolute-redline', permission: 'hardline' },
+  { id: 'critical.disk.raw-write', pattern: /\bdd\b[^\n]*\bof=\/dev\/(?:sd|nvme|hd|mmcblk|vd|xvd)|>\s*\/dev\/(?:sd|nvme|hd|mmcblk|vd|xvd)/i, reason: '直接写入块设备', impact: 'system', enforcement: 'absolute-redline', permission: 'hardline' },
+  { id: 'critical.remote.execute', pattern: /\b(?:curl|wget)\b[^|]*\|\s*(?:bash|sh|zsh)|\b(?:invoke-expression|iex)\b[^\n]*(?:invoke-webrequest|invoke-restmethod|iwr|irm)|\b(?:invoke-webrequest|invoke-restmethod|iwr|irm)\b[^|]*\|\s*(?:invoke-expression|iex)\b/i, reason: '下载或获取远程内容后直接执行', impact: 'network', enforcement: 'model-directed', permission: 'network' },
+  { id: 'critical.hidden.encoded-command', pattern: /\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*-(?:encodedcommand|enc|e)\b|\b(?:base64|xxd|openssl)\b[^|]*\|\s*(?:bash|sh|zsh)/i, reason: '编码或解码后隐藏执行', impact: 'system', enforcement: 'model-directed', permission: 'shell_unparsed' },
+  { id: 'critical.permission-config.write', pattern: /(?:>|>>|\btee\b|\bset-content\b|\badd-content\b|\bout-file\b|\bremove-item\b|\brm\b|\bdel\b)[^\n]*(?:[\\/]codez[\\/](?:permission-rules|workspace-permissions)\.json)\b/i, reason: '修改 CodeZ 权限配置', impact: 'system', enforcement: 'absolute-redline', permission: 'hardline' },
+  { id: 'critical.process.host-shutdown', pattern: /(?:^|[;&|\n]\s*)(?:shutdown|reboot|halt|poweroff)\b|systemctl\s+(?:poweroff|reboot|halt)/i, reason: '关闭或重启主机', impact: 'process', enforcement: 'absolute-redline', permission: 'hardline' },
+  { id: 'critical.process.fork-bomb', pattern: /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, reason: 'Shell fork bomb', impact: 'process', enforcement: 'absolute-redline', permission: 'hardline' },
+  { id: 'critical.credential.access', pattern: /(?:>|tee\s+|set-content\s+|remove-item\s+).*(?:\.ssh|\.aws|\.npmrc|\.pypirc|\.netrc|\.bashrc|\.zshrc)/i, reason: '修改凭据或启动配置', impact: 'credential', enforcement: 'absolute-redline', permission: 'hardline' }
 ]
 
 interface CriticalMutation {
   id: string
   reason: string
   impact: PermissionImpact['kind']
+  enforcement: CriticalEnforcement
+  permission: PermissionCapability
 }
 
 function criticalSystemMutation(argv: string[]): CriticalMutation | null {
   const executable = normalizeExecutableName(argv[0] || '')
   const args = argv.slice(1).map((arg) => arg.toLowerCase())
   const subcommand = args[0] || ''
-  if (executable === 'systemctl' && ['enable', 'disable', 'mask', 'unmask', 'start', 'stop', 'restart', 'reload', 'edit', 'daemon-reload'].includes(subcommand)) {
-    return { id: 'critical.system.service', reason: '修改系统服务', impact: 'system' }
+  if (executable === 'systemctl' && ['start', 'stop', 'restart', 'reload'].includes(subcommand)) {
+    return { id: 'critical.system.service-state', reason: '启动、停止或重启系统服务', impact: 'system', enforcement: 'model-directed', permission: 'external_effect' }
   }
-  if (executable === 'sc' && ['config', 'create', 'delete', 'start', 'stop', 'failure', 'privs', 'sidtype'].includes(subcommand)) {
-    return { id: 'critical.system.service', reason: '修改 Windows 系统服务', impact: 'system' }
+  if (executable === 'systemctl' && ['enable', 'disable', 'mask', 'unmask', 'edit', 'daemon-reload'].includes(subcommand)) {
+    return { id: 'critical.system.service', reason: '配置系统服务', impact: 'system', enforcement: 'absolute-redline', permission: 'hardline' }
   }
-  if (['set-service', 'new-service', 'remove-service', 'restart-service', 'stop-service', 'start-service'].includes(executable)) {
-    return { id: 'critical.system.service', reason: '修改 Windows 系统服务', impact: 'system' }
+  if (executable === 'sc' && ['start', 'stop'].includes(subcommand)) {
+    return { id: 'critical.system.service-state', reason: '启动或停止 Windows 系统服务', impact: 'system', enforcement: 'model-directed', permission: 'external_effect' }
+  }
+  if (executable === 'sc' && ['config', 'create', 'delete', 'failure', 'privs', 'sidtype'].includes(subcommand)) {
+    return { id: 'critical.system.service', reason: '配置 Windows 系统服务', impact: 'system', enforcement: 'absolute-redline', permission: 'hardline' }
+  }
+  if (['restart-service', 'stop-service', 'start-service'].includes(executable)) {
+    return { id: 'critical.system.service-state', reason: '启动、停止或重启 Windows 系统服务', impact: 'system', enforcement: 'model-directed', permission: 'external_effect' }
+  }
+  if (['set-service', 'new-service', 'remove-service'].includes(executable)) {
+    return { id: 'critical.system.service', reason: '配置 Windows 系统服务', impact: 'system', enforcement: 'absolute-redline', permission: 'hardline' }
   }
   if (['useradd', 'userdel', 'usermod', 'groupadd', 'groupdel', 'groupmod', 'passwd', 'chpasswd'].includes(executable)) {
-    return { id: 'critical.system.account', reason: '修改系统账户或用户组', impact: 'system' }
+    return { id: 'critical.system.account', reason: '修改系统账户或用户组', impact: 'system', enforcement: 'absolute-redline', permission: 'hardline' }
   }
   if (executable === 'net' && ['user', 'localgroup', 'group'].includes(subcommand) && (args.length >= 3 || args.some((arg) => ['/add', '/delete', '/active:yes', '/active:no'].includes(arg)))) {
-    return { id: 'critical.system.account', reason: '修改 Windows 账户或用户组', impact: 'system' }
+    return { id: 'critical.system.account', reason: '修改 Windows 账户或用户组', impact: 'system', enforcement: 'absolute-redline', permission: 'hardline' }
   }
   if (['new-localuser', 'remove-localuser', 'set-localuser', 'add-localgroupmember', 'remove-localgroupmember'].includes(executable)) {
-    return { id: 'critical.system.account', reason: '修改 Windows 账户或用户组', impact: 'system' }
+    return { id: 'critical.system.account', reason: '修改 Windows 账户或用户组', impact: 'system', enforcement: 'absolute-redline', permission: 'hardline' }
   }
   if (['set-mppreference', 'add-mppreference', 'remove-mppreference', 'secedit'].includes(executable) ||
       (executable === 'netsh' && args[0] === 'advfirewall' && args.includes('set')) ||
       ['set-netfirewallprofile', 'set-netfirewallrule', 'new-netfirewallrule', 'remove-netfirewallrule'].includes(executable)) {
-    return { id: 'critical.system.security-policy', reason: '修改系统安全策略', impact: 'system' }
+    return { id: 'critical.system.security-policy', reason: '修改系统安全策略', impact: 'system', enforcement: 'absolute-redline', permission: 'hardline' }
   }
   if (executable === 'schtasks' && args.some((arg) => ['/create', '/change', '/delete'].includes(arg))) {
-    return { id: 'critical.startup.persistence', reason: '修改计划任务或启动持久化', impact: 'system' }
+    return { id: 'critical.startup.persistence', reason: '修改计划任务或启动持久化', impact: 'system', enforcement: 'absolute-redline', permission: 'hardline' }
   }
   if (executable === 'reg' && ['add', 'delete'].includes(subcommand) && /\/currentversion\/(?:run|runonce)(?:\/|\s|$)/i.test(argv.join(' ').replace(/\\/g, '/'))) {
-    return { id: 'critical.startup.persistence', reason: '修改注册表启动项', impact: 'system' }
+    return { id: 'critical.startup.persistence', reason: '修改注册表启动项', impact: 'system', enforcement: 'absolute-redline', permission: 'hardline' }
   }
   if (executable === 'crontab' && args.length > 0 && !args.every((arg) => ['-l', '--list'].includes(arg))) {
-    return { id: 'critical.startup.persistence', reason: '修改定时任务或启动持久化', impact: 'system' }
+    return { id: 'critical.startup.persistence', reason: '修改定时任务或启动持久化', impact: 'system', enforcement: 'absolute-redline', permission: 'hardline' }
   }
   return null
 }
@@ -99,10 +123,10 @@ function criticalPrivilegeEscalation(argv: string[]): CriticalMutation | null {
     args = args.slice(index + 1)
   }
   if (['pkexec', 'doas', 'runas'].includes(executable) || (wrappedByEnv && executable === 'sudo')) {
-    return { id: 'critical.privilege.escalation', reason: '请求管理员或根权限', impact: 'system' }
+    return { id: 'critical.privilege.escalation', reason: '请求管理员或根权限', impact: 'system', enforcement: 'absolute-redline', permission: 'hardline' }
   }
   if (executable === 'su') {
-    return { id: 'critical.privilege.escalation', reason: '请求管理员或根权限', impact: 'system' }
+    return { id: 'critical.privilege.escalation', reason: '请求管理员或根权限', impact: 'system', enforcement: 'absolute-redline', permission: 'hardline' }
   }
   return null
 }
@@ -203,85 +227,108 @@ function hasDynamicNestedCommand(argv: string[]): boolean {
 }
 
 export class CriticalOperationGuard {
-  async analyzeRaw(shell: PermissionShellKind, command: string, workspaceRoot: string): Promise<PermissionDecision | null> {
+  async analyzeRaw(shell: PermissionShellKind, command: string, workspaceRoot: string): Promise<CriticalOperationFinding | null> {
     const graph = await new ShellAnalysisService().parse(shell, command)
+    const findings: CriticalOperationFinding[] = []
     const hasRemoteFetch = graph.operations.some((operation) => ['invoke-webrequest', 'invoke-restmethod', 'iwr', 'irm'].includes((operation.argv[0] || '').toLowerCase()))
     const hasExpressionEvaluator = graph.operations.some((operation) => ['invoke-expression', 'iex'].includes((operation.argv[0] || '').toLowerCase()))
     if (graph.operators.includes('|') && hasRemoteFetch && hasExpressionEvaluator) {
-      return this.decision('critical.remote.execute', '下载或获取远程内容后直接执行', command, 'network')
+      findings.push(this.finding('critical.remote.execute', '下载或获取远程内容后直接执行', command, 'network', 'model-directed', 'network'))
     }
     for (const operation of graph.operations) {
       const gitArgs = gitInvocation(operation.argv)?.map((arg) => arg.toLowerCase())
       if (gitArgs?.[0] === 'push' && gitArgs.slice(1).some(isForcePushArgument)) {
-        return this.decision('critical.git.force-push', '强制改写远端历史', command, 'git-remote')
+        findings.push(this.finding('critical.git.force-push', '强制改写远端历史', command, 'git-remote', 'model-directed', 'external_effect'))
       }
       if ((operation.dynamic && graph.diagnostics.length === 0) || hasDynamicNestedCommand(operation.argv)) {
-        return this.decision('critical.hidden.dynamic-command', '动态生成或隐藏执行命令', command, 'system')
+        findings.push(this.finding('critical.hidden.dynamic-command', '动态生成或隐藏执行命令', command, 'system', 'model-directed', 'shell_unparsed'))
       }
       if (hasDynamicEvaluator(operation.argv)) {
-        return this.decision('critical.hidden.dynamic-command', '动态生成或隐藏执行命令', command, 'system')
+        findings.push(this.finding('critical.hidden.dynamic-command', '动态生成或隐藏执行命令', command, 'system', 'model-directed', 'shell_unparsed'))
       }
       const privilegeEscalation = criticalPrivilegeEscalation(operation.argv)
-      if (privilegeEscalation) return this.decision(privilegeEscalation.id, privilegeEscalation.reason, command, privilegeEscalation.impact)
+      if (privilegeEscalation) findings.push(this.finding(
+        privilegeEscalation.id,
+        privilegeEscalation.reason,
+        command,
+        privilegeEscalation.impact,
+        privilegeEscalation.enforcement,
+        privilegeEscalation.permission
+      ))
       if (packageCredentialMutation(operation.argv)) {
-        return this.decision('critical.credential.access', '修改包管理器凭据配置', command, 'credential')
+        findings.push(this.finding('critical.credential.access', '修改包管理器凭据配置', command, 'credential', 'absolute-redline', 'hardline'))
       }
       const systemMutation = criticalSystemMutation(operation.argv)
-      if (systemMutation) return this.decision(systemMutation.id, systemMutation.reason, command, systemMutation.impact)
+      if (systemMutation) findings.push(this.finding(
+        systemMutation.id,
+        systemMutation.reason,
+        command,
+        systemMutation.impact,
+        systemMutation.enforcement,
+        systemMutation.permission
+      ))
       const executable = normalizeExecutableName(operation.argv[0] || '')
       if (referencesPermissionConfig(operation.source) && !PERMISSION_CONFIG_READ_COMMANDS.has(executable) && !isShellWrapper(operation.argv)) {
-        return this.decision('critical.permission-config.write', '修改 CodeZ 权限配置', command, 'system')
+        findings.push(this.finding('critical.permission-config.write', '修改 CodeZ 权限配置', command, 'system', 'absolute-redline', 'hardline'))
       }
       const criticalDelete = this.criticalDeleteTarget(operation.argv, workspaceRoot)
-      if (criticalDelete) return criticalDelete
+      if (criticalDelete) findings.push(criticalDelete)
     }
     for (const rule of PATTERNS) {
-      if (rule.pattern.test(command)) return this.decision(rule.id, rule.reason, command, rule.impact)
+      if (rule.pattern.test(command)) findings.push(this.finding(
+        rule.id,
+        rule.reason,
+        command,
+        rule.impact,
+        rule.enforcement,
+        rule.permission
+      ))
     }
-    return null
+    return findings.find((finding) => finding.enforcement === 'absolute-redline') ?? findings[0] ?? null
   }
 
-  private criticalDeleteTarget(argv: string[], workspaceRoot: string): PermissionDecision | null {
+  private criticalDeleteTarget(argv: string[], workspaceRoot: string): CriticalOperationFinding | null {
     const executable = normalizeExecutableName(argv[0] || '')
     if (!['rm', 'rmdir', 'del', 'erase', 'rd', 'remove-item', 'ri'].includes(executable)) return null
     const targets = argv.slice(1).filter((arg) => arg && !arg.startsWith('-') && !arg.startsWith('/q') && !arg.startsWith('/s'))
     for (const target of targets) {
       const normalizedTarget = target.replace(/\\/g, '/').replace(/["']/g, '')
       if (/^[a-z]:\/(?:\*.*)?$/i.test(normalizedTarget)) {
-        return this.decision('critical.delete.system-root', '删除 Windows 磁盘根目录', target, 'system')
+        return this.finding('critical.delete.system-root', '删除 Windows 磁盘根目录', target, 'system', 'absolute-redline', 'hardline')
       }
       if (/^(?:[a-z]:)?\/(?:windows|program files(?: \(x86\))?|programdata|users)(?:\/|\*|$)/i.test(normalizedTarget)) {
-        return this.decision('critical.delete.system-root', '删除 Windows 系统或用户目录', target, 'system')
+        return this.finding('critical.delete.system-root', '删除 Windows 系统或用户目录', target, 'system', 'absolute-redline', 'hardline')
       }
       if (/^(?:~|\$\{?home\}?)(?:\/|$)/i.test(normalizedTarget)) {
-        return this.decision('critical.delete.home', '删除用户主目录', target, 'credential')
+        return this.finding('critical.delete.home', '删除用户主目录', target, 'credential', 'absolute-redline', 'hardline')
       }
       const resolved = path.resolve(workspaceRoot, target)
       const normalize = (value: string) => path.resolve(value).replace(/\\/g, '/').toLowerCase()
       if (normalize(resolved) === normalize(workspaceRoot)) {
-        return this.decision('critical.delete.workspace-root', '删除整个工作区', target, 'workspace')
+        return this.finding('critical.delete.workspace-root', '删除整个工作区', target, 'workspace', 'absolute-redline', 'hardline')
       }
       if (normalize(resolved) === normalize(os.homedir())) {
-        return this.decision('critical.delete.home', '删除用户主目录', target, 'credential')
+        return this.finding('critical.delete.home', '删除用户主目录', target, 'credential', 'absolute-redline', 'hardline')
       }
     }
     return null
   }
 
-  private decision(ruleId: string, reason: string, command: string, kind: PermissionImpact['kind']): PermissionDecision {
+  private finding(
+    ruleId: string,
+    reason: string,
+    pattern: string,
+    kind: PermissionImpact['kind'],
+    enforcement: CriticalEnforcement,
+    permission: PermissionCapability
+  ): CriticalOperationFinding {
     return {
-      action: 'ask',
-      permission: 'hardline',
-      checks: [{ permission: 'hardline', pattern: command.trim(), action: 'ask', reason }],
-      analysisStatus: 'parsed',
-      hardline: true,
-      riskLevel: 4,
-      reason,
       ruleId,
-      normalizedPattern: command.trim(),
-      impacts: [{ kind, target: command.trim() }],
-      snapshots: [],
-      critical: true
+      reason,
+      pattern: pattern.trim(),
+      impact: { kind, target: pattern.trim() },
+      enforcement,
+      permission
     }
   }
 }

@@ -10,7 +10,11 @@ describe('Explore subagent prompt', () => {
     expect(ExploreSubAgent.whenToUse).toContain('more than a few dependent queries')
     expect(ExploreSubAgent.whenNotToUse).toContain('Glob, Grep, or Read')
     expect(ExploreSubAgent.whenNotToUse).toContain('use Reviewer instead')
-    expect(ExploreSubAgent.outputSpec).toBeUndefined()
+    expect(ExploreSubAgent.outputSpec?.fields).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'report', required: true }),
+      expect.objectContaining({ name: 'conclusion', required: true }),
+      expect.objectContaining({ name: 'confidence', required: true }),
+    ]))
   })
 
   it('uses read tools and shell inspection without exposing write tools', () => {
@@ -21,7 +25,7 @@ describe('Explore subagent prompt', () => {
     expect(names).not.toEqual(expect.arrayContaining(['Edit', 'Write', 'NotebookEdit']))
   })
 
-  it('uses the shared tool policy and requests a concise plain-text report', async () => {
+  it('uses the shared tool policy and requires a Markdown submit_result handoff', async () => {
     const prompt = await ExploreSubAgent.systemPromptBuilder({
       workspaceRoot: '/workspace',
       sessionId: 'session-1',
@@ -40,8 +44,7 @@ describe('Explore subagent prompt', () => {
     expect(prompt).toContain('file search specialist')
     expect(prompt).toContain('Critical: Read-only mode')
     expect(prompt).toContain('Batch independent searches and reads')
-    expect(prompt).toContain('Return a concise report directly as normal text')
-    expect(prompt).toContain('do not call submit_result')
-    expect(prompt).not.toContain('# Research Handoff')
+    expect(prompt).toContain('Submit a concise Markdown report through submit_result')
+    expect(prompt).toContain('do not return the final answer as plain text')
   })
 })

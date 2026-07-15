@@ -32,6 +32,27 @@ describe('PermissionDecisionEngine', () => {
     expect(engine.decide({ mode: 'auto', permission: 'network', explicitRule: 'allow' }).action).toBe('allow')
   })
 
+  it('lets the model request approval without letting auto weaken auto mode', () => {
+    expect(engine.decide({
+      mode: 'full-access', permission: 'shell', approvalPreference: 'user'
+    }).action).toBe('ask')
+    expect(engine.decide({
+      mode: 'auto', permission: 'network', approvalPreference: 'auto'
+    }).action).toBe('ask')
+    expect(engine.decide({
+      mode: 'full-access', permission: 'network', approvalPreference: 'auto'
+    }).action).toBe('allow')
+  })
+
+  it('keeps deny and absolute redlines above the model preference', () => {
+    expect(engine.decide({
+      mode: 'full-access', permission: 'shell', explicitRule: 'deny', approvalPreference: 'user'
+    }).action).toBe('deny')
+    expect(engine.decide({
+      mode: 'full-access', permission: 'shell', absoluteRedline: true, approvalPreference: 'auto'
+    }).action).toBe('ask')
+  })
+
   it('does not let an explicit allow bypass Hardline', () => {
     expect(engine.decide({ mode: 'full-access', permission: 'hardline', explicitRule: 'allow' }).action).toBe('ask')
   })

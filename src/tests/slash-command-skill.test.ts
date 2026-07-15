@@ -55,4 +55,13 @@ describe('parseSlashCommand — 技能优先于 plan slug', () => {
       clientAction: { type: 'context:compact', payload: { instructions: '保留迁移决定' } }
     })
   })
+
+  it('胶囊格式 [$compact](compact) 被识别为本地压缩动作', () => {
+    expect(parseSlashCommand('[$compact](compact) 保留迁移决定', skills)).toEqual({
+      isCommand: true,
+      commandName: 'compact',
+      processedMessage: '',
+      clientAction: { type: 'context:compact', payload: { instructions: '保留迁移决定' } }
+    })
+  })
 })

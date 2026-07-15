@@ -112,7 +112,7 @@ describe('SubAgentManager parent abort propagation', { timeout: 15_000 }, () => 
         type: 'function',
         function: {
           name: 'Write',
-          arguments: JSON.stringify({ file_path: 'src/handoff.ts', content: 'export const done = true\n' })
+          arguments: JSON.stringify({ file_path: 'src/handoff.ts', content: 'export const done = true\n', approval: 'auto' })
         }
       }])
       callbacks.onDone('', 'tool_calls')

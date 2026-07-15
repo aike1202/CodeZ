@@ -2,6 +2,8 @@ export type PermissionMode = 'auto' | 'full-access'
 export type PermissionRiskLevel = 0 | 1 | 2 | 3 | 4
 export type PermissionAction = 'allow' | 'ask' | 'deny'
 export type PermissionApprovalScope = 'once' | 'session' | 'workspace'
+export type ToolApprovalPreference = 'auto' | 'user'
+export type PermissionApprovalSource = 'model-requested' | 'runtime-policy' | 'absolute-redline'
 export type PermissionCapability =
   | 'read'
   | 'edit'
@@ -56,6 +58,9 @@ export interface PermissionDecision {
   impacts: PermissionImpact[]
   snapshots: PermissionSnapshot[]
   critical: boolean
+  modelApprovalPreference?: ToolApprovalPreference | null
+  approvalSource?: PermissionApprovalSource
+  absoluteRedline?: boolean
 }
 
 export interface PermissionRequest extends PermissionDecision {

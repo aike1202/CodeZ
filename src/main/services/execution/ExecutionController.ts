@@ -218,6 +218,40 @@ export class ExecutionController {
     return true
   }
 
+  /**
+   * Preserve resumability after stopExecution revoked the attempt before the
+   * SubAgent finished writing its interrupted handoff. This never accepts a
+   * late completion or restores execution authority.
+   */
+  recordInterruptedHandoff(executionId: string, stepId: string, result: StepResult): boolean {
+    if (result.status !== 'interrupted' || !result.handoff?.canResume || !result.attemptId) {
+      return false
+    }
+    const runtime = this.requireRuntime(executionId)
+    const executor = this.requireExecutor(runtime, stepId)
+    if (
+      runtime.activeAttempts.has(executor.executorId) ||
+      executor.attemptId !== result.attemptId ||
+      !executor.subAgentId ||
+      ['completed', 'succeeded', 'taken_over'].includes(executor.status)
+    ) {
+      return false
+    }
+
+    executor.handoff = structuredClone(result.handoff)
+    executor.summary = result.summary || executor.summary
+    executor.error = result.error || executor.error
+    executor.failureReason = result.failureReason || executor.failureReason
+    executor.filesModified = [...new Set([...executor.filesModified, ...result.filesModified])]
+    executor.filesPossiblyModified = [...new Set([
+      ...executor.filesPossiblyModified,
+      ...(result.handoff.filesPossiblyModified || [])
+    ])]
+    executor.lastHeartbeatAt = Date.now()
+    this.commit(runtime, 'updated')
+    return true
+  }
+
   failExecutorBeforeStart(
     executionId: string,
     stepId: string,
@@ -273,6 +307,7 @@ export class ExecutionController {
   setExecutorSubAgentId(executionId: string, executorId: string, subAgentId: string): void {
     const runtime = this.requireRuntime(executionId)
     const executor = this.requireExecutorById(runtime, executorId)
+    if (executor.subAgentId !== subAgentId) executor.handoff = undefined
     executor.subAgentId = subAgentId
     this.commit(runtime, 'updated')
   }

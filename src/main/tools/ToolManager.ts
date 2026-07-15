@@ -30,6 +30,13 @@ import { ListMcpResourcesTool } from './builtin/ListMcpResourcesTool'
 import { ReadMcpResourceTool } from './builtin/ReadMcpResourceTool'
 import { GetMcpPromptTool } from './builtin/GetMcpPromptTool'
 import { McpAuthTool } from './builtin/McpAuthTool'
+import { FollowupTaskTool, SpawnAgentTool } from './builtin/AgentLifecycleTools'
+import {
+  InterruptAgentTool,
+  ListAgentsTool,
+  SendMessageTool,
+  WaitAgentTool
+} from './builtin/AgentMailboxTools'
 
 import type { ToolDefinition } from '../../shared/types/provider'
 import { ToolRegistry } from './runtime/ToolRegistry'
@@ -87,6 +94,12 @@ export class ToolManager {
       new UpdateResumeStateTool(),
       new WebSearchTool(),
       new WebFetchTool(),
+      new SpawnAgentTool(),
+      new FollowupTaskTool(),
+      new SendMessageTool(),
+      new WaitAgentTool(),
+      new ListAgentsTool(),
+      new InterruptAgentTool(),
       new SubAgentRunnerTool(),
       new TaskCreateTool(),
       new TaskGetTool(),

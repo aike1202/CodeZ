@@ -30,6 +30,7 @@ export const IPC_CHANNELS = {
   CHAT_STREAM_END: 'chat:stream:end',
   CHAT_STREAM_ERROR: 'chat:stream:error',
   CHAT_STREAM_STOP: 'chat:stream:stop',
+  CHAT_TOOL_INTERRUPT: 'chat:tool:interrupt',
   CHAT_STREAM_STEER: 'chat:stream:steer',
   CHAT_STREAM_STEER_CONSUMED: 'chat:stream:steer-consumed',
   CHAT_RUNTIME_STATUS: 'chat:runtime:status',

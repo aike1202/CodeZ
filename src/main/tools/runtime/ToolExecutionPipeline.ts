@@ -3,6 +3,7 @@ import { ToolHookRunner } from './ToolHookRunner'
 import { ToolInputValidator } from './ToolInputValidator'
 import { ToolScheduler } from './ToolScheduler'
 import { ToolResultProcessor } from './ToolResultProcessor'
+import { extractToolApproval, TOOL_APPROVAL_PROPERTY } from './ToolApprovalPolicy'
 import { getToolExecutionJournal, type ToolExecutionJournal, type ToolJournalIdentity } from './ToolExecutionJournal'
 import type { EnforcementMode } from './ToolRuntimeFeatureFlags'
 import type {
@@ -148,11 +149,19 @@ export class ToolExecutionPipeline {
         continue
       }
       try {
+        const extracted = extractToolApproval(validation.input, handler.descriptor.approval)
         const [effects, resourceKeys] = await Promise.all([
-          handler.descriptor.planEffects(validation.input, planningContext),
-          handler.descriptor.resourceKeys(validation.input, planningContext)
+          handler.descriptor.planEffects(extracted.businessInput, planningContext),
+          handler.descriptor.resourceKeys(extracted.businessInput, planningContext)
         ])
-        prepared.push({ call: { ...call, name: canonical }, handler, input: validation.input, effects, resourceKeys })
+        prepared.push({
+          call: { ...call, name: canonical },
+          handler,
+          input: extracted.businessInput,
+          approvalPreference: extracted.approvalPreference,
+          effects,
+          resourceKeys
+        })
       } catch (error: any) {
         immediate.set(call.position, {
           call,
@@ -185,10 +194,13 @@ export class ToolExecutionPipeline {
           continue
         }
         if (before.action === 'replace-input') {
+          const replacementInput = item.approvalPreference
+            ? { ...before.input, [TOOL_APPROVAL_PROPERTY]: item.approvalPreference }
+            : before.input
           const validation = this.validator.validate(
             context.catalog,
             item.handler.descriptor.name,
-            JSON.stringify(before.input)
+            JSON.stringify(replacementInput)
           )
           if (!validation.ok) {
             immediate.set(item.call.position, {
@@ -204,11 +216,12 @@ export class ToolExecutionPipeline {
             })
             continue
           }
+          const extracted = extractToolApproval(validation.input, item.handler.descriptor.approval)
           const [effects, resourceKeys] = await Promise.all([
-            item.handler.descriptor.planEffects(validation.input, planningContext),
-            item.handler.descriptor.resourceKeys(validation.input, planningContext)
+            item.handler.descriptor.planEffects(extracted.businessInput, planningContext),
+            item.handler.descriptor.resourceKeys(extracted.businessInput, planningContext)
           ])
-          hookPrepared.push({ ...item, input: validation.input, effects, resourceKeys })
+          hookPrepared.push({ ...item, input: extracted.businessInput, effects, resourceKeys })
           continue
         }
         hookPrepared.push(item)

@@ -140,6 +140,68 @@ describe('SessionStore runtime schema', () => {
     expect(reloaded.get('s1')?.summary).toBe('renderer snapshot')
   })
 
+  it('preserves durable Agent records and mailbox messages across stale renderer saves', async () => {
+    root = await mkdtemp(path.join(os.tmpdir(), 'codez-session-'))
+    const file = path.join(root, 'sessions.json')
+    const store = new SessionStore(file)
+    await store.save({
+      id: 's1', projectId: 'p1', summary: 'x', relativeTime: 'now', messages: []
+    })
+
+    await store.setAgentRecords('s1', [{
+      id: 'agent-1',
+      sessionId: 's1',
+      parentAgentId: '/root',
+      parentPath: '/root',
+      path: '/root/explore_auth',
+      type: 'Explore',
+      taskName: 'explore_auth',
+      description: 'Explore auth',
+      status: 'completed',
+      contextScopeId: 'subagent:agent-1',
+      createdAt: 1,
+      updatedAt: 2,
+      completedAt: 2,
+      runCount: 1,
+      launch: {
+        context: 'Known auth context',
+        permissionScope: { allowBash: true, allowedWriteFiles: [] },
+      },
+      result: {
+        status: 'completed',
+        report: '## Result\n\nDone.',
+        conclusion: 'Done.',
+        toolCallCount: 1,
+        filesExamined: ['src/auth.ts'],
+      },
+    }])
+    await store.setAgentMessages('s1', [{
+      id: 'message-1',
+      sessionId: 's1',
+      type: 'FINAL_ANSWER',
+      author: '/root/explore_auth',
+      recipient: '/root',
+      payload: '## Result\n\nDone.',
+      createdAt: 3,
+    }])
+
+    await store.save({
+      id: 's1', projectId: 'p1', summary: 'renderer update', relativeTime: 'now', messages: []
+    })
+
+    const reloaded = new SessionStore(file)
+    await reloaded.load()
+    expect(reloaded.get('s1')?.agentRuntime).toMatchObject({
+      version: 1,
+      agents: [{
+        id: 'agent-1',
+        launch: { context: 'Known auth context' },
+        result: { report: '## Result\n\nDone.' },
+      }],
+      messages: [{ id: 'message-1', type: 'FINAL_ANSWER' }],
+    })
+  })
+
   it('serializes renderer saves and tool activation patches without cross-field loss', async () => {
     root = await mkdtemp(path.join(os.tmpdir(), 'codez-session-'))
     const file = path.join(root, 'sessions.json')

@@ -5,14 +5,20 @@ import * as os from 'os'
 import * as path from 'path'
 
 export interface SpawnResult {
+  status: 'running' | 'completed' | 'failed' | 'interrupted'
+  command?: string
   exitCode: number | null
   stdout: string
   stderr: string
   timedOut: boolean
+  waitTimedOut: boolean
   background: boolean
+  taskId?: string
   pid?: number
   stdoutFile?: string
   stderrFile?: string
+  startedAt?: number
+  elapsedMs?: number
   truncated: boolean
 }
 
@@ -25,6 +31,8 @@ export interface RunOptions {
   executable?: string
   env?: NodeJS.ProcessEnv
   abortSignal?: AbortSignal
+  sessionId?: string
+  toolCallId?: string
 }
 
 export interface BackgroundTaskEntry {
@@ -33,6 +41,29 @@ export interface BackgroundTaskEntry {
   stderrFile: string
   startedAt: number
   shellType: 'bash' | 'powershell'
+}
+
+export interface CommandTaskEntry {
+  taskId: string
+  pid?: number
+  command: string
+  sessionId?: string
+  startedAt: number
+  completedAt?: number
+  shellType: 'bash' | 'powershell'
+  status: 'running' | 'completed' | 'failed' | 'interrupted'
+  exitCode: number | null
+}
+
+interface ManagedCommandTask extends CommandTaskEntry {
+  process: ChildProcess
+  detached: boolean
+  stdout: string
+  stderr: string
+  abortSignal?: AbortSignal
+  abortProcess?: () => void
+  toolCallIds: Set<string>
+  waiters: Set<() => void>
 }
 
 function terminateProcess(proc: ChildProcess, detached = false): void {
@@ -93,14 +124,180 @@ export function getBackgroundTaskRegistry(): BackgroundTaskRegistry {
   return registryInstance
 }
 
+export class CommandTaskRegistry {
+  private readonly tasks = new Map<string, ManagedCommandTask>()
+  private counter = 0
+
+  add(proc: ChildProcess, opts: RunOptions, detached: boolean): string {
+    this.prune()
+    const taskId = `cmd-${Date.now()}-${this.counter++}`
+    const task: ManagedCommandTask = {
+      taskId,
+      pid: proc.pid,
+      command: opts.command,
+      sessionId: opts.sessionId,
+      startedAt: Date.now(),
+      shellType: opts.shell,
+      status: 'running',
+      exitCode: null,
+      process: proc,
+      detached,
+      stdout: '',
+      stderr: '',
+      abortSignal: opts.abortSignal,
+      toolCallIds: new Set(opts.toolCallId ? [opts.toolCallId] : []),
+      waiters: new Set()
+    }
+    this.tasks.set(taskId, task)
+
+    proc.stdout?.on('data', (data) => { task.stdout += data.toString() })
+    proc.stderr?.on('data', (data) => { task.stderr += data.toString() })
+
+    const finish = (status: CommandTaskEntry['status'], exitCode: number | null) => {
+      if (task.status !== 'running') return
+      task.status = status
+      task.exitCode = exitCode
+      task.completedAt = Date.now()
+      if (task.abortProcess) task.abortSignal?.removeEventListener('abort', task.abortProcess)
+      for (const wake of task.waiters) wake()
+      task.waiters.clear()
+    }
+    proc.on('error', (error) => {
+      task.stderr += `${task.stderr ? '\n' : ''}${error.message}`
+      finish('failed', 1)
+    })
+    proc.on('close', (code) => finish(code === 0 ? 'completed' : 'failed', code))
+
+    task.abortProcess = () => this.interrupt(taskId)
+    opts.abortSignal?.addEventListener('abort', task.abortProcess, { once: true })
+    if (opts.abortSignal?.aborted) task.abortProcess()
+    return taskId
+  }
+
+  get(taskId: string): CommandTaskEntry | undefined {
+    const task = this.tasks.get(taskId)
+    if (!task) return undefined
+    return this.publicEntry(task)
+  }
+
+  list(): CommandTaskEntry[] {
+    return [...this.tasks.values()].map((task) => this.publicEntry(task))
+  }
+
+  bindToolCall(taskId: string, toolCallId?: string): boolean {
+    const task = this.tasks.get(taskId)
+    if (!task) return false
+    if (toolCallId) task.toolCallIds.add(toolCallId)
+    return true
+  }
+
+  interruptByToolCallId(toolCallId: string): SpawnResult | undefined {
+    for (const task of this.tasks.values()) {
+      if (task.toolCallIds.has(toolCallId)) return this.interrupt(task.taskId)
+    }
+    return undefined
+  }
+
+  async wait(taskId: string, timeoutMs: number): Promise<SpawnResult | undefined> {
+    const task = this.tasks.get(taskId)
+    if (!task) return undefined
+    if (task.status === 'running' && timeoutMs > 0) {
+      await new Promise<void>((resolve) => {
+        let settled = false
+        const finishWait = () => {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          task.waiters.delete(finishWait)
+          resolve()
+        }
+        const timer = setTimeout(finishWait, timeoutMs)
+        task.waiters.add(finishWait)
+        if (task.status !== 'running') finishWait()
+      })
+    }
+    return this.result(task)
+  }
+
+  interrupt(taskId: string): SpawnResult | undefined {
+    const task = this.tasks.get(taskId)
+    if (!task) return undefined
+    if (task.status === 'running') {
+      task.status = 'interrupted'
+      task.completedAt = Date.now()
+      if (task.abortProcess) task.abortSignal?.removeEventListener('abort', task.abortProcess)
+      terminateProcess(task.process, task.detached)
+      for (const wake of task.waiters) wake()
+      task.waiters.clear()
+    }
+    return this.result(task)
+  }
+
+  private result(task: ManagedCommandTask): SpawnResult {
+    const out = truncateOutput(task.stdout)
+    const err = truncateOutput(task.stderr)
+    return {
+      status: task.status,
+      command: task.command,
+      exitCode: task.exitCode,
+      stdout: out.text,
+      stderr: err.text,
+      timedOut: false,
+      waitTimedOut: task.status === 'running',
+      background: false,
+      taskId: task.taskId,
+      pid: task.pid,
+      startedAt: task.startedAt,
+      elapsedMs: Math.max((task.completedAt || Date.now()) - task.startedAt, 0),
+      truncated: out.truncated || err.truncated
+    }
+  }
+
+  private publicEntry(task: ManagedCommandTask): CommandTaskEntry {
+    return {
+      taskId: task.taskId,
+      pid: task.pid,
+      command: task.command,
+      sessionId: task.sessionId,
+      startedAt: task.startedAt,
+      completedAt: task.completedAt,
+      shellType: task.shellType,
+      status: task.status,
+      exitCode: task.exitCode
+    }
+  }
+
+  private prune(): void {
+    const expiry = Date.now() - 15 * 60_000
+    for (const [taskId, task] of this.tasks) {
+      if (task.status !== 'running' && (task.completedAt || task.startedAt) < expiry) {
+        this.tasks.delete(taskId)
+      }
+    }
+    if (this.tasks.size < 100) return
+    const completed = [...this.tasks.values()]
+      .filter((task) => task.status !== 'running')
+      .sort((left, right) => (left.completedAt || 0) - (right.completedAt || 0))
+    for (const task of completed.slice(0, this.tasks.size - 99)) this.tasks.delete(task.taskId)
+  }
+}
+
+let commandRegistryInstance: CommandTaskRegistry | null = null
+export function getCommandTaskRegistry(): CommandTaskRegistry {
+  if (!commandRegistryInstance) commandRegistryInstance = new CommandTaskRegistry()
+  return commandRegistryInstance
+}
+
 export class SpawnRunner {
   run(opts: RunOptions): Promise<SpawnResult> {
     if (opts.abortSignal?.aborted) {
       return Promise.resolve({
+        status: 'interrupted',
         exitCode: null,
         stdout: '',
         stderr: 'Execution interrupted before process start.',
         timedOut: false,
+        waitTimedOut: false,
         background: opts.run_in_background === true,
         truncated: false
       })
@@ -116,56 +313,25 @@ export class SpawnRunner {
   }
 
   private runForeground(opts: RunOptions): Promise<SpawnResult> {
-    return new Promise((resolve) => {
-      const { exe, args } = this.buildArgs(opts)
-      const detached = process.platform !== 'win32'
-      const proc = spawn(exe, args, {
-        cwd: opts.cwd,
-        env: opts.env || process.env,
-        windowsHide: true,
-        detached
-      })
-      let stdout = ''
-      let stderr = ''
-      let timedOut = false
-      let timer: NodeJS.Timeout | null = null
-      let settled = false
-
-      proc.stdout?.on('data', (d) => { stdout += d.toString() })
-      proc.stderr?.on('data', (d) => { stderr += d.toString() })
-
-      const abortProcess = () => terminateProcess(proc, detached)
-      const finish = (exitCode: number | null) => {
-        if (settled) return
-        settled = true
-        if (timer) clearTimeout(timer)
-        opts.abortSignal?.removeEventListener('abort', abortProcess)
-        const out = truncateOutput(stdout)
-        const err = truncateOutput(stderr)
-        resolve({
-          exitCode,
-          stdout: out.text,
-          stderr: err.text,
-          timedOut,
-          background: false,
-          pid: proc.pid,
-          truncated: out.truncated || err.truncated
-        })
-      }
-
-      opts.abortSignal?.addEventListener('abort', abortProcess, { once: true })
-      if (opts.abortSignal?.aborted) abortProcess()
-
-      if (opts.timeout && opts.timeout > 0) {
-        timer = setTimeout(() => {
-          timedOut = true
-          terminateProcess(proc, detached)
-        }, opts.timeout)
-      }
-
-      proc.on('error', () => finish(1))
-      proc.on('close', (code) => finish(code))
+    const { exe, args } = this.buildArgs(opts)
+    const detached = process.platform !== 'win32'
+    const proc = spawn(exe, args, {
+      cwd: opts.cwd,
+      env: opts.env || process.env,
+      windowsHide: true,
+      detached
     })
+    const registry = getCommandTaskRegistry()
+    const taskId = registry.add(proc, opts, detached)
+    return registry.wait(taskId, opts.timeout || 0) as Promise<SpawnResult>
+  }
+
+  wait(taskId: string, timeoutMs: number): Promise<SpawnResult | undefined> {
+    return getCommandTaskRegistry().wait(taskId, timeoutMs)
+  }
+
+  interrupt(taskId: string): SpawnResult | undefined {
+    return getCommandTaskRegistry().interrupt(taskId)
   }
 
   private runBackground(opts: RunOptions): Promise<SpawnResult> {
@@ -189,10 +355,12 @@ export class SpawnRunner {
     if (typeof pid !== 'number') {
       // spawn 失败（极少见，例如可执行文件不存在于 detached 路径）——不留无 pid 的后台登记
       return Promise.resolve({
+        status: 'failed',
         exitCode: 1,
         stdout: '',
         stderr: 'Failed to spawn background process (no pid).',
         timedOut: false,
+        waitTimedOut: false,
         background: true,
         truncated: false
       })
@@ -208,10 +376,12 @@ export class SpawnRunner {
     try { proc.unref() } catch {}
 
     return Promise.resolve({
+      status: 'running',
       exitCode: null,
       stdout: '',
       stderr: '',
       timedOut: false,
+      waitTimedOut: false,
       background: true,
       pid,
       stdoutFile,

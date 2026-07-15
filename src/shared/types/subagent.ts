@@ -88,3 +88,75 @@ export interface SubAgentHandoff {
   workspaceMayHaveUntrackedChanges: boolean
   canResume: boolean
 }
+
+export type AgentMessageType = 'NEW_TASK' | 'MESSAGE' | 'FINAL_ANSWER'
+export type AgentRuntimeStatus = 'queued' | 'running' | 'completed' | 'failed' | 'interrupted'
+
+export interface AgentResultSnapshot {
+  status: Exclude<AgentRuntimeStatus, 'queued' | 'running'>
+  report: string
+  conclusion?: string
+  qualitySummary?: {
+    coverage: number
+    confidence: string
+    unresolvedCount: number
+    filesExaminedCount: number
+    warning: string | null
+  }
+  toolCallCount: number
+  filesExamined: string[]
+  handoff?: SubAgentHandoff
+}
+
+/** Durable identity and latest result for one addressable SubAgent thread. */
+export interface AgentRecord {
+  id: string
+  sessionId: string
+  parentAgentId: string
+  parentPath: string
+  path: string
+  type: string
+  taskName: string
+  description: string
+  status: AgentRuntimeStatus
+  contextScopeId: `subagent:${string}`
+  createdAt: number
+  updatedAt: number
+  startedAt?: number
+  completedAt?: number
+  runCount: number
+  launch?: AgentLaunchSnapshot
+  result?: AgentResultSnapshot
+}
+
+/** Persisted mailbox envelope. Payload is Markdown for model-facing messages. */
+export interface AgentMailboxMessage {
+  id: string
+  sessionId: string
+  type: AgentMessageType
+  author: string
+  recipient: string
+  payload: string
+  createdAt: number
+  readAt?: number
+}
+
+/** Spawn-time constraints retained for durable follow-up turns. */
+export interface AgentLaunchSnapshot {
+  context?: string
+  expectations?: { questions: string[]; outOfScope?: string[] }
+  scope?: { directories?: string[]; excludeGlobs?: string[] }
+  depth?: 'quick' | 'normal' | 'exhaustive'
+  permissionScope?: {
+    allowedWriteFiles?: string[]
+    allowBash?: boolean
+    shellPolicy?: 'verification'
+    allowAllWritesInWorkspace?: boolean
+  }
+}
+
+export interface AgentRuntimeSnapshot {
+  version: 1
+  agents: AgentRecord[]
+  messages: AgentMailboxMessage[]
+}

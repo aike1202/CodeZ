@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto'
 import type { Tool } from '../Tool'
 import { fingerprint } from './canonicalJson'
 import { LegacyToolAdapter } from './LegacyToolAdapter'
+import { decorateToolHandlerApproval } from './ToolApprovalPolicy'
 import type {
   ToolAvailabilityContext,
   ToolCatalogSnapshot,
@@ -15,7 +16,8 @@ export class ToolRegistry {
   private readonly aliases = new Map<string, string>()
 
   register(handler: ToolHandler): void {
-    const { name, aliases } = handler.descriptor
+    const decoratedHandler = decorateToolHandlerApproval(handler)
+    const { name, aliases } = decoratedHandler.descriptor
     if (!VALID_TOOL_NAME.test(name)) throw new Error(`Invalid tool name: ${name}`)
     if (this.handlers.has(name) || this.aliases.has(name)) {
       throw new Error(`Tool name already registered: ${name}`)
@@ -26,7 +28,7 @@ export class ToolRegistry {
         throw new Error(`Tool alias already registered: ${alias}`)
       }
     }
-    this.handlers.set(name, handler)
+    this.handlers.set(name, decoratedHandler)
     for (const alias of aliases) this.aliases.set(alias, name)
   }
 
@@ -87,4 +89,3 @@ export class ToolRegistry {
     }
   }
 }
-

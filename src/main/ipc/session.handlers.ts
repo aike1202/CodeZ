@@ -8,6 +8,7 @@ import { getLargeToolResultStore } from '../tools/runtime/LargeToolResultStore'
 import { getToolExposureState } from '../tools/runtime/ToolExposurePlanner'
 import { getWorkspaceService } from './workspace.handlers'
 import { getMcpContentStore } from '../services/mcp'
+import { getAgentCollaborationRuntime } from '../services/agents'
 
 let sessionStore: SessionStore | null = null
 let loadPromise: Promise<void> | null = null
@@ -70,6 +71,7 @@ export function registerSessionIpc(): void {
         ])
       }
       getToolExposureState().clearSession(sessionId)
+      getAgentCollaborationRuntime().removeSession(sessionId)
     }
     getReadFingerprintStore().clear(sessionId)
   })

@@ -58,6 +58,11 @@ export class McpToolHandler implements ToolHandler<Record<string, unknown>> {
       searchHint: `${serverName} ${tool.name} ${tool.description || ''}`,
       inputSchema: tool.inputSchema as Record<string, unknown>,
       outputSchema: tool.outputSchema as Record<string, unknown> | undefined,
+      approval: {
+        modelPreference: annotations?.readOnlyHint === true && annotations?.destructiveHint !== true
+          ? 'not-applicable'
+          : 'required'
+      },
       availability: {
         enabled: () => true,
         roles: '*',

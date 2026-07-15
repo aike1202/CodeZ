@@ -136,6 +136,7 @@ export default function ExecutionLog({
       <button
         type="button"
         className="timeline-header-btn"
+        aria-expanded={expanded}
         onClick={() => setExpanded((val) => !val)}
       >
         <div className="timeline-header-content">
@@ -170,7 +171,7 @@ export default function ExecutionLog({
         <span className="timeline-header-arrow-text">{expanded ? '收起' : '展开'}</span>
       </button>
 
-      <div className={`timeline-list-wrapper ${expanded ? 'timeline-list-wrapper--expanded' : ''}`}>
+      <div className="timeline-list-wrapper" hidden={!expanded}>
         <Stack className="timeline-list">
           {displayItems.map((item, idx) => {
             if (item.type === 'parallel-batch') {

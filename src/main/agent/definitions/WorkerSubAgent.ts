@@ -49,8 +49,26 @@ export const WorkerSubAgent: SubAgentDefinition = {
   getTools: getExecutorTools,
 
   outputSpec: {
-    description: 'Report the outcome of executing this plan step.',
+    description: 'Submit a Markdown implementation handoff plus the machine-readable execution outcome.',
     fields: [
+      {
+        name: 'report',
+        type: 'string',
+        description: 'Markdown handoff describing changes, verification performed, blockers, and relevant file paths.',
+        required: true,
+      },
+      {
+        name: 'conclusion',
+        type: 'string',
+        description: 'One concise sentence stating whether the assigned step is complete.',
+        required: true,
+      },
+      {
+        name: 'confidence',
+        type: 'string',
+        description: 'Exactly "high", "medium", or "low".',
+        required: true,
+      },
       {
         name: 'status',
         type: 'string',
@@ -116,7 +134,7 @@ export const WorkerSubAgent: SubAgentDefinition = {
       '1. Read the step description and the files it involves.',
       '2. Implement the change with Edit / Write.',
       '3. If a verification command is appropriate (and permitted), run it via Bash/PowerShell.',
-      '4. Call submit_result reporting status, a summary, and the files you modified.',
+      '4. Call submit_result with a Markdown report, conclusion, confidence, status, summary, and the files you modified.',
       '',
       ...(ctx.context
         ? [

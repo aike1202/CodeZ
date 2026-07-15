@@ -34,8 +34,26 @@ export const ExecutionPlannerSubAgent: SubAgentDefinition = {
 
   outputSpec: {
     description:
-      'Submit the execution grouping: waves of parallelizable step IDs plus an isolation recommendation.',
+      'Submit a Markdown execution-plan handoff plus the machine-readable grouping.',
     fields: [
+      {
+        name: 'report',
+        type: 'string',
+        description: 'Markdown handoff summarizing wave order, dependencies, file collision risks, and isolation reasoning.',
+        required: true,
+      },
+      {
+        name: 'conclusion',
+        type: 'string',
+        description: 'One concise sentence stating the recommended grouping and isolation mode.',
+        required: true,
+      },
+      {
+        name: 'confidence',
+        type: 'string',
+        description: 'Exactly "high", "medium", or "low".',
+        required: true,
+      },
       {
         name: 'waves',
         type: 'string[]',
@@ -97,6 +115,9 @@ export const ExecutionPlannerSubAgent: SubAgentDefinition = {
       '',
       '## Output Format',
       'Call submit_result with:',
+      '- **report** (string): a concise Markdown handoff covering wave order, dependencies, collision risks, and isolation reasoning.',
+      '- **conclusion** (string): one sentence stating the recommendation.',
+      '- **confidence** (string): "high", "medium", or "low".',
       '- **waves** (string[]): each entry a JSON string, e.g. \'{"index":0,"stepIds":["p0"]}\'.',
       '  Waves must be ordered by index starting at 0. Every non-completed step must appear in exactly one wave.',
       '- **isolation** (string): "shared" or "worktree".',

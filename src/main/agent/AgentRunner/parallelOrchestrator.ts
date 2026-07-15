@@ -806,7 +806,7 @@ async function spawnWorker(
         permissionScope:
           isolation === 'worktree'
             ? { allowAllWritesInWorkspace: true, allowBash: true }
-            : { allowedWriteFiles: step.files ?? [], allowBash: false },
+            : { allowedWriteFiles: step.files ?? [], allowBash: true },
         transactionId: isolation === 'shared' ? config.transactionId : undefined,
         editTransactionService: isolation === 'shared' ? config.editTransactionService : undefined,
         apiConfig: config.apiConfig,
@@ -828,7 +828,15 @@ async function spawnWorker(
       handoff: result.handoff,
       worktreePath: worktree?.path,
     }
-    executionController.finishExecutor(executionId, stepId, stepResult)
+    const accepted = executionController.finishExecutor(executionId, stepId, stepResult)
+    if (!accepted) {
+      const handoffRecorded = executionController.recordInterruptedHandoff(executionId, stepId, stepResult)
+      if (!handoffRecorded) {
+        stepResult.status = 'interrupted'
+        stepResult.failureReason = 'parent_interrupted'
+        stepResult.error = 'Executor result arrived after its lease was revoked and was ignored.'
+      }
+    }
 
     callbacks.onSubAgentEnd?.(subAgentId, {
       status: output.status,

@@ -465,6 +465,158 @@
   text-overflow: ellipsis;
 }
 
+.prompt-permission-selector {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.prompt-permission-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px 0 9px;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+}
+
+.prompt-permission-trigger:hover,
+.prompt-permission-trigger[aria-expanded='true'] {
+  color: var(--text-main);
+  background: var(--bg-hover);
+}
+
+.prompt-permission-trigger:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-color) 30%, transparent);
+}
+
+.prompt-permission-trigger:disabled {
+  color: color-mix(in srgb, var(--text-muted) 55%, transparent);
+  cursor: not-allowed;
+  background: transparent;
+}
+
+.prompt-permission-trigger svg {
+  flex: 0 0 auto;
+  transition: transform 140ms ease;
+}
+
+.prompt-permission-trigger[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+
+.prompt-permission-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: -44px;
+  z-index: 70;
+  width: min(360px, calc(100vw - 32px));
+  padding: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.18), 0 3px 10px rgba(0, 0, 0, 0.08);
+  outline: none;
+  transform-origin: bottom left;
+  animation: prompt-permission-menu-in 120ms ease-out;
+}
+
+.prompt-permission-option {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 20px;
+  align-items: start;
+  gap: 10px;
+  width: 100%;
+  min-height: 54px;
+  padding: 8px 9px;
+  color: var(--text-main);
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.prompt-permission-option.is-active {
+  background: color-mix(in srgb, var(--bg-hover) 72%, transparent);
+}
+
+.prompt-permission-option.is-selected {
+  background: color-mix(in srgb, var(--bg-hover) 92%, var(--bg-panel));
+}
+
+.prompt-permission-option.is-selected.is-active {
+  background: color-mix(in srgb, var(--bg-hover) 100%, var(--bg-panel));
+}
+
+.prompt-permission-option-icon {
+  margin-top: 2px;
+  color: color-mix(in srgb, var(--text-main) 82%, var(--text-muted));
+}
+
+.prompt-permission-option-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.prompt-permission-option-title {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.prompt-permission-option-description {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 17px;
+  white-space: normal;
+}
+
+.prompt-permission-option-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  min-height: 20px;
+  margin-top: 1px;
+  color: var(--text-main);
+}
+
+@keyframes prompt-permission-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prompt-permission-menu,
+  .prompt-permission-trigger,
+  .prompt-permission-trigger svg,
+  .prompt-permission-option {
+    animation: none;
+    transition: none;
+  }
+}
+
 .prompt-dropdown-card {
   position: absolute;
   right: 0;

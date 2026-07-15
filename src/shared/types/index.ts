@@ -47,6 +47,8 @@ export type {
   PermissionRiskLevel,
   PermissionAction,
   PermissionApprovalScope,
+  ToolApprovalPreference,
+  PermissionApprovalSource,
   PermissionCapability,
   PermissionAnalysisStatus,
   PermissionImpact,
@@ -93,6 +95,15 @@ export type {
 } from './context'
 
 export type { ToolBatchMeta } from './toolExecution'
+
+export type {
+  AgentMailboxMessage,
+  AgentMessageType,
+  AgentRecord,
+  AgentResultSnapshot,
+  AgentRuntimeSnapshot,
+  AgentRuntimeStatus
+} from './subagent'
 
 export type {
   ImageMimeType,

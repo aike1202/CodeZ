@@ -91,6 +91,68 @@ describe('ExecutionController', () => {
     expect(controller.getExecution(execution.executionId)?.executors[0].status).toBe('stopped')
   })
 
+  it('records only a resumable interrupted handoff from the last revoked attempt', () => {
+    const execution = controller.createExecution({
+      workspaceRoot: root,
+      sessionId: 's1',
+      source: 'task:s1',
+      waves: [{ index: 0, stepIds: ['t1'] }],
+      isolation: 'shared',
+      rationale: ''
+    })
+    const attempt = controller.startExecutor(execution.executionId, 't1')
+    controller.stopExecution(execution.executionId)
+
+    const recorded = controller.recordInterruptedHandoff(execution.executionId, 't1', {
+      stepId: 't1',
+      executorId: attempt.snapshot.executorId,
+      attemptId: attempt.token.attemptId,
+      status: 'interrupted',
+      summary: 'paused safely',
+      filesModified: ['src/a.ts'],
+      failureReason: 'parent_interrupted',
+      handoff: {
+        reasonCode: 'parent_interrupted',
+        reason: 'Stopped by parent.',
+        originalTask: 'Implement t1',
+        filesExamined: ['src/a.ts'],
+        filesModified: ['src/a.ts'],
+        filesPossiblyModified: [],
+        recentTools: [],
+        workspaceMayHaveUntrackedChanges: false,
+        canResume: true
+      }
+    })
+
+    expect(recorded).toBe(true)
+    expect(controller.getExecution(execution.executionId)?.executors[0]).toMatchObject({
+      status: 'stopped',
+      summary: 'paused safely',
+      failureReason: 'parent_interrupted',
+      handoff: { canResume: true, reasonCode: 'parent_interrupted' }
+    })
+
+    expect(controller.recordInterruptedHandoff(execution.executionId, 't1', {
+      stepId: 't1',
+      executorId: attempt.snapshot.executorId,
+      attemptId: 'older-attempt',
+      status: 'interrupted',
+      summary: 'stale',
+      filesModified: [],
+      handoff: {
+        reasonCode: 'parent_interrupted',
+        reason: 'stale',
+        originalTask: 'Implement t1',
+        filesExamined: [],
+        filesModified: [],
+        filesPossiblyModified: [],
+        recentTools: [],
+        workspaceMayHaveUntrackedChanges: false,
+        canResume: true
+      }
+    })).toBe(false)
+  })
+
   it('does not reconcile a late result over a stopped or newer Executor attempt', () => {
     const execution = controller.createExecution({
       workspaceRoot: root,

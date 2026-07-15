@@ -24,6 +24,7 @@ function createHandler(execute = vi.fn(async (input: Record<string, unknown>) =>
         required: ['path'],
         additionalProperties: false
       },
+      approval: { modelPreference: 'not-applicable' },
       availability: { enabled: () => true, roles: '*', exposure: 'core' },
       behavior: {
         readOnly: () => true,
@@ -40,6 +41,17 @@ function createHandler(execute = vi.fn(async (input: Record<string, unknown>) =>
     },
     execute
   }
+}
+
+function createEffectfulHandler(execute = vi.fn(async (input: Record<string, unknown>) => ({
+  status: 'success' as const,
+  data: input,
+  modelContent: JSON.stringify(input)
+}))): ToolHandler<Record<string, unknown>> {
+  const handler = createHandler(execute)
+  handler.descriptor.approval = { modelPreference: 'required' }
+  handler.descriptor.behavior.readOnly = () => false
+  return handler
 }
 
 function setup(handler: ToolHandler, hooks: readonly ToolRuntimeHook[] = []) {
@@ -66,6 +78,32 @@ function setup(handler: ToolHandler, hooks: readonly ToolRuntimeHook[] = []) {
 }
 
 describe('ToolExecutionPipeline', () => {
+  it('requires and strips model approval metadata before planning and execution', async () => {
+    const execute = vi.fn(async (input: Record<string, unknown>) => ({
+      status: 'success' as const,
+      data: input,
+      modelContent: JSON.stringify(input)
+    }))
+    const handler = createEffectfulHandler(execute)
+    const { pipeline, context, authorize } = setup(handler)
+    const [missing] = await pipeline.executeBatch([
+      { callId: 'missing', position: 0, name: 'Example', rawArguments: '{"path":"a.txt"}' }
+    ], context)
+    expect(missing.result.status).toBe('error')
+    expect(authorize).not.toHaveBeenCalled()
+
+    const [allowed] = await pipeline.executeBatch([
+      { callId: 'allowed', position: 0, name: 'Example', rawArguments: '{"path":"a.txt","approval":"auto"}' }
+    ], context)
+    expect(allowed.result.status).toBe('success')
+    expect(allowed.input).toEqual({ path: 'a.txt' })
+    expect(authorize).toHaveBeenCalledWith(expect.objectContaining({
+      approvalPreference: 'auto',
+      input: { path: 'a.txt' }
+    }))
+    expect(execute).toHaveBeenCalledWith({ path: 'a.txt' }, expect.any(Object))
+  })
+
   it('validates before authorization and does not execute invalid input', async () => {
     const handler = createHandler()
     const { pipeline, context, authorize } = setup(handler)

@@ -2,6 +2,21 @@ import type { AgentState, ToolCallState, ReasoningTimelineItem } from '../../../
 import { parseArgs } from '../../../../utils/parseArgs'
 import type { CommandItem, EditItemWithStatus } from './types'
 
+export function getFileDisplayName(filePath: string): string {
+  const normalizedPath = filePath.replace(/[\\/]+$/u, '')
+  return normalizedPath.split(/[/\\]/).pop() || normalizedPath || '文件'
+}
+
+export function formatFileDisplayTarget(
+  filePath: string,
+  startLine?: number,
+  endLine?: number
+): string {
+  const fileName = getFileDisplayName(filePath)
+  if (typeof startLine !== 'number') return fileName
+  return `${fileName} #L${startLine}${typeof endLine === 'number' ? `-${endLine}` : '-'}`
+}
+
 export function getToolTarget(log: ToolCallState): string {
   const args = parseArgs(log.args)
 
@@ -103,6 +118,16 @@ export function formatReasoningDuration(item: ReasoningTimelineItem): string {
   const duration = Math.max(end - item.startedAt, 1)
   if (duration < 1000) return `${duration}ms`
   return `${Math.round(duration / 1000)}s`
+}
+
+export function formatRunningDuration(durationMs: number): string {
+  const totalSeconds = Math.max(Math.floor(durationMs / 1000), 0)
+  if (totalSeconds < 1) return '<1s'
+  if (totalSeconds < 60) return `${totalSeconds}s`
+
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${minutes}m ${seconds.toString().padStart(2, '0')}s`
 }
 
 export function normalizeCommandTitle(title: string): string {

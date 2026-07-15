@@ -13,7 +13,7 @@ export const SubAgentsModule: PromptModule = {
     const hasTool = (
       ctx.availableTools === undefined && ctx.deferredTools === undefined
     ) || exposedTools.some(tool =>
-      tool.name === 'SubAgentRunner' || tool.name === 'DelegateTasks')
+      tool.name === 'SubAgentRunner' || tool.name === 'DelegateTasks' || tool.name === 'spawn_agent')
     return hasTool && SubAgentManager.listEnabledDefinitions().length > 0
   },
   build: () => {
@@ -47,6 +47,8 @@ export const SubAgentsModule: PromptModule = {
       lines.push('If a Reviewer is interrupted or fails for infrastructure reasons, resume that same subagent ID in the same mode. Infrastructure retries do not consume the closure review and must not create a fresh Reviewer.')
       lines.push('Skip this gate when no behavioral project files changed, such as pure question answering or read-only investigation.')
     }
+    lines.push('For background delegation, spawn_agent returns immediately with an agent ID and path. Use list_agents to inspect status, send_message for additional context, and followup_task only after that Agent is idle.')
+    lines.push('When a delegated result is required for your answer or next action, call wait_agent and consume its FINAL_ANSWER before finalizing. Do not treat a successful spawn_agent response as completion of the delegated task.')
     lines.push('For interrupted or failed runs, use the returned handoff and resume_subagent_id when continuity is useful. Do not repeat confirmed completed work.')
     lines.push('</subagent_guidance>')
     return lines.join('\n')

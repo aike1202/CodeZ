@@ -4,7 +4,7 @@ import { ToolRegistry } from '../main/tools/runtime/ToolRegistry'
 import type { ToolHandler } from '../main/tools/runtime/types'
 
 describe('LegacyToolExecutionPipeline', () => {
-  it('keeps an independent parse/authorize/execute fallback without V2 validation', async () => {
+  it('uses canonical validation before the fallback authorizes or executes', async () => {
     const execute = vi.fn(async (input: Record<string, unknown>) => ({
       status: 'success' as const,
       modelContent: JSON.stringify(input)
@@ -15,6 +15,7 @@ describe('LegacyToolExecutionPipeline', () => {
         summary: 'legacy', description: 'legacy', inputSchema: {
           type: 'object', properties: { required: { type: 'string' } }, required: ['required']
         },
+        approval: { modelPreference: 'not-applicable' },
         availability: { enabled: () => true, roles: '*', exposure: 'core' },
         behavior: { readOnly: () => true, destructive: () => false, concurrency: 'safe', interrupt: 'cancel', maxResultChars: 1000 },
         planEffects: async () => ({ effects: [], analysisStatus: 'parsed' }),
@@ -32,7 +33,8 @@ describe('LegacyToolExecutionPipeline', () => {
       authorize: async () => ({ allowed: true, requestId: 'p1' }),
       createToolContext: () => ({ workspaceRoot: 'C:\\workspace' })
     })
-    expect(result.result.status).toBe('success')
-    expect(execute).toHaveBeenCalledWith({}, expect.any(Object))
+    expect(result.result.status).toBe('error')
+    expect(result.result.status === 'error' && result.result.error.code).toBe('TOOL_INPUT_INVALID')
+    expect(execute).not.toHaveBeenCalled()
   })
 })

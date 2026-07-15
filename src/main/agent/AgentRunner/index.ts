@@ -34,7 +34,9 @@ import { ChatSmartApprovalClient } from '../../services/permission/ChatSmartAppr
 import { ContextBudgetService } from '../../services/context/ContextBudgetService'
 import { getReadFingerprintStore } from '../../tools/ReadFingerprintStore'
 import type { ChatSteerInput } from '../../../shared/types/queuedPrompt'
+import type { ToolApprovalPreference } from '../../../shared/types/permission'
 import { resolveEffectiveReasoningBudgetTokens } from '../../services/chat/utils'
+import { getAgentCollaborationRuntime } from '../../services/agents'
 
 export enum NormalizedStopReason {
   Truncated = 'Truncated',
@@ -78,7 +80,8 @@ export async function authorizeToolCall(
   onPermissionRequest?: AgentRunnerCallbacks['onPermissionRequest'],
   smartApprovalClient?: SmartApprovalClient | null,
   sessionId?: string,
-  effectPlan?: ToolEffectPlan
+  effectPlan?: ToolEffectPlan,
+  approvalPreference: ToolApprovalPreference | null = null
 ): Promise<ToolAuthorization> {
   return authorizePermissionToolCall(
     toolName,
@@ -88,7 +91,8 @@ export async function authorizeToolCall(
     smartApprovalClient,
     sessionId,
     undefined,
-    effectPlan
+    effectPlan,
+    approvalPreference
   )
 }
 
@@ -172,6 +176,7 @@ export class AgentRunner {
     this.acceptingSteers = true
     const runtimeTurn = config.runtimeTurn
     const runtimeCoordinator = config.runtimeCoordinator
+    const sessionId = runtimeTurn?.sessionId || config.sessionId || `session_${Date.now()}`
     const flushPendingSteers = async (): Promise<number> => {
       const pending = this.pendingSteers.splice(0)
       for (const input of pending) {
@@ -179,6 +184,13 @@ export class AgentRunner {
         callbacks.onSteerConsumed?.(input)
       }
       return pending.length
+    }
+    const flushAgentMailbox = async (): Promise<number> => {
+      const messages = await getAgentCollaborationRuntime().consumeForAgent(sessionId, '/root')
+      for (const message of messages) {
+        await runtimeCoordinator!.recordUserContinuation(runtimeTurn!, message)
+      }
+      return messages.length
     }
     let runtimeClosed = false
     let overflowRetried = false
@@ -206,8 +218,6 @@ export class AgentRunner {
     const taskStore = TaskStore.getInstance()
     const configuredTools: ToolDefinition[] = config.tools || this.toolManager.getToolDefinitions()
     let availableTools: ToolDefinition[] = configuredTools
-
-    const sessionId = runtimeTurn?.sessionId || config.sessionId || `session_${Date.now()}`
 
     log.info('[AgentRunner] run start', { sessionId, model: config.model, loopMode: 'terminal-state', msgCount: allMessages.length })
 
@@ -307,6 +317,7 @@ export class AgentRunner {
         loopCount++
 
         await flushPendingSteers()
+        await flushAgentMailbox()
 
         log.info('[AgentRunner] loop start', { loopCount, msgCount: allMessages.length })
 
@@ -668,7 +679,8 @@ export class AgentRunner {
                   callbacks.onPermissionRequest,
                   smartApprovalClient,
                   sessionId,
-                  runtimeFlags.effectPolicy === 'enforce' ? prepared.effects : undefined
+                  runtimeFlags.effectPolicy === 'enforce' ? prepared.effects : undefined,
+                  prepared.approvalPreference
                 )
                 return authorization.allowed
                   ? {
@@ -779,13 +791,15 @@ export class AgentRunner {
               if (['Edit', 'Write', 'NotebookEdit'].includes(tr.name)) {
                 filesModifiedInSession = true
               } else if (tr.name === 'Bash' || tr.name === 'PowerShell') {
-                const cmdStr = String(item.input?.command || item.input?.commandLine || '')
+                let cmdData: any = item.result.data
+                if (typeof cmdData === 'string') {
+                  try { cmdData = JSON.parse(cmdData) } catch {}
+                }
+                const cmdStr = String(
+                  item.input?.command || item.input?.commandLine || cmdData?.command || ''
+                )
                 if (/(test|typecheck|build|lint)/.test(cmdStr)) {
-                  let cmdData: any = item.result.data
-                  if (typeof cmdData === 'string') {
-                    try { cmdData = JSON.parse(cmdData) } catch {}
-                  }
-                  if (cmdData && typeof cmdData === 'object') {
+                  if (cmdData && typeof cmdData === 'object' && cmdData.status !== 'running') {
                     lastVerificationResult = {
                       success: cmdData.exitCode === 0 && !cmdData.timedOut,
                       command: cmdStr
@@ -819,7 +833,8 @@ export class AgentRunner {
 
         const isVerificationFailure = filesModifiedInSession && lastVerificationResult && !lastVerificationResult.success;
         
-        if (await flushPendingSteers() > 0) {
+        const lateContinuations = await flushPendingSteers() + await flushAgentMailbox()
+        if (lateContinuations > 0) {
           consecutiveIdleTurns = 0
           currentState = AgentState.Running
           continue

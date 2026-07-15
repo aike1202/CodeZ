@@ -103,7 +103,10 @@ describe('MCP provider payloads', () => {
             description: expect.stringContaining('Review one issue'),
             schema: expect.objectContaining({
               type: 'object',
-              required: ['issue']
+              required: expect.arrayContaining(['issue', 'approval']),
+              properties: expect.objectContaining({
+                approval: expect.objectContaining({ enum: ['auto', 'user'] })
+              })
             })
           }
         ]))

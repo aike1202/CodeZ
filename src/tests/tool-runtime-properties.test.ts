@@ -27,7 +27,7 @@ function prepared(position: number, keys: string[]): PreparedToolCall {
   return {
     call: { callId: `c${position}`, position, name: `T${position}`, rawArguments: '{}' },
     handler: { descriptor: { name: `T${position}`, behavior: { concurrency: 'resource-locked' } } } as any,
-    input: {}, effects: { effects: [], analysisStatus: 'parsed' }, resourceKeys: keys
+    input: {}, approvalPreference: null, effects: { effects: [], analysisStatus: 'parsed' }, resourceKeys: keys
   }
 }
 
@@ -71,6 +71,7 @@ describe('Tool Runtime properties', () => {
       descriptor: {
         name: 'DeniedExternal', aliases: [], version: '1', source: 'mcp', sourceId: 'mcp:test',
         summary: 'denied', description: 'denied', inputSchema: { type: 'object', additionalProperties: false },
+        approval: { modelPreference: 'not-applicable' },
         availability: { enabled: () => true, roles: '*', exposure: 'core' },
         behavior: { readOnly: () => false, destructive: () => true, concurrency: 'resource-locked', interrupt: 'cancel', maxResultChars: 1000 },
         planEffects: async () => ({ effects: [{ kind: 'external-effect', target: 'test' }], analysisStatus: 'parsed' }),

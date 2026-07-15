@@ -5,6 +5,7 @@ import { app } from 'electron'
 
 import { SessionData } from '../../shared/types'
 import type { SessionRuntimeRef } from '../../shared/types/context'
+import type { AgentMailboxMessage, AgentRecord } from '../../shared/types/subagent'
 import { atomicWriteJson } from './context/atomicFile'
 
 const SESSIONS_FILE = 'sessions.json'
@@ -64,7 +65,8 @@ export class SessionStore {
         this.cache[idx] = {
           ...session,
           runtime: current.runtime,
-          toolRuntime: current.toolRuntime
+          toolRuntime: current.toolRuntime,
+          agentRuntime: current.agentRuntime
         }
       } else {
         this.cache.unshift(session)
@@ -117,6 +119,38 @@ export class SessionStore {
             ...session.toolRuntime?.activatedDeferredTools,
             [contextScopeId]: [...new Set([...existing, ...toolNames])]
           }
+        }
+      }
+    })
+  }
+
+  async setAgentRecords(sessionId: string, agents: AgentRecord[]): Promise<void> {
+    return this.enqueueMutation(async () => {
+      const idx = this.cache.findIndex((session) => session.id === sessionId)
+      if (idx < 0) throw new Error(`Session not found: ${sessionId}`)
+      const session = this.cache[idx]
+      this.cache[idx] = {
+        ...session,
+        agentRuntime: {
+          version: 1,
+          agents: agents.map((agent) => ({ ...agent })),
+          messages: session.agentRuntime?.messages || []
+        }
+      }
+    })
+  }
+
+  async setAgentMessages(sessionId: string, messages: AgentMailboxMessage[]): Promise<void> {
+    return this.enqueueMutation(async () => {
+      const idx = this.cache.findIndex((session) => session.id === sessionId)
+      if (idx < 0) throw new Error(`Session not found: ${sessionId}`)
+      const session = this.cache[idx]
+      this.cache[idx] = {
+        ...session,
+        agentRuntime: {
+          version: 1,
+          agents: session.agentRuntime?.agents || [],
+          messages: messages.map((message) => ({ ...message }))
         }
       }
     })

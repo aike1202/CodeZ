@@ -1,6 +1,7 @@
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import ExecutionLog from '../renderer/src/components/chat/ExecutionLog'
 import { LogItemRow } from '../renderer/src/components/chat/ExecutionLog/components/LogItemRow'
 import {
   buildSummaryText,
@@ -9,7 +10,57 @@ import {
 import { applyCompactionTimelineUpdate } from '../renderer/src/stores/chatStore/slices/messageSlice'
 import type { ChatMessage, CompactionTimelineItem } from '../renderer/src/stores/chatStore'
 
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('chat compaction execution timeline', () => {
+  it('removes a collapsed execution list from layout and accessibility navigation', () => {
+    const html = renderToStaticMarkup(React.createElement(ExecutionLog, {
+      timeline: [{
+        id: 'reasoning-complete',
+        type: 'reasoning',
+        content: '完成分析',
+        status: 'success',
+        startedAt: 1_000,
+        updatedAt: 2_000,
+        completedAt: 2_000,
+        sequence: 0
+      }]
+    }))
+
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).toContain('class="timeline-list-wrapper" hidden=""')
+    expect(html).toContain('展开')
+  })
+
+  it('renders the running indicator before the active log and its elapsed time after it', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(47_000)
+
+    const html = renderToStaticMarkup(React.createElement(LogItemRow, {
+      item: {
+        id: 'reasoning-running',
+        type: 'reasoning',
+        timestamp: 1_000,
+        status: 'running',
+        verb: 'Thought',
+        target: '思考中...'
+      },
+      isLast: true,
+      isItemExpanded: false,
+      hasItemDetail: false,
+      toggleItemExpand: () => undefined
+    }))
+
+    expect(html).toContain('timeline-icon-running')
+    expect(html).toContain('思考')
+    expect(html).toContain('用时 46s')
+    expect(html).not.toContain('思考中...')
+    expect(html.indexOf('timeline-icon-running')).toBeLessThan(html.indexOf('思考'))
+    expect(html.indexOf('思考')).toBeLessThan(html.indexOf('用时 46s'))
+  })
+
   it('records automatic compaction as an execution-log item without changing reasoning', () => {
     const message: ChatMessage = {
       id: 'agent-1',

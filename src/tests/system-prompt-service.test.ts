@@ -120,6 +120,8 @@ describe('SystemPromptService', () => {
   it('adapts tool, task, skill, and subagent guidance to exposed capabilities', async () => {
     const prompt = await SystemPromptService.buildSystemPrompt(mockCtx)
     expect(prompt).toContain('# Using tools')
+    expect(prompt).toContain('set it to `auto` for routine operations')
+    expect(prompt).toContain('Set it to `user` only for irreversible actions')
     expect(prompt).toContain('# Task tracking')
     expect(prompt).toContain('# Subagents')
     expect(prompt).toContain('brainstorming')

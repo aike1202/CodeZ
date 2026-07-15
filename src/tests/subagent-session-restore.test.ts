@@ -193,6 +193,102 @@ describe('chat store sub-agent session restore', () => {
     warnSpy.mockRestore()
   })
 
+  it('settles stale running timeline entries when the persisted message is no longer streaming', async () => {
+    const { useChatStore } = await import('../renderer/src/stores/chatStore')
+    const session = {
+      id: 's-stale-timeline',
+      projectId: 'p1',
+      summary: 'Stale execution timeline',
+      relativeTime: 'now',
+      messages: [{
+        id: 'agent-stale-tools',
+        role: 'agent',
+        content: 'Partial response',
+        streaming: false,
+        agentStates: [{
+          id: 'command-1',
+          type: 'command_running',
+          title: '正在运行 npm test',
+          timestamp: 1200
+        }],
+        toolCalls: [{
+          id: 'legacy-edit',
+          name: 'Edit',
+          args: JSON.stringify({ file_path: 'src/stale.ts' }),
+          status: 'running',
+          startedAt: 1250,
+          sequence: 0
+        }],
+        executionTimeline: [{
+          id: 'read-1',
+          type: 'tool',
+          toolCall: {
+            id: 'read-1',
+            name: 'Read',
+            args: JSON.stringify({ files: [{ file_path: 'src/a.ts' }] }),
+            status: 'running',
+            startedAt: 1300,
+            sequence: 1
+          },
+          startedAt: 1300,
+          updatedAt: 1300,
+          sequence: 1
+        }, {
+          id: 'reasoning-1',
+          type: 'reasoning',
+          content: 'Checking the result',
+          status: 'running',
+          startedAt: 1400,
+          updatedAt: 1400,
+          sequence: 2
+        }]
+      }]
+    }
+    ;(window as any).api.session.get.mockResolvedValue(session)
+    ;(window as any).api.chat.getRuntimeStatus.mockResolvedValue({
+      sessionId: session.id,
+      mainRunnerActive: false,
+      activeSubAgentIds: []
+    })
+    useChatStore.setState({
+      sessions: [session as any],
+      activeSessionId: null,
+      messages: [],
+      pendingInternalContinuation: null
+    })
+
+    await useChatStore.getState().selectSession(session.id)
+
+    const restored = useChatStore.getState().messages[0]
+    expect(restored).toMatchObject({
+      streaming: false,
+      interrupted: true,
+      executionStatus: 'interrupted'
+    })
+    expect(restored.agentStates?.[0]).toMatchObject({
+      type: 'command_completed',
+      status: 'error'
+    })
+    expect(restored.toolCalls?.[0]).toMatchObject({
+      status: 'error',
+      result: expect.stringContaining('runtime is no longer active')
+    })
+    expect(restored.executionTimeline?.[0]).toMatchObject({
+      type: 'tool',
+      toolCall: {
+        status: 'error',
+        result: expect.stringContaining('runtime is no longer active')
+      }
+    })
+    expect(restored.executionTimeline?.[1]).toMatchObject({
+      type: 'reasoning',
+      status: 'success'
+    })
+    expect((window as any).api.session.save).toHaveBeenCalledWith(
+      expect.objectContaining({ id: session.id, messages: [restored] })
+    )
+  })
+
   it('bridges a terminal subagent whose result may not have reached the parent ledger', async () => {
     const { useChatStore } = await import('../renderer/src/stores/chatStore')
     const session = {

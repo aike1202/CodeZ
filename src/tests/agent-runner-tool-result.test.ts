@@ -89,4 +89,24 @@ describe('AgentRunner tool result helpers', () => {
     expect(result.allowed).toBe(true)
     expect(approve.mock.calls[0][0]).toMatchObject({ sessionId: 'session-a' })
   })
+
+  it('passes the model approval preference into permission decisions', async () => {
+    const approve = vi.fn().mockResolvedValue(true)
+    const result = await authorizeToolCall(
+      'Bash',
+      { command: 'git status' },
+      '/tmp/codez-workspace',
+      approve,
+      null,
+      'session-a',
+      undefined,
+      'user'
+    )
+
+    expect(result.allowed).toBe(true)
+    expect(approve).toHaveBeenCalledWith(expect.objectContaining({
+      modelApprovalPreference: 'user',
+      approvalSource: 'model-requested'
+    }))
+  })
 })

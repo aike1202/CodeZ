@@ -15,15 +15,24 @@ import { fingerprint } from './canonicalJson'
 const READ_ONLY = new Set([
   'Read', 'list_files', 'Glob', 'Grep', 'Skill', 'ActivateSkill', 'DeactivateSkill', 'TaskGet', 'TaskList',
   'ExecutionInspect', 'update_resume_state', 'AskUserQuestion', 'ToolSearch', 'ToolResultRead',
-  'ListMcpResourcesTool', 'ReadMcpResourceTool', 'GetMcpPrompt'
+  'ListMcpResourcesTool', 'ReadMcpResourceTool', 'GetMcpPrompt', 'wait_agent', 'list_agents'
+])
+const APPROVAL_NOT_APPLICABLE = new Set([
+  'Read', 'list_files', 'Glob', 'Grep', 'TaskGet', 'TaskList', 'ExecutionInspect',
+  'AskUserQuestion', 'ToolSearch', 'ToolResultRead', 'ListMcpResourcesTool',
+  'ReadMcpResourceTool', 'GetMcpPrompt', 'send_message', 'wait_agent', 'list_agents',
+  'interrupt_agent'
 ])
 const CORE = new Set(['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash', 'PowerShell'])
-const ALWAYS = new Set(['AskUserQuestion', 'ToolSearch'])
+const ALWAYS = new Set([
+  'AskUserQuestion', 'ToolSearch', 'spawn_agent', 'wait_agent'
+])
 const DEFERRED = new Set([
   'NotebookEdit', 'PushNotification', 'WebSearch', 'WebFetch',
   'rollback_last_edit', 'SubAgentRunner', 'DelegateTasks',
   'ExecutionControl', 'ExecutionInspect',
-  'ListMcpResourcesTool', 'ReadMcpResourceTool', 'GetMcpPrompt', 'McpAuth'
+  'ListMcpResourcesTool', 'ReadMcpResourceTool', 'GetMcpPrompt', 'McpAuth',
+  'followup_task', 'send_message', 'list_agents', 'interrupt_agent'
 ])
 const EXCLUSIVE = new Set(['AskUserQuestion'])
 const TASK_TOOLS = new Set(['TaskCreate', 'TaskGet', 'TaskList', 'TaskUpdate'])
@@ -41,7 +50,11 @@ function exposureFor(name: string): ToolExposure {
 }
 
 function rolesFor(name: string): readonly AgentRole[] | '*' {
-  if (name === 'DelegateTasks' || name === 'ExecutionControl' || name === 'ExecutionInspect') {
+  if (
+    name === 'DelegateTasks' || name === 'ExecutionControl' || name === 'ExecutionInspect' ||
+    name === 'spawn_agent' || name === 'followup_task' || name === 'wait_agent' ||
+    name === 'interrupt_agent'
+  ) {
     return ['main']
   }
   if (name === 'SubAgentRunner') return ['main']
@@ -134,8 +147,18 @@ async function planLegacyEffects(
     effects.push({ kind: 'network', target })
   } else if (name === 'PushNotification') {
     effects.push({ kind: 'notify-user', channel: 'desktop' })
-  } else if (name === 'SubAgentRunner' || name === 'DelegateTasks') {
+  } else if (name === 'SubAgentRunner' || name === 'DelegateTasks' || name === 'spawn_agent' || name === 'followup_task') {
     effects.push({ kind: 'spawn-agent', role: String(input.subagent_type || 'executor'), isolation: String(input.isolation || '') })
+  } else if (name === 'send_message') {
+    effects.push({ kind: 'internal', target: `agent-message:${String(input.target || 'unknown')}` })
+  } else if (name === 'wait_agent' || name === 'list_agents') {
+    effects.push({ kind: 'read-memory', path: `session:${context.sessionId || 'unknown'}:agents` })
+  } else if (name === 'interrupt_agent') {
+    effects.push({
+      kind: 'control-execution',
+      executionId: String(input.target || 'unknown'),
+      action: 'interrupt-agent'
+    })
   } else if (name === 'ExecutionControl') {
     effects.push({
       kind: 'control-execution',
@@ -199,6 +222,9 @@ async function resourceKeysFor(
   if (name === 'ExecutionControl' || name === 'ExecutionInspect') {
     return [`execution:${String(input.execution_id || 'unknown')}`]
   }
+  if (['spawn_agent', 'followup_task', 'send_message', 'wait_agent', 'list_agents', 'interrupt_agent'].includes(name)) {
+    return [`session:${context.sessionId || 'unknown'}:agents`]
+  }
   if (name === 'Bash' || name === 'PowerShell') return [`workspace:${context.workspaceRoot}:shell`]
   return []
 }
@@ -217,6 +243,9 @@ export class LegacyToolAdapter implements ToolHandler<Record<string, unknown>, u
       summary: legacyTool.summary,
       description: legacyTool.description,
       inputSchema,
+      approval: {
+        modelPreference: APPROVAL_NOT_APPLICABLE.has(legacyTool.name) ? 'not-applicable' : 'required'
+      },
       availability: {
         enabled: () => true,
         roles: rolesFor(legacyTool.name),
@@ -227,7 +256,11 @@ export class LegacyToolAdapter implements ToolHandler<Record<string, unknown>, u
         destructive: () => ['Write', 'rollback_last_edit', 'ExecutionControl'].includes(legacyTool.name),
         concurrency: EXCLUSIVE.has(legacyTool.name)
           ? 'exclusive'
-          : ['Edit', 'Write', 'NotebookEdit', 'TaskCreate', 'TaskUpdate', 'ExecutionControl', 'Skill', 'ActivateSkill', 'DeactivateSkill'].includes(legacyTool.name)
+          : [
+              'Edit', 'Write', 'NotebookEdit', 'TaskCreate', 'TaskUpdate', 'ExecutionControl',
+              'Skill', 'ActivateSkill', 'DeactivateSkill', 'spawn_agent', 'followup_task',
+              'send_message', 'interrupt_agent'
+            ].includes(legacyTool.name)
             ? 'resource-locked'
             : 'safe',
         interrupt: ['Bash', 'PowerShell'].includes(legacyTool.name) ? 'cancel' : 'block',

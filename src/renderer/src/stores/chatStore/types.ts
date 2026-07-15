@@ -242,6 +242,10 @@ export interface ChatState {
   setTransactionId: (msgId: string, txId: string) => void
   setDiffEntries: (msgId: string, diffEntries: Array<{ path: string; diff: string }>) => void
   setEditStatus: (msgId: string, filePath: string, status: 'accepted' | 'rejected') => void
+  setEditStatuses: (
+    msgId: string,
+    statuses: Record<string, 'accepted' | 'rejected'>
+  ) => void
   addPermissionRequest: (msgId: string, request: Omit<PermissionRequestState, 'status' | 'createdAt'>) => void
   resolvePermissionRequest: (msgId: string, requestId: string, response: PermissionApprovalResponse) => void
   addAskUserRequest: (msgId: string, request: Omit<AskUserRequestState, 'status' | 'createdAt'>) => void

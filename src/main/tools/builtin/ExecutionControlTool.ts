@@ -6,6 +6,7 @@ type ControlArgs = {
   executor_id?: string
   action?: 'stop_executor' | 'stop_all' | 'takeover' | 'resume' | 'restart' | 'accept_completed'
   reason?: string
+  discard_context?: boolean
 }
 
 export class ExecutionControlTool extends Tool {
@@ -19,6 +20,8 @@ export class ExecutionControlTool extends Tool {
       'Use stop_executor for one Executor, stop_all for the entire execution, resume to continue durable',
       'child context, restart for a new child context with the saved task, takeover to transfer work,',
       'or accept_completed to merge ready worktree artifacts.',
+      'When handoff.canResume is true, you MUST use resume. Restart is rejected unless discard_context=true',
+      'explicitly confirms that the durable child context should be discarded.',
       'A successful stop revokes the lease before returning, so stale attempts cannot start new tools.'
     ].join('\n')
   }
@@ -34,7 +37,11 @@ export class ExecutionControlTool extends Tool {
           enum: ['stop_executor', 'stop_all', 'takeover', 'resume', 'restart', 'accept_completed'],
           description: 'Control action.'
         },
-        reason: { type: 'string', description: 'Optional audit reason.' }
+        reason: { type: 'string', description: 'Optional audit reason.' },
+        discard_context: {
+          type: 'boolean',
+          description: 'Restart only: explicitly discard resumable SubAgent context and start a new child thread.'
+        }
       },
       required: ['execution_id', 'action']
     }

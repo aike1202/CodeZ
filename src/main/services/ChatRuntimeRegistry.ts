@@ -25,6 +25,13 @@ export class ChatRuntimeRegistry<T extends { abort(): void }> {
     return Array.from(this.entries.values()).find((entry) => entry.sessionId === sessionId)?.runner
   }
 
+  requestAbort(streamId: string): boolean {
+    const entry = this.entries.get(streamId)
+    if (!entry) return false
+    entry.runner.abort()
+    return true
+  }
+
   unregister(streamId: string): void {
     const entry = this.entries.get(streamId)
     if (!entry || !this.entries.delete(streamId)) return

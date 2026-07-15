@@ -22,6 +22,7 @@ describe('ToolExecutionJournal', () => {
       descriptor: {
         name: 'JournalExample', aliases: [], version: 'v1', source: 'builtin', sourceId: 'test',
         summary: 'journal', description: 'journal', inputSchema: { type: 'object', additionalProperties: true },
+        approval: { modelPreference: 'not-applicable' },
         availability: { enabled: () => true, roles: '*', exposure: 'core' },
         behavior: { readOnly: () => true, destructive: () => false, concurrency: 'safe', interrupt: 'cancel', maxResultChars: 1000 },
         planEffects: async () => ({ effects: [{ kind: 'read-memory', path: 'opaque' }], analysisStatus: 'parsed' }),
@@ -59,6 +60,7 @@ describe('ToolExecutionJournal', () => {
       descriptor: {
         name: 'LargeJournalResult', aliases: [], version: 'v1', source: 'mcp', sourceId: 'mcp:test',
         summary: 'journal', description: 'journal', inputSchema: { type: 'object', additionalProperties: false },
+        approval: { modelPreference: 'not-applicable' },
         availability: { enabled: () => true, roles: '*', exposure: 'core' },
         behavior: { readOnly: () => true, destructive: () => false, concurrency: 'safe', interrupt: 'cancel', maxResultChars: 10 },
         planEffects: async () => ({ effects: [{ kind: 'external-effect', target: 'mcp:test' }], analysisStatus: 'parsed' }),

@@ -85,7 +85,31 @@ describe('CriticalOperationGuard', () => {
     expect(await new CriticalOperationGuard().analyzeRaw(shell, command, '/workspace')).toBeNull()
   })
 
-  it('keeps force push Hardline even when version text is present', async () => {
-    expect((await new CriticalOperationGuard().analyzeRaw('bash', 'git push --force origin version', '/workspace'))?.ruleId).toBe('critical.git.force-push')
+  it('keeps force push model-directed even when version text is present', async () => {
+    expect(await new CriticalOperationGuard().analyzeRaw('bash', 'git push --force origin version', '/workspace')).toMatchObject({
+      ruleId: 'critical.git.force-push',
+      enforcement: 'model-directed',
+      permission: 'external_effect'
+    })
+  })
+
+  it('keeps host and credential boundaries as absolute redlines', async () => {
+    expect(await new CriticalOperationGuard().analyzeRaw('bash', 'rm -rf /', '/workspace')).toMatchObject({
+      enforcement: 'absolute-redline', permission: 'hardline'
+    })
+    expect(await new CriticalOperationGuard().analyzeRaw(
+      'bash',
+      'npm config set //registry.npmjs.org/:_authToken secret',
+      '/workspace'
+    )).toMatchObject({ enforcement: 'absolute-redline', permission: 'hardline' })
+  })
+
+  it('splits service state changes from service configuration', async () => {
+    expect(await new CriticalOperationGuard().analyzeRaw('bash', 'systemctl restart example.service', '/workspace')).toMatchObject({
+      ruleId: 'critical.system.service-state', enforcement: 'model-directed', permission: 'external_effect'
+    })
+    expect(await new CriticalOperationGuard().analyzeRaw('bash', 'systemctl enable example.service', '/workspace')).toMatchObject({
+      ruleId: 'critical.system.service', enforcement: 'absolute-redline', permission: 'hardline'
+    })
   })
 })

@@ -61,8 +61,8 @@ function buildExploreRolePrompt(ctx: SubAgentContext): string {
     '- Adapt the search breadth to the requested depth.',
     '- Batch independent searches and reads whenever possible.',
     '- Search efficiently, follow evidence, and stop when the question is answered.',
-    '- Return a concise report directly as normal text. Include file paths and line references where they help the parent verify a finding.',
-    '- Do not create a report file and do not call submit_result.',
+    '- Submit a concise Markdown report through submit_result. Include file paths and line references where they help the parent verify a finding.',
+    '- Do not create a report file and do not return the final answer as plain text.',
     '',
     scopeSection,
     contextSection,
@@ -96,6 +96,42 @@ export const ExploreSubAgent: SubAgentDefinition = {
     'The task is to review or verify completed changes; use Reviewer instead.',
   ].join('\n'),
   costHint: 'Uses configured candidate models and otherwise follows the main Agent. Budgets: quick 8, normal 16, default 24, exhaustive 32 loops.',
+
+  outputSpec: {
+    description: 'Submit the completed exploration as a Markdown handoff for the parent Agent.',
+    fields: [
+      {
+        name: 'report',
+        type: 'string',
+        description: 'Concise Markdown report with the direct answer, evidence, and relevant file/line references.',
+        required: true,
+      },
+      {
+        name: 'conclusion',
+        type: 'string',
+        description: 'One concise sentence stating the direct answer.',
+        required: true,
+      },
+      {
+        name: 'confidence',
+        type: 'string',
+        description: 'Exactly "high", "medium", or "low".',
+        required: true,
+      },
+      {
+        name: 'filesExamined',
+        type: 'string[]',
+        description: 'Workspace paths actually inspected.',
+        required: true,
+      },
+      {
+        name: 'unresolvedCount',
+        type: 'number',
+        description: 'Number of requested questions that remain unresolved.',
+        required: true,
+      },
+    ],
+  },
 
   getTools: getExploreTools,
 

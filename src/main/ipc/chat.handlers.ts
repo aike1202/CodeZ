@@ -30,6 +30,7 @@ import { getAttachmentService } from './attachment.handlers'
 import { getProviderImagePolicy, supportsImageInput } from '../../shared/utils/imageCapabilities'
 import { SubAgentManager } from '../agent/SubAgentManager'
 import { getExecutionController } from '../services/execution/ExecutionController'
+import { PendingApprovalBroker } from './PendingApprovalBroker'
 import { PromptPredictionService } from '../services/PromptPredictionService'
 import type {
   PromptPredictionRequest,
@@ -43,6 +44,7 @@ import {
 import { ToolManager } from '../tools/ToolManager'
 import { getMcpConnectionManager } from '../services/mcp'
 import { getWorkspacePermissionStore } from '../services/permission/workspacePermissionStore'
+import { getCommandTaskRegistry } from '../tools/SpawnRunner'
 
 function applyRequestReasoningReserve(
   capabilities: ModelContextCapabilities,
@@ -68,6 +70,7 @@ function applyRequestReasoningReserve(
 
 const activeRunners = new ChatRuntimeRegistry<AgentRunner>()
 const stoppedBeforeRegistration = new Set<string>()
+const pendingApprovals = new PendingApprovalBroker()
 interface ActivePromptPrediction {
   key: string
   controller: AbortController
@@ -103,6 +106,7 @@ getExecutionController().onEvent((event) => {
 })
 
 function finishStream(streamId: string): void {
+  pendingApprovals.denyAll(streamId)
   activeRunners.unregister(streamId)
   stoppedBeforeRegistration.delete(streamId)
 }
@@ -402,12 +406,10 @@ export function registerChatIpc(): void {
           onDone: (fullContent, stopReason, txId) => {
             log.info('[Chat] done', { streamId, stopReason, contentLen: fullContent?.length ?? 0 })
             sender.send(IPC_CHANNELS.CHAT_STREAM_END, streamId, fullContent, stopReason, txId)
-            finishStream(streamId)
           },
           onError: (error) => {
             log.error('[Chat] error', { streamId, error })
             sender.send(IPC_CHANNELS.CHAT_STREAM_ERROR, streamId, error)
-            finishStream(streamId)
           },
           onContextBudget: (snapshot) => {
             sender.send(IPC_CHANNELS.CHAT_CONTEXT_BUDGET_UPDATED, streamId, request.sessionId, snapshot)
@@ -437,14 +439,15 @@ export function registerChatIpc(): void {
           },
           onPermissionRequest: async (request) => {
             return new Promise((resolve) => {
-              sender.send(IPC_CHANNELS.CHAT_REQUEST_APPROVAL, streamId, request)
               const responseChannel = `${IPC_CHANNELS.CHAT_APPROVAL_RESPONSE}:${request.id}`
               let settled = false
               let timer: NodeJS.Timeout | undefined
+              let unregisterPending: () => void = () => undefined
               const finish = (response: unknown) => {
                 if (settled) return
                 settled = true
                 if (timer) clearTimeout(timer)
+                unregisterPending()
                 ipcMain.removeHandler(responseChannel)
                 sender.removeListener('destroyed', onDestroyed)
                 if (typeof response === 'boolean') return resolve(response)
@@ -457,10 +460,12 @@ export function registerChatIpc(): void {
               }
               const onDestroyed = () => finish(false)
               timer = setTimeout(() => finish(false), 10 * 60 * 1000)
+              unregisterPending = pendingApprovals.register(streamId, () => finish(false))
               sender.once('destroyed', onDestroyed)
               ipcMain.handleOnce(responseChannel, (_event, response: unknown) => {
                 finish(response)
               })
+              sender.send(IPC_CHANNELS.CHAT_REQUEST_APPROVAL, streamId, request)
             })
           },
           onAskUserRequest: (request) => {
@@ -482,6 +487,7 @@ export function registerChatIpc(): void {
       ).catch((error) => {
         log.error('[Chat] runner crashed', { streamId, error: error instanceof Error ? error.message : String(error) })
         sender.send(IPC_CHANNELS.CHAT_STREAM_ERROR, streamId, `未知错误: ${error}`)
+      }).finally(() => {
         finishStream(streamId)
       })
 
@@ -508,12 +514,24 @@ export function registerChatIpc(): void {
   )
 
   ipcMain.handle(IPC_CHANNELS.CHAT_STREAM_STOP, (_event, streamId: string) => {
-    const runner = activeRunners.getRunner(streamId)
-    if (runner) {
-      runner.abort()
-      finishStream(streamId)
+    if (activeRunners.requestAbort(streamId)) {
+      pendingApprovals.denyAll(streamId)
     } else {
       rememberPendingStop(streamId)
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.CHAT_TOOL_INTERRUPT, (_event, toolCallId: string) => {
+    if (typeof toolCallId !== 'string' || !toolCallId.trim() || toolCallId.length > 512) {
+      return { ok: false, error: 'A valid tool call id is required.' }
+    }
+    const result = getCommandTaskRegistry().interruptByToolCallId(toolCallId)
+    if (!result) return { ok: false, error: 'The command is no longer running.' }
+    return {
+      ok: result.status === 'interrupted',
+      status: result.status,
+      taskId: result.taskId,
+      error: result.status === 'interrupted' ? undefined : 'The command is no longer running.'
     }
   })
 

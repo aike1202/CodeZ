@@ -24,12 +24,12 @@ describe('ToolInputValidator', () => {
   const snapshot = registry.createSnapshot({ platform: process.platform, agentRole: 'main' })
 
   it('returns parsed validated input', () => {
-    const result = new ToolInputValidator().validate(snapshot, 'Validated', '{"value":"ok"}')
-    expect(result).toEqual({ ok: true, input: { value: 'ok' } })
+    const result = new ToolInputValidator().validate(snapshot, 'Validated', '{"value":"ok","approval":"auto"}')
+    expect(result).toEqual({ ok: true, input: { value: 'ok', approval: 'auto' } })
   })
 
   it('reports missing and unexpected parameters', () => {
-    const result = new ToolInputValidator().validate(snapshot, 'Validated', '{"extra":true}')
+    const result = new ToolInputValidator().validate(snapshot, 'Validated', '{"extra":true,"approval":"auto"}')
     expect(result.ok).toBe(false)
     if (!result.ok) {
       expect(result.error.code).toBe('TOOL_INPUT_INVALID')
@@ -46,4 +46,3 @@ describe('ToolInputValidator', () => {
     if (!large.ok) expect(large.error.code).toBe('TOOL_ARGUMENTS_TOO_LARGE')
   })
 })
-

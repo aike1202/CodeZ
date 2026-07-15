@@ -106,6 +106,8 @@ export interface SubAgentContext {
 
   /** 续接此前被中断的 SubAgent；复用其规范化账本作用域与历史。 */
   resumeSubAgentId?: string
+  /** 在同一个持久上下文中启动一个新的后续任务。 */
+  continuationMode?: 'followup'
 
   /** Reviewer 首次独立审查或同一上下文中的收口复审。 */
   reviewMode?: 'initial' | 'closure'
@@ -143,6 +145,8 @@ export interface SubAgentContext {
   compactionService?: CompactionService
   /** 父 Agent 的取消信号；触发时必须停止当前子智能体。 */
   parentSignal?: AbortSignal
+  /** 在模型循环边界消费投递给此 Agent 的邮箱消息。 */
+  consumeAgentMessages?: () => Promise<string[]>
 
   /** 并行 Executor 的 Runtime 租约；每次工具调用前必须仍然有效。 */
   controlToken?: ExecutorControlToken
@@ -379,7 +383,8 @@ export async function authorizeSubAgentToolCall(
   scope: SubAgentPermissionScope | undefined,
   onPermissionRequest?: AgentRunnerCallbacks['onPermissionRequest'],
   agentId?: string,
-  controlToken?: ExecutorControlToken
+  controlToken?: ExecutorControlToken,
+  approvalPreference: import('../../shared/types/permission').ToolApprovalPreference | null = null
 ): Promise<string | null> {
   if (controlToken) {
     const leaseDenial = getExecutionController().assertLeaseActive(controlToken)
@@ -397,7 +402,9 @@ export async function authorizeSubAgentToolCall(
     onPermissionRequest,
     null,
     sessionId,
-    agentId
+    agentId,
+    undefined,
+    approvalPreference
   )
   return authorization.allowed
     ? null
@@ -424,7 +431,13 @@ function buildRecoverableStopOutput(
   const summary = `Executor stopped after recoverable API/network error: ${error}`
   const data: Record<string, unknown> = {}
   for (const field of spec.fields) {
-    if (field.name === 'status') {
+    if (field.name === 'report') {
+      data[field.name] = `## SubAgent stopped\n\n${summary}`
+    } else if (field.name === 'conclusion') {
+      data[field.name] = summary
+    } else if (field.name === 'confidence') {
+      data[field.name] = 'low'
+    } else if (field.name === 'status') {
       data[field.name] = 'failed'
     } else if (field.name === 'summary') {
       data[field.name] = summary
@@ -822,7 +835,17 @@ export class SubAgentManager {
         if (!previousScope || previousScope.activeMessages.length === 0) {
           throw new Error(`Cannot resume SubAgent '${ctx.resumeSubAgentId}': context was not found.`)
         }
-        if (latestTurnId && previousScope.lastCompletedTurnId === latestTurnId) {
+        if (ctx.continuationMode === 'followup') {
+          if (
+            !latestTurnId ||
+            (
+              previousScope.lastCompletedTurnId !== latestTurnId &&
+              previousScope.lastInterruptedTurnId !== latestTurnId
+            )
+          ) {
+            throw new Error(`Cannot follow up SubAgent '${ctx.resumeSubAgentId}': its latest run has no terminal durable state.`)
+          }
+        } else if (latestTurnId && previousScope.lastCompletedTurnId === latestTurnId) {
           const isReviewerClosure = canonical === 'Reviewer' && ctx.reviewMode === 'closure'
           if (!isReviewerClosure) {
             const replayedResult = replayCompletedSubAgentResult(canonical, def, ctx, previousScope)
@@ -859,6 +882,18 @@ export class SubAgentManager {
 
       const toolManager = new ToolManager()
       const availableTools = def.getTools(toolManager)
+      for (const name of ['send_message', 'list_agents']) {
+        const tool = toolManager.getTool(name)
+        if (!tool || availableTools.some((candidate) => candidate.function.name === name)) continue
+        availableTools.push({
+          type: 'function',
+          function: {
+            name: tool.name,
+            description: tool.description,
+            parameters: tool.parameters_schema
+          }
+        })
+      }
       let submitResultTool: ToolDefinition | undefined
       if (def.outputSpec) {
         submitResultTool = generateSubmitResultTool(def.outputSpec)
@@ -873,13 +908,15 @@ export class SubAgentManager {
         throw new Error('SubAgent requires resolved model context capabilities')
       }
       const contextCapabilities: ModelContextCapabilities = ctx.contextCapabilities
-      const turnInput = ctx.resumeSubAgentId && ctx.reviewMode !== 'closure'
-        ? [
-            'Continue the interrupted task from the existing SubAgent history.',
-            'Do not restart, re-plan, or repeat completed inspection and tool work.',
-            'Resume from the last durable state and finish the original task.'
-          ].join(' ')
-        : task
+      const turnInput = ctx.continuationMode === 'followup'
+        ? task
+        : ctx.resumeSubAgentId && ctx.reviewMode !== 'closure'
+          ? [
+              'Continue the interrupted task from the existing SubAgent history.',
+              'Do not restart, re-plan, or repeat completed inspection and tool work.',
+              'Resume from the last durable state and finish the original task.'
+            ].join(' ')
+          : task
       const runtimeTurn = await core.coordinator.beginTurn({
         sessionId: ctx.sessionId,
         contextScopeId,
@@ -1015,6 +1052,10 @@ export class SubAgentManager {
     try {
       while (loopCount < effectiveMaxLoops && !abortController.signal.aborted) {
         loopCount++
+        const incomingMessages = await ctx.consumeAgentMessages?.() || []
+        for (const message of incomingMessages) {
+          await core.coordinator.recordUserContinuation(runtimeTurn, message)
+        }
         const isFinalizationPhase = Boolean(
           submitResultTool && finalizationReserveLoops > 0 &&
           loopCount > effectiveMaxLoops - finalizationReserveLoops
@@ -1438,7 +1479,8 @@ export class SubAgentManager {
                 null,
                 ctx.sessionId,
                 subAgentId,
-                runtimeFlags.effectPolicy === 'enforce' ? prepared.effects : undefined
+                runtimeFlags.effectPolicy === 'enforce' ? prepared.effects : undefined,
+                prepared.approvalPreference
               )
               return authorization.allowed
                 ? {

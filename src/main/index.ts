@@ -22,6 +22,7 @@ import { TerminalService } from './services/TerminalService'
 import { getContextCoreServices } from './services/context'
 import { getAttachmentService, registerAttachmentIpc } from './ipc/attachment.handlers'
 import { registerMcpIpc } from './ipc/mcp.handlers'
+import { getAgentCollaborationRuntime } from './services/agents'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -97,6 +98,14 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.codez.desktop')
 
   const sessionStore = await initializeSessionStore()
+  const agentRuntime = getAgentCollaborationRuntime()
+  agentRuntime.configurePersistence({
+    saveAgents: (sessionId, agents) => sessionStore.setAgentRecords(sessionId, agents),
+    saveMessages: (sessionId, messages) => sessionStore.setAgentMessages(sessionId, messages)
+  })
+  for (const session of sessionStore.getAll()) {
+    if (!session.isDeleted) await agentRuntime.restoreSession(session.id, session.agentRuntime)
+  }
   await getAttachmentService().cleanupOrphans(new Set(sessionStore.getAll().map((session) => session.id)))
   const contextCore = getContextCoreServices()
   for (const session of sessionStore.getAll()) {

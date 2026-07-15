@@ -5,7 +5,13 @@ import * as path from 'path'
 import { PermissionManager } from '../main/services/PermissionManager'
 
 const workspaceRoot = path.resolve('/tmp/codez-workspace')
-const context = (mode: 'auto' | 'full-access') => ({ workspaceRoot, cwd: workspaceRoot, platform: process.platform, mode })
+const context = (mode: 'auto' | 'full-access', approvalPreference?: 'auto' | 'user') => ({
+  workspaceRoot,
+  cwd: workspaceRoot,
+  platform: process.platform,
+  mode,
+  approvalPreference
+})
 
 describe('PermissionManager', () => {
   const manager = new PermissionManager()
@@ -221,7 +227,7 @@ describe('PermissionManager', () => {
     ])
   })
 
-  it('recursively scans nested package scripts for Hardline commands', async () => {
+  it('recursively scans nested package scripts for model-directed high-risk commands', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'codez-permission-nested-script-'))
     try {
       await writeFile(path.join(root, 'package.json'), JSON.stringify({
@@ -236,7 +242,8 @@ describe('PermissionManager', () => {
         { ...context('auto'), workspaceRoot: root, cwd: root }
       )
 
-      expect(decision.hardline).toBe(true)
+      expect(decision.hardline).toBe(false)
+      expect(decision.action).toBe('ask')
       expect(decision.ruleId).toBe('critical.hidden.encoded-command')
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -251,7 +258,7 @@ describe('PermissionManager', () => {
 
     expect(decision).toMatchObject({
       action: 'ask',
-      hardline: true,
+      hardline: false,
       ruleId: 'critical.hidden.dynamic-command'
     })
   })
@@ -273,7 +280,8 @@ describe('PermissionManager', () => {
         { ...context('auto'), workspaceRoot: root, cwd: root }
       )
 
-      expect(decision.hardline).toBe(true)
+      expect(decision.hardline).toBe(false)
+      expect(decision.action).toBe('ask')
       expect(decision.ruleId).toBe('critical.hidden.encoded-command')
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -313,5 +321,42 @@ describe('PermissionManager', () => {
   it('asks for L4 in both modes', async () => {
     expect((await manager.evaluateToolCall('Bash', { command: 'sudo rm -rf /var/lib/example' }, context('auto'))).riskLevel).toBe(4)
     expect((await manager.evaluateToolCall('Bash', { command: 'sudo rm -rf /var/lib/example' }, context('full-access'))).action).toBe('ask')
+  })
+
+  it('uses the model preference in full-access while preserving absolute redlines', async () => {
+    expect(await manager.evaluateToolCall(
+      'Bash',
+      { command: 'git status' },
+      context('full-access', 'user')
+    )).toMatchObject({ action: 'ask', approvalSource: 'model-requested', absoluteRedline: false })
+
+    expect(await manager.evaluateToolCall(
+      'Bash',
+      { command: 'git push --force origin main' },
+      context('full-access', 'auto')
+    )).toMatchObject({
+      action: 'allow',
+      ruleId: 'critical.git.force-push',
+      hardline: false,
+      absoluteRedline: false
+    })
+
+    expect(await manager.evaluateToolCall(
+      'Bash',
+      { command: 'sudo rm -rf /var/lib/example' },
+      context('full-access', 'auto')
+    )).toMatchObject({
+      action: 'ask',
+      approvalSource: 'absolute-redline',
+      absoluteRedline: true
+    })
+  })
+
+  it('does not let model auto weaken auto-mode high-risk policy', async () => {
+    expect(await manager.evaluateToolCall(
+      'Bash',
+      { command: 'git push --force origin main' },
+      context('auto', 'auto')
+    )).toMatchObject({ action: 'ask', approvalSource: 'runtime-policy', hardline: false })
   })
 })

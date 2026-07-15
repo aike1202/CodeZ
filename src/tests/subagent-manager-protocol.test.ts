@@ -185,13 +185,27 @@ describe('structured subagent completion protocol', { timeout: 15_000 }, () => {
     expect(result.output).toContain('src/core.ts:10-20')
   })
 
-  it('accepts an Explore plain-text report without submit_result', async () => {
+  it('requires Explore to submit its Markdown report through submit_result', async () => {
     const { SubAgentManager } = await import('../main/agent/SubAgentManager')
     const { ExploreSubAgent } = await import('../main/agent/definitions/ExploreSubAgent')
 
     chatMock.streamChat.mockImplementationOnce(async (_config, callbacks) => {
-      callbacks.onChunk('The parser owns the failing branch at src/core.ts:10.', '')
-      callbacks.onDone('The parser owns the failing branch at src/core.ts:10.', 'stop')
+      callbacks.onChunk('', '', [{
+        index: 0,
+        id: 'explore-submit-1',
+        type: 'function',
+        function: {
+          name: 'submit_result',
+          arguments: JSON.stringify({
+            report: '## Direct answer\n\nThe parser owns the failing branch at `src/core.ts:10`.',
+            conclusion: 'The parser owns the failing branch.',
+            confidence: 'high',
+            filesExamined: ['src/core.ts'],
+            unresolvedCount: 0,
+          }),
+        },
+      }])
+      callbacks.onDone('', 'tool_calls')
     })
 
     const result = await SubAgentManager.spawn('Explore', {
@@ -203,10 +217,10 @@ describe('structured subagent completion protocol', { timeout: 15_000 }, () => {
       onError: vi.fn(),
     })
 
-    expect(ExploreSubAgent.outputSpec).toBeUndefined()
+    expect(ExploreSubAgent.outputSpec).toBeDefined()
     expect(result.status).toBe('completed')
     expect(result.output).toContain('src/core.ts:10')
-    expect(result.structuredOutput).toBeUndefined()
+    expect(result.structuredOutput).toMatchObject({ confidence: 'high' })
   })
 
   it('uses one runtime context for lifecycle hooks and prompt construction', async () => {
@@ -241,6 +255,8 @@ describe('structured subagent completion protocol', { timeout: 15_000 }, () => {
     })
 
     expect(promptContext).toBe(beforeSpawnContext)
-    expect((promptContext as { promptTools?: ToolDefinition[] }).promptTools).toEqual([readTool])
+    const promptToolNames = (promptContext as { promptTools?: ToolDefinition[] }).promptTools
+      ?.map((tool) => tool.function.name)
+    expect(promptToolNames).toEqual(['Read', 'send_message', 'list_agents'])
   })
 })

@@ -1,14 +1,15 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import Flex from '../../../ui/Flex'
 import {
   type UnifiedTimelineItem,
+  formatRunningDuration,
   getFileIconComponent
 } from '../utils'
 import { buildDiffEditInfo } from '../../../../utils/editDiffUtils'
 import ExecutionLogDetail from '../../ExecutionLogDetail'
 import { ThoughtIcon, SearchIcon, CmdIcon, AskIcon } from '../../../svg-icons'
 import IconSkills from '../../../icons/IconSkills'
-import { CircleAlert, CircleCheck, Minimize2, RefreshCw } from 'lucide-react'
+import { CircleAlert, CircleCheck, Loader2, Minimize2 } from 'lucide-react'
 import { FileIcon, FolderIcon } from '@react-symbols/icons/utils'
 import './LogItemRow.css'
 
@@ -63,6 +64,23 @@ interface LogItemRowProps {
   ) => void
 }
 
+function RunningDuration({ startedAt }: { startedAt: number }): React.ReactElement {
+  const [elapsedMs, setElapsedMs] = useState(() => Math.max(Date.now() - startedAt, 0))
+
+  useEffect(() => {
+    const updateElapsed = () => setElapsedMs(Math.max(Date.now() - startedAt, 0))
+    updateElapsed()
+    const timer = window.setInterval(updateElapsed, 1000)
+    return () => window.clearInterval(timer)
+  }, [startedAt])
+
+  return (
+    <span className="timeline-item-duration">
+      用时 {formatRunningDuration(elapsedMs)}
+    </span>
+  )
+}
+
 export function LogItemRow({
   item,
   isLast,
@@ -80,9 +98,9 @@ export function LogItemRow({
   const isTaskSummarySkill = isSkillItem && item.target === 'task-summary'
 
   const getItemIcon = (item: UnifiedTimelineItem) => {
-    if (item.type === 'reasoning') return <ThoughtIcon running={item.status === 'running'} />
+    if (item.status === 'running') return <Loader2 aria-hidden="true" />
+    if (item.type === 'reasoning') return <ThoughtIcon />
     if (item.type === 'compaction') {
-      if (item.status === 'running') return <RefreshCw className="spin-slow" />
       if (item.status === 'error') return <CircleAlert />
       return <Minimize2 />
     }
@@ -104,6 +122,7 @@ export function LogItemRow({
     item.type === 'edit' || (item.type === 'tool' && item.verb === 'Analyzed' && item.fileName)
   const isEditItem = item.type === 'edit'
   const canOpenEditDiff = isEditItem && Boolean(item.args?.trim()) && Boolean(onDiffClick)
+  const hideRunningReasoningTarget = item.type === 'reasoning' && item.status === 'running'
 
   const openFile = (event: React.MouseEvent) => {
     event.stopPropagation()
@@ -135,7 +154,7 @@ export function LogItemRow({
             onClick={(e) => hasItemDetail && toggleItemExpand(item.id, e)}
           >
             <Flex align="center" gap={2} className="relative" style={{ flex: 1, minWidth: 0 }}>
-              <span className={`timeline-icon-box${isTaskSummarySkill ? ' timeline-icon-completed' : isSkillItem ? ' timeline-icon-skill' : item.type === 'compaction' ? ` timeline-icon-compaction is-${item.status}` : ''}`}>
+              <span className={`timeline-icon-box${item.status === 'running' ? ' timeline-icon-running' : isTaskSummarySkill ? ' timeline-icon-completed' : isSkillItem ? ' timeline-icon-skill' : item.type === 'compaction' ? ` timeline-icon-compaction is-${item.status}` : ''}`}>
                 {getItemIcon(item)}
               </span>
               <span className="timeline-target-truncate-box pr-4">
@@ -149,7 +168,7 @@ export function LogItemRow({
                     {isTaskSummarySkill ? '任务已完成' : VERB_TRANSLATIONS[item.verb] || item.verb}
                   </span>
                 )}
-                {item.type === 'compaction' || isTaskSummarySkill ? null : item.verb === 'Searched' || item.verb === 'Searching' ? (
+                {item.type === 'compaction' || isTaskSummarySkill || hideRunningReasoningTarget ? null : item.verb === 'Searched' || item.verb === 'Searching' ? (
                   <span className="timeline-target-link" style={{ textDecoration: 'none', cursor: 'default' }}>
                     查找 {item.target}
                   </span>
@@ -179,6 +198,7 @@ export function LogItemRow({
                 </button>
               ) : null}
             </Flex>
+            {item.status === 'running' ? <RunningDuration startedAt={item.timestamp} /> : null}
           </Flex>
 
           {hasItemDetail && isItemExpanded && (

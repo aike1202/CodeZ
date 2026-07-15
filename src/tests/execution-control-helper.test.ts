@@ -110,7 +110,7 @@ describe('ExecutionControl recovery', () => {
     expect(spawnedContext?.controlToken?.attemptId).toBeTruthy()
     expect(spawnedContext?.permissionScope).toMatchObject({
       allowedWriteFiles: ['src/a.ts'],
-      allowBash: false
+      allowBash: true
     })
     expect(setup.controller.getExecution(setup.execution.executionId)?.executors[0].attemptCount).toBe(2)
     expect(setup.controller.getExecution(setup.execution.executionId)?.status).toBe('completed')
@@ -142,6 +142,112 @@ describe('ExecutionControl recovery', () => {
     expect(spawnedContext?.resumeSubAgentId).toBe(setup.executorId)
     expect(spawnedContext?.subAgentId).toBe(setup.executorId)
     expect(spawnedContext?.providerId).toBe('provider-test')
+  })
+
+  it('rejects restart when the durable context can be resumed', async () => {
+    const setup = failedExecution(true)
+    const spawn = vi.spyOn(SubAgentManager, 'spawn')
+
+    const response = await handleExecutionControl(
+      'tool-resumable-restart',
+      JSON.stringify({
+        execution_id: setup.execution.executionId,
+        executor_id: setup.executorId,
+        action: 'restart'
+      }),
+      config(setup.root),
+      callbacks
+    )
+
+    expect(JSON.parse(response.content)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('Use resume')
+    })
+    expect(spawn).not.toHaveBeenCalled()
+    expect(setup.controller.getExecution(setup.execution.executionId)?.executors[0].attemptCount).toBe(1)
+  })
+
+  it('resumes the same child context after a restart attempt is stopped', async () => {
+    const setup = failedExecution(false)
+    const parent = new AbortController()
+    const contexts: SubAgentContext[] = []
+    let startedResolve!: () => void
+    const started = new Promise<void>((resolve) => { startedResolve = resolve })
+
+    vi.spyOn(SubAgentManager, 'spawn').mockImplementation(async (_type, ctx): Promise<SubAgentResult> => {
+      contexts.push(ctx)
+      if (contexts.length === 1) {
+        startedResolve()
+        if (!ctx.parentSignal?.aborted) {
+          await new Promise<void>((resolve) =>
+            ctx.parentSignal?.addEventListener('abort', () => resolve(), { once: true }))
+        }
+        return {
+          type: 'Executor',
+          status: 'interrupted',
+          output: 'Stopped while recovering.',
+          toolCallCount: 3,
+          filesExamined: ['src/a.ts'],
+          handoff: {
+            reasonCode: 'parent_interrupted',
+            reason: 'Stopped while recovering.',
+            originalTask: ctx.task,
+            filesExamined: ['src/a.ts'],
+            filesModified: [],
+            filesPossiblyModified: [],
+            recentTools: [],
+            workspaceMayHaveUntrackedChanges: false,
+            canResume: true
+          }
+        }
+      }
+      return {
+        type: 'Executor',
+        status: 'completed',
+        output: 'resumed',
+        structuredOutput: { status: 'completed', summary: 'resumed', filesModified: [] } as any,
+        toolCallCount: 1,
+        filesExamined: ['src/a.ts']
+      }
+    })
+
+    const restarting = handleExecutionControl(
+      'tool-restart-interrupted',
+      JSON.stringify({
+        execution_id: setup.execution.executionId,
+        executor_id: setup.executorId,
+        action: 'restart'
+      }),
+      config(setup.root),
+      callbacks,
+      parent.signal
+    )
+    await started
+    parent.abort('user stopped')
+    expect(JSON.parse((await restarting).content).ok).toBe(false)
+
+    const interrupted = setup.controller.getExecution(setup.execution.executionId)!.executors[0]
+    expect(interrupted).toMatchObject({
+      status: 'stopped',
+      handoff: { reasonCode: 'parent_interrupted', canResume: true }
+    })
+    expect(interrupted.subAgentId).not.toBe(setup.executorId)
+
+    const resumed = await handleExecutionControl(
+      'tool-resume-after-stop',
+      JSON.stringify({
+        execution_id: setup.execution.executionId,
+        executor_id: setup.executorId,
+        action: 'resume'
+      }),
+      config(setup.root),
+      callbacks
+    )
+
+    expect(JSON.parse(resumed.content).ok).toBe(true)
+    expect(contexts[1].subAgentId).toBe(interrupted.subAgentId)
+    expect(contexts[1].resumeSubAgentId).toBe(interrupted.subAgentId)
+    expect(setup.controller.getExecution(setup.execution.executionId)?.status).toBe('completed')
   })
 
   it('accepts ready artifacts without requiring an Executor id', async () => {

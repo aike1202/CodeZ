@@ -1,12 +1,8 @@
 import React, { useMemo } from 'react'
 import ExecutionLog from './ExecutionLog'
 import MessageBody from './MessageBody'
-import EditApprovalWidget from './EditApprovalWidget'
 import { AlertTriangle } from 'lucide-react'
-import { extractMessageEdits, handleApprovalDiffClick } from './ChatArea' // We might need to move extractMessageEdits to a utils file?
 import type { ChatMessage, ExecutionTimelineItem, SubAgentRecord } from '../../stores/chatStore'
-
-// Wait, I will just export extractMessageEdits from ExecutionLogUtils or somewhere if needed, but for now I can import from ChatArea. Or better, move it to ChatAreaUtils.ts?
 
 export interface AgentMessageContentProps {
   msg: ChatMessage
@@ -79,9 +75,6 @@ export function AgentMessageContent({
 
     return result
   }, [msg.executionTimeline, msg.reasoningContent, msg.agentStates, isStreaming])
-
-  const { edits, tools } = extractMessageEdits(msg)
-  const allProcessed = edits.length > 0 && edits.every((e: { filePath: string }) => msg.editStatuses?.[e.filePath])
 
   // Legacy fallback if no executionTimeline but has agentStates or reasoningContent
   const legacyExecution = (!msg.executionTimeline || msg.executionTimeline.length === 0) && (msg.reasoningContent || (msg.agentStates && msg.agentStates.length > 0))
@@ -184,16 +177,6 @@ export function AgentMessageContent({
         </div>
       )}
 
-      {allProcessed && (
-        <EditApprovalWidget
-          msgId={msg.id}
-          txId={msg.txId || ''}
-          edits={edits}
-          editStatuses={msg.editStatuses}
-          onDiffClick={(filePath) => handleApprovalDiffClick(filePath, tools, handleDiffClick, handleFileClick)}
-          onFileClick={(filePath) => handleFileClick(filePath)}
-        />
-      )}
     </div>
   )
 }

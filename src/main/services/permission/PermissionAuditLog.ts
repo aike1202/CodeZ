@@ -4,6 +4,7 @@ import * as path from 'path'
 
 function redact(value: string): string {
   return value
+    .replace(/("(?:api[_-]?key|token|password|secret)"\s*:\s*")[^"]*/gi, '$1[REDACTED]')
     .replace(/(authorization\s*:\s*(?:bearer|basic)\s+)\S+/gi, '$1[REDACTED]')
     .replace(/((?:api[_-]?key|token|password|secret)\s*[=:]\s*)[^\s"']+/gi, '$1[REDACTED]')
 }

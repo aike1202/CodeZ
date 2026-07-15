@@ -1,4 +1,5 @@
 import type { FileContextReference } from '../../../shared/types/context'
+import type { ToolApprovalPreference } from '../../../shared/types/permission'
 import type { Tool, ToolContext, ToolExecutionOutput } from '../Tool'
 
 export type JsonSchemaObject = Record<string, unknown> & { type?: string }
@@ -7,6 +8,10 @@ export type ToolExposure = 'always' | 'core' | 'deferred' | 'internal'
 export type ToolConcurrency = 'safe' | 'resource-locked' | 'exclusive'
 export type ToolInterruptBehavior = 'cancel' | 'block' | 'detach'
 export type AgentRole = 'main' | 'explore' | 'execution-planner' | 'executor' | string
+
+export interface ToolApprovalMetadata {
+  modelPreference: 'not-applicable' | 'required'
+}
 
 export interface ToolAvailabilityContext {
   platform: NodeJS.Platform
@@ -53,6 +58,7 @@ export interface ToolDescriptor {
   searchHint?: string
   inputSchema: JsonSchemaObject
   outputSchema?: JsonSchemaObject
+  approval: ToolApprovalMetadata
   availability: {
     enabled(context: ToolAvailabilityContext): boolean
     roles: readonly AgentRole[] | '*'
@@ -161,6 +167,7 @@ export interface PreparedToolCall {
   call: NormalizedToolCall
   handler: ToolHandler
   input: Record<string, unknown>
+  approvalPreference: ToolApprovalPreference | null
   effects: ToolEffectPlan
   resourceKeys: readonly string[]
 }

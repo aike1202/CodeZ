@@ -2,7 +2,14 @@ import type { ExecutionTimelineItem, ReasoningTimelineItem } from '../../../../s
 import { parseArgs } from '../../../../utils/parseArgs'
 import { computeEditStats } from '../../../../utils/editDiffUtils'
 import type { CommandItem, EditItemWithStatus, UnifiedTimelineItem } from './types'
-import { getToolTarget, getToolNoun, formatDuration, formatReasoningDuration } from './itemParsers'
+import {
+  formatDuration,
+  formatFileDisplayTarget,
+  formatReasoningDuration,
+  getFileDisplayName,
+  getToolNoun,
+  getToolTarget
+} from './itemParsers'
 import { parseTaskUpdateDetail } from '../../ExecutionLogDetail/taskUpdateDetail'
 
 function getReadFileStatuses(
@@ -154,10 +161,11 @@ export function buildUnifiedTimeline(
             const filePath = typeof file?.file_path === 'string' ? file.file_path : ''
             const offset = file?.offset
             const limit = file?.limit
-            let targetText = filePath || '文件'
-            if (typeof offset === 'number') {
-              targetText += ` #L${offset}${typeof limit === 'number' ? `-${offset + limit - 1}` : '-'}`
-            }
+            const targetText = formatFileDisplayTarget(
+              filePath,
+              typeof offset === 'number' ? offset : undefined,
+              typeof offset === 'number' && typeof limit === 'number' ? offset + limit - 1 : undefined
+            )
 
             list.push({
               id: `${tc.id}_${index}`,
@@ -168,7 +176,7 @@ export function buildUnifiedTimeline(
               verb: tc.status === 'running' ? 'Analyzing' : 'Analyzed',
               target: targetText,
               realPath: filePath,
-              fileName: filePath ? filePath.split(/[/\\]/).pop() : undefined,
+              fileName: filePath ? getFileDisplayName(filePath) : undefined,
               args: tc.args,
               detail: index === 0 ? tc.result : undefined,
               duration,
@@ -186,10 +194,11 @@ export function buildUnifiedTimeline(
         const filePath = typeof file?.file_path === 'string' ? file.file_path : ''
         const offset = file?.offset
         const limit = file?.limit
-        let targetText = filePath || '文件'
-        if (typeof offset === 'number') {
-          targetText += ` #L${offset}${typeof limit === 'number' ? `-${offset + limit - 1}` : '-'}`
-        }
+        const targetText = formatFileDisplayTarget(
+          filePath,
+          typeof offset === 'number' ? offset : undefined,
+          typeof offset === 'number' && typeof limit === 'number' ? offset + limit - 1 : undefined
+        )
         list.push({
           id: tc.id,
           type: 'tool',
@@ -198,7 +207,7 @@ export function buildUnifiedTimeline(
           verb: tc.status === 'running' ? 'Analyzing' : 'Analyzed',
           target: targetText,
           realPath: filePath,
-          fileName: filePath ? filePath.split(/[/\\]/).pop() : undefined,
+          fileName: filePath ? getFileDisplayName(filePath) : undefined,
           args: tc.args,
           detail: tc.result,
           duration,
@@ -214,14 +223,9 @@ export function buildUnifiedTimeline(
 
         let targetText = '多个文件'
         if (filePaths.length === 1) {
-          targetText = filePaths[0]
-          if (typeof startLine === 'number' && typeof endLine === 'number') {
-            targetText += ` #L${startLine}-${endLine}`
-          } else if (typeof startLine === 'number') {
-            targetText += ` #L${startLine}-`
-          }
+          targetText = formatFileDisplayTarget(filePaths[0], startLine, endLine)
         } else if (filePaths.length > 1) {
-          const names = filePaths.map((p) => p.split(/[/\\]/).pop()).slice(0, 2)
+          const names = filePaths.map((p) => getFileDisplayName(p)).slice(0, 2)
           targetText = `${filePaths.length} 个文件 (${names.join(', ')}${filePaths.length > 2 ? '...' : ''})`
         }
 
@@ -233,7 +237,7 @@ export function buildUnifiedTimeline(
           verb: 'Analyzed',
           target: targetText,
           realPath: filePaths.length === 1 ? filePaths[0] : undefined,
-          fileName: filePaths.length === 1 ? filePaths[0].split(/[/\\]/).pop() : undefined,
+          fileName: filePaths.length === 1 ? getFileDisplayName(filePaths[0]) : undefined,
           args: tc.args,
           detail: tc.result,
           duration: duration,
@@ -259,11 +263,11 @@ export function buildUnifiedTimeline(
                 : tc.name === 'Write'
                   ? 'Created'
                   : 'Edited',
-            target: target,
+            target: getFileDisplayName(target),
             realPath: target,
             additions: additions,
             deletions: deletions,
-            fileName: target.split(/[/\\]/).pop(),
+            fileName: getFileDisplayName(target),
             detail: tc.result,
             args: tc.args,
             toolName: tc.name,
@@ -277,7 +281,7 @@ export function buildUnifiedTimeline(
           const targetPaths = argsObj.targetPaths || argsObj.TargetPaths
           if (Array.isArray(targetPaths) && targetPaths.length > 0) {
             targetPaths.forEach((pathItem: string, index: number) => {
-              const fileName = pathItem.split(/[/\\]/).pop() || pathItem
+              const fileName = getFileDisplayName(pathItem)
               const isRunning = tc.status === 'running'
               list.push({
                 id: `${tc.id}_${index}`,
@@ -343,8 +347,15 @@ export function buildUnifiedTimeline(
           if (typeof sLine === 'number' && typeof eLine === 'number') {
             startLine = sLine
             endLine = eLine
-            targetDisplay = `${target} #L${startLine}-${endLine}`
           }
+          targetDisplay = formatFileDisplayTarget(target, startLine, endLine)
+        } else if ([
+          'write_to_file',
+          'replace_file_content',
+          'multi_replace_file_content',
+          'apply_patch'
+        ].includes(tc.name)) {
+          targetDisplay = getFileDisplayName(target)
         }
 
         if (tc.name === 'Bash' || tc.name === 'PowerShell' || tc.name === 'run_command') {
@@ -486,7 +497,7 @@ export function buildUnifiedTimeline(
           args: tc.args,
           detail: tc.result,
           duration: formatDuration(tc),
-          fileName: target.split(/[/\\]/).pop(),
+          fileName: target ? getFileDisplayName(target) : undefined,
           toolName: tc.name,
           ...toolTimelineMeta
         })
@@ -554,12 +565,12 @@ export function buildUnifiedTimeline(
       timestamp: edit.timestamp,
       status: isActuallyRunning ? 'running' : edit.status === 'running' ? 'error' : edit.status,
       verb: edit.isRunning && isActuallyRunning ? 'Editing' : 'Edited',
-      target: edit.filePath,
+      target: getFileDisplayName(edit.filePath),
       realPath: edit.filePath,
       additions: edit.additions,
       deletions: edit.deletions,
       args: edit.args,
-      fileName: edit.filePath.split(/[/\\]/).pop(),
+      fileName: getFileDisplayName(edit.filePath),
       toolName: edit.toolName
     })
   })

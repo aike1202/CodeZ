@@ -42,14 +42,17 @@ export function parseSlashCommand(
 ): ParseResult {
   const trimMsg = message.trim()
 
-  if (trimMsg === '/compact' || trimMsg.startsWith('/compact ')) {
+  const compactSlashMatch = trimMsg.match(/^\/compact(?:\s+(.*))?$/i)
+  const compactPillMatch = trimMsg.match(/^\[\$compact\]\([^)]+\)(?:\s+(.*))?$/i)
+  const compactMatch = compactSlashMatch || compactPillMatch
+  if (compactMatch) {
     return {
       isCommand: true,
       commandName: 'compact',
       processedMessage: '',
       clientAction: {
         type: 'context:compact',
-        payload: { instructions: trimMsg.slice('/compact'.length).trim() }
+        payload: { instructions: compactMatch[1]?.trim() || '' }
       }
     }
   }

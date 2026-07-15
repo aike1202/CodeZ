@@ -91,12 +91,16 @@ describe('parallel orchestrator control authority', () => {
     expect(report.status).toBe('stopped')
     expect(report.waves[0].results[0].status).toBe('interrupted')
     expect(getExecutionController().getExecution(report.executionId!)?.status).toBe('stopped')
+    expect(getExecutionController().getExecution(report.executionId!)?.executors[0].handoff).toMatchObject({
+      reasonCode: 'parent_interrupted',
+      canResume: true
+    })
     expect(spawnedContext?.transactionId).toBe('tx-shared')
     expect(spawnedContext?.providerId).toBe('provider-test')
     expect(spawnedContext?.editTransactionService).toBe(editTransactionService)
     expect(spawnedContext?.permissionScope).toMatchObject({
       allowedWriteFiles: ['src/a.ts'],
-      allowBash: false
+      allowBash: true
     })
   })
 

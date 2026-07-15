@@ -66,6 +66,10 @@ export interface MessageSlice {
   setTransactionId: (msgId: string, txId: string) => void
   setDiffEntries: (msgId: string, diffEntries: Array<{ path: string; diff: string }>) => void
   setEditStatus: (msgId: string, filePath: string, status: 'accepted' | 'rejected') => void
+  setEditStatuses: (
+    msgId: string,
+    statuses: Record<string, 'accepted' | 'rejected'>
+  ) => void
   appendAgentState: (msgId: string, state: AgentState) => void
   updateAgentState: (msgId: string, stateId: string, updates: Partial<AgentState>) => void
   appendReasoningTimelineChunk: (msgId: string, delta: string) => void
@@ -493,6 +497,18 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       newStatuses[filePath] = status
       return { ...m, editStatuses: newStatuses }
     }))
+    if (ownerSessionId) void get().persistSession(ownerSessionId)
+  },
+
+  setEditStatuses: (msgId, statuses) => {
+    if (Object.keys(statuses).length === 0) return
+    const ownerSessionId = get().sessions.find((session) =>
+      session.messages.some((message) => message.id === msgId)
+    )?.id
+    set((s) => updateMessageInState(s, msgId, (message) => ({
+      ...message,
+      editStatuses: { ...(message.editStatuses || {}), ...statuses }
+    })))
     if (ownerSessionId) void get().persistSession(ownerSessionId)
   },
 

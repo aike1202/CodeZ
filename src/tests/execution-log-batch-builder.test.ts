@@ -6,6 +6,7 @@ import type {
 import {
   buildEditItems,
   buildUnifiedTimeline,
+  formatRunningDuration,
   getParallelBatchDuration,
   groupParallelToolBatches
 } from '../renderer/src/components/chat/ExecutionLog/utils'
@@ -25,6 +26,14 @@ const toolItem = (
   verb: 'Analyzed',
   target: id,
   ...options
+})
+
+describe('execution log running duration', () => {
+  it('formats live elapsed time for short and long operations', () => {
+    expect(formatRunningDuration(999)).toBe('<1s')
+    expect(formatRunningDuration(46_900)).toBe('46s')
+    expect(formatRunningDuration(65_000)).toBe('1m 05s')
+  })
 })
 
 describe('execution log parallel batch builder', () => {
@@ -304,9 +313,39 @@ describe('execution log parallel batch builder', () => {
       'src/App.tsx',
       'src/db.ts'
     ])
-    expect((batch as ParallelToolBatchItem).items[1].target).toContain('#L10-29')
+    expect((batch as ParallelToolBatchItem).items.map((item) => item.target)).toEqual([
+      'App.tsx',
+      'db.ts #L10-29'
+    ])
     expect((batch as ParallelToolBatchItem).items[1].status).toBe('error')
     expect((batch as ParallelToolBatchItem).status).toBe('error')
+  })
+
+  it('shows only the file name for a single Read while preserving its full path', () => {
+    const filePath = 'F:\\Project\\src\\timelineBuilder.ts'
+    const timeline: ExecutionTimelineItem[] = [{
+      id: 'tool_read-single',
+      type: 'tool',
+      toolCall: {
+        id: 'read-single',
+        name: 'Read',
+        args: JSON.stringify({ files: [{ file_path: filePath, offset: 10, limit: 20 }] }),
+        status: 'success',
+        result: `<file path="${filePath}">\n10\tcontent\n</file>`,
+        startedAt: 100,
+        completedAt: 200,
+        sequence: 0
+      },
+      startedAt: 100,
+      updatedAt: 200,
+      sequence: 0
+    }]
+
+    expect(buildUnifiedTimeline(timeline, [], [], undefined, false)).toMatchObject([{
+      target: 'timelineBuilder.ts #L10-29',
+      realPath: filePath,
+      fileName: 'timelineBuilder.ts'
+    }])
   })
 
   it('counts a multi-file Read as one item inside an outer tool batch', () => {
@@ -373,20 +412,52 @@ describe('execution log parallel batch builder', () => {
 })
 
 describe('legacy edit execution log', () => {
+  it('shows only the file name for Edit while preserving its full path', () => {
+    const filePath = 'F:\\Project\\src\\components\\App.tsx'
+    const timeline: ExecutionTimelineItem[] = [{
+      id: 'tool_edit-modern',
+      type: 'tool',
+      toolCall: {
+        id: 'edit-modern',
+        name: 'Edit',
+        args: JSON.stringify({
+          file_path: filePath,
+          edits: [{ old_string: 'before', new_string: 'after' }]
+        }),
+        status: 'success',
+        result: 'Updated successfully.',
+        startedAt: 100,
+        completedAt: 200,
+        sequence: 0
+      },
+      startedAt: 100,
+      updatedAt: 200,
+      sequence: 0
+    }]
+
+    expect(buildUnifiedTimeline(timeline, [], [], undefined, false)).toMatchObject([{
+      target: 'App.tsx',
+      realPath: filePath,
+      fileName: 'App.tsx',
+      verb: 'Edited'
+    }])
+  })
+
   it('keeps distinct diff metadata for repeated edits to the same file', () => {
+    const filePath = 'src/components/App.tsx'
     const edits = buildEditItems([
-      { id: 'legacy-edit-1', type: 'edit', title: '已编辑 src/App.tsx', detail: '+1 -1', timestamp: 100 },
-      { id: 'legacy-edit-2', type: 'edit', title: '已编辑 src/App.tsx', detail: '+2 -2', timestamp: 101 }
+      { id: 'legacy-edit-1', type: 'edit', title: `已编辑 ${filePath}`, detail: '+1 -1', timestamp: 100 },
+      { id: 'legacy-edit-2', type: 'edit', title: `已编辑 ${filePath}`, detail: '+2 -2', timestamp: 101 }
     ], [
-      { id: 'tool-edit-1', name: 'Edit', args: JSON.stringify({ file_path: 'src/App.tsx', edits: [{ old_string: 'a', new_string: 'b' }] }), status: 'success', startedAt: 100, sequence: 0 },
-      { id: 'tool-edit-2', name: 'Edit', args: JSON.stringify({ file_path: 'src/App.tsx', edits: [{ old_string: 'c', new_string: 'd' }] }), status: 'success', startedAt: 101, sequence: 1 }
+      { id: 'tool-edit-1', name: 'Edit', args: JSON.stringify({ file_path: filePath, edits: [{ old_string: 'a', new_string: 'b' }] }), status: 'success', startedAt: 100, sequence: 0 },
+      { id: 'tool-edit-2', name: 'Edit', args: JSON.stringify({ file_path: filePath, edits: [{ old_string: 'c', new_string: 'd' }] }), status: 'success', startedAt: 101, sequence: 1 }
     ])
 
     const items = buildUnifiedTimeline([], [], edits, undefined, false)
 
     expect(items).toMatchObject([
-      { realPath: 'src/App.tsx', toolName: 'Edit', args: expect.stringContaining('"new_string":"b"') },
-      { realPath: 'src/App.tsx', toolName: 'Edit', args: expect.stringContaining('"new_string":"d"') }
+      { target: 'App.tsx', realPath: filePath, toolName: 'Edit', args: expect.stringContaining('"new_string":"b"') },
+      { target: 'App.tsx', realPath: filePath, toolName: 'Edit', args: expect.stringContaining('"new_string":"d"') }
     ])
   })
 })

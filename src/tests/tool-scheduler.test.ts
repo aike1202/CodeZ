@@ -13,6 +13,7 @@ function call(position: number, key: string, concurrency: 'safe' | 'resource-loc
     call: { callId: `c${position}`, position, name: `T${position}`, rawArguments: '{}' },
     handler,
     input: {},
+    approvalPreference: null,
     effects: { effects: [], analysisStatus: 'parsed' },
     resourceKeys: key ? [key] : []
   }
@@ -43,4 +44,3 @@ describe('ToolScheduler', () => {
     expect(waves[1].calls[0].call.position).toBe(1)
   })
 })
-

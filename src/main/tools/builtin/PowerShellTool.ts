@@ -1,21 +1,46 @@
 // src/main/tools/builtin/PowerShellTool.ts
-import { Tool, ToolContext } from '../Tool'
-import * as path from 'path'
 import * as fs from 'fs'
-import { SpawnRunner } from '../SpawnRunner'
+import * as path from 'path'
+import { Tool, ToolContext } from '../Tool'
+import { getCommandTaskRegistry, SpawnRunner, type SpawnResult } from '../SpawnRunner'
 
-interface PSArgs {
+interface PowerShellArgs {
   command?: string
   description?: string
   timeout?: number
+  task_id?: string
+  action?: 'wait' | 'interrupt'
   run_in_background?: boolean
   dangerouslyDisableSandbox?: boolean
 }
 
-const DEFAULT_TIMEOUT = 120000
-const MAX_TIMEOUT = 600000
+const DEFAULT_TIMEOUT = 30_000
+const MIN_TIMEOUT = 250
+const MAX_TIMEOUT = 120_000
 
 const sessionCwd: Map<string, string> = new Map()
+
+function resolveTimeout(value: number | undefined): number {
+  if (!Number.isFinite(value)) return DEFAULT_TIMEOUT
+  return Math.min(Math.max(Math.round(value!), MIN_TIMEOUT), MAX_TIMEOUT)
+}
+
+function formatResult(result: SpawnResult): string {
+  const payload: Record<string, unknown> = { ...result }
+  if (result.status === 'running') {
+    payload.message = 'Command is still running. Choose wait with a new timeout or interrupt it.'
+    payload.nextActions = [
+      { action: 'wait', task_id: result.taskId },
+      { action: 'interrupt', task_id: result.taskId }
+    ]
+  } else if (result.status === 'interrupted') {
+    payload.error = {
+      code: 'COMMAND_INTERRUPTED',
+      message: 'The command was interrupted before completion.'
+    }
+  }
+  return JSON.stringify(payload, null, 2)
+}
 
 export function resolvePwshExe(): string {
   if (process.env.CODEZ_PS_PATH && fs.existsSync(process.env.CODEZ_PS_PATH)) return process.env.CODEZ_PS_PATH
@@ -23,63 +48,74 @@ export function resolvePwshExe(): string {
 }
 
 function detectCd(command: string, currentCwd: string): string | null {
-  const m = command.match(/^\s*(?:cd|Set-Location)\s+([^\s;&|]+)/)
-  if (!m) return null
-  const target = m[1].replace(/^["']|["']$/g, '')
+  const match = command.match(/^\s*(?:cd|Set-Location)\s+([^\s;&|]+)/)
+  if (!match) return null
+  const target = match[1].replace(/^["']|["']$/g, '')
   if (!target) return null
   const resolved = path.isAbsolute(target) ? target : path.resolve(currentCwd, target)
-  if (fs.existsSync(resolved)) return resolved
-  return null
+  return fs.existsSync(resolved) ? resolved : null
 }
 
 export class PowerShellTool extends Tool {
-  get name() {
-    return 'PowerShell'
-  }
+  get name() { return 'PowerShell' }
 
-  get summary() {
-    return 'Execute a PowerShell command.'
-  }
+  get summary() { return 'Execute or control a PowerShell command.' }
 
   get description() {
-    return `Executes a PowerShell command with optional timeout. Working directory persists between calls; shell state does not. Edition: Windows PowerShell 5.1 (powershell.exe). Pipeline chain && and || are NOT available — use "A; if ($?) { B }". Ternary ?:, null-coalescing ??, and null-conditional ?. are NOT available. Avoid 2>&1 on native exes (wraps stderr in ErrorRecord). Default file encoding is UTF-16 LE; pass -Encoding utf8 to Out-File/Set-Content. ConvertFrom-Json returns PSCustomObject, not a hashtable (-AsHashtable unavailable). Use Glob/Grep/Read/Edit/Write instead of Get-ChildItem -Recurse / Select-String / Get-Content / Set-Content. Interactive/blocking commands (Read-Host, Get-Credential, Out-GridView, git rebase -i) are forbidden (runs with -NonInteractive); add -Confirm:$false to destructive cmdlets you intend to run. timeout in ms (default 120000, max 600000); run_in_background runs detached. To stop a background process, run Stop-Process -Id <pid> in a later PowerShell call. Do not prefix commands with cd — the working directory is already set. Avoid Start-Sleep: run long commands with run_in_background and you will be notified on completion. Unix equivalents: head/tail -> Get-Content -TotalCount/-Tail; which -> (Get-Command name).Source; touch -> if (-not (Test-Path p)) { New-Item -ItemType File p } (never New-Item -Force on a file); wc -l -> (Get-Content p | Measure-Object -Line).Lines; mkdir -p -> New-Item -ItemType Directory -Force p; rm -rf -> Remove-Item -Recurse -Force p. Multiline strings to native exes: use a single-quoted here-string @'...'@ with the closing '@ at column 0. For git: prefer a new commit over amending; never use --no-verify/--no-gpg-sign unless the user asks; avoid destructive ops (reset --hard, push --force) unless truly the best approach.`
+    return `Executes or controls a PowerShell command. For a new command, set command and choose timeout based on the expected time. timeout is only the current wait window in ms (default 30000, min 250, max 120000): if it expires, the process keeps running and the result returns status=running plus taskId. Then call PowerShell with task_id and action=wait (optionally a new timeout) or action=interrupt. Do not rerun the original command. Working directory persists between calls; shell state does not. Edition: Windows PowerShell 5.1 (powershell.exe). Pipeline chain && and || are unavailable; use "A; if ($?) { B }". Use explicit UTF-8 for file operations and dedicated Glob/Grep/Read/Edit/Write tools for repository work. Interactive commands are forbidden. run_in_background remains available for intentionally detached processes. Do not prefix commands with cd because the working directory is already set.`
   }
 
   get parameters_schema() {
     return {
       type: 'object',
       properties: {
-        command: { type: 'string', description: 'The PowerShell command to execute.' },
+        command: { type: 'string', description: 'New PowerShell command to execute. Omit when controlling task_id.' },
         description: { type: 'string', description: 'Short description of what the command does.' },
-        timeout: { type: 'number', description: 'Timeout in ms. Default 120000, max 600000.' },
-        run_in_background: { type: 'boolean', description: 'Run detached; returns pid + stdoutFile immediately.' },
+        timeout: { type: 'number', description: 'Current wait window in ms. Default 30000, min 250, max 120000. Expiry does not kill the command.' },
+        task_id: { type: 'string', description: 'Task id returned when a previous command is still running.' },
+        action: { type: 'string', enum: ['wait', 'interrupt'], description: 'With task_id: wait again or interrupt the running command.' },
+        run_in_background: { type: 'boolean', description: 'Run intentionally detached; returns pid + stdoutFile immediately.' },
         dangerouslyDisableSandbox: { type: 'boolean', description: 'Reserved (no sandbox this period).' }
       },
-      required: ['command']
+      additionalProperties: false
     }
   }
 
   async execute(args: string, context: ToolContext): Promise<string> {
     try {
-      const parsed = JSON.parse(args) as PSArgs
-      if (!parsed.command) return 'Error: command is required.'
-
+      const parsed = JSON.parse(args) as PowerShellArgs
       const sessionId = context.sessionId || '_default'
       const currentCwd = sessionCwd.get(sessionId) || context.workspaceRoot
-      const executable = resolvePwshExe()
-
-      let timeout = parsed.timeout ?? DEFAULT_TIMEOUT
-      if (timeout > MAX_TIMEOUT) timeout = MAX_TIMEOUT
-
       const runner = new SpawnRunner()
+
+      if (parsed.task_id) {
+        if (parsed.command) return 'Error: command and task_id cannot be used together.'
+        if (!parsed.action) return 'Error: action is required with task_id.'
+        const registry = getCommandTaskRegistry()
+        const task = registry.get(parsed.task_id)
+        if (!task) return `Error: Command task '${parsed.task_id}' was not found.`
+        if (task.sessionId !== sessionId) return 'Access denied. This command task belongs to another session.'
+        if (task.shellType !== 'powershell') return 'Error: This command task was not started by PowerShell.'
+        registry.bindToolCall(parsed.task_id, context.toolCallId)
+        const result = parsed.action === 'interrupt'
+          ? runner.interrupt(parsed.task_id)
+          : await runner.wait(parsed.task_id, resolveTimeout(parsed.timeout))
+        return result ? formatResult(result) : `Error: Command task '${parsed.task_id}' was not found.`
+      }
+
+      if (!parsed.command) return 'Error: command is required for a new command.'
+      if (parsed.action) return 'Error: action requires task_id.'
+
       const result = await runner.run({
         command: parsed.command,
         cwd: currentCwd,
         shell: 'powershell',
-        executable,
-        timeout,
+        executable: resolvePwshExe(),
+        timeout: resolveTimeout(parsed.timeout),
         run_in_background: parsed.run_in_background === true,
-        abortSignal: context.abortSignal
+        abortSignal: context.abortSignal,
+        sessionId,
+        toolCallId: context.toolCallId
       })
 
       if (!result.background) {
@@ -87,19 +123,9 @@ export class PowerShellTool extends Tool {
         if (next) sessionCwd.set(sessionId, next)
       }
 
-      return JSON.stringify({
-        command: parsed.command,
-        exitCode: result.exitCode,
-        stdout: result.stdout,
-        stderr: result.stderr,
-        timedOut: result.timedOut,
-        background: result.background,
-        pid: result.pid,
-        stdoutFile: result.stdoutFile,
-        truncated: result.truncated
-      }, null, 2)
-    } catch (err: any) {
-      return `Error: ${err.message}`
+      return formatResult({ ...result, command: parsed.command })
+    } catch (error: any) {
+      return `Error: ${error.message}`
     }
   }
 }

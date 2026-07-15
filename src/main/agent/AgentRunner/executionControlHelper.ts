@@ -18,6 +18,7 @@ interface ControlArgs {
   executor_id?: string
   action?: ControlAction
   reason?: string
+  discard_context?: boolean
 }
 
 function toolResult(toolCallId: string, ok: boolean, dataOrError: unknown) {
@@ -85,6 +86,18 @@ export async function handleExecutionControl(
   if (parsed.action === 'resume' && (!executor.handoff?.canResume || !executor.subAgentId)) {
     return toolResult(toolCallId, false, 'This Executor has no resumable durable context. Use restart or takeover.')
   }
+  if (
+    parsed.action === 'restart' &&
+    executor.handoff?.canResume &&
+    executor.subAgentId &&
+    parsed.discard_context !== true
+  ) {
+    return toolResult(
+      toolCallId,
+      false,
+      'This Executor has resumable durable context. Use resume. To explicitly discard it and start over, set discard_context=true.'
+    )
+  }
   if (!executor.originalTask) {
     return toolResult(toolCallId, false, 'The original Executor task was not persisted; takeover is required.')
   }
@@ -133,7 +146,7 @@ export async function handleExecutionControl(
       compactionService: config.compactionService,
       permissionScope: execution.isolation === 'worktree'
         ? { allowAllWritesInWorkspace: true, allowBash: true }
-        : { allowedWriteFiles: executor.assignedFiles || [], allowBash: false },
+        : { allowedWriteFiles: executor.assignedFiles || [], allowBash: true },
       transactionId: execution.isolation === 'shared' ? parentTransaction?.id : undefined,
       editTransactionService: execution.isolation === 'shared' ? parentTransaction?.service : undefined,
       apiConfig: {
@@ -162,9 +175,28 @@ export async function handleExecutionControl(
       handoff: result.handoff,
       worktreePath: executor.worktreePath
     }
-    controller.finishExecutor(execution.executionId, executor.stepId, stepResult)
+    const accepted = controller.finishExecutor(execution.executionId, executor.stepId, stepResult)
+    const handoffRecorded = !accepted && controller.recordInterruptedHandoff(
+      execution.executionId,
+      executor.stepId,
+      stepResult
+    )
+    if (!accepted && !handoffRecorded) {
+      callbacks.onSubAgentEnd?.(subAgentId, {
+        status: 'interrupted',
+        output: 'The recovery result arrived after its Executor lease was revoked and was ignored.',
+        toolCallCount: result.toolCallCount,
+        filesExamined: result.filesExamined
+      })
+      return toolResult(toolCallId, false, {
+        action: parsed.action,
+        ignored: true,
+        reason: 'Executor attempt was no longer authoritative.',
+        execution: controller.getExecution(execution.executionId)
+      })
+    }
 
-    if (stepResult.status === 'completed' && executor.worktreePath) {
+    if (accepted && stepResult.status === 'completed' && executor.worktreePath) {
       const metadata = WorktreeService.list(config.workspaceRoot).find((item) =>
         path.resolve(item.path) === path.resolve(executor.worktreePath!)
       )
@@ -208,7 +240,7 @@ export async function handleExecutionControl(
       conclusion: output.summary,
       handoff: result.handoff
     })
-    return toolResult(toolCallId, stepResult.status === 'completed', {
+    return toolResult(toolCallId, accepted && stepResult.status === 'completed', {
       action: parsed.action,
       result: stepResult,
       execution: controller.getExecution(execution.executionId)

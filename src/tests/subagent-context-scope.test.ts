@@ -257,7 +257,7 @@ describe('SubAgent canonical context scope', { timeout: 15_000 }, () => {
           id: 'write-1',
           function: {
             name: 'Write',
-            arguments: JSON.stringify({ file_path: filePath, content: 'from worker\n' })
+            arguments: JSON.stringify({ file_path: filePath, content: 'from worker\n', approval: 'auto' })
           }
         }])
         callbacks.onDone('', 'tool_calls')

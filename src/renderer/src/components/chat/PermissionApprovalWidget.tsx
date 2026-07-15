@@ -4,7 +4,7 @@ import Button from '../ui/Button'
 import Card from '../ui/Card'
 import Flex from '../ui/Flex'
 import Stack from '../ui/Stack'
-import { approvalOptionsForRequest } from './permissionApprovalOptions'
+import { approvalLabelForRequest, approvalOptionsForRequest } from './permissionApprovalOptions'
 import './PermissionApprovalWidget.css'
 
 interface RequestState extends PermissionRequest {
@@ -39,12 +39,12 @@ export default function PermissionApprovalWidget({ msgId, requests, onResolve }:
         <div className="permission-approval-list">
           {pendingRequests.map((request) => {
             const loading = loadingRequestId === request.id
-            const hardline = request.hardline ?? request.critical
-            const unparsed = !hardline && request.analysisStatus === 'unparsed'
-            const label = hardline ? '极度危险' : unparsed ? '无法完整分析' : '需要授权'
+            const absoluteRedline = request.absoluteRedline ?? request.hardline ?? request.critical
+            const unparsed = !absoluteRedline && request.analysisStatus === 'unparsed'
+            const label = approvalLabelForRequest(request)
             const visibleChecks = (request.checks ?? []).filter((check) => check.action !== 'allow')
             return (
-              <div key={request.id} className={`permission-approval-float-item ${hardline ? 'is-critical' : unparsed ? 'is-unparsed' : ''}`}>
+              <div key={request.id} className={`permission-approval-float-item ${absoluteRedline ? 'is-critical' : unparsed ? 'is-unparsed' : ''}`}>
                 <Flex align="center" justify="between" gap={2}>
                   <span className="permission-approval-tool">{label}</span>
                   <span>{request.toolName}</span>
@@ -57,6 +57,7 @@ export default function PermissionApprovalWidget({ msgId, requests, onResolve }:
                       <div key={`${check.permission}:${check.pattern}`}>{check.permission}: {check.pattern}</div>
                     ))}
                     {request.impacts.map((impact) => <div key={`${impact.kind}:${impact.target}`}>{impact.kind}: {impact.target}</div>)}
+                    {request.agentId ? <small>来源 Agent：{request.agentId}</small> : null}
                     <small>规则：{request.ruleId}</small>
                   </div>
                   <Flex justify="end" gap={2} wrap="wrap" className="permission-approval-actions">

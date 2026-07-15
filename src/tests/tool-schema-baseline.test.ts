@@ -10,7 +10,7 @@ const V1_TOOL_NAMES = [
 ].sort((a, b) => a.localeCompare(b))
 
 describe('V1/V2 tool schema baseline', () => {
-  it('locks the original 24-tool canonical schema fingerprint', () => {
+  it('locks the approval-aware 24-tool canonical schema fingerprint', () => {
     const manager = new ToolManager()
     const baseline = manager.createCatalogSnapshot().descriptors
       .filter((descriptor) => V1_TOOL_NAMES.includes(descriptor.name))
@@ -21,7 +21,7 @@ describe('V1/V2 tool schema baseline', () => {
       }))
       .sort((a, b) => a.name.localeCompare(b.name))
     expect(baseline.map((item) => item.name)).toEqual(V1_TOOL_NAMES)
-    expect(fingerprint(baseline)).toBe('05164f232fe46aefcdfc381f2bf8720bd5bd2cec779855c1d54f4545f0dd1ea9')
+    expect(fingerprint(baseline)).toBe('da9f683fb90405b4da6c57657eb8ffec5267179e98bfd42cdf025fdee005d02b')
   })
 
   it('records a comparable default eager-schema budget', () => {
