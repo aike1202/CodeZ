@@ -1,0 +1,18 @@
+{
+  "activeProviderId": "provider-missing",
+  "providers": [
+    {
+      "id": "provider-legacy",
+      "name": "Legacy fixture",
+      "baseUrl": "https://provider.example/v1",
+      "apiFormat": "openai",
+      "apiKeyRef": "[REDACTED_LEGACY_CIPHERTEXT]",
+      "encryption": "safeStorage",
+      "defaultModel": "legacy-model",
+      "thinking": { "enabled": true, "mode": "auto" },
+      "enabled": true,
+      "createdAt": "2025-01-01T00:00:00.000Z",
+      "updatedAt": "2025-01-01T00:00:00.000Z"
+    }
+  ]
+}

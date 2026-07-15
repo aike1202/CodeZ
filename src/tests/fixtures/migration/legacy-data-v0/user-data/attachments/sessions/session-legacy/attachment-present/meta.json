@@ -1,0 +1,10 @@
+{
+  "attachment": {
+    "id": "attachment-present",
+    "storageKey": "sessions/session-legacy/attachment-present",
+    "name": "present.png",
+    "mimeType": "image/png",
+    "size": 67
+  },
+  "createdAt": 1735689600000
+}

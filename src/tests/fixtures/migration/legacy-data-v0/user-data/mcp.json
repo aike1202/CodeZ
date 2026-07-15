@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "fixture-server": {
+      "command": "fixture-mcp-server",
+      "args": ["--stdio"],
+      "env": {
+        "FIXTURE_TOKEN": "${secret:FIXTURE_TOKEN}"
+      },
+      "enabled": true
+    }
+  }
+}

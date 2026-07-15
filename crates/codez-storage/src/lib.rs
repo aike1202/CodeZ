@@ -3,8 +3,17 @@
 //! Versioned repositories, atomic files, credentials, and legacy-data migration.
 
 mod atomic_file;
+mod migration;
+mod schema;
 
 pub use atomic_file::{
     AtomicFileStore, AtomicWriteFaultInjector, AtomicWriteStage, InjectedWriteFault, JsonLinesRead,
     StorageError,
 };
+pub use migration::{
+    BackupReport, DataSensitivity, DiscoveryLimits, DiscoveryRule, LEGACY_DATA_CATALOG,
+    LegacyDataSet, LegacyDataSpec, LegacyFormat, LegacyMigrationService, LegacyRoots,
+    LegacyValidation, ManifestScope, MigrationError, MigrationManifest, MigrationManifestEntry,
+    MigrationPhase, MigrationRunId, RootScope, SchemaSelector, TreeSelector,
+};
+pub use schema::{SchemaError, SchemaFamily, SchemaFormat, VersionedDocument, VersionedRecord};

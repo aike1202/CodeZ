@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "snapshots": {
+    "fixture": {
+      "fingerprint": "fixture-fingerprint",
+      "files": 3
+    }
+  }
+}

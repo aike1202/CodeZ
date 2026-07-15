@@ -1,0 +1,4 @@
+{
+  "disabled": ["fixture-disabled-skill"],
+  "enabled": ["fixture-enabled-skill"]
+}

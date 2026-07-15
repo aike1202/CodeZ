@@ -1,0 +1,30 @@
+{
+  "sessions": [
+    {
+      "id": "session-legacy",
+      "projectId": "project-fixture",
+      "summary": "Legacy session fixture",
+      "relativeTime": "yesterday",
+      "messages": [
+        {
+          "id": "message-1",
+          "role": "user",
+          "content": "Inspect the fixture",
+          "attachments": [
+            {
+              "id": "attachment-missing",
+              "storageKey": "sessions/session-legacy/missing",
+              "name": "missing.png",
+              "mimeType": "image/png",
+              "size": 42
+            }
+          ]
+        }
+      ],
+      "runtime": {
+        "schemaVersion": 2,
+        "ledgerRelativePath": "session-runtime/session-legacy/ledger.jsonl"
+      }
+    }
+  ]
+}
