@@ -8,6 +8,16 @@ export const IPC_CHANNELS = {
   GET_RECENT_PROJECTS: 'workspace:get-recent-projects',
   ADD_RECENT_PROJECT: 'workspace:add-recent-project',
   REMOVE_RECENT_PROJECT: 'workspace:remove-recent-project',
+  UPDATE_PROJECT: 'workspace:update-project',
+  RENAME_RECENT_PROJECT: 'workspace:rename-recent-project',
+  OPEN_IN_EDITOR: 'workspace:open-in-editor',
+  OPEN_IN_EXPLORER: 'workspace:open-in-explorer',
+  DETECT_INSTALLED_EDITORS: 'workspace:detect-installed-editors',
+
+  // Desktop host
+  WINDOW_CONTROL: 'window-control',
+  WINDOW_MAXIMIZED_STATE: 'window-maximized-state',
+  APP_LOG: 'app:log',
 
   // Provider
   PROVIDER_LIST: 'provider:list',
@@ -94,6 +104,15 @@ export const IPC_CHANNELS = {
   // Theme
   THEME_GET: 'theme:get',
   THEME_SET: 'theme:set',
+  THEME_UPDATED: 'theme:updated',
+
+  // Terminal
+  TERMINAL_START: 'terminal:start',
+  TERMINAL_WRITE: 'terminal:write',
+  TERMINAL_RESIZE: 'terminal:resize',
+  TERMINAL_KILL: 'terminal:kill',
+  TERMINAL_OUTPUT: 'terminal:output',
+  TERMINAL_EXIT: 'terminal:exit',
 
   // Skills
   SKILL_GET_ALL: 'skill:get-all',

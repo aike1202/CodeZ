@@ -256,7 +256,7 @@ export function registerFileOpsHandlers(): void {
     }
   })
 
-  ipcMain.handle('workspace:open-in-explorer', async (_event, rootPath: string): Promise<boolean> => {
+  ipcMain.handle(IPC_CHANNELS.OPEN_IN_EXPLORER, async (_event, rootPath: string): Promise<boolean> => {
     try {
       await shell.openPath(rootPath)
       return true
@@ -267,7 +267,7 @@ export function registerFileOpsHandlers(): void {
   })
 
   ipcMain.handle(
-    'workspace:open-in-editor',
+    IPC_CHANNELS.OPEN_IN_EDITOR,
     async (_event, rootPath: string, editorId: string, exePath: string | null): Promise<boolean> => {
       return new Promise((resolve) => {
         let command = ''
@@ -299,7 +299,7 @@ export function registerFileOpsHandlers(): void {
   )
 
   ipcMain.handle(
-    'workspace:detect-installed-editors',
+    IPC_CHANNELS.DETECT_INSTALLED_EDITORS,
     async (): Promise<Array<{ id: string; name: string; exePath: string | null; iconPath: string | null }>> => {
       const getCommandPath = (cmd: string): Promise<string | null> => {
         return new Promise((resolve) => {

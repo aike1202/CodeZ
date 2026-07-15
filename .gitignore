@@ -119,6 +119,8 @@ Thumbs.db
 dist-electron/
 release/
 *.vite/
+/target/
+/src-tauri/gen/
 
 # Editor directories and files
 .idea/

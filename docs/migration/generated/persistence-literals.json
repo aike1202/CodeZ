@@ -1,0 +1,434 @@
+{
+  "entries": [
+    {
+      "file": "src/main/agent/RulesResolver.ts",
+      "line": 20,
+      "value": ".codez"
+    },
+    {
+      "file": "src/main/agent/RulesResolver.ts",
+      "line": 21,
+      "value": ".codez"
+    },
+    {
+      "file": "src/main/agent/RulesResolver.ts",
+      "line": 40,
+      "value": ".codez"
+    },
+    {
+      "file": "src/main/ipc/attachment.handlers.ts",
+      "line": 13,
+      "value": "userData"
+    },
+    {
+      "file": "src/main/ipc/rules.handlers.ts",
+      "line": 14,
+      "value": ".codez"
+    },
+    {
+      "file": "src/main/ipc/rules.handlers.ts",
+      "line": 15,
+      "value": ".codez"
+    },
+    {
+      "file": "src/main/ipc/rules.handlers.ts",
+      "line": 25,
+      "value": ".codez"
+    },
+    {
+      "file": "src/main/ipc/rules.handlers.ts",
+      "line": 45,
+      "value": ".codez"
+    },
+    {
+      "file": "src/main/ipc/rules.handlers.ts",
+      "line": 47,
+      "value": ".codez"
+    },
+    {
+      "file": "src/main/ipc/rules.handlers.ts",
+      "line": 54,
+      "value": ".codez"
+    },
+    {
+      "file": "src/main/ipc/rules.handlers.ts",
+      "line": 88,
+      "value": ".codez"
+    },
+    {
+      "file": "src/main/ipc/rules.handlers.ts",
+      "line": 90,
+      "value": ".codez"
+    },
+    {
+      "file": "src/main/ipc/rules.handlers.ts",
+      "line": 97,
+      "value": ".codez"
+    },
+    {
+      "file": "src/main/ipc/workspace.handlers/fileOpsHandlers.ts",
+      "line": 97,
+      "value": "userData"
+    },
+    {
+      "file": "src/main/services/AttachmentService.ts",
+      "line": 231,
+      "value": "meta.json"
+    },
+    {
+      "file": "src/main/services/AttachmentService.ts",
+      "line": 257,
+      "value": "meta.json"
+    },
+    {
+      "file": "src/main/services/AttachmentService.ts",
+      "line": 271,
+      "value": "meta.json"
+    },
+    {
+      "file": "src/main/services/context/ContextRuntimeServices.ts",
+      "line": 17,
+      "value": "userData"
+    },
+    {
+      "file": "src/main/services/context/ModelLedgerStore.ts",
+      "line": 271,
+      "value": "ledger.jsonl"
+    },
+    {
+      "file": "src/main/services/context/ModelLedgerStore.ts",
+      "line": 275,
+      "value": "snapshot.json"
+    },
+    {
+      "file": "src/main/services/EditTransactionService.ts",
+      "line": 79,
+      "value": "userData"
+    },
+    {
+      "file": "src/main/services/EditTransactionService.ts",
+      "line": 139,
+      "value": "metadata.json"
+    },
+    {
+      "file": "src/main/services/EditTransactionService.ts",
+      "line": 922,
+      "value": "metadata.json"
+    },
+    {
+      "file": "src/main/services/execution/ExecutionController.ts",
+      "line": 478,
+      "value": ".codez"
+    },
+    {
+      "file": "src/main/services/execution/ExecutionController.ts",
+      "line": 482,
+      "value": ".json"
+    },
+    {
+      "file": "src/main/services/execution/ExecutionController.ts",
+      "line": 542,
+      "value": ".codez"
+    },
+    {
+      "file": "src/main/services/mcp/McpConfigService.ts",
+      "line": 191,
+      "value": "userData"
+    },
+    {
+      "file": "src/main/services/mcp/McpConfigService.ts",
+      "line": 192,
+      "value": "mcp.json"
+    },
+    {
+      "file": "src/main/services/mcp/McpConfigService.ts",
+      "line": 193,
+      "value": "mcp-project-trust.json"
+    },
+    {
+      "file": "src/main/services/mcp/McpConfigService.ts",
+      "line": 200,
+      "value": ".mcp.json"
+    },
+    {
+      "file": "src/main/services/mcp/McpConfigService.ts",
+      "line": 202,
+      "value": ".codez"
+    },
+    {
+      "file": "src/main/services/mcp/McpConfigService.ts",
+      "line": 202,
+      "value": "mcp.local.json"
+    },
+    {
+      "file": "src/main/services/mcp/McpContentStore.ts",
+      "line": 21,
+      "value": "userData"
+    },
+    {
+      "file": "src/main/services/mcp/McpContentStore.ts",
+      "line": 23,
+      "value": "codez-userdata"
+    },
+    {
+      "file": "src/main/services/mcp/McpOAuthProvider.ts",
+      "line": 25,
+      "value": "userData"
+    },
+    {
+      "file": "src/main/services/mcp/McpOAuthProvider.ts",
+      "line": 25,
+      "value": "mcp-oauth.secure"
+    },
+    {
+      "file": "src/main/services/mcp/McpOAuthProvider.ts",
+      "line": 27,
+      "value": "codez-userdata"
+    },
+    {
+      "file": "src/main/services/mcp/McpOAuthProvider.ts",
+      "line": 27,
+      "value": "mcp-oauth.secure"
+    },
+    {
+      "file": "src/main/services/mcp/McpSecretStore.ts",
+      "line": 13,
+      "value": "userData"
+    },
+    {
+      "file": "src/main/services/mcp/McpSecretStore.ts",
+      "line": 13,
+      "value": "mcp-secrets.secure"
+    },
+    {
+      "file": "src/main/services/mcp/McpSecretStore.ts",
+      "line": 15,
+      "value": "codez-userdata"
+    },
+    {
+      "file": "src/main/services/mcp/McpSecretStore.ts",
+      "line": 15,
+      "value": "mcp-secrets.secure"
+    },
+    {
+      "file": "src/main/services/MemoryService.ts",
+      "line": 16,
+      "value": ".codez"
+    },
+    {
+      "file": "src/main/services/permission/NestedCommandExpander.ts",
+      "line": 107,
+      "value": "package.json"
+    },
+    {
+      "file": "src/main/services/permission/PermissionAuditLog.ts",
+      "line": 13,
+      "value": "userData"
+    },
+    {
+      "file": "src/main/services/permission/PermissionAuditLog.ts",
+      "line": 13,
+      "value": "permission-audit.jsonl"
+    },
+    {
+      "file": "src/main/services/permission/PermissionRuleStore.ts",
+      "line": 43,
+      "value": "userData"
+    },
+    {
+      "file": "src/main/services/permission/PermissionRuleStore.ts",
+      "line": 43,
+      "value": "permission-rules.json"
+    },
+    {
+      "file": "src/main/services/permission/workspacePermissionStore.ts",
+      "line": 18,
+      "value": "userData"
+    },
+    {
+      "file": "src/main/services/permission/workspacePermissionStore.ts",
+      "line": 18,
+      "value": "workspace-permissions.json"
+    },
+    {
+      "file": "src/main/services/PlanStore.ts",
+      "line": 25,
+      "value": ".codez"
+    },
+    {
+      "file": "src/main/services/ProjectAnalysisService/index.ts",
+      "line": 50,
+      "value": "userData"
+    },
+    {
+      "file": "src/main/services/ProjectAnalysisService/index.ts",
+      "line": 50,
+      "value": ".codez-cache"
+    },
+    {
+      "file": "src/main/services/ProjectAnalysisService/index.ts",
+      "line": 63,
+      "value": "package.json"
+    },
+    {
+      "file": "src/main/services/ProjectAnalysisService/index.ts",
+      "line": 65,
+      "value": "package-lock.json"
+    },
+    {
+      "file": "src/main/services/ProjectAnalysisService/index.ts",
+      "line": 92,
+      "value": "package.json"
+    },
+    {
+      "file": "src/main/services/ProjectAnalysisService/index.ts",
+      "line": 98,
+      "value": "tsconfig.json"
+    },
+    {
+      "file": "src/main/services/ProjectAnalysisService/index.ts",
+      "line": 375,
+      "value": "package.json"
+    },
+    {
+      "file": "src/main/services/ProjectAnalysisService/index.ts",
+      "line": 404,
+      "value": "composer.json"
+    },
+    {
+      "file": "src/main/services/ProjectAnalysisService/index.ts",
+      "line": 412,
+      "value": "package-lock.json"
+    },
+    {
+      "file": "src/main/services/ProjectAnalysisService/index.ts",
+      "line": 413,
+      "value": "package.json"
+    },
+    {
+      "file": "src/main/services/ProjectAnalysisService/index.ts",
+      "line": 449,
+      "value": "package.json"
+    },
+    {
+      "file": "src/main/services/ProjectAnalysisService/index.ts",
+      "line": 453,
+      "value": "tsconfig.json"
+    },
+    {
+      "file": "src/main/services/ProjectAnalysisService/snapshotCache.ts",
+      "line": 6,
+      "value": "project-snapshots.json"
+    },
+    {
+      "file": "src/main/services/ProviderService.ts",
+      "line": 7,
+      "value": "providers.json"
+    },
+    {
+      "file": "src/main/services/ProviderService.ts",
+      "line": 41,
+      "value": "userData"
+    },
+    {
+      "file": "src/main/services/RecentProjectsStore.ts",
+      "line": 13,
+      "value": "userData"
+    },
+    {
+      "file": "src/main/services/RecentProjectsStore.ts",
+      "line": 13,
+      "value": "recent-projects.json"
+    },
+    {
+      "file": "src/main/services/SessionStore.ts",
+      "line": 11,
+      "value": "sessions.json"
+    },
+    {
+      "file": "src/main/services/SessionStore.ts",
+      "line": 21,
+      "value": "userData"
+    },
+    {
+      "file": "src/main/services/SettingsService.ts",
+      "line": 7,
+      "value": "settings.json"
+    },
+    {
+      "file": "src/main/services/SettingsService.ts",
+      "line": 34,
+      "value": "userData"
+    },
+    {
+      "file": "src/main/services/SkillManager.ts",
+      "line": 27,
+      "value": ".codez"
+    },
+    {
+      "file": "src/main/services/SkillManager.ts",
+      "line": 31,
+      "value": ".codez"
+    },
+    {
+      "file": "src/main/services/SkillManager.ts",
+      "line": 31,
+      "value": "skills-config.json"
+    },
+    {
+      "file": "src/main/services/SkillManager.ts",
+      "line": 36,
+      "value": ".codez-cache"
+    },
+    {
+      "file": "src/main/services/SkillManager.ts",
+      "line": 36,
+      "value": "skills-config.json"
+    },
+    {
+      "file": "src/main/services/SkillManager.ts",
+      "line": 52,
+      "value": ".codez-cache"
+    },
+    {
+      "file": "src/main/services/SkillManager.ts",
+      "line": 52,
+      "value": "skills-config.json"
+    },
+    {
+      "file": "src/main/services/VerificationStrategyService.ts",
+      "line": 15,
+      "value": "package.json"
+    },
+    {
+      "file": "src/main/services/WorkspaceService.ts",
+      "line": 37,
+      "value": "package.json"
+    },
+    {
+      "file": "src/main/services/WorktreeService.ts",
+      "line": 19,
+      "value": ".codez"
+    },
+    {
+      "file": "src/main/tools/runtime/LargeToolResultStore.ts",
+      "line": 28,
+      "value": "userData"
+    },
+    {
+      "file": "src/main/tools/runtime/LargeToolResultStore.ts",
+      "line": 28,
+      "value": "codez-userdata"
+    },
+    {
+      "file": "src/main/tools/runtime/ToolExecutionJournal.ts",
+      "line": 60,
+      "value": "userData"
+    },
+    {
+      "file": "src/main/tools/runtime/ToolExecutionJournal.ts",
+      "line": 60,
+      "value": "tool-execution-journal.jsonl"
+    }
+  ]
+}

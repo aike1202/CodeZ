@@ -53,16 +53,16 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.REMOVE_RECENT_PROJECT, id),
 
     openInEditor: (rootPath: string, editorId: string, exePath: string | null): Promise<boolean> =>
-      ipcRenderer.invoke('workspace:open-in-editor', rootPath, editorId, exePath),
+      ipcRenderer.invoke(IPC_CHANNELS.OPEN_IN_EDITOR, rootPath, editorId, exePath),
 
     openInExplorer: (rootPath: string): Promise<boolean> =>
-      ipcRenderer.invoke('workspace:open-in-explorer', rootPath),
+      ipcRenderer.invoke(IPC_CHANNELS.OPEN_IN_EXPLORER, rootPath),
 
     renameRecentProject: (id: string, newName: string): Promise<void> =>
-      ipcRenderer.invoke('workspace:rename-recent-project', id, newName),
+      ipcRenderer.invoke(IPC_CHANNELS.RENAME_RECENT_PROJECT, id, newName),
 
     detectInstalledEditors: (): Promise<any[]> =>
-      ipcRenderer.invoke('workspace:detect-installed-editors')
+      ipcRenderer.invoke(IPC_CHANNELS.DETECT_INSTALLED_EDITORS)
   },
 
   permission: {
@@ -391,24 +391,24 @@ const api = {
 
   terminal: {
     start: (workspaceId: string, rootPath: string): Promise<void> =>
-      ipcRenderer.invoke('terminal:start', workspaceId, rootPath),
+      ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_START, workspaceId, rootPath),
 
     write: (workspaceId: string, text: string): Promise<void> =>
-      ipcRenderer.invoke('terminal:write', workspaceId, text),
+      ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_WRITE, workspaceId, text),
 
     resize: (workspaceId: string, cols: number, rows: number): Promise<void> =>
-      ipcRenderer.invoke('terminal:resize', workspaceId, cols, rows),
+      ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_RESIZE, workspaceId, cols, rows),
 
     kill: (workspaceId: string): Promise<void> =>
-      ipcRenderer.invoke('terminal:kill', workspaceId),
+      ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_KILL, workspaceId),
 
     onOutput: (callback: (workspaceId: string, data: string) => void): (() => void) => {
       const handler = (_event: unknown, workspaceId: string, data: string) => {
         callback(workspaceId, data)
       }
-      ipcRenderer.on('terminal:output', handler)
+      ipcRenderer.on(IPC_CHANNELS.TERMINAL_OUTPUT, handler)
       return () => {
-        ipcRenderer.removeListener('terminal:output', handler)
+        ipcRenderer.removeListener(IPC_CHANNELS.TERMINAL_OUTPUT, handler)
       }
     },
 
@@ -416,9 +416,9 @@ const api = {
       const handler = (_event: unknown, workspaceId: string) => {
         callback(workspaceId)
       }
-      ipcRenderer.on('terminal:exit', handler)
+      ipcRenderer.on(IPC_CHANNELS.TERMINAL_EXIT, handler)
       return () => {
-        ipcRenderer.removeListener('terminal:exit', handler)
+        ipcRenderer.removeListener(IPC_CHANNELS.TERMINAL_EXIT, handler)
       }
     }
   },
@@ -430,8 +430,8 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.THEME_SET, source),
     onUpdated: (callback: (info: { shouldUseDarkColors: boolean; themeSource: 'system' | 'light' | 'dark' }) => void): (() => void) => {
       const handler = (_event: unknown, info: any) => callback(info)
-      ipcRenderer.on('theme:updated', handler)
-      return () => ipcRenderer.removeListener('theme:updated', handler)
+      ipcRenderer.on(IPC_CHANNELS.THEME_UPDATED, handler)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.THEME_UPDATED, handler)
     }
   },
 
@@ -567,10 +567,10 @@ const api = {
   },
 
   logger: {
-    info: (...args: any[]) => ipcRenderer.send('app:log', 'info', ...args),
-    warn: (...args: any[]) => ipcRenderer.send('app:log', 'warn', ...args),
-    error: (...args: any[]) => ipcRenderer.send('app:log', 'error', ...args),
-    debug: (...args: any[]) => ipcRenderer.send('app:log', 'debug', ...args)
+    info: (...args: any[]) => ipcRenderer.send(IPC_CHANNELS.APP_LOG, 'info', ...args),
+    warn: (...args: any[]) => ipcRenderer.send(IPC_CHANNELS.APP_LOG, 'warn', ...args),
+    error: (...args: any[]) => ipcRenderer.send(IPC_CHANNELS.APP_LOG, 'error', ...args),
+    debug: (...args: any[]) => ipcRenderer.send(IPC_CHANNELS.APP_LOG, 'debug', ...args)
   }
 }
 

@@ -1,0 +1,18 @@
+[package]
+name = "codez-storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+codez-core.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+aes-gcm = "0.10.3"
+base64 = "0.22.1"
+serde_json.workspace = true
+windows-dpapi = "0.2.0"
+
+[lints]
+workspace = true

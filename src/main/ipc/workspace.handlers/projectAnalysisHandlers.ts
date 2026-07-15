@@ -42,14 +42,14 @@ export function registerProjectAnalysisHandlers(): void {
   })
 
   ipcMain.handle(
-    'workspace:update-project',
+    IPC_CHANNELS.UPDATE_PROJECT,
     async (_event, project: WorkspaceInfo): Promise<void> => {
       await store.updateProject(project)
     }
   )
 
   ipcMain.handle(
-    'workspace:rename-recent-project',
+    IPC_CHANNELS.RENAME_RECENT_PROJECT,
     async (_event, id: string, newName: string): Promise<void> => {
       await store.rename(id, newName)
     }

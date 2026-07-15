@@ -1,0 +1,2724 @@
+{
+  "declaredChannels": {
+    "OPEN_DIRECTORY": "workspace:open-directory",
+    "SCAN_FILE_TREE": "workspace:scan-file-tree",
+    "READ_FILE": "workspace:read-file",
+    "GET_ALL_PATHS": "workspace:get-all-paths",
+    "DETECT_PROJECT": "workspace:detect-project",
+    "GET_RECENT_PROJECTS": "workspace:get-recent-projects",
+    "ADD_RECENT_PROJECT": "workspace:add-recent-project",
+    "REMOVE_RECENT_PROJECT": "workspace:remove-recent-project",
+    "UPDATE_PROJECT": "workspace:update-project",
+    "RENAME_RECENT_PROJECT": "workspace:rename-recent-project",
+    "OPEN_IN_EDITOR": "workspace:open-in-editor",
+    "OPEN_IN_EXPLORER": "workspace:open-in-explorer",
+    "DETECT_INSTALLED_EDITORS": "workspace:detect-installed-editors",
+    "WINDOW_CONTROL": "window-control",
+    "WINDOW_MAXIMIZED_STATE": "window-maximized-state",
+    "APP_LOG": "app:log",
+    "PROVIDER_LIST": "provider:list",
+    "PROVIDER_ADD": "provider:add",
+    "PROVIDER_UPDATE": "provider:update",
+    "PROVIDER_REMOVE": "provider:remove",
+    "PROVIDER_TEST": "provider:test",
+    "PROVIDER_SET_ACTIVE": "provider:set-active",
+    "ATTACHMENT_IMPORT_DRAFT": "attachment:import-draft",
+    "ATTACHMENT_PROMOTE_DRAFTS": "attachment:promote-drafts",
+    "ATTACHMENT_ROLLBACK_PROMOTION": "attachment:rollback-promotion",
+    "ATTACHMENT_DISCARD_DRAFTS": "attachment:discard-drafts",
+    "ATTACHMENT_READ_PREVIEW": "attachment:read-preview",
+    "CHAT_STREAM_START": "chat:stream:start",
+    "CHAT_STREAM_CHUNK": "chat:stream:chunk",
+    "CHAT_STREAM_END": "chat:stream:end",
+    "CHAT_STREAM_ERROR": "chat:stream:error",
+    "CHAT_STREAM_STOP": "chat:stream:stop",
+    "CHAT_TOOL_INTERRUPT": "chat:tool:interrupt",
+    "CHAT_STREAM_STEER": "chat:stream:steer",
+    "CHAT_STREAM_STEER_CONSUMED": "chat:stream:steer-consumed",
+    "CHAT_RUNTIME_STATUS": "chat:runtime:status",
+    "CHAT_RUNTIME_STATUS_CHANGED": "chat:runtime:status-changed",
+    "CHAT_PREDICT_NEXT_INPUT": "chat:predict-next-input",
+    "CHAT_COMPACT_START": "chat:compact:start",
+    "CHAT_CONTEXT_BUDGET_UPDATED": "chat:context-budget-updated",
+    "CHAT_COMPACTION_STARTED": "chat:compaction-started",
+    "CHAT_COMPACTION_COMPLETED": "chat:compaction-completed",
+    "CHAT_COMPACTION_FAILED": "chat:compaction-failed",
+    "CHAT_HISTORY_RECOVERED": "chat:history-recovered",
+    "CHAT_ACCEPT_FILE": "chat:accept-file",
+    "CHAT_REJECT_FILE": "chat:reject-file",
+    "CHAT_REQUEST_APPROVAL": "chat:request-approval",
+    "CHAT_APPROVAL_RESPONSE": "chat:approval-response",
+    "CHAT_REQUEST_ASK_USER": "chat:request-ask-user",
+    "CHAT_ASK_USER_RESPONSE": "chat:ask-user-response",
+    "CHAT_GET_DIFF": "chat:get-diff",
+    "CHAT_REVERT_MESSAGES": "chat:revert-messages",
+    "CHAT_PREVIEW_REVERT_MESSAGES": "chat:preview-revert-messages",
+    "CHAT_STREAM_TOOL_START": "chat:stream:tool-start",
+    "CHAT_STREAM_TOOL_END": "chat:stream:tool-end",
+    "CHAT_STREAM_SUBAGENT_START": "chat:stream:subagent:start",
+    "CHAT_STREAM_SUBAGENT_END": "chat:stream:subagent:end",
+    "CHAT_STREAM_SUBAGENT_CHUNK": "chat:stream:subagent:chunk",
+    "CHAT_STREAM_SUBAGENT_TOOL_START": "chat:stream:subagent:tool-start",
+    "CHAT_STREAM_SUBAGENT_TOOL_END": "chat:stream:subagent:tool-end",
+    "SESSION_LIST": "session:list",
+    "SESSION_GET": "session:get",
+    "SESSION_SAVE": "session:save",
+    "SESSION_DELETE": "session:delete",
+    "PLAN_STATE_CHANGED": "plan:state-changed",
+    "PLAN_APPROVE": "plan:approve",
+    "PLAN_REJECT": "plan:reject",
+    "PLAN_LIST": "plan:list",
+    "PLAN_LOAD": "plan:load",
+    "PLAN_GET_ACTIVE": "plan:get-active",
+    "PLAN_ENTER_REQUEST": "plan:enter-request",
+    "PLAN_ENTER_RESPONSE": "plan:enter-response",
+    "PLAN_SUBAGENT_PROGRESS": "plan:subagent-progress",
+    "PLAN_LINKED": "plan:linked",
+    "PARALLEL_EXEC_STARTED": "parallel:exec-started",
+    "PARALLEL_WAVE_UPDATE": "parallel:wave-update",
+    "PARALLEL_EXEC_DONE": "parallel:exec-done",
+    "EXECUTION_EVENT": "execution:event",
+    "TASK_UPDATED": "task:updated",
+    "THEME_GET": "theme:get",
+    "THEME_SET": "theme:set",
+    "THEME_UPDATED": "theme:updated",
+    "TERMINAL_START": "terminal:start",
+    "TERMINAL_WRITE": "terminal:write",
+    "TERMINAL_RESIZE": "terminal:resize",
+    "TERMINAL_KILL": "terminal:kill",
+    "TERMINAL_OUTPUT": "terminal:output",
+    "TERMINAL_EXIT": "terminal:exit",
+    "SKILL_GET_ALL": "skill:get-all",
+    "SKILL_TOGGLE": "skill:toggle",
+    "SKILL_CHECK_EXTERNAL": "skill:check-external",
+    "SKILL_IMPORT_EXTERNAL": "skill:import-external",
+    "SKILL_LIST_EXTERNAL": "skill:list-external",
+    "SKILL_IMPORT_SINGLE": "skill:import-single",
+    "SKILL_DELETE": "skill:delete",
+    "RULES_GET_LIST": "rules:get-list",
+    "RULES_SAVE": "rules:save",
+    "RULES_DELETE": "rules:delete",
+    "RULES_RENAME": "rules:rename",
+    "SETTINGS_GET": "settings:get",
+    "SETTINGS_SAVE": "settings:save",
+    "MCP_LIST": "mcp:list",
+    "MCP_SAVE_USER": "mcp:save-user",
+    "MCP_SET_ENABLED": "mcp:set-enabled",
+    "MCP_GET_CATALOG": "mcp:get-catalog",
+    "MCP_RECONNECT": "mcp:reconnect",
+    "MCP_AUTHORIZE": "mcp:authorize",
+    "MCP_LOGOUT": "mcp:logout",
+    "MCP_TRUST_PROJECT": "mcp:trust-project",
+    "MCP_SECRET_KEYS": "mcp:secret-keys",
+    "MCP_SECRET_SET": "mcp:secret-set",
+    "MCP_SECRET_DELETE": "mcp:secret-delete",
+    "MCP_CHANGED": "mcp:changed",
+    "PERMISSION_MODE_GET": "permission:mode:get",
+    "PERMISSION_MODE_SET": "permission:mode:set",
+    "SUBAGENT_LIST": "subagent:list",
+    "SUBAGENT_TOGGLE": "subagent:toggle",
+    "SUBAGENT_GET_DETAIL": "subagent:get-detail",
+    "SUBAGENT_SET_MODEL": "subagent:set-model"
+  },
+  "categories": {
+    "mainRequests": [
+      {
+        "file": "src/main/ipc/attachment.handlers.ts",
+        "line": 37,
+        "expression": "ipcMain.handle",
+        "channel": "attachment:import-draft",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/attachment.handlers.ts",
+        "line": 43,
+        "expression": "ipcMain.handle",
+        "channel": "attachment:promote-drafts",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/attachment.handlers.ts",
+        "line": 49,
+        "expression": "ipcMain.handle",
+        "channel": "attachment:rollback-promotion",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/attachment.handlers.ts",
+        "line": 55,
+        "expression": "ipcMain.handle",
+        "channel": "attachment:discard-drafts",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/attachment.handlers.ts",
+        "line": 60,
+        "expression": "ipcMain.handle",
+        "channel": "attachment:read-preview",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/chat.handlers.ts",
+        "line": 125,
+        "expression": "ipcMain.handle",
+        "channel": "chat:predict-next-input",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/chat.handlers.ts",
+        "line": 195,
+        "expression": "ipcMain.handle",
+        "channel": "chat:stream:start",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/chat.handlers.ts",
+        "line": 465,
+        "expression": "ipcMain.handleOnce",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/chat.handlers.ts",
+        "line": 475,
+        "expression": "ipcMain.handleOnce",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/chat.handlers.ts",
+        "line": 498,
+        "expression": "ipcMain.handle",
+        "channel": "chat:runtime:status",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/chat.handlers.ts",
+        "line": 502,
+        "expression": "ipcMain.handle",
+        "channel": "chat:stream:steer",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/chat.handlers.ts",
+        "line": 516,
+        "expression": "ipcMain.handle",
+        "channel": "chat:stream:stop",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/chat.handlers.ts",
+        "line": 524,
+        "expression": "ipcMain.handle",
+        "channel": "chat:tool:interrupt",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/chat.handlers.ts",
+        "line": 538,
+        "expression": "ipcMain.handle",
+        "channel": "chat:compact:start",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/chat.handlers.ts",
+        "line": 617,
+        "expression": "ipcMain.handle",
+        "channel": "chat:accept-file",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/chat.handlers.ts",
+        "line": 623,
+        "expression": "ipcMain.handle",
+        "channel": "chat:reject-file",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/chat.handlers.ts",
+        "line": 629,
+        "expression": "ipcMain.handle",
+        "channel": "chat:get-diff",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/chat.handlers.ts",
+        "line": 635,
+        "expression": "ipcMain.handle",
+        "channel": "chat:revert-messages",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/chat.handlers.ts",
+        "line": 689,
+        "expression": "ipcMain.handle",
+        "channel": "chat:preview-revert-messages",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/chat.handlers.ts",
+        "line": 720,
+        "expression": "ipcMain.handle",
+        "channel": "plan:approve",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/chat.handlers.ts",
+        "line": 730,
+        "expression": "ipcMain.handle",
+        "channel": "plan:reject",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/mcp.handlers.ts",
+        "line": 18,
+        "expression": "ipcMain.handle",
+        "channel": "mcp:list",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/mcp.handlers.ts",
+        "line": 22,
+        "expression": "ipcMain.handle",
+        "channel": "mcp:save-user",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/mcp.handlers.ts",
+        "line": 26,
+        "expression": "ipcMain.handle",
+        "channel": "mcp:set-enabled",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/mcp.handlers.ts",
+        "line": 30,
+        "expression": "ipcMain.handle",
+        "channel": "mcp:get-catalog",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/mcp.handlers.ts",
+        "line": 31,
+        "expression": "ipcMain.handle",
+        "channel": "mcp:reconnect",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/mcp.handlers.ts",
+        "line": 35,
+        "expression": "ipcMain.handle",
+        "channel": "mcp:authorize",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/mcp.handlers.ts",
+        "line": 39,
+        "expression": "ipcMain.handle",
+        "channel": "mcp:logout",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/mcp.handlers.ts",
+        "line": 43,
+        "expression": "ipcMain.handle",
+        "channel": "mcp:trust-project",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/mcp.handlers.ts",
+        "line": 47,
+        "expression": "ipcMain.handle",
+        "channel": "mcp:secret-keys",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/mcp.handlers.ts",
+        "line": 48,
+        "expression": "ipcMain.handle",
+        "channel": "mcp:secret-set",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/mcp.handlers.ts",
+        "line": 53,
+        "expression": "ipcMain.handle",
+        "channel": "mcp:secret-delete",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/permission.handlers.ts",
+        "line": 7,
+        "expression": "ipcMain.handle",
+        "channel": "permission:mode:get",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/permission.handlers.ts",
+        "line": 11,
+        "expression": "ipcMain.handle",
+        "channel": "permission:mode:set",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/plan.handlers.ts",
+        "line": 7,
+        "expression": "ipcMain.handle",
+        "channel": "plan:list",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/plan.handlers.ts",
+        "line": 12,
+        "expression": "ipcMain.handle",
+        "channel": "plan:load",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/plan.handlers.ts",
+        "line": 19,
+        "expression": "ipcMain.handle",
+        "channel": "plan:get-active",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/provider.handlers.ts",
+        "line": 19,
+        "expression": "ipcMain.handle",
+        "channel": "provider:list",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/provider.handlers.ts",
+        "line": 23,
+        "expression": "ipcMain.handle",
+        "channel": "provider:add",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/provider.handlers.ts",
+        "line": 38,
+        "expression": "ipcMain.handle",
+        "channel": "provider:update",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/provider.handlers.ts",
+        "line": 45,
+        "expression": "ipcMain.handle",
+        "channel": "provider:remove",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/provider.handlers.ts",
+        "line": 49,
+        "expression": "ipcMain.handle",
+        "channel": "provider:test",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/provider.handlers.ts",
+        "line": 53,
+        "expression": "ipcMain.handle",
+        "channel": "provider:set-active",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/rules.handlers.ts",
+        "line": 9,
+        "expression": "ipcMain.handle",
+        "channel": "rules:get-list",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/rules.handlers.ts",
+        "line": 32,
+        "expression": "ipcMain.handle",
+        "channel": "rules:save",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/rules.handlers.ts",
+        "line": 69,
+        "expression": "ipcMain.handle",
+        "channel": "rules:delete",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/rules.handlers.ts",
+        "line": 79,
+        "expression": "ipcMain.handle",
+        "channel": "rules:rename",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/session.handlers.ts",
+        "line": 50,
+        "expression": "ipcMain.handle",
+        "channel": "session:list",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/session.handlers.ts",
+        "line": 54,
+        "expression": "ipcMain.handle",
+        "channel": "session:get",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/session.handlers.ts",
+        "line": 58,
+        "expression": "ipcMain.handle",
+        "channel": "session:save",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/session.handlers.ts",
+        "line": 62,
+        "expression": "ipcMain.handle",
+        "channel": "session:delete",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/settings.handlers.ts",
+        "line": 18,
+        "expression": "ipcMain.handle",
+        "channel": "settings:get",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/settings.handlers.ts",
+        "line": 22,
+        "expression": "ipcMain.handle",
+        "channel": "settings:save",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/skill.handlers.ts",
+        "line": 7,
+        "expression": "ipcMain.handle",
+        "channel": "skill:get-all",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/skill.handlers.ts",
+        "line": 14,
+        "expression": "ipcMain.handle",
+        "channel": "skill:toggle",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/skill.handlers.ts",
+        "line": 21,
+        "expression": "ipcMain.handle",
+        "channel": "skill:check-external",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/skill.handlers.ts",
+        "line": 26,
+        "expression": "ipcMain.handle",
+        "channel": "skill:import-external",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/skill.handlers.ts",
+        "line": 31,
+        "expression": "ipcMain.handle",
+        "channel": "skill:list-external",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/skill.handlers.ts",
+        "line": 36,
+        "expression": "ipcMain.handle",
+        "channel": "skill:import-single",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/skill.handlers.ts",
+        "line": 41,
+        "expression": "ipcMain.handle",
+        "channel": "skill:delete",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/subagent.handlers.ts",
+        "line": 20,
+        "expression": "ipcMain.handle",
+        "channel": "subagent:list",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/subagent.handlers.ts",
+        "line": 32,
+        "expression": "ipcMain.handle",
+        "channel": "subagent:toggle",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/subagent.handlers.ts",
+        "line": 47,
+        "expression": "ipcMain.handle",
+        "channel": "subagent:get-detail",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/subagent.handlers.ts",
+        "line": 57,
+        "expression": "ipcMain.handle",
+        "channel": "subagent:set-model",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/terminal.handlers.ts",
+        "line": 6,
+        "expression": "ipcMain.handle",
+        "channel": "terminal:start",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/terminal.handlers.ts",
+        "line": 12,
+        "expression": "ipcMain.handle",
+        "channel": "terminal:write",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/terminal.handlers.ts",
+        "line": 16,
+        "expression": "ipcMain.handle",
+        "channel": "terminal:resize",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/terminal.handlers.ts",
+        "line": 20,
+        "expression": "ipcMain.handle",
+        "channel": "terminal:kill",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/theme.handlers.ts",
+        "line": 6,
+        "expression": "ipcMain.handle",
+        "channel": "theme:get",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/theme.handlers.ts",
+        "line": 14,
+        "expression": "ipcMain.handle",
+        "channel": "theme:set",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/workspace.handlers/fileOpsHandlers.ts",
+        "line": 203,
+        "expression": "ipcMain.handle",
+        "channel": "workspace:open-directory",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/workspace.handlers/fileOpsHandlers.ts",
+        "line": 219,
+        "expression": "ipcMain.handle",
+        "channel": "workspace:scan-file-tree",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/workspace.handlers/fileOpsHandlers.ts",
+        "line": 229,
+        "expression": "ipcMain.handle",
+        "channel": "workspace:get-all-paths",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/workspace.handlers/fileOpsHandlers.ts",
+        "line": 242,
+        "expression": "ipcMain.handle",
+        "channel": "workspace:read-file",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/workspace.handlers/fileOpsHandlers.ts",
+        "line": 259,
+        "expression": "ipcMain.handle",
+        "channel": "workspace:open-in-explorer",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/workspace.handlers/fileOpsHandlers.ts",
+        "line": 269,
+        "expression": "ipcMain.handle",
+        "channel": "workspace:open-in-editor",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/workspace.handlers/fileOpsHandlers.ts",
+        "line": 301,
+        "expression": "ipcMain.handle",
+        "channel": "workspace:detect-installed-editors",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/workspace.handlers/projectAnalysisHandlers.ts",
+        "line": 20,
+        "expression": "ipcMain.handle",
+        "channel": "workspace:detect-project",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/workspace.handlers/projectAnalysisHandlers.ts",
+        "line": 29,
+        "expression": "ipcMain.handle",
+        "channel": "workspace:get-recent-projects",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/workspace.handlers/projectAnalysisHandlers.ts",
+        "line": 33,
+        "expression": "ipcMain.handle",
+        "channel": "workspace:add-recent-project",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/workspace.handlers/projectAnalysisHandlers.ts",
+        "line": 40,
+        "expression": "ipcMain.handle",
+        "channel": "workspace:remove-recent-project",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/workspace.handlers/projectAnalysisHandlers.ts",
+        "line": 44,
+        "expression": "ipcMain.handle",
+        "channel": "workspace:update-project",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/workspace.handlers/projectAnalysisHandlers.ts",
+        "line": 51,
+        "expression": "ipcMain.handle",
+        "channel": "workspace:rename-recent-project",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      }
+    ],
+    "mainListeners": [
+      {
+        "file": "src/main/index.ts",
+        "line": 168,
+        "expression": "ipcMain.on",
+        "channel": "window-control",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/logger.ts",
+        "line": 24,
+        "expression": "ipcMain.on",
+        "channel": "app:log",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      }
+    ],
+    "mainEvents": [
+      {
+        "file": "src/main/agent/AgentRunner/parallelOrchestrator.ts",
+        "line": 470,
+        "expression": "win.webContents.send",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/agent/AgentRunner/subAgentRunnerHelper.ts",
+        "line": 340,
+        "expression": "win.webContents.send",
+        "channel": "plan:subagent-progress",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/agent/AgentRunner/subAgentRunnerHelper.ts",
+        "line": 401,
+        "expression": "win.webContents.send",
+        "channel": "plan:subagent-progress",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/agent/AgentRunner/subAgentRunnerHelper.ts",
+        "line": 466,
+        "expression": "win.webContents.send",
+        "channel": "plan:subagent-progress",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/index.ts",
+        "line": 71,
+        "expression": "mainWindow.webContents.send",
+        "channel": "window-maximized-state",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/index.ts",
+        "line": 75,
+        "expression": "mainWindow.webContents.send",
+        "channel": "window-maximized-state",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/chat.handlers.ts",
+        "line": 96,
+        "expression": "window.webContents.send",
+        "channel": "chat:runtime:status-changed",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/chat.handlers.ts",
+        "line": 104,
+        "expression": "window.webContents.send",
+        "channel": "execution:event",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/mcp.handlers.ts",
+        "line": 14,
+        "expression": "window.webContents.send",
+        "channel": "mcp:changed",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/ipc/theme.handlers.ts",
+        "line": 25,
+        "expression": "win.webContents.send",
+        "channel": "theme:updated",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/services/PlanStore.ts",
+        "line": 74,
+        "expression": "win.webContents.send",
+        "channel": "plan:state-changed",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/services/TaskStore.ts",
+        "line": 381,
+        "expression": "win.webContents.send",
+        "channel": "task:updated",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/services/TerminalService.ts",
+        "line": 30,
+        "expression": "window.webContents.send",
+        "channel": "terminal:output",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/services/TerminalService.ts",
+        "line": 37,
+        "expression": "window.webContents.send",
+        "channel": "terminal:exit",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/main/services/TerminalService.ts",
+        "line": 43,
+        "expression": "window.webContents.send",
+        "channel": "terminal:output",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      }
+    ],
+    "rendererRequests": [
+      {
+        "file": "src/preload/index.ts",
+        "line": 32,
+        "expression": "ipcRenderer.invoke",
+        "channel": "workspace:open-directory",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 35,
+        "expression": "ipcRenderer.invoke",
+        "channel": "workspace:scan-file-tree",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 38,
+        "expression": "ipcRenderer.invoke",
+        "channel": "workspace:get-all-paths",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 41,
+        "expression": "ipcRenderer.invoke",
+        "channel": "workspace:read-file",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 44,
+        "expression": "ipcRenderer.invoke",
+        "channel": "workspace:detect-project",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 47,
+        "expression": "ipcRenderer.invoke",
+        "channel": "workspace:get-recent-projects",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 50,
+        "expression": "ipcRenderer.invoke",
+        "channel": "workspace:add-recent-project",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 53,
+        "expression": "ipcRenderer.invoke",
+        "channel": "workspace:remove-recent-project",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 56,
+        "expression": "ipcRenderer.invoke",
+        "channel": "workspace:open-in-editor",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 59,
+        "expression": "ipcRenderer.invoke",
+        "channel": "workspace:open-in-explorer",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 62,
+        "expression": "ipcRenderer.invoke",
+        "channel": "workspace:rename-recent-project",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 65,
+        "expression": "ipcRenderer.invoke",
+        "channel": "workspace:detect-installed-editors",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 69,
+        "expression": "ipcRenderer.invoke",
+        "channel": "permission:mode:get",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 71,
+        "expression": "ipcRenderer.invoke",
+        "channel": "permission:mode:set",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 76,
+        "expression": "ipcRenderer.invoke",
+        "channel": "provider:list",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 79,
+        "expression": "ipcRenderer.invoke",
+        "channel": "provider:add",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 82,
+        "expression": "ipcRenderer.invoke",
+        "channel": "provider:update",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 85,
+        "expression": "ipcRenderer.invoke",
+        "channel": "provider:remove",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 88,
+        "expression": "ipcRenderer.invoke",
+        "channel": "provider:test",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 91,
+        "expression": "ipcRenderer.invoke",
+        "channel": "provider:set-active",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 100,
+        "expression": "ipcRenderer.invoke",
+        "channel": "attachment:import-draft",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 106,
+        "expression": "ipcRenderer.invoke",
+        "channel": "attachment:promote-drafts",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 109,
+        "expression": "ipcRenderer.invoke",
+        "channel": "attachment:rollback-promotion",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 112,
+        "expression": "ipcRenderer.invoke",
+        "channel": "attachment:discard-drafts",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 118,
+        "expression": "ipcRenderer.invoke",
+        "channel": "attachment:read-preview",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 125,
+        "expression": "ipcRenderer.invoke",
+        "channel": "chat:predict-next-input",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 128,
+        "expression": "ipcRenderer.invoke",
+        "channel": "chat:runtime:status",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 141,
+        "expression": "ipcRenderer.invoke",
+        "channel": "chat:stream:steer",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 148,
+        "expression": "ipcRenderer.invoke",
+        "channel": "chat:tool:interrupt",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 271,
+        "expression": "ipcRenderer.invoke",
+        "channel": "`${IPC_CHANNELS.CHAT_APPROVAL_RESPONSE}:${request.id}`",
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": true
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 280,
+        "expression": "ipcRenderer.invoke",
+        "channel": "`${IPC_CHANNELS.CHAT_ASK_USER_RESPONSE}:${request.id}`",
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": true
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 290,
+        "expression": "ipcRenderer.invoke",
+        "channel": "chat:stream:stop",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 330,
+        "expression": "ipcRenderer.invoke",
+        "channel": "chat:stream:start",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 360,
+        "expression": "ipcRenderer.invoke",
+        "channel": "chat:compact:start",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 363,
+        "expression": "ipcRenderer.invoke",
+        "channel": "chat:accept-file",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 366,
+        "expression": "ipcRenderer.invoke",
+        "channel": "chat:reject-file",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 369,
+        "expression": "ipcRenderer.invoke",
+        "channel": "chat:get-diff",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 372,
+        "expression": "ipcRenderer.invoke",
+        "channel": "`${IPC_CHANNELS.CHAT_APPROVAL_RESPONSE}:${requestId}`",
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": true
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 375,
+        "expression": "ipcRenderer.invoke",
+        "channel": "`${IPC_CHANNELS.CHAT_ASK_USER_RESPONSE}:${requestId}`",
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": true
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 380,
+        "expression": "ipcRenderer.invoke",
+        "channel": "session:list",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 383,
+        "expression": "ipcRenderer.invoke",
+        "channel": "session:get",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 386,
+        "expression": "ipcRenderer.invoke",
+        "channel": "session:save",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 389,
+        "expression": "ipcRenderer.invoke",
+        "channel": "session:delete",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 394,
+        "expression": "ipcRenderer.invoke",
+        "channel": "terminal:start",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 397,
+        "expression": "ipcRenderer.invoke",
+        "channel": "terminal:write",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 400,
+        "expression": "ipcRenderer.invoke",
+        "channel": "terminal:resize",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 403,
+        "expression": "ipcRenderer.invoke",
+        "channel": "terminal:kill",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 428,
+        "expression": "ipcRenderer.invoke",
+        "channel": "theme:get",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 430,
+        "expression": "ipcRenderer.invoke",
+        "channel": "theme:set",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 440,
+        "expression": "ipcRenderer.invoke",
+        "channel": "skill:get-all",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 442,
+        "expression": "ipcRenderer.invoke",
+        "channel": "skill:toggle",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 444,
+        "expression": "ipcRenderer.invoke",
+        "channel": "skill:check-external",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 446,
+        "expression": "ipcRenderer.invoke",
+        "channel": "skill:import-external",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 448,
+        "expression": "ipcRenderer.invoke",
+        "channel": "skill:list-external",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 450,
+        "expression": "ipcRenderer.invoke",
+        "channel": "skill:import-single",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 452,
+        "expression": "ipcRenderer.invoke",
+        "channel": "skill:delete",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 457,
+        "expression": "ipcRenderer.invoke",
+        "channel": "rules:get-list",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 459,
+        "expression": "ipcRenderer.invoke",
+        "channel": "rules:save",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 461,
+        "expression": "ipcRenderer.invoke",
+        "channel": "rules:delete",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 463,
+        "expression": "ipcRenderer.invoke",
+        "channel": "rules:rename",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 468,
+        "expression": "ipcRenderer.invoke",
+        "channel": "settings:get",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 470,
+        "expression": "ipcRenderer.invoke",
+        "channel": "settings:save",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 474,
+        "expression": "ipcRenderer.invoke",
+        "channel": "mcp:list",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 476,
+        "expression": "ipcRenderer.invoke",
+        "channel": "mcp:save-user",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 478,
+        "expression": "ipcRenderer.invoke",
+        "channel": "mcp:set-enabled",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 480,
+        "expression": "ipcRenderer.invoke",
+        "channel": "mcp:get-catalog",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 482,
+        "expression": "ipcRenderer.invoke",
+        "channel": "mcp:reconnect",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 484,
+        "expression": "ipcRenderer.invoke",
+        "channel": "mcp:authorize",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 486,
+        "expression": "ipcRenderer.invoke",
+        "channel": "mcp:logout",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 488,
+        "expression": "ipcRenderer.invoke",
+        "channel": "mcp:trust-project",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 489,
+        "expression": "ipcRenderer.invoke",
+        "channel": "mcp:secret-keys",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 491,
+        "expression": "ipcRenderer.invoke",
+        "channel": "mcp:secret-set",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 493,
+        "expression": "ipcRenderer.invoke",
+        "channel": "mcp:secret-delete",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 503,
+        "expression": "ipcRenderer.invoke",
+        "channel": "subagent:list",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 505,
+        "expression": "ipcRenderer.invoke",
+        "channel": "subagent:toggle",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 507,
+        "expression": "ipcRenderer.invoke",
+        "channel": "subagent:get-detail",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 512,
+        "expression": "ipcRenderer.invoke",
+        "channel": "subagent:set-model",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 517,
+        "expression": "ipcRenderer.invoke",
+        "channel": "plan:list",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 519,
+        "expression": "ipcRenderer.invoke",
+        "channel": "plan:load",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 521,
+        "expression": "ipcRenderer.invoke",
+        "channel": "plan:get-active",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      }
+    ],
+    "rendererListeners": [
+      {
+        "file": "src/preload/index.ts",
+        "line": 134,
+        "expression": "ipcRenderer.on",
+        "channel": "chat:runtime:status-changed",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 311,
+        "expression": "ipcRenderer.on",
+        "channel": "chat:stream:chunk",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 312,
+        "expression": "ipcRenderer.on",
+        "channel": "chat:stream:end",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 313,
+        "expression": "ipcRenderer.on",
+        "channel": "chat:stream:error",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 314,
+        "expression": "ipcRenderer.on",
+        "channel": "chat:stream:steer-consumed",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 315,
+        "expression": "ipcRenderer.on",
+        "channel": "chat:stream:tool-start",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 316,
+        "expression": "ipcRenderer.on",
+        "channel": "chat:stream:tool-end",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 317,
+        "expression": "ipcRenderer.on",
+        "channel": "chat:stream:subagent:start",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 318,
+        "expression": "ipcRenderer.on",
+        "channel": "chat:stream:subagent:end",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 319,
+        "expression": "ipcRenderer.on",
+        "channel": "chat:stream:subagent:chunk",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 320,
+        "expression": "ipcRenderer.on",
+        "channel": "chat:stream:subagent:tool-start",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 321,
+        "expression": "ipcRenderer.on",
+        "channel": "chat:stream:subagent:tool-end",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 322,
+        "expression": "ipcRenderer.on",
+        "channel": "chat:request-approval",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 323,
+        "expression": "ipcRenderer.on",
+        "channel": "chat:request-ask-user",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 324,
+        "expression": "ipcRenderer.on",
+        "channel": "chat:context-budget-updated",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 325,
+        "expression": "ipcRenderer.on",
+        "channel": "chat:compaction-started",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 326,
+        "expression": "ipcRenderer.on",
+        "channel": "chat:compaction-completed",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 327,
+        "expression": "ipcRenderer.on",
+        "channel": "chat:compaction-failed",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 409,
+        "expression": "ipcRenderer.on",
+        "channel": "terminal:output",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 419,
+        "expression": "ipcRenderer.on",
+        "channel": "terminal:exit",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 433,
+        "expression": "ipcRenderer.on",
+        "channel": "theme:updated",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 496,
+        "expression": "ipcRenderer.on",
+        "channel": "mcp:changed",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 540,
+        "expression": "ipcRenderer.on",
+        "channel": "parallel:exec-started",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 541,
+        "expression": "ipcRenderer.on",
+        "channel": "parallel:wave-update",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 542,
+        "expression": "ipcRenderer.on",
+        "channel": "parallel:exec-done",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 543,
+        "expression": "ipcRenderer.on",
+        "channel": "execution:event",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 562,
+        "expression": "ipcRenderer.on",
+        "channel": "task:updated",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      }
+    ],
+    "rendererSends": [
+      {
+        "file": "src/preload/index.ts",
+        "line": 570,
+        "expression": "ipcRenderer.send",
+        "channel": "app:log",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 571,
+        "expression": "ipcRenderer.send",
+        "channel": "app:log",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 572,
+        "expression": "ipcRenderer.send",
+        "channel": "app:log",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/preload/index.ts",
+        "line": 573,
+        "expression": "ipcRenderer.send",
+        "channel": "app:log",
+        "declaredChannel": true,
+        "derivedFromDeclaredChannel": false
+      }
+    ],
+    "rendererApiUsages": [
+      {
+        "file": "src/renderer/src/App/hooks/useAppPreview.ts",
+        "line": 102,
+        "expression": "window.api.workspace.readFile",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/App/hooks/useAppWorkspace.ts",
+        "line": 21,
+        "expression": "window.api.workspace.openDirectory",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/App/hooks/useAppWorkspace.ts",
+        "line": 28,
+        "expression": "window.api.workspace.scanFileTree",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/App/hooks/useAppWorkspace.ts",
+        "line": 29,
+        "expression": "window.api.workspace.detectProject",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/App/hooks/useAppWorkspace.ts",
+        "line": 44,
+        "expression": "window.api.workspace.addRecentProject",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/App/hooks/useAppWorkspace.ts",
+        "line": 46,
+        "expression": "window.api.workspace.getRecentProjects",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/App/hooks/useAppWorkspace.ts",
+        "line": 66,
+        "expression": "window.api.workspace.scanFileTree",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/App/hooks/useAppWorkspace.ts",
+        "line": 67,
+        "expression": "window.api.workspace.detectProject",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/App/hooks/useAppWorkspace.ts",
+        "line": 84,
+        "expression": "window.api.workspace.renameRecentProject",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/App/hooks/useAppWorkspace.ts",
+        "line": 85,
+        "expression": "window.api.workspace.getRecentProjects",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/App/hooks/useAppWorkspace.ts",
+        "line": 102,
+        "expression": "window.api.workspace.removeRecentProject",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/App/hooks/useAppWorkspace.ts",
+        "line": 103,
+        "expression": "window.api.workspace.getRecentProjects",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/App/hooks/useAppWorkspace.ts",
+        "line": 121,
+        "expression": "window.api.workspace.openInExplorer",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/App/index.tsx",
+        "line": 89,
+        "expression": "window.api.workspace.getRecentProjects",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/App/index.tsx",
+        "line": 91,
+        "expression": "window.api.chat.onRuntimeStatusChanged",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/App/index.tsx",
+        "line": 100,
+        "expression": "window.api.theme",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/App/index.tsx",
+        "line": 101,
+        "expression": "window.api.theme.get",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/App/index.tsx",
+        "line": 105,
+        "expression": "window.api.theme.onUpdated",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/chat/ChatArea/index.tsx",
+        "line": 244,
+        "expression": "window.api.chat.respondToApproval",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/chat/ChatArea/index.tsx",
+        "line": 261,
+        "expression": "window.api.chat.respondAskUser",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/chat/ChatArea/index.tsx",
+        "line": 441,
+        "expression": "window.api.chat.steer",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/chat/EditApprovalWidget.tsx",
+        "line": 77,
+        "expression": "window.api.chat.rejectFile",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/chat/ExecutionLog/components/LogItemRow.tsx",
+        "line": 154,
+        "expression": "window.api.chat.interruptTool",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/chat/hooks/useSendMessage.ts",
+        "line": 206,
+        "expression": "window.api.attachment.promoteDrafts",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/chat/hooks/useSendMessage.ts",
+        "line": 294,
+        "expression": "window.api.chat.getDiff",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/chat/hooks/useSendMessage.ts",
+        "line": 450,
+        "expression": "window.api.attachment.rollbackPromotion",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/chat/hooks/useSendMessage.ts",
+        "line": 461,
+        "expression": "window.api.attachment.discardDrafts",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/chat/ImageAttachmentGrid.tsx",
+        "line": 33,
+        "expression": "window.api.attachment.readPreview",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/chat/ImagePreviewModal.tsx",
+        "line": 38,
+        "expression": "window.api.attachment.readPreview",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/chat/TerminalPanel/components/TerminalInstance.tsx",
+        "line": 75,
+        "expression": "window.api.terminal.kill",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/chat/TerminalPanel/components/TerminalInstance.tsx",
+        "line": 76,
+        "expression": "window.api.terminal.start",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/chat/TerminalPanel/components/TerminalInstance.tsx",
+        "line": 79,
+        "expression": "window.api.terminal.resize",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/chat/TerminalPanel/components/TerminalInstance.tsx",
+        "line": 130,
+        "expression": "window.api.terminal.start",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/chat/TerminalPanel/components/TerminalInstance.tsx",
+        "line": 134,
+        "expression": "window.api.terminal.resize",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/chat/TerminalPanel/components/TerminalInstance.tsx",
+        "line": 141,
+        "expression": "window.api.terminal.write",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/chat/TerminalPanel/components/TerminalInstance.tsx",
+        "line": 145,
+        "expression": "window.api.terminal.resize",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/chat/TerminalPanel/components/TerminalInstance.tsx",
+        "line": 148,
+        "expression": "window.api.terminal.onOutput",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/chat/TerminalPanel/components/TerminalInstance.tsx",
+        "line": 154,
+        "expression": "window.api.terminal.onExit",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/chat/TerminalPanel/index.tsx",
+        "line": 67,
+        "expression": "window.api.terminal.kill",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/FileTree.tsx",
+        "line": 55,
+        "expression": "window.api.workspace.readFile",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/modals/TaskHistoryModal.tsx",
+        "line": 21,
+        "expression": "window.api.task.getByProject",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/modals/TaskHistoryModal.tsx",
+        "line": 33,
+        "expression": "window.api.task.delete",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/PromptArea/hooks/useImageAttachments.ts",
+        "line": 38,
+        "expression": "window.api.attachment.importDraft",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/PromptArea/hooks/useImageAttachments.ts",
+        "line": 67,
+        "expression": "window.api.attachment.discardDrafts",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/PromptArea/hooks/usePromptEditor.ts",
+        "line": 112,
+        "expression": "window.api.skill.getAll",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/PromptArea/hooks/usePromptPrediction.ts",
+        "line": 59,
+        "expression": "window.api.chat.predictNextInput",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/PromptArea/index.tsx",
+        "line": 156,
+        "expression": "window.api.attachment.discardDrafts",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/PromptArea/index.tsx",
+        "line": 158,
+        "expression": "window.api.attachment.rollbackPromotion",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/PromptArea/index.tsx",
+        "line": 189,
+        "expression": "window.api.attachment.promoteDrafts",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/PromptArea/index.tsx",
+        "line": 194,
+        "expression": "window.api.attachment.rollbackPromotion",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/PromptArea/index.tsx",
+        "line": 206,
+        "expression": "window.api.attachment.discardDrafts",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/SettingsAgentsTab.tsx",
+        "line": 17,
+        "expression": "window.api.subAgent.list",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/SettingsAgentsTab.tsx",
+        "line": 33,
+        "expression": "window.api.subAgent.toggle",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/SettingsGeneralTab/index.tsx",
+        "line": 45,
+        "expression": "window.api.theme",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/SettingsGeneralTab/index.tsx",
+        "line": 46,
+        "expression": "window.api.theme.set",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/SettingsMcpTab/index.tsx",
+        "line": 56,
+        "expression": "window.api.mcp.list",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/SettingsMcpTab/index.tsx",
+        "line": 63,
+        "expression": "window.api.mcp.onChanged",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/SettingsMcpTab/index.tsx",
+        "line": 147,
+        "expression": "window.api.mcp.saveUser",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/SettingsMcpTab/index.tsx",
+        "line": 162,
+        "expression": "window.api.mcp.setEnabled",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/SettingsMcpTab/index.tsx",
+        "line": 287,
+        "expression": "window.api.mcp.reconnect",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/SettingsMcpTab/index.tsx",
+        "line": 288,
+        "expression": "window.api.mcp.authorize",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/SettingsMcpTab/index.tsx",
+        "line": 289,
+        "expression": "window.api.mcp.logout",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/SettingsMcpTab/McpServerDetailModal.tsx",
+        "line": 134,
+        "expression": "window.api.mcp.getCatalog",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/SettingsSkillsTab.tsx",
+        "line": 27,
+        "expression": "window.api.skill.getAll",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/SettingsSkillsTab.tsx",
+        "line": 36,
+        "expression": "window.api.skill.checkExternal",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/SettingsSkillsTab.tsx",
+        "line": 50,
+        "expression": "window.api.skill.toggle",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/SettingsSkillsTab.tsx",
+        "line": 62,
+        "expression": "window.api.skill.remove",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/SettingsSkillsTab.tsx",
+        "line": 76,
+        "expression": "window.api.workspace.openInExplorer",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/SkillImportModal.tsx",
+        "line": 24,
+        "expression": "window.api.skill.listExternal",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/SkillImportModal.tsx",
+        "line": 49,
+        "expression": "window.api.skill.importSingle",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/SubAgentDetailModal.tsx",
+        "line": 40,
+        "expression": "window.api.subAgent.getDetail",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/SubAgentDetailModal.tsx",
+        "line": 82,
+        "expression": "window.api.subAgent.setModel",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/TopBar/components/ProjectSelector.tsx",
+        "line": 88,
+        "expression": "window.api.workspace.openInEditor",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/TopBar/index.tsx",
+        "line": 71,
+        "expression": "window.api.theme",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/TopBar/index.tsx",
+        "line": 72,
+        "expression": "window.api.theme.get",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/TopBar/index.tsx",
+        "line": 76,
+        "expression": "window.api.theme.onUpdated",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/TopBar/index.tsx",
+        "line": 81,
+        "expression": "window.api.workspace.detectInstalledEditors",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/components/TopBar/index.tsx",
+        "line": 162,
+        "expression": "window.api.theme.set",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/pages/WelcomePage.tsx",
+        "line": 25,
+        "expression": "window.api.workspace.getRecentProjects",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/pages/WelcomePage.tsx",
+        "line": 33,
+        "expression": "window.api.workspace.openDirectory",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/pages/WelcomePage.tsx",
+        "line": 46,
+        "expression": "window.api.workspace.scanFileTree",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/pages/WelcomePage.tsx",
+        "line": 47,
+        "expression": "window.api.workspace.detectProject",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/pages/WelcomePage.tsx",
+        "line": 64,
+        "expression": "window.api.workspace.addRecentProject",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/chatStore/slices/runtimeStatusSlice.ts",
+        "line": 38,
+        "expression": "window.api.chat.getRuntimeStatus",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/chatStore/slices/sessionSlice.ts",
+        "line": 457,
+        "expression": "window.api.session.list",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/chatStore/slices/sessionSlice.ts",
+        "line": 493,
+        "expression": "window.api.chat.getRuntimeStatus",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/chatStore/slices/sessionSlice.ts",
+        "line": 494,
+        "expression": "window.api.chat.getRuntimeStatus",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/chatStore/slices/sessionSlice.ts",
+        "line": 503,
+        "expression": "window.api.session.get",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/chatStore/slices/sessionSlice.ts",
+        "line": 551,
+        "expression": "window.api.session.save",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/chatStore/slices/sessionSlice.ts",
+        "line": 638,
+        "expression": "window.api.session.save",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/chatStore/slices/sessionSlice.ts",
+        "line": 650,
+        "expression": "window.api.session.save",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/chatStore/slices/sessionSlice.ts",
+        "line": 741,
+        "expression": "window.api.session.save",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/chatStore/slices/sessionSlice.ts",
+        "line": 782,
+        "expression": "window.api.session.delete",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/chatStore/slices/sessionSlice.ts",
+        "line": 800,
+        "expression": "window.api.session.save",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/providerStore.ts",
+        "line": 37,
+        "expression": "window.api.provider.list",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/providerStore.ts",
+        "line": 49,
+        "expression": "window.api.provider.add",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/providerStore.ts",
+        "line": 58,
+        "expression": "window.api.provider.update",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/providerStore.ts",
+        "line": 67,
+        "expression": "window.api.provider.remove",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/providerStore.ts",
+        "line": 77,
+        "expression": "window.api.provider.testConnection",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/providerStore.ts",
+        "line": 81,
+        "expression": "window.api.provider.setActive",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/rulesStore.ts",
+        "line": 25,
+        "expression": "window.api.rules.getList",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/rulesStore.ts",
+        "line": 35,
+        "expression": "window.api.rules.save",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/rulesStore.ts",
+        "line": 48,
+        "expression": "window.api.rules.delete",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/rulesStore.ts",
+        "line": 67,
+        "expression": "window.api.rules.rename",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/settingsStore.ts",
+        "line": 18,
+        "expression": "window.api.settings.get",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/settingsStore.ts",
+        "line": 35,
+        "expression": "window.api.settings.save",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/workspaceStore.ts",
+        "line": 72,
+        "expression": "window.api.permission.getMode",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/stores/workspaceStore.ts",
+        "line": 84,
+        "expression": "window.api.permission.setMode",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/utils/logger.ts",
+        "line": 5,
+        "expression": "window.api.logger.info",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/utils/logger.ts",
+        "line": 10,
+        "expression": "window.api.logger.warn",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/utils/logger.ts",
+        "line": 15,
+        "expression": "window.api.logger.error",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      },
+      {
+        "file": "src/renderer/src/utils/logger.ts",
+        "line": 20,
+        "expression": "window.api.logger.debug",
+        "channel": null,
+        "declaredChannel": false,
+        "derivedFromDeclaredChannel": false
+      }
+    ]
+  },
+  "undeclaredTransportReferences": []
+}

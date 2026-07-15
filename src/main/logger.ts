@@ -1,5 +1,6 @@
 import log from 'electron-log/main';
 import { app, ipcMain } from 'electron';
+import { IPC_CHANNELS } from '../shared/ipc/channels';
 
 // 初始化日志配置
 export function setupLogger() {
@@ -20,7 +21,7 @@ export function setupLogger() {
   log.errorHandler.startCatching();
 
   // 监听渲染进程的日志
-  ipcMain.on('app:log', (event, level, ...args) => {
+  ipcMain.on(IPC_CHANNELS.APP_LOG, (event, level, ...args) => {
     const fn = log[level as keyof typeof log] as any;
     if (typeof fn === 'function') {
       fn('[renderer]', ...args);

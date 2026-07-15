@@ -4,6 +4,7 @@ import IconMinimize from '../../icons/IconMinimize'
 import IconMaximize from '../../icons/IconMaximize'
 import IconWindowRestore from '../../icons/IconWindowRestore'
 import IconClose from '../../icons/IconClose'
+import { IPC_CHANNELS } from '@shared/ipc/channels'
 
 interface WindowControlsProps {
   isMaximized: boolean
@@ -14,7 +15,7 @@ function sendWindowControl(action: 'minimize' | 'maximize' | 'close') {
   try {
     const win = window as any
     if (win.electron?.ipcRenderer) {
-      win.electron.ipcRenderer.send('window-control', action)
+      win.electron.ipcRenderer.send(IPC_CHANNELS.WINDOW_CONTROL, action)
     }
   } catch {}
 }

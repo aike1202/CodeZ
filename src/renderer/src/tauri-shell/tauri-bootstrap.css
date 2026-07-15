@@ -1,0 +1,383 @@
+:root {
+  font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei", sans-serif;
+  color: #20242a;
+  background: #f5f6f7;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+button {
+  color: inherit;
+  font: inherit;
+}
+
+.tauri-bootstrap {
+  display: grid;
+  grid-template-rows: 44px 1fr;
+  width: 100%;
+  height: 100%;
+  background: #f5f6f7;
+}
+
+.tauri-bootstrap__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #dfe2e6;
+  background: #ffffff;
+  user-select: none;
+}
+
+.tauri-bootstrap__brand {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 9px;
+  padding-left: 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tauri-bootstrap__mark {
+  display: grid;
+  width: 23px;
+  height: 23px;
+  place-items: center;
+  border-radius: 4px;
+  background: #20242a;
+  color: #ffffff;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 10px;
+}
+
+.tauri-bootstrap__phase {
+  overflow: hidden;
+  color: #737a84;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tauri-bootstrap__window-actions {
+  display: flex;
+  align-self: stretch;
+}
+
+.tauri-bootstrap__window-actions button,
+.tauri-bootstrap__summary-actions button {
+  display: grid;
+  width: 44px;
+  min-width: 44px;
+  height: 100%;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.tauri-bootstrap__window-actions button:hover {
+  background: #eceff2;
+}
+
+.tauri-bootstrap__window-actions .tauri-bootstrap__close:hover {
+  background: #d92d3a;
+  color: #ffffff;
+}
+
+.tauri-bootstrap__window-actions button:focus-visible,
+.tauri-bootstrap__summary-actions button:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: -2px;
+}
+
+.tauri-bootstrap__workspace {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.8fr) minmax(360px, 1.2fr);
+  grid-template-rows: 1fr 38px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tauri-bootstrap__summary {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  padding: clamp(32px, 6vw, 76px);
+  border-right: 1px solid #dfe2e6;
+  background: #ffffff;
+}
+
+.tauri-bootstrap__signal {
+  width: 42px;
+  height: 5px;
+  margin-bottom: 24px;
+  background: #d6d9dd;
+}
+
+.tauri-bootstrap__signal--ready {
+  background: #23995b;
+}
+
+.tauri-bootstrap__signal--error {
+  background: #d92d3a;
+}
+
+.tauri-bootstrap__eyebrow {
+  margin: 0 0 10px;
+  color: #737a84;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+}
+
+.tauri-bootstrap__summary h1 {
+  max-width: 520px;
+  margin: 0;
+  font-size: clamp(25px, 3vw, 38px);
+  font-weight: 630;
+  letter-spacing: 0;
+  line-height: 1.15;
+}
+
+.tauri-bootstrap__message {
+  max-width: 420px;
+  margin: 14px 0 0;
+  color: #616872;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.tauri-bootstrap__summary-actions {
+  display: flex;
+  width: max-content;
+  height: 36px;
+  margin-top: 26px;
+  border: 1px solid #dfe2e6;
+  border-radius: 5px;
+  background: #ffffff;
+}
+
+.tauri-bootstrap__summary-actions button {
+  width: 38px;
+  min-width: 38px;
+}
+
+.tauri-bootstrap__summary-actions button + button {
+  border-left: 1px solid #dfe2e6;
+}
+
+.tauri-bootstrap__summary-actions button:hover {
+  color: #0958d9;
+  background: #f0f6ff;
+}
+
+.tauri-bootstrap__trace {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  padding: clamp(34px, 7vw, 90px);
+  background: #f5f6f7;
+}
+
+.tauri-bootstrap__trace-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  min-height: 60px;
+  align-items: center;
+  gap: 14px;
+  color: #8b9199;
+  font-size: 13px;
+}
+
+.tauri-bootstrap__trace-row:not(:last-child)::after {
+  position: absolute;
+  top: 37px;
+  bottom: -23px;
+  left: 9px;
+  width: 1px;
+  background: #cdd1d6;
+  content: "";
+}
+
+.tauri-bootstrap__trace-node {
+  z-index: 1;
+  width: 9px;
+  height: 9px;
+  justify-self: center;
+  border: 2px solid #b4bac1;
+  border-radius: 50%;
+  background: #f5f6f7;
+}
+
+.tauri-bootstrap__trace-row.is-complete {
+  color: #2d333b;
+}
+
+.tauri-bootstrap__trace-row.is-complete .tauri-bootstrap__trace-node {
+  border-color: #23995b;
+  background: #23995b;
+}
+
+.tauri-bootstrap__trace-row.is-current {
+  color: #2d333b;
+  font-weight: 600;
+}
+
+.tauri-bootstrap__trace-row.is-current .tauri-bootstrap__trace-node {
+  border-color: #d99a16;
+  background: #fff4d6;
+}
+
+.tauri-bootstrap__trace-value {
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+}
+
+.tauri-bootstrap__details {
+  display: flex;
+  grid-column: 1 / -1;
+  min-width: 0;
+  align-items: center;
+  gap: 24px;
+  padding: 0 14px;
+  border-top: 1px solid #dfe2e6;
+  background: #eceff2;
+  color: #616872;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 10px;
+}
+
+.tauri-bootstrap__path {
+  overflow: hidden;
+  margin-left: auto;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tauri-bootstrap__spin {
+  animation: tauri-bootstrap-spin 0.9s linear infinite;
+}
+
+@keyframes tauri-bootstrap-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 760px) {
+  .tauri-bootstrap__workspace {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(260px, 0.9fr) minmax(280px, 1.1fr) 38px;
+  }
+
+  .tauri-bootstrap__summary {
+    padding: 34px;
+    border-right: 0;
+    border-bottom: 1px solid #dfe2e6;
+  }
+
+  .tauri-bootstrap__trace {
+    padding: 26px 34px;
+  }
+
+  .tauri-bootstrap__details {
+    grid-column: 1;
+    gap: 12px;
+  }
+
+  .tauri-bootstrap__details span:nth-child(2) {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tauri-bootstrap__spin {
+    animation: none;
+  }
+}
+
+:root[data-theme="dark"] {
+  color: #e1e4e8;
+  background: #1c1c1c;
+}
+
+:root[data-theme="dark"] .tauri-bootstrap,
+:root[data-theme="dark"] .tauri-bootstrap__trace,
+:root[data-theme="dark"] .tauri-bootstrap__trace-node {
+  background: #1c1c1c;
+}
+
+:root[data-theme="dark"] .tauri-bootstrap__bar,
+:root[data-theme="dark"] .tauri-bootstrap__summary,
+:root[data-theme="dark"] .tauri-bootstrap__summary-actions {
+  background: #232323;
+}
+
+:root[data-theme="dark"] .tauri-bootstrap__bar,
+:root[data-theme="dark"] .tauri-bootstrap__summary,
+:root[data-theme="dark"] .tauri-bootstrap__summary-actions,
+:root[data-theme="dark"] .tauri-bootstrap__summary-actions button + button,
+:root[data-theme="dark"] .tauri-bootstrap__details {
+  border-color: #3c3c3c;
+}
+
+:root[data-theme="dark"] .tauri-bootstrap__mark {
+  background: #e1e4e8;
+  color: #232323;
+}
+
+:root[data-theme="dark"] .tauri-bootstrap__phase,
+:root[data-theme="dark"] .tauri-bootstrap__eyebrow,
+:root[data-theme="dark"] .tauri-bootstrap__message,
+:root[data-theme="dark"] .tauri-bootstrap__details {
+  color: #959da5;
+}
+
+:root[data-theme="dark"] .tauri-bootstrap__window-actions button:hover {
+  background: #2b2b2b;
+}
+
+:root[data-theme="dark"] .tauri-bootstrap__summary-actions button:hover {
+  color: #69a7ff;
+  background: #243247;
+}
+
+:root[data-theme="dark"] .tauri-bootstrap__trace-row {
+  color: #6f7780;
+}
+
+:root[data-theme="dark"] .tauri-bootstrap__trace-row.is-complete,
+:root[data-theme="dark"] .tauri-bootstrap__trace-row.is-current {
+  color: #e1e4e8;
+}
+
+:root[data-theme="dark"] .tauri-bootstrap__trace-row:not(:last-child)::after {
+  background: #454b52;
+}
+
+:root[data-theme="dark"] .tauri-bootstrap__trace-row.is-current .tauri-bootstrap__trace-node {
+  border-color: #d99a16;
+  background: #4a3a16;
+}
+
+:root[data-theme="dark"] .tauri-bootstrap__details {
+  background: #2b2b2b;
+}

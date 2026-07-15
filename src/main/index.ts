@@ -23,6 +23,7 @@ import { getContextCoreServices } from './services/context'
 import { getAttachmentService, registerAttachmentIpc } from './ipc/attachment.handlers'
 import { registerMcpIpc } from './ipc/mcp.handlers'
 import { getAgentCollaborationRuntime } from './services/agents'
+import { IPC_CHANNELS } from '../shared/ipc/channels'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -67,11 +68,11 @@ function createWindow(): void {
   })
 
   mainWindow.on('maximize', () => {
-    mainWindow?.webContents.send('window-maximized-state', true)
+    mainWindow?.webContents.send(IPC_CHANNELS.WINDOW_MAXIMIZED_STATE, true)
   })
   
   mainWindow.on('unmaximize', () => {
-    mainWindow?.webContents.send('window-maximized-state', false)
+    mainWindow?.webContents.send(IPC_CHANNELS.WINDOW_MAXIMIZED_STATE, false)
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -164,7 +165,7 @@ if (hasSingleInstanceLock) void app.whenReady().then(async () => {
   })
 
   // 监听来自前端渲染进程的自定义标题栏指令
-  ipcMain.on('window-control', (_, action) => {
+  ipcMain.on(IPC_CHANNELS.WINDOW_CONTROL, (_, action) => {
     if (!mainWindow) return
     if (action === 'minimize') mainWindow.minimize()
     if (action === 'maximize') {

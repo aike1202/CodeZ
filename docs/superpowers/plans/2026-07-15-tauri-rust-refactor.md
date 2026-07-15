@@ -8,6 +8,8 @@
 >
 > 架构：`docs/superpowers/specs/2026-07-15-tauri-rust-architecture-design.md`
 
+> 实施状态：已于 2026-07-15 开始；进展与生成清单见 `docs/migration/README.md`
+
 ## 1. 目标与约束
 
 **目标：** 以 Tauri v2 + Rust 后端直接替换 Electron 主进程和 preload，保留 React UI 与现有核心行为，安全迁移用户数据，最终发布物不包含 Electron/Node 主进程。
@@ -57,19 +59,19 @@ Phase 4-7 可在接口稳定后局部并行，但 Phase 2 的数据/平台契约
 
 ### 4.1 决策冻结
 
-- [ ] 确认保留 React UI，不做 Rust/WASM UI 重写。
-- [ ] 确认首发平台和 CPU 架构；建议 Windows x64 先验，macOS/Linux 随后。
-- [ ] 确认应用 ID、产品名、签名主体和升级路径。
-- [ ] 确认初期继续使用兼容 JSON/目录存储，不同时切换 SQLite。
-- [ ] 确认 Provider 密钥不回显或保持现状的安全/兼容取舍。
-- [ ] 确认旧 Electron 数据保留策略和发布级回退窗口。
-- [ ] 审核架构设计中的 crate 边界、依赖规则和前端目标目录，必要变更通过 ADR 记录。
+- [x] 确认保留 React UI，不做 Rust/WASM UI 重写。
+- [x] 确认首发平台和 CPU 架构；Windows x64 先验，macOS/Linux 随后。
+- [ ] 确认应用 ID、产品名、签名主体和升级路径。应用 ID 与产品名已冻结；签名主体和升级 feed 待 Phase 9 发布环境确认。
+- [x] 确认初期继续使用兼容 JSON/目录存储，不同时切换 SQLite。
+- [x] 确认 Provider 密钥不回显，只允许 masked/configured 状态和替换操作。
+- [x] 确认旧 Electron 数据至少保留一个稳定版本，默认不自动删除。
+- [x] 审核架构设计中的 crate 边界、依赖规则和前端目标目录；结论见 `docs/decisions/0001-tauri-rust-migration-defaults.md`。
 
 ### 4.2 契约清单
 
 - [ ] 为现有 `window.api` 生成方法清单：输入、输出、错误、取消、事件和订阅释放语义。
-- [ ] 记录所有 `ipcMain.handle/on` 与 `webContents.send`，清除未定义在 `IPC_CHANNELS` 的散落字符串。
-- [ ] 为 Chat、Tool、SubAgent、Permission、AskUser、Terminal 和 MCP 事件定义稳定 envelope：
+- [x] 记录所有 `ipcMain.handle/on` 与 `webContents.send`，并清除未定义在 `IPC_CHANNELS` 的静态散落字符串；动态请求响应 channel 已单独标记。
+- [x] 为 Chat、Tool、SubAgent、Permission、AskUser、Terminal 和 MCP 事件定义稳定 envelope：
 
 ```ts
 interface DesktopEvent<T> {
@@ -93,6 +95,8 @@ interface DesktopEvent<T> {
 4. **Shell parser：** 用现有 Bash/PowerShell 权限语料对 Rust tree-sitter 解析结果做差异报告。
 5. **Tauri 流：** 持续高吞吐聊天/终端事件，验证顺序、取消、背压、组件卸载和内存上限。
 6. **资源与打包：** 验证 builtin skills、parser grammar/资源、`rg` 和安装后路径定位。
+
+当前进展：Windows `safeStorage` sentinel 已验证为 `Local State` 用户 DPAPI 主密钥 + Chromium `v10` AES-256-GCM envelope，可实现只读 legacy reader；macOS/Linux 兼容性及其余五项 spike 仍待完成。证据见 `docs/migration/spikes/windows-safe-storage.md`。
 
 ### 4.4 性能与质量基线
 
@@ -127,15 +131,15 @@ src/renderer/src/desktop/
   generated/
 ```
 
-- [ ] 建立 Cargo workspace、格式化、Clippy、测试和依赖审计命令。
-- [ ] 为 workspace 增加依赖方向检查，禁止 core/runtime 反向依赖 Tauri 或具体平台 adapter。
-- [ ] 配置 Tauri v2、Vite dev/build、应用 ID、无边框窗口、最小尺寸和 CSP。
-- [ ] 建立 `AppState` 生命周期，只存放服务句柄，不把领域逻辑写入 command。
+- [x] 建立 Cargo workspace、格式化、Clippy 和测试命令；依赖安全审计将在锁定审计工具后补充。
+- [x] 为 workspace 增加依赖方向检查，禁止 core/runtime 反向依赖 Tauri 或具体平台 adapter。
+- [x] 配置 Tauri v2、Vite dev/build、应用 ID、无边框窗口、最小尺寸和 CSP。
+- [x] 建立 `AppState` 生命周期，只存放服务句柄，不把领域逻辑写入 command。
 - [ ] 建立统一 Rust 错误枚举、稳定错误码、脱敏日志和前端错误映射。
-- [ ] 选择并落地 Rust -> TypeScript 类型生成/校验方案。
-- [ ] 建立前端 `desktopApi`，组件以后只依赖该 adapter。
+- [x] 选择并落地 `ts-rs` Rust -> TypeScript 类型生成方案，生成结果由 `npm run contracts:generate` 维护。
+- [x] 建立前端 `desktopApi`，Tauri 迁移代码只通过该 adapter 调用 command。
 - [ ] 实现最小窗口、主题、外链、目录选择、单实例、快捷键和安全退出 smoke。
-- [ ] 建立 Windows/macOS/Linux CI 矩阵；至少执行 fmt、clippy、Rust test、前端 typecheck/test 和 Tauri build check。
+- [x] 建立 Windows/macOS/Linux CI 矩阵；执行依赖方向、fmt、clippy、Rust test、前端 typecheck/test 和 Tauri build check。
 
 **Phase 1 出口：** 干净环境可启动 Tauri React 页面；command、channel、event 和错误传递有自动化测试；capabilities 不授予通用 Shell/文件权限。
 

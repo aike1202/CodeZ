@@ -1,5 +1,6 @@
 import * as pty from 'node-pty'
 import { BrowserWindow } from 'electron'
+import { IPC_CHANNELS } from '../../shared/ipc/channels'
 
 export class TerminalService {
   private static instances: Map<string, pty.IPty> = new Map()
@@ -26,20 +27,20 @@ export class TerminalService {
 
       ptyProcess.onData((data: string) => {
         if (!window.isDestroyed()) {
-          window.webContents.send('terminal:output', terminalId, data)
+          window.webContents.send(IPC_CHANNELS.TERMINAL_OUTPUT, terminalId, data)
         }
       })
 
       ptyProcess.onExit(() => {
         this.instances.delete(terminalId)
         if (!window.isDestroyed()) {
-          window.webContents.send('terminal:exit', terminalId)
+          window.webContents.send(IPC_CHANNELS.TERMINAL_EXIT, terminalId)
         }
       })
     } catch (err) {
       console.error('Failed to spawn pty process:', err)
       if (!window.isDestroyed()) {
-        window.webContents.send('terminal:output', terminalId, `[Error spawning shell]: ${err instanceof Error ? err.message : String(err)}\r\n`)
+        window.webContents.send(IPC_CHANNELS.TERMINAL_OUTPUT, terminalId, `[Error spawning shell]: ${err instanceof Error ? err.message : String(err)}\r\n`)
       }
     }
   }

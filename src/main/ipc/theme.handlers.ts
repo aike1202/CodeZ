@@ -22,7 +22,7 @@ export function registerThemeIpc(): void {
   // Listen to OS theme changes
   nativeTheme.on('updated', () => {
     BrowserWindow.getAllWindows().forEach((win) => {
-      win.webContents.send('theme:updated', {
+      win.webContents.send(IPC_CHANNELS.THEME_UPDATED, {
         shouldUseDarkColors: nativeTheme.shouldUseDarkColors,
         themeSource: nativeTheme.themeSource
       })
