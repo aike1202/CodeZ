@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::sync::Arc;
 use serde_json::Value;
 
 use crate::tools::registry::{DefaultToolDescriptor, ToolDescriptor, ToolHandler, ToolContext, BoxFuture, ToolAvailability, ToolBehavior};

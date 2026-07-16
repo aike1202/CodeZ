@@ -1,5 +1,4 @@
 use regex::Regex;
-use std::sync::Arc;
 use crate::permission::contract::{PermissionCapability};
 use crate::permission::shell::types::NormalizedOperationGraph;
 

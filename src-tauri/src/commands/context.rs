@@ -16,8 +16,8 @@ pub async fn ledger_append_event(
 
 #[command]
 pub async fn ledger_get_snapshot(
-    state: State<'_, AppState>,
-    session_id: String,
+    _state: State<'_, AppState>,
+    _session_id: String,
 ) -> Result<Option<SessionRuntimeSnapshot>, CommandError> {
     // TODO: Delegate to ModelLedgerStore.get_snapshot
     Ok(None)

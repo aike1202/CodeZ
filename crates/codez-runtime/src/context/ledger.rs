@@ -2,14 +2,12 @@ use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio::fs::{self, File};
-use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
+use tokio::fs::{self};
+use tokio::io::AsyncWriteExt;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use codez_contracts::context::{
-    LedgerEvent, LedgerEventType, SessionRuntimeSnapshot,
-    SessionRuntimeScopeSnapshot, NormalizedModelMessage,
+    LedgerEvent, SessionRuntimeSnapshot,
 };
 
 #[derive(Debug, thiserror::Error)]

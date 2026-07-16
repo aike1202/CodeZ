@@ -1,4 +1,4 @@
-use codez_contracts::context::{ContextScopeId, NormalizedModelMessage};
+use codez_contracts::context::ContextScopeId;
 use crate::context::budget::ModelContextCapabilities;
 
 pub struct CompactionRequest {

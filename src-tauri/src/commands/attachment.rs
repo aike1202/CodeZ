@@ -1,5 +1,4 @@
-use tauri::{command, AppHandle, State};
-use codez_core::AppError;
+use tauri::{command, State};
 use codez_contracts::{CommandError, ComposerImageAttachment, DraftImageAttachment, SessionImageAttachment, AttachmentPreviewBytes};
 use crate::{state::AppState, error::command_result};
 

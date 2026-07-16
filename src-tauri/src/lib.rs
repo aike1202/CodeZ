@@ -127,6 +127,43 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::theme::theme_set,
             commands::permission::permission_mode_get,
             commands::permission::permission_mode_set,
+            commands::settings::settings_get,
+            commands::settings::settings_save,
+            commands::settings::session_list,
+            commands::settings::session_get,
+            commands::settings::session_save,
+            commands::settings::session_delete,
+            commands::task::task_list,
+            commands::task::task_get,
+            commands::task::task_get_by_project,
+            commands::task::task_save,
+            commands::task::task_delete,
+            commands::rules::rules_get_list,
+            commands::rules::rules_save,
+            commands::rules::rules_delete,
+            commands::rules::rules_rename,
+            commands::skills::skill_get_all,
+            commands::skills::skill_toggle,
+            commands::skills::skill_check_external,
+            commands::skills::skill_import_external,
+            commands::skills::skill_list_external,
+            commands::skills::skill_import_single,
+            commands::skills::skill_remove,
+            commands::mcp::mcp_list,
+            commands::mcp::mcp_save_user,
+            commands::mcp::mcp_set_enabled,
+            commands::mcp::mcp_get_catalog,
+            commands::mcp::mcp_reconnect,
+            commands::mcp::mcp_authorize,
+            commands::mcp::mcp_logout,
+            commands::mcp::mcp_trust_project,
+            commands::mcp::mcp_list_secret_keys,
+            commands::mcp::mcp_set_secret,
+            commands::mcp::mcp_delete_secret,
+            commands::subagent::subagent_list,
+            commands::subagent::subagent_toggle,
+            commands::subagent::subagent_get_detail,
+            commands::subagent::subagent_set_model,
         ])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::ThemeChanged(_)) {
@@ -136,10 +173,10 @@ pub fn run() -> Result<(), tauri::Error> {
         .setup(|app| {
             let (pty_tx, mut pty_rx) = tokio::sync::mpsc::unbounded_channel();
             
-            let mut state = composition::compose_app_state(app, pty_tx)?;
+            let state = composition::compose_app_state(app, pty_tx)?;
             
             let handle = app.handle().clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 #[derive(serde::Serialize, Clone)]
                 struct OutputPayload { id: String, data: String }
                 

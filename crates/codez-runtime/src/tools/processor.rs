@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use serde_json::Value;
 
 use crate::tools::large_result::LargeToolResultStore;
 use crate::tools::types::{ToolExecutionError, ToolExecutionResult, ToolPipelineResult};
@@ -69,7 +68,7 @@ impl ToolResultProcessor {
         // Pass 1: truncate errors and stringify data
         for mut item in results {
             match &mut item.result {
-                ToolExecutionResult::Success { model_content, .. } => {
+                ToolExecutionResult::Success { model_content: _, .. } => {
                     // It is already a string in Rust struct.
                 }
                 ToolExecutionResult::Error { error, model_content, .. } |

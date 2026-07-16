@@ -16,9 +16,9 @@ impl ModelHistoryNormalizer {
         let mut result = Vec::new();
         let mut pending = HashMap::new();
 
-        let mut flush_interrupted = |pending: &mut HashMap<String, PendingCall>, result: &mut Vec<NormalizedModelMessage>| {
+        let flush_interrupted = |pending: &mut HashMap<String, PendingCall>, result: &mut Vec<NormalizedModelMessage>| {
             for call in pending.values() {
-                let mut msg = NormalizedModelMessage {
+                let msg = NormalizedModelMessage {
                     id: format!("interrupted:{}", call.call_id),
                     client_message_id: None,
                     turn_id: call.turn_id.clone(),
@@ -38,7 +38,7 @@ impl ModelHistoryNormalizer {
         };
 
         for original in messages {
-            let mut message = original.clone();
+            let message = original.clone();
             
             if message.role != "tool" && !pending.is_empty() {
                 flush_interrupted(&mut pending, &mut result);

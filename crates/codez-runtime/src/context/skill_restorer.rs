@@ -5,7 +5,7 @@ pub struct SkillContextRestorer;
 impl SkillContextRestorer {
     pub fn restore(
         states: &[SessionSkillState],
-        token_budget: u32,
+        _token_budget: u32,
         source_sequence: u32,
     ) -> Option<PostCompactionSkillContext> {
         let active_states: Vec<_> = states.iter().filter(|s| s.status == "active").collect();

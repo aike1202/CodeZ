@@ -1,15 +1,14 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     path::{Path, PathBuf},
     sync::Arc,
-    time::{Duration, SystemTime},
+    time::SystemTime,
 };
 use tokio::fs;
 use serde::{Serialize, Deserialize};
 
 use codez_contracts::{AttachmentPreviewBytes, ComposerImageAttachment, DraftImageAttachment, SessionImageAttachment};
 use codez_core::{AppError, AppPaths};
-use image::DynamicImage;
 use uuid::Uuid;
 
 const DRAFT_TTL_SECS: u64 = 24 * 60 * 60;

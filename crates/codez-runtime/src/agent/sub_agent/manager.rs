@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::agent::state::{AgentState, AgentStatus};
+use crate::agent::state::AgentStatus;
 use crate::agent::sub_agent::mailbox::SubAgentMailbox;
 
 pub struct SubAgentEntry {

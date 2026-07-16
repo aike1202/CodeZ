@@ -1,8 +1,7 @@
 use codez_contracts::context::{
     LedgerEvent, LedgerEventType, SessionRuntimeScopeSnapshot,
-    UserMessagePayload, AssistantMessagePayload, ToolResultPayload, SkillStateUpdatedPayload,
+    UserMessagePayload, AssistantMessagePayload, ToolResultPayload,
     TurnCompletedPayload, TurnInterruptedPayload, CompactionCompletedPayload,
-    HistoryRevertedPayload, LegacyImportCompletedPayload,
 };
 use crate::context::ledger::LoadedSessionRuntime;
 use crate::context::skill_state::apply_message_to_session_skill_states;
@@ -147,7 +146,7 @@ pub fn apply_event(state: &mut LoadedSessionRuntime, event: LedgerEvent) -> Resu
             ));
         }
         LedgerEventType::TurnCompleted => {
-            let payload: TurnCompletedPayload = serde_json::from_value(event.payload).map_err(|e| e.to_string())?;
+            let _payload: TurnCompletedPayload = serde_json::from_value(event.payload).map_err(|e| e.to_string())?;
             scope.last_completed_turn_id = event.turn_id;
         }
         LedgerEventType::TurnInterrupted => {

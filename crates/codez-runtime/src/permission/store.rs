@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::fs::{self, OpenOptions};
+use tokio::fs::{self};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::RwLock;
 use serde::{Deserialize, Serialize};

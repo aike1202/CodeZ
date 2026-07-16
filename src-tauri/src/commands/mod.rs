@@ -1,11 +1,16 @@
-pub(crate) mod host;
-pub(crate) mod system;
-pub(crate) mod theme;
-pub(crate) mod workspace;
-pub mod terminal;
-pub mod provider;
 pub mod attachment;
-pub mod git;
 pub mod context;
+pub mod git;
+pub mod host;
+pub mod mcp;
 pub mod permission;
-
+pub mod provider;
+pub mod rules;
+pub mod settings;
+pub mod skills;
+pub mod subagent;
+pub mod system;
+pub mod task;
+pub mod terminal;
+pub mod theme;
+pub mod workspace;

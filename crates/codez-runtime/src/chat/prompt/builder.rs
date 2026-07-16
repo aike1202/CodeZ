@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use crate::chat::prompt::pipeline::PromptPipeline;
 use crate::chat::prompt::modules::{
     identity::IdentityModule,

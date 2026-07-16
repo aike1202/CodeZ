@@ -56,7 +56,7 @@ impl ToolExecutionPipeline {
     ) -> Vec<ToolPipelineResult> {
         let mut results = Vec::new();
         
-        let catalog = context.catalog();
+        let _catalog = context.catalog();
         let _exposed_names: Option<std::collections::HashSet<String>> = context.exposure().map(|e| {
             e.eager_tools.iter().map(|d| d.name().to_string()).collect()
         });

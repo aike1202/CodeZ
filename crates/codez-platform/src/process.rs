@@ -74,7 +74,7 @@ impl ProcessRunner for NativeProcessRunner {
             let stdout = child.stdout.take().expect("stdout configured");
             let stderr = child.stderr.take().expect("stderr configured");
 
-            let max_bytes = request.max_output_bytes as usize;
+            let _max_bytes = request.max_output_bytes as usize;
             
             // Shared reference or just pass a large enough max to each, 
             // the interface implies total combined output bytes?

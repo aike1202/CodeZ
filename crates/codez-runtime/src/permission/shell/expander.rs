@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use sha2::{Sha256, Digest};
 use tokio::fs;
 
@@ -29,10 +29,10 @@ impl NestedCommandExpander {
     pub async fn expand_command(
         parent_shell: PermissionShellKind,
         argv: &[String],
-        workspace_root: &str,
+        _workspace_root: &str,
         cwd: &str,
         depth: usize,
-        mut seen: HashSet<String>,
+        _seen: HashSet<String>,
     ) -> ExpandedCommand {
         if depth > 4 {
             return ExpandedCommand {

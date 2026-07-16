@@ -1,12 +1,11 @@
-use codez_contracts::context::{SessionSkillState, NormalizedModelMessage, LedgerEventType};
-use std::collections::HashMap;
+use codez_contracts::context::{SessionSkillState, NormalizedModelMessage};
 
 pub fn apply_message_to_session_skill_states(
     current_states: Option<&[SessionSkillState]>,
-    active_messages: &[NormalizedModelMessage],
-    new_message: &NormalizedModelMessage,
+    _active_messages: &[NormalizedModelMessage],
+    _new_message: &NormalizedModelMessage,
 ) -> Vec<SessionSkillState> {
-    let mut states = current_states.unwrap_or(&[]).to_vec();
+    let states = current_states.unwrap_or(&[]).to_vec();
 
     // TODO: parse tool results and model outputs to upsert skill states
     // In TS:

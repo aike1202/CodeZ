@@ -76,7 +76,7 @@ impl EditTransactionService {
             .clone();
 
         let execute = async {
-            let guard = lock.lock().await;
+            let _guard = lock.lock().await;
 
             if !allow_closing {
                 if let Some(tx_arc) = self.transactions.get(tx_id) {
@@ -186,7 +186,7 @@ impl EditTransactionService {
         Ok(())
     }
 
-    pub async fn record_mutation(&self, tx_id: &str, file_path: PathBuf, staged_backup: bool) -> Result<(), AppError> {
+    pub async fn record_mutation(&self, tx_id: &str, file_path: PathBuf, _staged_backup: bool) -> Result<(), AppError> {
         let tx_arc = match self.transactions.get(tx_id) {
             Some(arc) => arc.clone(),
             None => return Ok(()),

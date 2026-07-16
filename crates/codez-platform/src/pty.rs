@@ -1,6 +1,6 @@
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::thread;
 use dashmap::DashMap;
 use tokio::sync::mpsc;
@@ -136,7 +136,7 @@ impl PtyManager {
     }
 
     pub fn kill_all(&self) {
-        for mut instance in self.instances.iter_mut() {
+        for instance in self.instances.iter_mut() {
             let mut child = instance.child.lock().unwrap();
             let _ = child.kill();
         }

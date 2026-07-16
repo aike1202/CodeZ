@@ -14,7 +14,7 @@ struct ExitPayload {
 
 #[tauri::command]
 pub async fn terminal_start(
-    app: AppHandle,
+    _app: AppHandle,
     state: State<'_, crate::state::AppState>,
     workspace_id: String,
     root_path: String,
