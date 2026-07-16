@@ -3,7 +3,7 @@
 //! Versioned repositories, atomic files, credentials, and legacy-data migration.
 
 mod atomic_file;
-mod credentials;
+pub mod credentials;
 mod migration;
 mod repositories;
 mod schema;

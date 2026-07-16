@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import { ImagePlus } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
 import { useProviderStore } from '../../stores/providerStore'
-import type { ModelConfig, ThinkingEffort } from '@shared/types/provider'
+import type { ModelConfig, ThinkingEffort } from '../../shared/desktop'
 import {
   getReasoningCapabilities,
   mergeModelThinkingConfig,
@@ -324,7 +324,7 @@ export default function PromptArea({
     const effort = e.target.value as ThinkingEffort
     updateActiveModel({
       thinkingEffort: effort,
-      thinkingBudgetTokens: effort === 'auto' ? undefined : null
+      thinkingBudgetTokens: undefined
     })
   }
 
@@ -332,7 +332,7 @@ export default function PromptArea({
     const isAuto = e.target.value === 'auto'
     updateActiveModel({
       thinkingEffort: isAuto ? 'auto' : 'custom',
-      thinkingBudgetTokens: isAuto ? null : Number(e.target.value)
+      thinkingBudgetTokens: isAuto ? undefined : Number(e.target.value)
     })
   }
 

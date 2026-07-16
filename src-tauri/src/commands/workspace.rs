@@ -258,6 +258,7 @@ pub async fn workspace_glob(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+#[allow(clippy::too_many_arguments)]
 #[tracing::instrument(
     name = "desktop.command",
     skip_all,
@@ -453,27 +454,7 @@ fn create_search_service(
     state: &AppState,
 ) -> Result<codez_runtime::SearchService, AppError> {
     let rg_path = state.resources.ripgrep_executable();
-    // ProcessRunner is not yet injected in AppState; use a stub that returns an error.
-    // Phase 3.3 will add a real NativeProcessRunner to AppState.
-    // For now, grep will return a validation error; glob works without it.
-    codez_runtime::SearchService::new(rg_path, Arc::new(StubProcessRunner))
-}
-
-/// Stub process runner until Phase 3.3 provides NativeProcessRunner.
-struct StubProcessRunner;
-
-impl codez_core::ProcessRunner for StubProcessRunner {
-    fn run<'a>(
-        &'a self,
-        _request: codez_core::ProcessRequest,
-        _cancellation: codez_core::CancellationToken,
-    ) -> codez_core::PortFuture<'a, codez_core::ProcessOutput> {
-        Box::pin(async {
-            Err(AppError::validation(
-                "Process execution is not yet available (Phase 3.3)",
-            ))
-        })
-    }
+    codez_runtime::SearchService::new(rg_path, state.process_runner.clone())
 }
 
 fn editor_command_name(editor_id: &str) -> &str {

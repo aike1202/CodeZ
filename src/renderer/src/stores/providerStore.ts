@@ -1,17 +1,6 @@
 import { create } from 'zustand'
-import type { ThinkingConfig, ApiFormat, ModelConfig } from '@shared/types/provider'
-
-interface ProviderInfo {
-  id: string
-  name: string
-  baseUrl: string
-  apiFormat?: ApiFormat
-  apiKey: string
-  models: ModelConfig[]
-  thinking: ThinkingConfig
-  enabled: boolean
-  createdAt: string
-}
+import type { ThinkingConfig, ApiFormat, ModelConfig, ProviderInfo, ProviderFormData } from '../shared/desktop'
+import { desktopApi } from '../shared/desktop'
 
 interface ProviderState {
   providers: ProviderInfo[]
@@ -19,8 +8,8 @@ interface ProviderState {
   loading: boolean
 
   loadProviders: () => Promise<void>
-  addProvider: (form: { name: string; baseUrl: string; apiFormat?: ApiFormat; apiKey: string; models: ModelConfig[]; thinking: ThinkingConfig }) => Promise<ProviderInfo>
-  updateProvider: (id: string, form: Partial<{ name: string; baseUrl: string; apiFormat: ApiFormat; apiKey: string; models: ModelConfig[]; thinking: ThinkingConfig }>) => Promise<void>
+  addProvider: (form: ProviderFormData) => Promise<ProviderInfo>
+  updateProvider: (id: string, form: Partial<ProviderFormData>) => Promise<void>
   removeProvider: (id: string) => Promise<void>
   testConnection: (id: string) => Promise<{ success: boolean; message: string; models?: string[] }>
   setActiveProvider: (id: string) => Promise<void>
@@ -34,7 +23,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   loadProviders: async () => {
     set({ loading: true })
     try {
-      const data = await window.api.provider.list()
+      const data = await desktopApi.provider.getAll()
       const providers = data || []
       set({ providers, loading: false })
       if (providers.length > 0 && !get().activeProviderId) {
@@ -46,7 +35,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
 
   addProvider: async (form) => {
-    const info = await window.api.provider.add(form as any)
+    const info = await desktopApi.provider.create(form)
     set((s) => ({
       providers: [...s.providers, info],
       activeProviderId: s.activeProviderId || info.id
@@ -55,7 +44,20 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
 
   updateProvider: async (id, form) => {
-    const updated = await window.api.provider.update(id, form as any)
+    const existing = get().providers.find((p) => p.id === id)
+    if (!existing) return
+
+    const formData: ProviderFormData = {
+      name: existing.name,
+      baseUrl: existing.baseUrl,
+      apiFormat: existing.apiFormat,
+      apiKey: '',
+      models: existing.models,
+      thinking: existing.thinking,
+      ...form
+    }
+
+    const updated = await desktopApi.provider.update(id, formData)
     if (updated) {
       set((s) => ({
         providers: s.providers.map((p) => (p.id === id ? updated : p))
@@ -64,7 +66,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
 
   removeProvider: async (id) => {
-    await window.api.provider.remove(id)
+    await desktopApi.provider.delete(id)
     set((s) => ({
       providers: s.providers.filter((p) => p.id !== id),
       activeProviderId: s.activeProviderId === id
@@ -74,11 +76,11 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
 
   testConnection: async (id) => {
-    return window.api.provider.testConnection(id)
+    return desktopApi.provider.testConnection(id)
   },
 
   setActiveProvider: async (id) => {
-    await window.api.provider.setActive(id)
+    await desktopApi.provider.setActive(id)
     set({ activeProviderId: id })
   }
 }))

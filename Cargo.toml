@@ -21,6 +21,7 @@ license = "UNLICENSED"
 codez-contracts = { path = "crates/codez-contracts" }
 codez-core = { path = "crates/codez-core" }
 codez-platform = { path = "crates/codez-platform" }
+codez-providers = { path = "crates/codez-providers" }
 codez-runtime = { path = "crates/codez-runtime" }
 codez-storage = { path = "crates/codez-storage" }
 aes = { version = "0.8.4", features = ["zeroize"] }
@@ -32,11 +33,14 @@ keyring = { version = "3.6.3", default-features = false }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 regex = "1.12.2"
+reqwest = { version = "0.12.12", features = ["json", "stream", "rustls-tls"], default-features = false }
+eventsource-stream = "0.2.3"
+futures-util = "0.3.30"
 same-file = "1.0.6"
 sha2 = "0.10.9"
 tempfile = "3.27.0"
 thiserror = "2.0.18"
-tokio = { version = "1.49.0", features = ["macros", "rt", "sync", "time"] }
+tokio = { version = "1.49.0", features = ["macros", "rt", "sync", "time", "fs", "process", "io-util"] }
 tokio-util = { version = "0.7.18", features = ["rt"] }
 tracing = "0.1.44"
 tracing-appender = "0.2.5"

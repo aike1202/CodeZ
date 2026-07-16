@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import type { ThinkingConfig, ThinkingMode, ThinkingEffort, ApiFormat } from '@shared/types/provider'
+import type { ThinkingConfig, ThinkingMode, ThinkingEffort, ApiFormat } from '../shared/desktop'
 import { getImageInputCapability } from '@shared/utils/imageCapabilities'
 import { getReasoningCapabilities } from '@shared/utils/reasoningCapabilities'
 import { IconAdd, IconEye, IconEyeOff, IconTrash, IconClose } from './Icons'
@@ -18,7 +18,7 @@ export interface ModelFormData {
   apiFormat?: ApiFormat
   thinkingMode?: ThinkingMode
   thinkingEffort?: ThinkingEffort
-  thinkingBudgetTokens?: number | null
+  thinkingBudgetTokens?: number
   supportsVision?: boolean
 }
 

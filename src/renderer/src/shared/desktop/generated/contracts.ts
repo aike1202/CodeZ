@@ -27,4 +27,50 @@ export type FileContent = { path: string, content: string, truncated: boolean, t
 
 export type ProjectInfo = { type: string, framework?: string, packageManager?: string, };
 
+export type GlobResult = { paths: Array<string>, truncated: boolean, total: number, };
+
+export type GrepResult = { lines: Array<string>, truncated: boolean, };
+
+export type ProjectSnapshotResult = { rootName: string, projectType: string, packageManager?: string, scripts: { [key in string]: string }, dependencies: { [key in string]: string }, devDependencies: { [key in string]: string }, configFiles: Array<string>, entrypoints: Array<string>, tree: string, docsTree: string, };
+
+export type EditorInfo = { id: string, name: string, exePath?: string, iconData?: string, };
+
+export type WorktreeInfo = { path: string, branch: string, head: string, };
+
+export type GitSnapshotResult = { snapshot: string, };
+
+export type SessionImageAttachment = { id: string, kind: string, name: string, mimeType: string, width: number, height: number, sizeBytes: bigint, storageKey: string, scope: string, sessionId: string, };
+
+export type DraftImageAttachment = { id: string, kind: string, name: string, mimeType: string, width: number, height: number, sizeBytes: bigint, storageKey: string, scope: string, draftId: string, };
+
+export type ComposerImageAttachment = { "scope": "session" } & SessionImageAttachment | { "scope": "draft" } & DraftImageAttachment;
+
+export type AttachmentPreviewBytes = { mimeType: string, bytes: Array<number>, };
+
+export type ThinkingMode = "auto" | "none" | "openai" | "deepseek" | "qwen" | "anthropic" | "gemini" | "grok" | "openrouter";
+
+export type ThinkingEffort = "auto" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "custom";
+
+export type ThinkingConfig = { enabled: boolean, mode: ThinkingMode, effort?: ThinkingEffort, budgetTokens?: number, };
+
+export type ApiFormat = "openai" | "anthropic" | "gemini";
+
+export type ModelConfig = { id: string, name: string, maxContextTokens: number, maxInputTokens?: number, maxOutputTokens?: number, reasoningCountsAgainstContext?: boolean, supportsVision?: boolean, apiFormat?: ApiFormat, thinkingMode?: ThinkingMode, thinkingEffort?: ThinkingEffort, thinkingBudgetTokens?: number, };
+
+export type ModelContextCapabilities = { contextWindowTokens: number, maxInputTokens: number | null, maxOutputTokens: number | null, reasoningCountsAgainstContext: boolean | null, };
+
+export type ProviderTokenUsage = { inputTokens: number, outputTokens: number, reasoningTokens?: number, totalTokens?: number, };
+
+export type ChatProviderErrorCode = "CONTEXT_OVERFLOW" | "AUTHENTICATION" | "RATE_LIMIT" | "NOT_FOUND" | "NETWORK" | "UNKNOWN";
+
+export type ProviderConfig = { id: string, name: string, baseUrl: string, apiFormat?: ApiFormat, apiKeyRef: string, encryption: string, models: Array<ModelConfig>, thinking: ThinkingConfig, enabled: boolean, createdAt: string, updatedAt: string, };
+
+export type ProviderInfo = { id: string, name: string, baseUrl: string, apiFormat?: ApiFormat, apiKey: string, models: Array<ModelConfig>, thinking: ThinkingConfig, enabled: boolean, createdAt: string, };
+
+export type ProviderFormData = { name: string, baseUrl: string, apiFormat?: ApiFormat, apiKey: string, models: Array<ModelConfig>, thinking: ThinkingConfig, };
+
+export type ConnectionTestResult = { success: boolean, message: string, models?: Array<string>, };
+
+export type ProvidersFile = { providers: Array<ProviderConfig>, activeProviderId?: string, };
+
 export type DesktopEvent<T> = { version: number, streamId: string | null, sequence: number | null, kind: string, payload: T, };

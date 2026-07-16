@@ -1,9 +1,16 @@
 use std::{fs, path::PathBuf};
 
 use codez_contracts::{
-    CommandError, DesktopEvent, ErrorCode, FileContent, FileTreeNode, FileTreeNodeType,
-    HealthResponse, ProjectInfo, SystemProbeEvent, ThemeInfo, ThemeSource, WindowAction,
+    AttachmentPreviewBytes, CommandError, ComposerImageAttachment, DesktopEvent,
+    DraftImageAttachment, EditorInfo, ErrorCode, FileContent, FileTreeNode, FileTreeNodeType,
+    GitSnapshotResult, GlobResult, GrepResult, HealthResponse, ProjectInfo, ProjectSnapshotResult,
+    SessionImageAttachment, SystemProbeEvent, ThemeInfo, ThemeSource, WindowAction, WorktreeInfo,
     WorkspaceInfo, WorkspacePathItem,
+    provider::{
+        ApiFormat, ChatProviderErrorCode, ConnectionTestResult, ModelConfig,
+        ModelContextCapabilities, ProviderConfig, ProviderFormData, ProviderInfo,
+        ProviderTokenUsage, ProvidersFile, ThinkingConfig, ThinkingEffort, ThinkingMode,
+    },
 };
 use ts_rs::{Config, TS};
 
@@ -30,6 +37,29 @@ fn main() -> std::io::Result<()> {
         format!("export {}", WorkspacePathItem::decl(&config)),
         format!("export {}", FileContent::decl(&config)),
         format!("export {}", ProjectInfo::decl(&config)),
+        format!("export {}", GlobResult::decl(&config)),
+        format!("export {}", GrepResult::decl(&config)),
+        format!("export {}", ProjectSnapshotResult::decl(&config)),
+        format!("export {}", EditorInfo::decl(&config)),
+        format!("export {}", WorktreeInfo::decl(&config)),
+        format!("export {}", GitSnapshotResult::decl(&config)),
+        format!("export {}", SessionImageAttachment::decl(&config)),
+        format!("export {}", DraftImageAttachment::decl(&config)),
+        format!("export {}", ComposerImageAttachment::decl(&config)),
+        format!("export {}", AttachmentPreviewBytes::decl(&config)),
+        format!("export {}", ThinkingMode::decl(&config)),
+        format!("export {}", ThinkingEffort::decl(&config)),
+        format!("export {}", ThinkingConfig::decl(&config)),
+        format!("export {}", ApiFormat::decl(&config)),
+        format!("export {}", ModelConfig::decl(&config)),
+        format!("export {}", ModelContextCapabilities::decl(&config)),
+        format!("export {}", ProviderTokenUsage::decl(&config)),
+        format!("export {}", ChatProviderErrorCode::decl(&config)),
+        format!("export {}", ProviderConfig::decl(&config)),
+        format!("export {}", ProviderInfo::decl(&config)),
+        format!("export {}", ProviderFormData::decl(&config)),
+        format!("export {}", ConnectionTestResult::decl(&config)),
+        format!("export {}", ProvidersFile::decl(&config)),
         format!("export {}", DesktopEvent::<String>::decl(&config)),
     ]
     .join("\n\n");

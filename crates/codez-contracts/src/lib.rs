@@ -1,5 +1,9 @@
 #![forbid(unsafe_code)]
 
+pub mod provider;
+pub mod chat;
+pub mod context;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -226,6 +230,72 @@ pub struct EditorInfo {
     pub exe_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon_data: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
+pub struct WorktreeInfo {
+    pub path: String,
+    pub branch: String,
+    pub head: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
+pub struct GitSnapshotResult {
+    pub snapshot: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
+pub struct SessionImageAttachment {
+    pub id: String,
+    pub kind: String, // "image"
+    pub name: String,
+    pub mime_type: String,
+    pub width: u32,
+    pub height: u32,
+    pub size_bytes: u64,
+    pub storage_key: String,
+    pub scope: String, // "session"
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
+pub struct DraftImageAttachment {
+    pub id: String,
+    pub kind: String, // "image"
+    pub name: String,
+    pub mime_type: String,
+    pub width: u32,
+    pub height: u32,
+    pub size_bytes: u64,
+    pub storage_key: String,
+    pub scope: String, // "draft"
+    pub draft_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "scope")]
+#[ts(export)]
+pub enum ComposerImageAttachment {
+    #[serde(rename = "session")]
+    Session(SessionImageAttachment),
+    #[serde(rename = "draft")]
+    Draft(DraftImageAttachment),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
+pub struct AttachmentPreviewBytes {
+    pub mime_type: String,
+    pub bytes: Vec<u8>,
 }
 
 #[cfg(test)]

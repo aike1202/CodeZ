@@ -18,6 +18,7 @@ codez-contracts.workspace = true
 codez-core.workspace = true
 codez-platform.workspace = true
 codez-runtime.workspace = true
+codez-providers.workspace = true
 codez-storage.workspace = true
 serde.workspace = true
 tauri = { version = "2.11.5", features = [] }
@@ -26,16 +27,17 @@ tauri-plugin-global-shortcut = "2.3.2"
 tauri-plugin-opener = "2.5.4"
 tauri-plugin-single-instance = "2.4.3"
 tracing.workspace = true
-opener = "0.7.5"
+opener = "0.8.5"
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
 thiserror.workspace = true
 url = "2.5.8"
+tokio = { workspace = true, features = ["process"] }
 
 [dev-dependencies]
 serde_json.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["process"] }
+
 
 [lints]
 workspace = true

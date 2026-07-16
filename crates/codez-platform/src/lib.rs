@@ -5,7 +5,11 @@
 mod filesystem;
 mod resources;
 mod system;
+pub mod process;
+pub mod pty;
 
 pub use filesystem::{NativeFileSystem, NativeFileSystemError};
 pub use resources::{RequiredResources, ResourceError, ResourceLocator};
 pub use system::{SystemClock, UuidGenerator};
+pub use process::NativeProcessRunner;
+pub use pty::{PtyManager, PtyEvent};

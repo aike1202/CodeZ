@@ -216,7 +216,7 @@ impl SearchService {
             max_output_bytes: GREP_MAX_OUTPUT,
         };
 
-        let output = self.process_runner.run(request, cancellation).await;
+        let output = self.process_runner.as_ref().run(request, cancellation).await;
         let output = match output {
             Ok(output) => output,
             Err(error) if error.kind() == codez_core::AppErrorKind::ProcessFailed => {
@@ -383,8 +383,8 @@ fn relativize_path(path_str: &str, workspace_root: &Path, search_dir: &Path) -> 
             return relative.to_string_lossy().into_owned();
         }
     }
-    if path_str.starts_with("./") {
-        return path_str[2..].to_string();
+    if let Some(stripped) = path_str.strip_prefix("./") {
+        return stripped.to_string();
     }
     if let Ok(absolute) = search_dir.join(path_str).canonicalize() {
         if let Ok(relative) = absolute.strip_prefix(workspace_root) {

@@ -1,0 +1,16 @@
+pub mod identity;
+pub mod engineering_philosophy;
+pub mod memory;
+pub mod context_management;
+pub mod repository_rules;
+pub mod environment;
+pub mod git_status;
+pub mod skills;
+pub mod verification_strategy;
+pub mod editing;
+pub mod verification;
+pub mod task_management;
+pub mod worker_delegation;
+pub mod output_policy;
+pub mod available_tools;
+pub mod sub_agents;

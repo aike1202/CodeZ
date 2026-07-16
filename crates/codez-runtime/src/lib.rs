@@ -1,12 +1,19 @@
 #![forbid(unsafe_code)]
 
-mod cancellation;
-mod host;
+pub mod attachment;
+pub mod cancellation;
+pub mod edit_transaction;
+pub mod fingerprint;
+pub mod mutation_coordinator;
+pub mod tools;
+pub mod git;
+pub mod host;
 mod observability;
 mod project_analysis;
 mod search;
 mod system;
-mod workspace;
+pub mod workspace;
+pub mod context;
 
 pub use cancellation::{
     AgentCancellation, CancellationTree, ProcessCancellation, SessionCancellation, ToolCancellation,
@@ -23,3 +30,4 @@ pub use workspace::{
     FilePreview, FileTreeNode, ProjectInfo, WorkspaceEntryKind, WorkspaceLimits, WorkspacePathItem,
     WorkspaceService,
 };
+pub mod chat;

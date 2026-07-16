@@ -44,7 +44,7 @@ impl ProjectAnalysisService {
     ) -> Result<ProjectSnapshot, AppError> {
         let root_name = filesystem
             .workspace_root()
-            .root()
+            .as_path()
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("workspace")
@@ -66,10 +66,11 @@ impl ProjectAnalysisService {
         let config_files = find_config_files(filesystem).await?;
         let entrypoints = find_entrypoints(filesystem, &package_json).await?;
 
+        let default_paths = vec![".".to_string()];
         let target_paths = options
             .dir_paths
             .as_deref()
-            .unwrap_or(&[".".to_string()]);
+            .unwrap_or(&default_paths);
         let max_depth = options.max_depth.unwrap_or(DEFAULT_TREE_DEPTH);
         let include_files = options.include_files;
 

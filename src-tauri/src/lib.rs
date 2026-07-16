@@ -8,7 +8,7 @@ mod logging;
 mod state;
 
 use codez_core::{AppError, RedactedText};
-use tauri::{Manager, WebviewWindow};
+use tauri::{Manager, WebviewWindow, Emitter};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 fn log_window_error(window: &WebviewWindow, operation: &str, source: impl std::fmt::Display) {
@@ -89,6 +89,18 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::host::open_external,
             commands::workspace::workspace_open_directory,
             commands::workspace::workspace_scan_file_tree,
+            commands::terminal::terminal_start,
+            commands::terminal::terminal_write,
+            commands::terminal::terminal_resize,
+            commands::terminal::terminal_kill,
+            commands::provider::provider_get_all,
+            commands::provider::provider_create,
+            commands::provider::provider_update,
+            commands::provider::provider_delete,
+            commands::provider::provider_set_active,
+            commands::context::ledger_append_event,
+            commands::context::ledger_get_snapshot,
+            commands::provider::provider_test_connection,
             commands::workspace::workspace_get_all_paths,
             commands::workspace::workspace_read_file,
             commands::workspace::workspace_detect_project,
@@ -102,6 +114,15 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::workspace::workspace_open_in_editor,
             commands::workspace::workspace_detect_installed_editors,
             commands::workspace::workspace_get_project_snapshot,
+            commands::git::workspace_get_git_snapshot,
+            commands::git::workspace_create_worktree,
+            commands::git::workspace_remove_worktree,
+            commands::git::workspace_list_worktrees,
+            commands::attachment::attachment_import_draft,
+            commands::attachment::attachment_promote_drafts,
+            commands::attachment::attachment_discard_drafts,
+            commands::attachment::attachment_read_preview,
+            commands::attachment::attachment_delete_session,
             commands::theme::theme_get,
             commands::theme::theme_set,
         ])
@@ -111,7 +132,31 @@ pub fn run() -> Result<(), tauri::Error> {
             }
         })
         .setup(|app| {
-            let state = composition::compose_app_state(app)?;
+            let (pty_tx, mut pty_rx) = tokio::sync::mpsc::unbounded_channel();
+            
+            let mut state = composition::compose_app_state(app, pty_tx)?;
+            
+            let handle = app.handle().clone();
+            tokio::spawn(async move {
+                #[derive(serde::Serialize, Clone)]
+                struct OutputPayload { id: String, data: String }
+                
+                #[derive(serde::Serialize, Clone)]
+                struct ExitPayload { id: String }
+
+                while let Some(event) = pty_rx.recv().await {
+                    match event {
+                        codez_platform::pty::PtyEvent::Output { id, data } => {
+                            let text = String::from_utf8_lossy(&data).to_string();
+                            let _ = handle.emit("terminal:output", OutputPayload { id, data: text });
+                        }
+                        codez_platform::pty::PtyEvent::Exit { id } => {
+                            let _ = handle.emit("terminal:exit", ExitPayload { id });
+                        }
+                    }
+                }
+            });
+
             lifecycle::register_shutdown_hooks(app.handle(), &state.shutdown, &state.cancellation)?;
             tracing::debug!(
                 data_path_ready = state.paths.data_directory().is_absolute(),
