@@ -1,8 +1,9 @@
 use std::{fs, path::PathBuf};
 
 use codez_contracts::{
-    CommandError, DesktopEvent, ErrorCode, HealthResponse, SystemProbeEvent, ThemeInfo,
-    ThemeSource, WindowAction,
+    CommandError, DesktopEvent, ErrorCode, FileContent, FileTreeNode, FileTreeNodeType,
+    HealthResponse, ProjectInfo, SystemProbeEvent, ThemeInfo, ThemeSource, WindowAction,
+    WorkspaceInfo, WorkspacePathItem,
 };
 use ts_rs::{Config, TS};
 
@@ -23,6 +24,12 @@ fn main() -> std::io::Result<()> {
         format!("export {}", WindowAction::decl(&config)),
         format!("export {}", ThemeSource::decl(&config)),
         format!("export {}", ThemeInfo::decl(&config)),
+        format!("export {}", WorkspaceInfo::decl(&config)),
+        format!("export {}", FileTreeNodeType::decl(&config)),
+        format!("export {}", FileTreeNode::decl(&config)),
+        format!("export {}", WorkspacePathItem::decl(&config)),
+        format!("export {}", FileContent::decl(&config)),
+        format!("export {}", ProjectInfo::decl(&config)),
         format!("export {}", DesktopEvent::<String>::decl(&config)),
     ]
     .join("\n\n");

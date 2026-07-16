@@ -7,8 +7,8 @@ use std::{
 };
 
 use codez_core::{
-    AppError, FileKind, FileMetadata, FileSystem, PortFuture, SafeWorkspacePath,
-    WorkspacePathError, WorkspaceRoot,
+    AppError, DirectoryEntry, DirectoryListing, FileKind, FileMetadata, FileSystem, PortFuture,
+    SafeWorkspacePath, WorkspacePathError, WorkspaceRoot,
 };
 use same_file::Handle;
 use tempfile::Builder;
@@ -31,6 +31,8 @@ pub enum NativeFileSystemError {
     FileTooLarge { path: PathBuf, max_bytes: u64 },
     #[error("workspace file read limit must be positive")]
     InvalidReadLimit,
+    #[error("workspace directory entry limit must be positive")]
+    InvalidDirectoryLimit,
     #[error("workspace filesystem failed to {operation}: {path}")]
     Io {
         operation: &'static str,
@@ -59,6 +61,9 @@ impl NativeFileSystemError {
             }
             Self::InvalidReadLimit => {
                 AppError::validation("The workspace read limit must be positive")
+            }
+            Self::InvalidDirectoryLimit => {
+                AppError::validation("The workspace directory limit must be positive")
             }
             Self::AuthorityMismatch(_) | Self::RootChanged(_) | Self::PathChanged(_) => {
                 AppError::conflict("The workspace path changed; retry the operation")
@@ -150,6 +155,24 @@ impl NativeFileSystem {
 }
 
 impl FileSystem for NativeFileSystem {
+    fn workspace_root(&self) -> &WorkspaceRoot {
+        &self.authority.root
+    }
+
+    fn resolve<'a>(&'a self, requested: &'a Path) -> PortFuture<'a, SafeWorkspacePath> {
+        let filesystem = self.clone();
+        let requested = requested.to_path_buf();
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || resolve_blocking(&filesystem.authority, &requested))
+                .await
+                .map_err(|source| NativeFileSystemError::TaskJoin {
+                    operation: "resolve workspace path",
+                    source,
+                })?
+                .map_err(NativeFileSystemError::into_app_error)
+        })
+    }
+
     fn metadata<'a>(&'a self, path: &'a SafeWorkspacePath) -> PortFuture<'a, FileMetadata> {
         let filesystem = self.clone();
         let path = path.clone();
@@ -161,6 +184,26 @@ impl FileSystem for NativeFileSystem {
                     source,
                 })?
                 .map_err(NativeFileSystemError::into_app_error)
+        })
+    }
+
+    fn read_directory<'a>(
+        &'a self,
+        path: &'a SafeWorkspacePath,
+        max_entries: usize,
+    ) -> PortFuture<'a, DirectoryListing> {
+        let filesystem = self.clone();
+        let path = path.clone();
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || {
+                read_directory_blocking(&filesystem.authority, &path, max_entries)
+            })
+            .await
+            .map_err(|source| NativeFileSystemError::TaskJoin {
+                operation: "read workspace directory",
+                source,
+            })?
+            .map_err(NativeFileSystemError::into_app_error)
         })
     }
 
@@ -207,7 +250,7 @@ impl FileSystem for NativeFileSystem {
 }
 
 fn open_blocking(root: &Path) -> Result<NativeFileSystem, NativeFileSystemError> {
-    let canonical = fs::canonicalize(root)
+    let canonical = dunce::canonicalize(root)
         .map_err(|source| io_error("canonicalize workspace root", root, source))?;
     let metadata = fs::metadata(&canonical)
         .map_err(|source| io_error("inspect workspace root", &canonical, source))?;
@@ -242,7 +285,7 @@ fn canonical_candidate(
     let candidate = std::path::absolute(candidate)
         .map_err(|source| io_error("normalize workspace path", candidate, source))?;
     let (ancestor, suffix) = nearest_existing_ancestor(&candidate)?;
-    let canonical_ancestor = fs::canonicalize(&ancestor)
+    let canonical_ancestor = dunce::canonicalize(&ancestor)
         .map_err(|source| io_error("canonicalize workspace ancestor", &ancestor, source))?;
     let mut canonical_target = canonical_ancestor;
     for component in suffix {
@@ -291,7 +334,7 @@ fn nearest_existing_ancestor(
 
 fn ensure_root_stable(authority: &WorkspaceAuthority) -> Result<(), NativeFileSystemError> {
     let root = authority.root.as_path();
-    let canonical = fs::canonicalize(root)
+    let canonical = dunce::canonicalize(root)
         .map_err(|source| io_error("revalidate workspace root", root, source))?;
     let current = Handle::from_path(root)
         .map_err(|source| io_error("reopen workspace root identity", root, source))?;
@@ -338,6 +381,67 @@ fn metadata_blocking(
         kind,
         byte_length: metadata.len(),
     })
+}
+
+fn read_directory_blocking(
+    authority: &WorkspaceAuthority,
+    path: &SafeWorkspacePath,
+    max_entries: usize,
+) -> Result<DirectoryListing, NativeFileSystemError> {
+    if max_entries == 0 {
+        return Err(NativeFileSystemError::InvalidDirectoryLimit);
+    }
+    let absolute = revalidate_path(authority, path)?;
+    let metadata = fs::symlink_metadata(&absolute)
+        .map_err(|source| io_error("inspect workspace directory", &absolute, source))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(NativeFileSystemError::UnsafeFileType(absolute));
+    }
+    let opened_identity = Handle::from_path(&absolute)
+        .map_err(|source| io_error("open workspace directory identity", &absolute, source))?;
+    let directory = fs::read_dir(&absolute)
+        .map_err(|source| io_error("read workspace directory", &absolute, source))?;
+    let mut entries = Vec::new();
+    let mut truncated = false;
+    for (index, entry) in directory.enumerate() {
+        if index >= max_entries {
+            truncated = true;
+            break;
+        }
+        let entry = entry
+            .map_err(|source| io_error("read workspace directory entry", &absolute, source))?;
+        let entry_path = entry.path();
+        let file_type = entry
+            .file_type()
+            .map_err(|source| io_error("inspect workspace directory entry", &entry_path, source))?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        let kind = if file_type.is_file() {
+            FileKind::File
+        } else if file_type.is_dir() {
+            FileKind::Directory
+        } else {
+            FileKind::Other
+        };
+        let metadata = entry
+            .metadata()
+            .map_err(|source| io_error("read workspace entry metadata", &entry_path, source))?;
+        let safe_path = SafeWorkspacePath::from_canonical(&authority.root, &entry_path)?;
+        entries.push(DirectoryEntry {
+            name: entry.file_name(),
+            path: safe_path,
+            kind,
+            byte_length: metadata.len(),
+        });
+    }
+    let current = revalidate_path(authority, path)?;
+    let current_identity = Handle::from_path(&current)
+        .map_err(|source| io_error("recheck workspace directory identity", &current, source))?;
+    if current_identity != opened_identity {
+        return Err(NativeFileSystemError::PathChanged(absolute));
+    }
+    Ok(DirectoryListing { entries, truncated })
 }
 
 fn read_bounded_blocking(
@@ -519,7 +623,7 @@ fn ensure_parent_directories(
                 return Err(io_error("inspect workspace directory", &current, source));
             }
         }
-        let canonical = fs::canonicalize(&current)
+        let canonical = dunce::canonicalize(&current)
             .map_err(|source| io_error("canonicalize workspace directory", &current, source))?;
         SafeWorkspacePath::from_canonical(&authority.root, &canonical)?;
     }

@@ -2,11 +2,16 @@ import { Channel, invoke } from '@tauri-apps/api/core'
 
 import type {
   DesktopEvent,
+  FileContent,
+  FileTreeNode,
   HealthResponse,
+  ProjectInfo,
   SystemProbeEvent,
   ThemeInfo,
   ThemeSource,
-  WindowAction
+  WindowAction,
+  WorkspaceInfo,
+  WorkspacePathItem
 } from './generated/contracts'
 import { normalizeDesktopError } from './errors'
 
@@ -29,6 +34,14 @@ export interface DesktopApi {
   }
   workspace: {
     openDirectory(): Promise<string | null>
+    scanFileTree(rootPath: string): Promise<FileTreeNode[]>
+    getAllPaths(rootPath: string): Promise<WorkspacePathItem[]>
+    readFile(filePath: string, rootPath: string): Promise<FileContent>
+    detectProject(rootPath: string): Promise<ProjectInfo>
+    getRecentProjects(): Promise<WorkspaceInfo[]>
+    addRecentProject(project: WorkspaceInfo): Promise<void>
+    removeRecentProject(id: string): Promise<void>
+    renameRecentProject(id: string, newName: string): Promise<void>
   }
   theme: {
     get(): Promise<ThemeInfo>
@@ -69,7 +82,15 @@ export const desktopApi: DesktopApi = {
     openExternal: (target) => command('open_external', { target })
   },
   workspace: {
-    openDirectory: () => command('workspace_open_directory')
+    openDirectory: () => command('workspace_open_directory'),
+    scanFileTree: (rootPath) => command('workspace_scan_file_tree', { rootPath }),
+    getAllPaths: (rootPath) => command('workspace_get_all_paths', { rootPath }),
+    readFile: (filePath, rootPath) => command('workspace_read_file', { filePath, rootPath }),
+    detectProject: (rootPath) => command('workspace_detect_project', { rootPath }),
+    getRecentProjects: () => command('workspace_get_recent_projects'),
+    addRecentProject: (project) => command('workspace_add_recent_project', { project }),
+    removeRecentProject: (id) => command('workspace_remove_recent_project', { id }),
+    renameRecentProject: (id, newName) => command('workspace_rename_recent_project', { id, newName })
   },
   theme: {
     get: () => command('theme_get'),

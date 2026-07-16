@@ -102,6 +102,76 @@ pub struct ThemeInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
+pub struct WorkspaceInfo {
+    pub id: String,
+    pub root_path: String,
+    pub name: String,
+    pub project_type: String,
+    pub opened_at: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(rename_all = "lowercase")]
+pub enum FileTreeNodeType {
+    File,
+    Directory,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", optional_fields)]
+pub struct FileTreeNode {
+    pub name: String,
+    pub path: String,
+    #[serde(rename = "type")]
+    #[ts(rename = "type")]
+    pub kind: FileTreeNodeType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub children: Option<Vec<Self>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub size: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extension: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct WorkspacePathItem {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct FileContent {
+    pub path: String,
+    pub content: String,
+    pub truncated: bool,
+    #[ts(type = "number")]
+    pub total_lines: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", optional_fields)]
+pub struct ProjectInfo {
+    #[serde(rename = "type")]
+    #[ts(rename = "type")]
+    pub project_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub framework: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub package_manager: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct DesktopEvent<T> {
     pub version: u16,
     pub stream_id: Option<String>,
@@ -114,8 +184,8 @@ pub struct DesktopEvent<T> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CommandError, DesktopEvent, ErrorCode, SystemProbeEvent, ThemeInfo, ThemeSource,
-        WindowAction,
+        CommandError, DesktopEvent, ErrorCode, FileTreeNode, FileTreeNodeType, SystemProbeEvent,
+        ThemeInfo, ThemeSource, WindowAction,
     };
 
     #[test]
@@ -152,6 +222,23 @@ mod tests {
         assert_eq!(value["version"], 1);
         assert_eq!(value["kind"], "themeChanged");
         assert_eq!(value["payload"]["themeSource"], "system");
+    }
+
+    #[test]
+    fn workspace_tree_nodes_keep_legacy_type_and_optional_fields() {
+        let node = FileTreeNode {
+            name: "src".to_string(),
+            path: "src".to_string(),
+            kind: FileTreeNodeType::Directory,
+            children: Some(Vec::new()),
+            size: None,
+            extension: None,
+        };
+        let value = serde_json::to_value(node).expect("workspace tree node must serialize");
+
+        assert_eq!(value["type"], "directory");
+        assert!(value.get("children").is_some());
+        assert!(value.get("size").is_none() && value.get("extension").is_none());
     }
 
     #[test]

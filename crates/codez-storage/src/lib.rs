@@ -5,6 +5,7 @@
 mod atomic_file;
 mod credentials;
 mod migration;
+mod repositories;
 mod schema;
 
 pub use atomic_file::{
@@ -24,4 +25,5 @@ pub use migration::{
     MigrationManifest, MigrationManifestEntry, MigrationPhase, MigrationRunId, RootScope,
     SchemaSelector, TransformReport, TransformedFile, TreeSelector,
 };
+pub use repositories::RecentProjectsStore;
 pub use schema::{SchemaError, SchemaFamily, SchemaFormat, VersionedDocument, VersionedRecord};

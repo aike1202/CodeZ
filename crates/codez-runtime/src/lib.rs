@@ -4,6 +4,7 @@ mod cancellation;
 mod host;
 mod observability;
 mod system;
+mod workspace;
 
 pub use cancellation::{
     AgentCancellation, CancellationTree, ProcessCancellation, SessionCancellation, ToolCancellation,
@@ -14,3 +15,7 @@ pub use host::{
 };
 pub use observability::{session_span, stream_span, tool_span};
 pub use system::SystemService;
+pub use workspace::{
+    FilePreview, FileTreeNode, ProjectInfo, WorkspaceEntryKind, WorkspaceLimits, WorkspacePathItem,
+    WorkspaceService,
+};

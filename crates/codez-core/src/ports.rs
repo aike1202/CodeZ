@@ -2,12 +2,12 @@ use std::{
     collections::BTreeMap,
     ffi::OsString,
     future::Future,
-    path::PathBuf,
+    path::{Path, PathBuf},
     pin::Pin,
     time::{Duration, SystemTime},
 };
 
-use crate::{AppError, CancellationToken, SafeWorkspacePath};
+use crate::{AppError, CancellationToken, RecentProject, SafeWorkspacePath, WorkspaceRoot};
 
 /// Boxed asynchronous port result used at dynamic adapter boundaries.
 pub type PortFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, AppError>> + Send + 'a>>;
@@ -28,9 +28,35 @@ pub struct FileMetadata {
     pub byte_length: u64,
 }
 
+/// One direct child returned from a bounded workspace directory read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectoryEntry {
+    pub name: OsString,
+    pub path: SafeWorkspacePath,
+    pub kind: FileKind,
+    pub byte_length: u64,
+}
+
+/// Bounded directory result that reports whether additional entries were omitted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectoryListing {
+    pub entries: Vec<DirectoryEntry>,
+    pub truncated: bool,
+}
+
 /// Bounded filesystem operations supplied by storage or platform adapters.
 pub trait FileSystem: Send + Sync {
+    fn workspace_root(&self) -> &WorkspaceRoot;
+
+    fn resolve<'a>(&'a self, requested: &'a Path) -> PortFuture<'a, SafeWorkspacePath>;
+
     fn metadata<'a>(&'a self, path: &'a SafeWorkspacePath) -> PortFuture<'a, FileMetadata>;
+
+    fn read_directory<'a>(
+        &'a self,
+        path: &'a SafeWorkspacePath,
+        max_entries: usize,
+    ) -> PortFuture<'a, DirectoryListing>;
 
     fn read_bounded<'a>(
         &'a self,
@@ -43,6 +69,17 @@ pub trait FileSystem: Send + Sync {
         path: &'a SafeWorkspacePath,
         bytes: &'a [u8],
     ) -> PortFuture<'a, ()>;
+}
+
+/// Durable recent-project repository implemented by the storage adapter.
+pub trait RecentProjectRepository: Send + Sync {
+    fn list(&self) -> PortFuture<'_, Vec<RecentProject>>;
+
+    fn upsert(&self, project: RecentProject) -> PortFuture<'_, ()>;
+
+    fn remove<'a>(&'a self, id: &'a str) -> PortFuture<'a, ()>;
+
+    fn rename<'a>(&'a self, id: &'a str, new_name: &'a str) -> PortFuture<'a, ()>;
 }
 
 /// Fully explicit request passed to a process adapter.

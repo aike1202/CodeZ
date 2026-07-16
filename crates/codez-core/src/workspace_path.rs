@@ -57,6 +57,12 @@ impl WorkspaceRoot {
     pub fn as_path(&self) -> &Path {
         &self.canonical_path
     }
+
+    /// Returns a stable registry key with platform path-case semantics.
+    #[must_use]
+    pub fn identity_key(&self) -> String {
+        identity_key(&self.canonical_path)
+    }
 }
 
 impl SafeWorkspacePath {

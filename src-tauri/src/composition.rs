@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::Arc};
 use codez_core::{AppPathError, AppPaths};
 use codez_platform::ResourceLocator;
 use codez_runtime::{CancellationTree, HostPreferences, ShutdownCoordinator, SystemService};
-use codez_storage::{AtomicFileStore, OsCredentialStore};
+use codez_storage::{AtomicFileStore, OsCredentialStore, RecentProjectsStore};
 use tauri::{App, Manager};
 use thiserror::Error;
 
@@ -44,6 +44,11 @@ pub(crate) fn compose_app_state(app: &App) -> Result<AppState, CompositionError>
         home_directory,
     )?);
     let logging = logging::initialize(paths.log_directory())?;
+    let storage = AtomicFileStore::default();
+    let recent_projects = Arc::new(RecentProjectsStore::new(
+        paths.data_directory().to_path_buf(),
+        storage.clone(),
+    ));
 
     Ok(AppState {
         system: Arc::new(SystemService::new()),
@@ -51,7 +56,8 @@ pub(crate) fn compose_app_state(app: &App) -> Result<AppState, CompositionError>
         resources: Arc::new(ResourceLocator::new(
             paths.resource_directory().to_path_buf(),
         )),
-        storage: Arc::new(AtomicFileStore::default()),
+        storage: Arc::new(storage),
+        recent_projects,
         credentials: Arc::new(OsCredentialStore::default()),
         cancellation: Arc::new(CancellationTree::new()),
         shutdown: Arc::new(ShutdownCoordinator::default()),

@@ -640,6 +640,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tempfile",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
@@ -663,6 +664,7 @@ name = "codez-platform"
 version = "0.1.0"
 dependencies = [
  "codez-core",
+ "dunce",
  "portable-pty",
  "same-file",
  "serde",

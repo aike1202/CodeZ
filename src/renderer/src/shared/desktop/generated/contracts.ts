@@ -15,4 +15,16 @@ export type ThemeSource = "system" | "light" | "dark";
 
 export type ThemeInfo = { shouldUseDarkColors: boolean, themeSource: ThemeSource, };
 
+export type WorkspaceInfo = { id: string, rootPath: string, name: string, projectType: string, openedAt: string, };
+
+export type FileTreeNodeType = "file" | "directory";
+
+export type FileTreeNode = { name: string, path: string, type: FileTreeNodeType, children?: Array<FileTreeNode>, size?: number, extension?: string, };
+
+export type WorkspacePathItem = { name: string, path: string, isDir: boolean, };
+
+export type FileContent = { path: string, content: string, truncated: boolean, totalLines: number, };
+
+export type ProjectInfo = { type: string, framework?: string, packageManager?: string, };
+
 export type DesktopEvent<T> = { version: number, streamId: string | null, sequence: number | null, kind: string, payload: T, };
