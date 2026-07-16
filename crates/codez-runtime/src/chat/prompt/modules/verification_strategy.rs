@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 use tokio::fs;
 
 use crate::chat::prompt::types::{PromptContext, PromptLayer, PromptModule};
@@ -7,7 +7,9 @@ use crate::chat::prompt::types::{PromptContext, PromptLayer, PromptModule};
 pub struct VerificationStrategyModule;
 
 impl VerificationStrategyModule {
-    async fn read_package_scripts(workspace_root: &std::path::Path) -> Option<HashMap<String, String>> {
+    async fn read_package_scripts(
+        workspace_root: &std::path::Path,
+    ) -> Option<HashMap<String, String>> {
         let package_json_path = workspace_root.join("package.json");
         if !package_json_path.exists() {
             return None;

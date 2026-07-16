@@ -791,6 +791,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "ts-rs",
 ]
 
@@ -810,15 +811,22 @@ dependencies = [
 name = "codez-desktop"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "codez-contracts",
  "codez-core",
+ "codez-mcp",
  "codez-platform",
  "codez-providers",
  "codez-runtime",
  "codez-storage",
+ "dunce",
+ "futures-util",
  "opener",
+ "rustix",
+ "same-file",
  "serde",
  "serde_json",
+ "serde_yaml",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -840,12 +848,20 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "codez-core",
- "reqwest 0.12.28",
+ "http",
+ "process-wrap",
+ "regex",
  "reqwest 0.13.4",
  "rmcp",
  "serde",
  "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
+ "tracing",
+ "url",
+ "zeroize",
 ]
 
 [[package]]
@@ -855,7 +871,9 @@ dependencies = [
  "codez-core",
  "dashmap",
  "dunce",
+ "nix 0.31.3",
  "portable-pty",
+ "process-wrap",
  "same-file",
  "serde",
  "serde_json",
@@ -866,6 +884,8 @@ dependencies = [
  "tree-sitter-bash",
  "tree-sitter-powershell",
  "uuid",
+ "win32job",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -875,9 +895,7 @@ dependencies = [
  "async-stream",
  "async-trait",
  "chrono",
- "codez-contracts",
  "codez-core",
- "codez-storage",
  "eventsource-stream",
  "futures-util",
  "reqwest 0.12.28",
@@ -888,7 +906,6 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid",
- "zeroize",
 ]
 
 [[package]]
@@ -897,7 +914,6 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
- "codez-contracts",
  "codez-core",
  "dashmap",
  "dunce",
@@ -914,6 +930,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
  "uuid",
 ]
@@ -4125,9 +4142,9 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.9.5"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9ef1d0d795eb7d84685bca4f72f3649f064e6641543d3a8c415898726a57b41"
+checksum = "44c5af06bb1b7d3216d91932aed5265164bf384dc89cd6ba05cf59a35f5f76ea"
 dependencies = [
  "rand_chacha 0.9.0",
  "rand_core 0.9.5",
@@ -4224,7 +4241,7 @@ dependencies = [
  "num-traits",
  "paste",
  "profiling",
- "rand 0.9.5",
+ "rand 0.9.4",
  "rand_chacha 0.9.0",
  "simd_helpers",
  "thiserror 2.0.18",
@@ -4966,6 +4983,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "serde_yaml"
+version = "0.9.34+deprecated"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
+dependencies = [
+ "indexmap 2.14.0",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
 ]
 
 [[package]]
@@ -6345,6 +6375,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "unsafe-libyaml"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
+
+[[package]]
 name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6708,6 +6744,16 @@ name = "weezl"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
+
+[[package]]
+name = "win32job"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c6a6724ccfbf34154a8691bd868b0fcd2be2ca3f7b47b32614654f1a01b191c"
+dependencies = [
+ "thiserror 1.0.69",
+ "windows 0.61.3",
+]
 
 [[package]]
 name = "winapi"

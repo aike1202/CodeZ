@@ -41,6 +41,7 @@ impl ErrorReporter {
                 );
             }
             AppErrorKind::Validation
+            | AppErrorKind::Unsupported
             | AppErrorKind::PermissionDenied
             | AppErrorKind::NotFound
             | AppErrorKind::Conflict
@@ -72,6 +73,7 @@ fn diagnostic_for_log(error: &AppError) -> &str {
 const fn contract_code(kind: AppErrorKind) -> ErrorCode {
     match kind {
         AppErrorKind::Validation => ErrorCode::Validation,
+        AppErrorKind::Unsupported => ErrorCode::Unsupported,
         AppErrorKind::PermissionDenied => ErrorCode::PermissionDenied,
         AppErrorKind::NotFound => ErrorCode::NotFound,
         AppErrorKind::Conflict => ErrorCode::Conflict,
@@ -176,6 +178,7 @@ mod tests {
     fn every_application_error_kind_has_the_stable_contract_code() {
         let cases = [
             (AppErrorKind::Validation, ErrorCode::Validation),
+            (AppErrorKind::Unsupported, ErrorCode::Unsupported),
             (AppErrorKind::PermissionDenied, ErrorCode::PermissionDenied),
             (AppErrorKind::NotFound, ErrorCode::NotFound),
             (AppErrorKind::Conflict, ErrorCode::Conflict),

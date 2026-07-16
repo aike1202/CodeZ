@@ -17,13 +17,16 @@ pub use credentials::{
     OsCredentialStore, SecretValue,
 };
 pub use migration::{
-    BackupReport, CredentialMigrationEntry, CredentialMigrationReason, CredentialMigrationReport,
-    CredentialMigrationStatus, DataSensitivity, DiscoveryLimits, DiscoveryRule,
-    ElectronSafeStorageReader, LEGACY_DATA_CATALOG, LegacyCredentialReadError,
-    LegacyCredentialReader, LegacyDataSet, LegacyDataSpec, LegacyFormat, LegacyMigrationService,
-    LegacyRoots, LegacyValidation, ManifestScope, MigrationCommitMarker, MigrationError,
-    MigrationManifest, MigrationManifestEntry, MigrationPhase, MigrationRunId, RootScope,
-    SchemaSelector, TransformReport, TransformedFile, TreeSelector,
+    ActivatedFile, ActivationScope, BackupReport, CredentialMigrationEntry,
+    CredentialMigrationReason, CredentialMigrationReport, CredentialMigrationStatus,
+    CredentialReentry,
+    DataSensitivity, DiscoveryLimits, DiscoveryRule, ElectronSafeStorageReader,
+    LEGACY_DATA_CATALOG, LegacyCredentialReadError, LegacyCredentialReader, LegacyDataSet,
+    LegacyDataSpec, LegacyFormat, LegacyMigrationCoordinator, LegacyMigrationService, LegacyRoots,
+    LegacyValidation, ManifestScope, MigrationActivationMarker, MigrationActivationService,
+    MigrationCommitMarker, MigrationError, MigrationManifest, MigrationManifestEntry,
+    MigrationPhase, MigrationRunId, RootScope, SchemaSelector, StartupMigrationOutcome,
+    TransformReport, TransformedFile, TreeSelector,
 };
-pub use repositories::RecentProjectsStore;
+pub use repositories::{RecentProjectsStore, SessionStore};
 pub use schema::{SchemaError, SchemaFamily, SchemaFormat, VersionedDocument, VersionedRecord};

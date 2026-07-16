@@ -19,9 +19,11 @@ impl PromptModule for SubAgentsModule {
 
     fn is_enabled<'a>(&'a self, ctx: &'a PromptContext) -> BoxFuture<'a, bool> {
         Box::pin(async move {
-            let has_tool = ctx.available_tools.as_ref().map_or(true, |tools| {
+            let has_tool = ctx.available_tools.as_ref().is_none_or(|tools| {
                 tools.iter().any(|t| {
-                    t.name == "SubAgentRunner" || t.name == "DelegateTasks" || t.name == "spawn_agent"
+                    t.name == "SubAgentRunner"
+                        || t.name == "DelegateTasks"
+                        || t.name == "spawn_agent"
                 })
             });
 

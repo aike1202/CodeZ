@@ -1,6 +1,6 @@
 # Rust MCP SDK capability spike
 
-> 状态：通过，需 CodeZ 兼容与安全适配层
+> 状态：SDK capability spike 通过；Tauri live gateway、配置协调和用户流程未完成
 >
 > 日期：2026-07-15
 >
@@ -8,7 +8,7 @@
 
 ## 目的
 
-用现有 Electron MCP 行为和真实 JavaScript SDK fixture 验证 Rust SDK，而不是只比较 API。Spike 不替换 `McpConnectionManager`，`rmcp` 当前仅是 `codez-mcp` 的 dev dependency。
+用现有 Electron MCP 行为和真实 JavaScript SDK fixture 验证 Rust SDK，而不是只比较 API。`rmcp` 现已作为 `codez-mcp` 的生产协议依赖；这不替换 Electron `McpConnectionManager`，也不证明 Tauri command 已能管理 live connections。
 
 ## 方法
 
@@ -51,6 +51,8 @@ Phase 7 采用 `rmcp 2.2.0` 作为 MCP 协议核心，不自研完整 JSON-RPC/M
 
 该选择不表示 Phase 7 已完成；它只关闭“Rust SDK 是否可作为协议核心”的 Phase 0 风险。
 
+截至 2026-07-16，Tauri `AppState` 已注入可持久化的 `McpUserConfigService` 和 `McpSecretService`，因此 list/save/set-enabled 与密钥 metadata 操作可以走 Rust boundary。它尚未持有 `McpGateway` 或配置 reconciliation service；`mcp_get_catalog`、`mcp_reconnect`、`mcp_authorize`、`mcp_logout` 和 project trust 必须返回 typed `UNSUPPORTED`，不能以空 catalog 或 `Ok(())` 假装功能可用。live stdio/HTTP/SSE/OAuth、catalog、reverse request 和状态事件仍属于 Phase 7 未完成工作。
+
 ## 验证
 
 2026-07-15 Windows x64：
@@ -66,7 +68,7 @@ npm.cmd run check:architecture
 npm.cmd test
 ```
 
-8 个 Rust spike 测试、workspace 全量 Rust 格式/Clippy/测试、TypeScript 类型检查和 8 个 crate 的架构检查均通过。Vitest 全量回归为 183 个文件、1,166 项测试全部通过；Electron MCP 的 stdio、HTTP、OAuth 真实 fixture 回归也通过。
+这段命令及其结果是 2026-07-15 的 SDK spike 历史记录，不是当前工作树的 Phase 7 验收。当前 workspace 整合完成后必须重新运行相关 Rust/前端门禁，并额外运行含 Tauri live gateway 的集成测试；不能用 SDK fixture 或 Electron MCP 回归替代 Rust/Tauri 用户流程证据。
 
 ## 限制
 

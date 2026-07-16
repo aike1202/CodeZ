@@ -1,8 +1,11 @@
 #![forbid(unsafe_code)]
 
-pub mod provider;
 pub mod chat;
 pub mod context;
+pub mod migration;
+pub mod mcp;
+pub mod permission;
+pub mod provider;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -15,6 +18,7 @@ pub const THEME_CHANGED_EVENT: &str = "desktop://theme-changed";
 #[ts(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ErrorCode {
     Validation,
+    Unsupported,
     PermissionDenied,
     NotFound,
     Conflict,
@@ -41,6 +45,16 @@ impl CommandError {
     pub fn validation(message: impl Into<String>) -> Self {
         Self {
             code: ErrorCode::Validation,
+            message: message.into(),
+            retryable: false,
+            correlation_id: None,
+        }
+    }
+
+    #[must_use]
+    pub fn unsupported(message: impl Into<String>) -> Self {
+        Self {
+            code: ErrorCode::Unsupported,
             message: message.into(),
             retryable: false,
             correlation_id: None,
@@ -281,12 +295,10 @@ pub struct DraftImageAttachment {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(tag = "scope")]
-#[ts(export)]
+#[serde(untagged)]
+#[ts(export, untagged)]
 pub enum ComposerImageAttachment {
-    #[serde(rename = "session")]
     Session(SessionImageAttachment),
-    #[serde(rename = "draft")]
     Draft(DraftImageAttachment),
 }
 

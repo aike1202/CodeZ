@@ -12,15 +12,14 @@ pub struct SubAgentEntry {
     pub mailbox: SubAgentMailbox,
 }
 
+#[derive(Default)]
 pub struct SubAgentManager {
     sub_agents: Arc<RwLock<HashMap<String, SubAgentEntry>>>,
 }
 
 impl SubAgentManager {
     pub fn new() -> Self {
-        Self {
-            sub_agents: Arc::new(RwLock::new(HashMap::new())),
-        }
+        Self::default()
     }
 
     pub async fn spawn_sub_agent(&self, name: String, role: String) -> Result<(), String> {
@@ -29,12 +28,15 @@ impl SubAgentManager {
             return Err(format!("Sub-agent with name '{}' already exists", name));
         }
 
-        map.insert(name.clone(), SubAgentEntry {
-            name,
-            role,
-            status: AgentStatus::Idle,
-            mailbox: SubAgentMailbox::new(),
-        });
+        map.insert(
+            name.clone(),
+            SubAgentEntry {
+                name,
+                role,
+                status: AgentStatus::Idle,
+                mailbox: SubAgentMailbox::new(),
+            },
+        );
 
         Ok(())
     }
@@ -56,6 +58,8 @@ impl SubAgentManager {
 
     pub async fn list_sub_agents(&self) -> Vec<(String, String, AgentStatus)> {
         let map = self.sub_agents.read().await;
-        map.values().map(|e| (e.name.clone(), e.role.clone(), e.status.clone())).collect()
+        map.values()
+            .map(|e| (e.name.clone(), e.role.clone(), e.status.clone()))
+            .collect()
     }
 }

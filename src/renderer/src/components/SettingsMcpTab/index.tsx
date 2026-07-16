@@ -168,11 +168,12 @@ export default function SettingsMcpTab(): React.ReactElement {
     }
   }
 
-  const runServerAction = async (config: ScopedMcpConfig, action: () => Promise<McpServerStatus[]>) => {
+  const runServerAction = async (config: ScopedMcpConfig, action: () => Promise<void>) => {
     setBusyServer(config.name)
     setActionError('')
     try {
-      setStatuses(await action())
+      await action()
+      applyPayload(await window.api.mcp.list(), false)
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : String(cause))
     } finally {

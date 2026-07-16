@@ -1,6 +1,6 @@
-use std::path::PathBuf;
-use std::sync::Arc;
-use codez_core::{CancellationToken, FileSystem};
+use std::{path::PathBuf, sync::Arc};
+
+use codez_core::{AppError, CancellationToken, FileSystem};
 
 use crate::git::GitService;
 
@@ -18,11 +18,11 @@ impl ParallelWorktreeManager {
         filesystem: &dyn FileSystem,
         name: &str,
         cancellation: CancellationToken,
-    ) -> Result<PathBuf, String> {
-        match self.git_service.create_worktree(filesystem, name, cancellation).await {
-            Ok(info) => Ok(PathBuf::from(info.path)),
-            Err(e) => Err(e.to_string()),
-        }
+    ) -> Result<PathBuf, AppError> {
+        self.git_service
+            .create_worktree(filesystem, name, cancellation)
+            .await
+            .map(|info| info.path)
     }
 
     pub async fn clean_worktree(
@@ -30,10 +30,9 @@ impl ParallelWorktreeManager {
         filesystem: &dyn FileSystem,
         name: &str,
         cancellation: CancellationToken,
-    ) -> Result<(), String> {
-        match self.git_service.remove_worktree(filesystem, name, false, cancellation).await {
-            Ok(_) => Ok(()),
-            Err(e) => Err(e.to_string()),
-        }
+    ) -> Result<(), AppError> {
+        self.git_service
+            .remove_worktree(filesystem, name, false, cancellation)
+            .await
     }
 }

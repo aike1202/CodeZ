@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, path::Path};
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    path::Path,
+};
 
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use serde_json::value::RawValue;
@@ -6,12 +9,14 @@ use zeroize::Zeroizing;
 
 use super::{
     BACKUP_REPORT_SCHEMA_VERSION, BackupReport, LegacyDataSet, MigrationError, MigrationManifest,
-    MigrationPhase, MigrationRunId, filesystem,
+    MigrationPhase, MigrationRunId, filesystem, layout,
     legacy_safe_storage::{LegacyCredentialReadError, LegacyCredentialReader},
 };
 use crate::{CredentialId, CredentialKind, CredentialStore, SecretValue};
 
-pub(super) const CREDENTIAL_REPORT_SCHEMA_VERSION: u32 = 1;
+pub(super) const CREDENTIAL_REPORT_SCHEMA_VERSION: u32 = 2;
+const LEGACY_CREDENTIAL_REPORT_SCHEMA_VERSION: u32 = 1;
+const CREDENTIAL_REENTRY_RECEIPT_SCHEMA_VERSION: u32 = 1;
 
 /// Outcome of migrating one credential identity or one whole encrypted source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -19,6 +24,8 @@ pub(super) const CREDENTIAL_REPORT_SCHEMA_VERSION: u32 = 1;
 pub enum CredentialMigrationStatus {
     /// Plaintext was transferred directly into secure operating-system storage.
     Migrated,
+    /// The user explicitly re-entered the credential into secure operating-system storage.
+    Reentered,
     /// The user must provide the credential again before migration can commit.
     RequiresReentry,
     /// The legacy source contained no configured credential.
@@ -102,10 +109,49 @@ pub struct CredentialMigrationReport {
     pub entries: Vec<CredentialMigrationEntry>,
     /// Number of credentials written to secure storage.
     pub migrated: usize,
+    /// Number of credentials explicitly re-entered into secure storage.
+    #[serde(default)]
+    pub reentered: usize,
     /// Number of records or encrypted sources requiring user input.
     pub requires_reentry: usize,
     /// Number of absent credential families.
     pub not_present: usize,
+}
+
+/// One user-supplied credential value that may complete a blocked migration.
+///
+/// The secret is deliberately not serializable or printable. It is consumed by
+/// the narrow operating-system credential-store adapter during resume.
+pub struct CredentialReentry {
+    credential_id: CredentialId,
+    secret: SecretValue,
+}
+
+impl CredentialReentry {
+    /// Creates one explicit credential re-entry request.
+    #[must_use]
+    pub fn new(credential_id: CredentialId, secret: SecretValue) -> Self {
+        Self {
+            credential_id,
+            secret,
+        }
+    }
+
+    /// Returns the non-secret target identity for this input.
+    #[must_use]
+    pub fn credential_id(&self) -> &CredentialId {
+        &self.credential_id
+    }
+}
+
+/// Immutable redacted evidence that a blocked credential report was completed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct CredentialReentryReceipt {
+    schema_version: u32,
+    awaiting_report_fingerprint: String,
+    completed_report: CredentialMigrationReport,
+    fingerprint: String,
 }
 
 pub(super) fn migrate_credentials_blocking<R, S>(
@@ -119,6 +165,7 @@ where
     R: LegacyCredentialReader,
     S: CredentialStore,
 {
+    layout::reject_filesystem_redirects(backup_root)?;
     validate_backup_prerequisite(manifest, backup_report)?;
     let mut entries = Vec::new();
     migrate_provider_credentials(
@@ -161,12 +208,258 @@ where
         },
         entries,
         migrated,
+        reentered: 0,
         requires_reentry,
         not_present,
     })
 }
 
-fn validate_backup_prerequisite(
+pub(super) fn complete_credential_reentry_blocking<S>(
+    awaiting_report: CredentialMigrationReport,
+    values: Vec<CredentialReentry>,
+    credential_store: &S,
+) -> Result<CredentialMigrationReport, MigrationError>
+where
+    S: CredentialStore,
+{
+    validate_credential_report_structure(&awaiting_report)?;
+    if awaiting_report.phase != MigrationPhase::AwaitingCredentials {
+        return Err(MigrationError::CredentialReportMismatch);
+    }
+
+    let required = required_reentry_ids(&awaiting_report)?;
+    let mut supplied = HashMap::with_capacity(values.len());
+    for value in values {
+        let credential_id = value.credential_id.clone();
+        if supplied.insert(credential_id.clone(), value.secret).is_some() {
+            return Err(MigrationError::CredentialReentryDuplicate { id: credential_id });
+        }
+    }
+    if let Some(credential_id) = supplied
+        .keys()
+        .find(|credential_id| !required.contains(*credential_id))
+        .cloned()
+    {
+        return Err(MigrationError::CredentialReentryUnexpected { id: credential_id });
+    }
+    if let Some(credential_id) = required
+        .iter()
+        .find(|credential_id| !supplied.contains_key(*credential_id))
+        .cloned()
+    {
+        return Err(MigrationError::CredentialReentryMissing { id: credential_id });
+    }
+
+    for credential_id in &required {
+        let secret = supplied
+            .get(credential_id)
+            .ok_or_else(|| MigrationError::CredentialReentryMissing {
+                id: credential_id.clone(),
+            })?;
+        credential_store
+            .set(credential_id, secret)
+            .map_err(MigrationError::CredentialStore)?;
+    }
+
+    let mut completed_report = awaiting_report;
+    for entry in &mut completed_report.entries {
+        if entry.status == CredentialMigrationStatus::RequiresReentry {
+            entry.status = CredentialMigrationStatus::Reentered;
+            entry.reason = None;
+        }
+    }
+    completed_report.phase = MigrationPhase::Verified;
+    completed_report.reentered = completed_report.reentered.saturating_add(required.len());
+    completed_report.requires_reentry = 0;
+    validate_credential_report_structure(&completed_report)?;
+    Ok(completed_report)
+}
+
+pub(super) fn new_credential_reentry_receipt(
+    awaiting_report: &CredentialMigrationReport,
+    completed_report: CredentialMigrationReport,
+) -> Result<CredentialReentryReceipt, MigrationError> {
+    validate_reentry_completion(awaiting_report, &completed_report)?;
+    let mut receipt = CredentialReentryReceipt {
+        schema_version: CREDENTIAL_REENTRY_RECEIPT_SCHEMA_VERSION,
+        awaiting_report_fingerprint: credential_report_fingerprint(awaiting_report)?,
+        completed_report,
+        fingerprint: String::new(),
+    };
+    receipt.fingerprint = credential_reentry_receipt_fingerprint(&receipt)?;
+    Ok(receipt)
+}
+
+pub(super) fn completed_report_from_receipt(
+    awaiting_report: &CredentialMigrationReport,
+    receipt: CredentialReentryReceipt,
+) -> Result<CredentialMigrationReport, MigrationError> {
+    if receipt.schema_version != CREDENTIAL_REENTRY_RECEIPT_SCHEMA_VERSION
+        || receipt.awaiting_report_fingerprint != credential_report_fingerprint(awaiting_report)?
+        || receipt.fingerprint != credential_reentry_receipt_fingerprint(&receipt)?
+    {
+        return Err(MigrationError::CredentialReportMismatch);
+    }
+    validate_reentry_completion(awaiting_report, &receipt.completed_report)?;
+    Ok(receipt.completed_report)
+}
+
+pub(super) fn validate_credential_report_structure(
+    report: &CredentialMigrationReport,
+) -> Result<(), MigrationError> {
+    if !matches!(
+        report.schema_version,
+        LEGACY_CREDENTIAL_REPORT_SCHEMA_VERSION | CREDENTIAL_REPORT_SCHEMA_VERSION
+    ) {
+        return Err(MigrationError::CredentialReportMismatch);
+    }
+
+    let mut migrated = 0_usize;
+    let mut reentered = 0_usize;
+    let mut not_present = 0_usize;
+    let mut requires_reentry = 0_usize;
+    for entry in &report.entries {
+        match entry.status {
+            CredentialMigrationStatus::Migrated => {
+                migrated = migrated.saturating_add(1);
+                if entry.reason.is_some() || entry.credential_id.is_none() {
+                    return Err(MigrationError::CredentialReportMismatch);
+                }
+            }
+            CredentialMigrationStatus::Reentered => {
+                reentered = reentered.saturating_add(1);
+                if entry.reason.is_some() || entry.credential_id.is_none() {
+                    return Err(MigrationError::CredentialReportMismatch);
+                }
+            }
+            CredentialMigrationStatus::NotPresent => {
+                not_present = not_present.saturating_add(1);
+                if entry.credential_id.is_some() || entry.reason.is_some() {
+                    return Err(MigrationError::CredentialReportMismatch);
+                }
+            }
+            CredentialMigrationStatus::RequiresReentry => {
+                requires_reentry = requires_reentry.saturating_add(1);
+                if entry.reason.is_none() {
+                    return Err(MigrationError::CredentialReportMismatch);
+                }
+            }
+        }
+    }
+    let expected_phase = if requires_reentry == 0 {
+        MigrationPhase::Verified
+    } else {
+        MigrationPhase::AwaitingCredentials
+    };
+    if migrated != report.migrated
+        || reentered != report.reentered
+        || not_present != report.not_present
+        || requires_reentry != report.requires_reentry
+        || report
+            .migrated
+            .saturating_add(report.reentered)
+            .saturating_add(report.not_present)
+            .saturating_add(report.requires_reentry)
+            != report.entries.len()
+        || report.phase != expected_phase
+    {
+        return Err(MigrationError::CredentialReportMismatch);
+    }
+    Ok(())
+}
+
+fn required_reentry_ids(
+    report: &CredentialMigrationReport,
+) -> Result<HashSet<CredentialId>, MigrationError> {
+    let mut ids = HashSet::with_capacity(report.requires_reentry);
+    for entry in report
+        .entries
+        .iter()
+        .filter(|entry| entry.status == CredentialMigrationStatus::RequiresReentry)
+    {
+        let credential_id = entry.credential_id.clone().ok_or(
+            MigrationError::CredentialReentryIdentifierMissing {
+                data_set: entry.data_set,
+                source_index: entry.source_index,
+            },
+        )?;
+        if !ids.insert(credential_id.clone()) {
+            return Err(MigrationError::CredentialReentryDuplicate { id: credential_id });
+        }
+    }
+    Ok(ids)
+}
+
+fn validate_reentry_completion(
+    awaiting_report: &CredentialMigrationReport,
+    completed_report: &CredentialMigrationReport,
+) -> Result<(), MigrationError> {
+    validate_credential_report_structure(awaiting_report)?;
+    validate_credential_report_structure(completed_report)?;
+    if awaiting_report.phase != MigrationPhase::AwaitingCredentials
+        || completed_report.phase != MigrationPhase::Verified
+        || awaiting_report.run_id != completed_report.run_id
+        || awaiting_report.manifest_fingerprint != completed_report.manifest_fingerprint
+        || awaiting_report.entries.len() != completed_report.entries.len()
+        || completed_report.migrated != awaiting_report.migrated
+        || completed_report.not_present != awaiting_report.not_present
+        || completed_report.requires_reentry != 0
+        || completed_report.reentered
+            != awaiting_report
+                .reentered
+                .saturating_add(awaiting_report.requires_reentry)
+    {
+        return Err(MigrationError::CredentialReportMismatch);
+    }
+
+    for (awaiting, completed) in awaiting_report.entries.iter().zip(&completed_report.entries) {
+        if awaiting.data_set != completed.data_set
+            || awaiting.source_index != completed.source_index
+            || awaiting.credential_id != completed.credential_id
+        {
+            return Err(MigrationError::CredentialReportMismatch);
+        }
+        let expected_status = match awaiting.status {
+            CredentialMigrationStatus::Migrated => CredentialMigrationStatus::Migrated,
+            CredentialMigrationStatus::Reentered => CredentialMigrationStatus::Reentered,
+            CredentialMigrationStatus::NotPresent => CredentialMigrationStatus::NotPresent,
+            CredentialMigrationStatus::RequiresReentry => CredentialMigrationStatus::Reentered,
+        };
+        if completed.status != expected_status || completed.reason.is_some() {
+            return Err(MigrationError::CredentialReportMismatch);
+        }
+    }
+    Ok(())
+}
+
+fn credential_report_fingerprint(
+    report: &CredentialMigrationReport,
+) -> Result<String, MigrationError> {
+    let bytes = serde_json::to_vec(report).map_err(MigrationError::CredentialReentrySerialization)?;
+    Ok(filesystem::sha256_bytes(&bytes))
+}
+
+fn credential_reentry_receipt_fingerprint(
+    receipt: &CredentialReentryReceipt,
+) -> Result<String, MigrationError> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct FingerprintInput<'a> {
+        schema_version: u32,
+        awaiting_report_fingerprint: &'a str,
+        completed_report: &'a CredentialMigrationReport,
+    }
+
+    let bytes = serde_json::to_vec(&FingerprintInput {
+        schema_version: receipt.schema_version,
+        awaiting_report_fingerprint: &receipt.awaiting_report_fingerprint,
+        completed_report: &receipt.completed_report,
+    })
+    .map_err(MigrationError::CredentialReentrySerialization)?;
+    Ok(filesystem::sha256_bytes(&bytes))
+}
+
+pub(super) fn validate_backup_prerequisite(
     manifest: &MigrationManifest,
     backup_report: &BackupReport,
 ) -> Result<(), MigrationError> {
@@ -254,12 +547,7 @@ where
             continue;
         };
         if encoded.is_empty() {
-            entries.push(reentry_entry(
-                LegacyDataSet::Providers,
-                source_index,
-                Some(credential_id),
-                CredentialMigrationReason::MissingCredential,
-            ));
+            entries.push(not_present_entry_at(LegacyDataSet::Providers, source_index));
             continue;
         }
         if provider.encryption.as_deref() != Some("safeStorage") {
@@ -407,9 +695,13 @@ fn reentry_entry(
 }
 
 fn not_present_entry(data_set: LegacyDataSet) -> CredentialMigrationEntry {
+    not_present_entry_at(data_set, 0)
+}
+
+fn not_present_entry_at(data_set: LegacyDataSet, source_index: usize) -> CredentialMigrationEntry {
     CredentialMigrationEntry {
         data_set,
-        source_index: 0,
+        source_index,
         credential_id: None,
         status: CredentialMigrationStatus::NotPresent,
         reason: None,

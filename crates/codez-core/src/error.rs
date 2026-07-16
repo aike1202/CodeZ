@@ -6,6 +6,7 @@ use crate::redaction::RedactedText;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppErrorKind {
     Validation,
+    Unsupported,
     PermissionDenied,
     NotFound,
     Conflict,
@@ -23,6 +24,7 @@ impl AppErrorKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Validation => "VALIDATION",
+            Self::Unsupported => "UNSUPPORTED",
             Self::PermissionDenied => "PERMISSION_DENIED",
             Self::NotFound => "NOT_FOUND",
             Self::Conflict => "CONFLICT",
@@ -51,6 +53,12 @@ impl AppError {
     #[must_use]
     pub fn validation(message: impl Into<String>) -> Self {
         Self::without_diagnostic(AppErrorKind::Validation, message, false)
+    }
+
+    /// Creates a non-retryable error for a capability that is not implemented by this host.
+    #[must_use]
+    pub fn unsupported(message: impl Into<String>) -> Self {
+        Self::without_diagnostic(AppErrorKind::Unsupported, message, false)
     }
 
     /// Creates a non-retryable authorization failure.
@@ -214,6 +222,7 @@ mod tests {
             AppError::timeout("timed out"),
             AppError::process_failed("process failed", "exit code 1"),
             AppError::validation("invalid input"),
+            AppError::unsupported("unsupported operation"),
             AppError::permission_denied("permission denied"),
             AppError::internal("internal failure"),
         ];
@@ -225,6 +234,7 @@ mod tests {
                 AppErrorKind::Timeout,
                 AppErrorKind::ProcessFailed,
                 AppErrorKind::Validation,
+                AppErrorKind::Unsupported,
                 AppErrorKind::PermissionDenied,
                 AppErrorKind::Internal,
             ]

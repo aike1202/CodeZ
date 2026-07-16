@@ -2,4 +2,4 @@
 import type { DraftImageAttachment } from "./DraftImageAttachment";
 import type { SessionImageAttachment } from "./SessionImageAttachment";
 
-export type ComposerImageAttachment = { "scope": "session" } & SessionImageAttachment | { "scope": "draft" } & DraftImageAttachment;
+export type ComposerImageAttachment = SessionImageAttachment | DraftImageAttachment;

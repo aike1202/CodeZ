@@ -1,4 +1,6 @@
-use crate::permission::shell::types::{NormalizedOperation, NormalizedOperationGraph, NormalizedRedirect, PermissionShellKind};
+use crate::permission::shell::types::{
+    NormalizedOperation, NormalizedOperationGraph, NormalizedRedirect, PermissionShellKind,
+};
 
 fn tokenize(command: &str) -> Vec<String> {
     let mut tokens = Vec::new();
@@ -36,7 +38,9 @@ fn tokenize(command: &str) -> Vec<String> {
 }
 
 fn collapse_line_continuations(command: &str) -> String {
-    let re = regex::Regex::new(r"(\^+)(\r\n|\r|\n)").unwrap();
+    let Ok(re) = regex::Regex::new(r"(\^+)(\r\n|\r|\n)") else {
+        return command.to_string();
+    };
     re.replace_all(command, |caps: &regex::Captures| {
         let carets = &caps[1];
         let newline = &caps[2];
@@ -45,7 +49,8 @@ fn collapse_line_continuations(command: &str) -> String {
         } else {
             format!("{}{}", carets, newline)
         }
-    }).to_string()
+    })
+    .to_string()
 }
 
 pub struct CmdCommandParser;
@@ -109,8 +114,15 @@ impl CmdCommandParser {
                 if pair == "&&" || pair == "||" || pair == ">>" {
                     if pair == ">>" {
                         let target_str: String = chars[index + 2..].iter().collect();
-                        let target = target_str.trim().split_whitespace().next().unwrap_or("").to_string();
-                        redirects.push(NormalizedRedirect { operator: ">>".to_string(), target });
+                        let target = target_str
+                            .split_whitespace()
+                            .next()
+                            .unwrap_or("")
+                            .to_string();
+                        redirects.push(NormalizedRedirect {
+                            operator: ">>".to_string(),
+                            target,
+                        });
                         current.push_str(&pair);
                     } else {
                         if !current.trim().is_empty() {
@@ -122,7 +134,7 @@ impl CmdCommandParser {
                     index += 2;
                     continue;
                 }
-                
+
                 if char == '&' || char == '|' {
                     if !current.trim().is_empty() {
                         segments.push(current.trim().to_string());
@@ -135,8 +147,15 @@ impl CmdCommandParser {
 
                 if char == '>' || char == '<' {
                     let target_str: String = chars[index + 1..].iter().collect();
-                    let target = target_str.trim().split_whitespace().next().unwrap_or("").to_string();
-                    redirects.push(NormalizedRedirect { operator: char.to_string(), target });
+                    let target = target_str
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or("")
+                        .to_string();
+                    redirects.push(NormalizedRedirect {
+                        operator: char.to_string(),
+                        target,
+                    });
                 }
             }
             current.push(char);
@@ -147,19 +166,23 @@ impl CmdCommandParser {
             segments.push(current.trim().to_string());
         }
 
-        let operations: Vec<NormalizedOperation> = segments.into_iter().map(|source| {
-            let argv = tokenize(&source);
-            let executable = argv.first().cloned().unwrap_or_default();
-            let dynamic = argv.is_empty() || executable.contains('%') || executable.contains('!');
-            NormalizedOperation {
-                shell: PermissionShellKind::Cmd,
-                source,
-                executable,
-                argv,
-                dynamic,
-                children: Vec::new(),
-            }
-        }).collect();
+        let operations: Vec<NormalizedOperation> = segments
+            .into_iter()
+            .map(|source| {
+                let argv = tokenize(&source);
+                let executable = argv.first().cloned().unwrap_or_default();
+                let dynamic =
+                    argv.is_empty() || executable.contains('%') || executable.contains('!');
+                NormalizedOperation {
+                    shell: PermissionShellKind::Cmd,
+                    source,
+                    executable,
+                    argv,
+                    dynamic,
+                    children: Vec::new(),
+                }
+            })
+            .collect();
 
         NormalizedOperationGraph {
             shell: PermissionShellKind::Cmd,

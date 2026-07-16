@@ -25,8 +25,6 @@ impl PromptModule for EngineeringPhilosophyModule {
     }
 
     fn build<'a>(&'a self, _ctx: &'a PromptContext) -> BoxFuture<'a, Option<String>> {
-        Box::pin(async move {
-            Some(TEXT.to_string())
-        })
+        Box::pin(async move { Some(TEXT.to_string()) })
     }
 }

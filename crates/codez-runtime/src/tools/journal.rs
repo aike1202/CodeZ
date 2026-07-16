@@ -1,12 +1,13 @@
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
+use thiserror::Error;
 use tokio::fs::{self, OpenOptions};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
-use chrono::Utc;
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolJournalIdentity {
     pub session_id: Option<String>,
@@ -20,7 +21,7 @@ pub struct ToolJournalIdentity {
     pub schema_fingerprint: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolJournalEvent {
     #[serde(flatten)]
@@ -55,6 +56,14 @@ pub struct ToolExecutionJournal {
     max_bytes: u64,
     max_files: u32,
     lock: Arc<Mutex<()>>,
+}
+
+#[derive(Debug, Error)]
+pub enum ToolJournalError {
+    #[error("failed to serialize a tool journal event")]
+    Serialize(#[from] serde_json::Error),
+    #[error("tool journal I/O failed")]
+    Io(#[from] std::io::Error),
 }
 
 impl ToolExecutionJournal {
@@ -97,12 +106,12 @@ impl ToolExecutionJournal {
         Ok(())
     }
 
-    pub async fn append(&self, mut event: ToolJournalEvent) -> std::io::Result<()> {
+    pub async fn append(&self, mut event: ToolJournalEvent) -> Result<(), ToolJournalError> {
         if event.timestamp.is_none() {
             event.timestamp = Some(Utc::now().to_rfc3339());
         }
 
-        let line = format!("{}\n", serde_json::to_string(&event).unwrap());
+        let line = format!("{}\n", serde_json::to_string(&event)?);
         let bytes = line.as_bytes();
 
         let _guard = self.lock.lock().await;

@@ -5,14 +5,14 @@ use std::{
 
 use codez_contracts::{
     CommandError, EditorInfo, FileContent, FileTreeNode, FileTreeNodeType,
-    GlobResult as GlobContract, GrepResult as GrepContract, ProjectInfo,
-    ProjectSnapshotResult, WorkspaceInfo, WorkspacePathItem,
+    GlobResult as GlobContract, GrepResult as GrepContract, ProjectInfo, ProjectSnapshotResult,
+    WorkspaceInfo, WorkspacePathItem,
 };
 use codez_core::{AppError, FileSystem, RecentProject, RecentProjectRepository};
 use codez_platform::NativeFileSystem;
 use codez_runtime::{
-    FileTreeNode as RuntimeFileTreeNode, GrepOptions, GrepOutputMode,
-    ProjectAnalysisService, SnapshotOptions, WorkspaceEntryKind, WorkspaceService,
+    FileTreeNode as RuntimeFileTreeNode, GrepOptions, GrepOutputMode, ProjectAnalysisService,
+    SnapshotOptions, WorkspaceEntryKind, WorkspaceService,
 };
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
@@ -229,11 +229,7 @@ pub async fn workspace_rename_recent_project(
 }
 
 #[tauri::command(rename_all = "camelCase")]
-#[tracing::instrument(
-    name = "desktop.command",
-    skip_all,
-    fields(command = "workspace_glob")
-)]
+#[tracing::instrument(name = "desktop.command", skip_all, fields(command = "workspace_glob"))]
 pub async fn workspace_glob(
     root_path: String,
     pattern: String,
@@ -259,11 +255,7 @@ pub async fn workspace_glob(
 
 #[tauri::command(rename_all = "camelCase")]
 #[allow(clippy::too_many_arguments)]
-#[tracing::instrument(
-    name = "desktop.command",
-    skip_all,
-    fields(command = "workspace_grep")
-)]
+#[tracing::instrument(name = "desktop.command", skip_all, fields(command = "workspace_grep"))]
 pub async fn workspace_grep(
     root_path: String,
     pattern: String,
@@ -332,13 +324,13 @@ pub async fn workspace_open_in_explorer(
         if !path.is_absolute() {
             return Err(AppError::validation("Path must be absolute"));
         }
-        opener::open(&path)
-            .map(|()| true)
-            .map_err(|source| AppError::external(
+        opener::open(&path).map(|()| true).map_err(|source| {
+            AppError::external(
                 "Failed to open path in file explorer",
                 source.to_string(),
                 false,
-            ))
+            )
+        })
     }
     .await;
     command_result(&state.errors, result)
@@ -368,11 +360,9 @@ pub async fn workspace_open_in_editor(
             .args(shell_args(&command))
             .output()
             .await
-            .map_err(|source| AppError::external(
-                "Failed to open editor",
-                source.to_string(),
-                false,
-            ))?;
+            .map_err(|source| {
+                AppError::external("Failed to open editor", source.to_string(), false)
+            })?;
 
         Ok(output.status.success())
     }
@@ -450,9 +440,7 @@ async fn workspace_service(root_path: &str) -> Result<WorkspaceService, AppError
     Ok(WorkspaceService::new(filesystem))
 }
 
-fn create_search_service(
-    state: &AppState,
-) -> Result<codez_runtime::SearchService, AppError> {
+fn create_search_service(state: &AppState) -> Result<codez_runtime::SearchService, AppError> {
     let rg_path = state.resources.ripgrep_executable();
     codez_runtime::SearchService::new(rg_path, state.process_runner.clone())
 }

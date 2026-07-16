@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -45,7 +46,7 @@ pub enum ModelPreference {
     Required,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolApprovalMetadata {
     pub model_preference: ModelPreference,
@@ -58,27 +59,63 @@ pub struct ToolAvailabilityContext {
     pub workspace_root: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum ToolEffect {
-    ReadFile { path: String, scope: String }, // workspace | external
-    WriteFile { path: String, mode: String }, // create | modify | overwrite
-    DeleteFile { path: String },
-    ExecuteCommand { shell: String, command: String }, // bash | powershell
-    Network { target: Option<String>, method: Option<String> },
-    ExternalEffect { target: String },
-    NotifyUser { channel: String }, // desktop | remote
-    SpawnAgent { role: String, isolation: Option<String> },
-    ControlExecution { execution_id: String, action: String },
-    MutateTaskState { session_id: Option<String> },
-    ReadMemory { path: String },
-    Internal { target: String },
-    UserInteraction { channel: String }, // ask-user
-    Rollback { target: String },
-    Unknown { target: String },
+    ReadFile {
+        path: String,
+        scope: String,
+    }, // workspace | external
+    WriteFile {
+        path: String,
+        mode: String,
+    }, // create | modify | overwrite
+    DeleteFile {
+        path: String,
+    },
+    ExecuteCommand {
+        shell: String,
+        command: String,
+    }, // bash | powershell
+    Network {
+        target: Option<String>,
+        method: Option<String>,
+    },
+    ExternalEffect {
+        target: String,
+    },
+    NotifyUser {
+        channel: String,
+    }, // desktop | remote
+    SpawnAgent {
+        role: String,
+        isolation: Option<String>,
+    },
+    ControlExecution {
+        execution_id: String,
+        action: String,
+    },
+    MutateTaskState {
+        session_id: Option<String>,
+    },
+    ReadMemory {
+        path: String,
+    },
+    Internal {
+        target: String,
+    },
+    UserInteraction {
+        channel: String,
+    }, // ask-user
+    Rollback {
+        target: String,
+    },
+    Unknown {
+        target: String,
+    },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolEffectPlan {
     pub effects: Vec<ToolEffect>,
@@ -92,7 +129,7 @@ pub struct ToolPlanningContext {
     pub agent_role: AgentRole,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolExecutionError {
     pub code: String,
@@ -142,7 +179,7 @@ pub struct DeferredToolSummary {
     pub search_hint: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NormalizedToolCall {
     pub call_id: String,
     pub position: usize,
@@ -173,14 +210,27 @@ pub struct PreparedToolCall {
     pub resource_keys: Vec<String>,
 }
 
-#[derive(Clone)]
+impl std::fmt::Debug for PreparedToolCall {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PreparedToolCall")
+            .field("call", &self.call)
+            .field("canonical_name", &self.canonical_name)
+            .field("input", &self.input)
+            .field("effects", &self.effects)
+            .field("resource_keys", &self.resource_keys)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct ToolExecutionWave {
     pub index: usize,
     pub calls: Vec<PreparedToolCall>,
     pub reason: String,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ToolPipelineResult {
     pub call: NormalizedToolCall,
     pub canonical_name: String,

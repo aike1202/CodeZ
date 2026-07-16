@@ -127,7 +127,7 @@ pub enum ChatProviderErrorCode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(rename_all = "camelCase")]
 pub struct ProviderConfig {
     pub id: String,
@@ -136,8 +136,9 @@ pub struct ProviderConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub api_format: Option<ApiFormat>,
-    pub api_key_ref: String,
-    pub encryption: String, // 'safeStorage' | 'base64' | 'none'
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub credential_id: Option<String>,
     pub models: Vec<ModelConfig>,
     pub thinking: ThinkingConfig,
     pub enabled: bool,
@@ -155,7 +156,7 @@ pub struct ProviderInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub api_format: Option<ApiFormat>,
-    pub api_key: String,
+    pub api_key_configured: bool,
     pub models: Vec<ModelConfig>,
     pub thinking: ThinkingConfig,
     pub enabled: bool,

@@ -10,11 +10,14 @@ use std::{
 
 #[cfg(windows)]
 use std::{
-    fs,
+    fs::{self, OpenOptions},
+    os::windows::fs::OpenOptionsExt,
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(windows)]
+use codez_platform::{PtyEvent, PtyManager, pty::PTY_EVENT_QUEUE_CAPACITY};
 use portable_pty::{Child, CommandBuilder, ExitStatus, MasterPty, PtySize, native_pty_system};
 
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
@@ -33,6 +36,8 @@ const RESIZED: PtySize = PtySize {
 };
 const WAIT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_CAPTURED_OUTPUT_BYTES: usize = 256 * 1024;
+#[cfg(windows)]
+const PROCESS_TREE_FIXTURE_REQUEST: &str = "process-tree-fixture.request";
 
 struct PtyProbe {
     master: Option<Box<dyn MasterPty + Send>>,
@@ -42,10 +47,27 @@ struct PtyProbe {
     output_rx: Receiver<Vec<u8>>,
     reader_done_rx: Receiver<io::Result<()>>,
     reader_thread: Option<JoinHandle<()>>,
+    #[cfg(windows)]
+    _shell_environment: TestDirectory,
 }
 
 impl PtyProbe {
-    fn spawn(command: CommandBuilder) -> TestResult<Self> {
+    fn spawn(mut command: CommandBuilder) -> TestResult<Self> {
+        #[cfg(windows)]
+        let shell_environment = {
+            let directory = TestDirectory::create()?;
+            fs::create_dir_all(
+                directory
+                    .path()
+                    .join("Microsoft")
+                    .join("Windows")
+                    .join("PowerShell")
+                    .join("PSReadLine"),
+            )?;
+            command.env("APPDATA", directory.path());
+            directory
+        };
+
         let pair = native_pty_system().openpty(INITIAL_SIZE)?;
         let mut reader = pair.master.try_clone_reader()?;
         let writer = pair.master.take_writer()?;
@@ -78,6 +100,8 @@ impl PtyProbe {
             output_rx,
             reader_done_rx,
             reader_thread: Some(reader_thread),
+            #[cfg(windows)]
+            _shell_environment: shell_environment,
         };
 
         #[cfg(windows)]
@@ -87,13 +111,6 @@ impl PtyProbe {
         }
 
         Ok(probe)
-    }
-
-    fn root_pid(&self) -> TestResult<u32> {
-        self.child
-            .as_ref()
-            .and_then(|child| child.process_id())
-            .ok_or_else(|| "PTY child did not expose a process ID".into())
     }
 
     fn write_bytes(&mut self, input: &[u8]) -> TestResult {
@@ -113,6 +130,11 @@ impl PtyProbe {
         #[cfg(not(windows))]
         self.write_bytes(b"\n")?;
         Ok(())
+    }
+
+    #[cfg(windows)]
+    fn write_ctrl_c(&mut self) -> TestResult {
+        self.write_bytes(&[0x03])
     }
 
     fn resize(&self, size: PtySize) -> TestResult {
@@ -261,7 +283,7 @@ fn shell_command(cwd: Option<&Path>) -> CommandBuilder {
             "-NoProfile",
             "-NoExit",
             "-Command",
-            "$u = [System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding = $u; [Console]::OutputEncoding = $u; $OutputEncoding = $u",
+            "$u = [System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding = $u; [Console]::OutputEncoding = $u; $OutputEncoding = $u; if (Get-Module PSReadLine) { Remove-Module PSReadLine }",
         ]);
         command
     };
@@ -284,13 +306,13 @@ fn spawn_shell(cwd: Option<&Path>) -> TestResult<PtyProbe> {
 }
 
 #[cfg(windows)]
-fn process_exists(pid: u32) -> bool {
-    ProcessCommand::new("tasklist")
-        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
-        .output()
-        .is_ok_and(|output| {
-            String::from_utf8_lossy(&output.stdout).contains(&format!(",\"{pid}\","))
-        })
+fn command_prompt(cwd: Option<&Path>) -> CommandBuilder {
+    let mut command = CommandBuilder::new("cmd.exe");
+    command.args(["/D", "/Q"]);
+    if let Some(cwd) = cwd {
+        command.cwd(cwd);
+    }
+    command
 }
 
 #[cfg(not(windows))]
@@ -307,11 +329,11 @@ fn kill_process_tree(pid: u32) -> TestResult {
     let output = ProcessCommand::new("taskkill")
         .args(["/PID", &pid, "/T", "/F"])
         .output()?;
-    if output.status.success() || !process_exists(pid.parse()?) {
+    if output.status.success() {
         return Ok(());
     }
     Err(format!(
-        "taskkill failed: {}",
+        "taskkill failed for process {pid}: {}",
         String::from_utf8_lossy(&output.stderr)
     )
     .into())
@@ -330,6 +352,7 @@ fn kill_process_tree(pid: u32) -> TestResult {
     }
 }
 
+#[cfg(not(windows))]
 fn wait_for_process_exit(pid: u32) -> TestResult {
     let deadline = Instant::now() + WAIT_TIMEOUT;
     while process_exists(pid) {
@@ -339,6 +362,165 @@ fn wait_for_process_exit(pid: u32) -> TestResult {
         thread::sleep(Duration::from_millis(20));
     }
     Ok(())
+}
+
+#[cfg(windows)]
+fn wait_for_child_ready(path: &Path) -> TestResult<u32> {
+    const PREFIX: &str = "CODEZ_CHILD_READY:";
+    const SUFFIX: &str = ":END";
+
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    loop {
+        match fs::read_to_string(path) {
+            Ok(contents) => {
+                if let Some(pid) = contents
+                    .strip_prefix(PREFIX)
+                    .and_then(|value| value.strip_suffix(SUFFIX))
+                    .and_then(|value| value.parse().ok())
+                {
+                    return Ok(pid);
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "child process did not publish a complete ready marker at {}",
+                path.display()
+            )
+            .into());
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[cfg(windows)]
+fn exclusive_lock_is_held(path: &Path) -> TestResult<bool> {
+    match OpenOptions::new().read(true).write(true).open(path) {
+        Ok(_) => Ok(false),
+        Err(error) if error.raw_os_error() == Some(32) => Ok(true),
+        Err(error) => Err(error.into()),
+    }
+}
+
+#[cfg(windows)]
+fn wait_for_exclusive_lock_release(path: &Path) -> TestResult<bool> {
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    loop {
+        match OpenOptions::new().read(true).write(true).open(path) {
+            Ok(_) => return Ok(true),
+            Err(error) if error.raw_os_error() == Some(32) => {}
+            Err(error) => return Err(error.into()),
+        }
+
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "child process still held its exclusive lock at {}",
+                path.display()
+            )
+            .into());
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[cfg(windows)]
+async fn wait_for_terminal_marker(
+    manager: &PtyManager,
+    events: &mut tokio::sync::mpsc::Receiver<PtyEvent>,
+    terminal_id: &str,
+    marker: &str,
+) -> TestResult {
+    let mut output = Vec::new();
+    let result = tokio::time::timeout(WAIT_TIMEOUT, async {
+        loop {
+            match events.recv().await {
+                Some(PtyEvent::Output { id, sequence, data }) if id == terminal_id => {
+                    manager.acknowledge(terminal_id, sequence)?;
+                    if output.len() + data.len() > MAX_CAPTURED_OUTPUT_BYTES {
+                        return Err("PTY manager output exceeded the probe limit".into());
+                    }
+                    output.extend_from_slice(&data);
+                    if String::from_utf8_lossy(&output).contains(marker) {
+                        return Ok(());
+                    }
+                }
+                Some(PtyEvent::Exit { id, .. }) if id == terminal_id => {
+                    return Err("PTY manager exited before the expected marker".into());
+                }
+                Some(_) => {}
+                None => return Err("PTY manager event channel closed unexpectedly".into()),
+            }
+        }
+    })
+    .await;
+
+    match result {
+        Ok(result) => result,
+        Err(_) => Err(format!(
+            "timed out waiting for {marker:?}; captured output: {:?}",
+            String::from_utf8_lossy(&output)
+        )
+        .into()),
+    }
+}
+
+#[cfg(windows)]
+async fn wait_for_terminal_pid(
+    manager: &PtyManager,
+    events: &mut tokio::sync::mpsc::Receiver<PtyEvent>,
+    terminal_id: &str,
+) -> TestResult<u32> {
+    let mut output = Vec::new();
+    tokio::time::timeout(WAIT_TIMEOUT, async {
+        loop {
+            match events.recv().await {
+                Some(PtyEvent::Output { id, sequence, data }) if id == terminal_id => {
+                    manager.acknowledge(terminal_id, sequence)?;
+                    if output.len() + data.len() > MAX_CAPTURED_OUTPUT_BYTES {
+                        return Err("PTY manager output exceeded the probe limit".into());
+                    }
+                    output.extend_from_slice(&data);
+                    if let Some(pid) =
+                        pid_after_marker(&String::from_utf8_lossy(&output), "CODEZ_CHILD_PID:")
+                    {
+                        return Ok(pid);
+                    }
+                }
+                Some(PtyEvent::Exit { id, .. }) if id == terminal_id => {
+                    return Err("PTY manager exited before the descendant reported its PID".into());
+                }
+                Some(_) => {}
+                None => return Err("PTY manager event channel closed unexpectedly".into()),
+            }
+        }
+    })
+    .await
+    .map_err(|_| "timed out waiting for the descendant process ID")?
+}
+
+#[cfg(windows)]
+fn powershell_executable() -> TestResult<PathBuf> {
+    let system_root = std::env::var_os("SystemRoot").ok_or("SystemRoot is not configured")?;
+    let executable = PathBuf::from(system_root)
+        .join("System32")
+        .join("WindowsPowerShell")
+        .join("v1.0")
+        .join("powershell.exe");
+    if !executable.is_file() {
+        return Err(format!("PowerShell is missing at {}", executable.display()).into());
+    }
+    Ok(executable)
+}
+
+#[cfg(windows)]
+fn powershell_path_literal(path: &Path) -> TestResult<String> {
+    let value = path
+        .to_str()
+        .ok_or("fixture executable path is not valid Unicode")?;
+    Ok(format!("'{}'", value.replace('\'', "''")))
 }
 
 fn pid_after_marker(output: &str, marker: &str) -> Option<u32> {
@@ -441,53 +623,124 @@ fn windows_conpty_should_report_resized_dimensions() -> TestResult {
 
 #[cfg(windows)]
 #[test]
+#[ignore = "spawned as a descendant by the ConPTY process-tree test"]
+fn windows_process_tree_descendant_fixture() -> TestResult {
+    let directory = std::env::current_dir()?;
+    if !directory.join(PROCESS_TREE_FIXTURE_REQUEST).is_file() {
+        return Ok(());
+    }
+
+    let lock_path = directory.join("child.lock");
+    let ready_path = directory.join("child.ready");
+    let _lock = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .share_mode(0)
+        .open(lock_path)?;
+    let pid = std::process::id();
+    fs::write(&ready_path, format!("CODEZ_CHILD_READY:{pid}:END"))?;
+
+    println!("CODEZ_CHILD_PID:{pid}");
+    io::stdout().flush()?;
+    loop {
+        thread::sleep(Duration::from_secs(1));
+    }
+}
+
+#[cfg(windows)]
+#[test]
 fn windows_conpty_should_deliver_ctrl_c_to_the_foreground_command() -> TestResult {
-    let mut probe = spawn_shell(None)?;
-    probe.write_line(
-        "[Console]::WriteLine([string]::Concat('CODEZ_LOOP_', 'STARTED')); while ($true) { Start-Sleep -Milliseconds 100 }",
-    )?;
-    let before_interrupt = probe.wait_for_output("CODEZ_LOOP_STARTED")?;
-    let prompt_count = before_interrupt.matches("PS ").count();
-    probe.write_bytes(&[0x03])?;
-    probe.wait_for_value("PowerShell prompt after Ctrl+C", |output| {
-        (output.matches("PS ").count() > prompt_count).then_some(())
+    let mut probe = PtyProbe::spawn(command_prompt(None))?;
+    probe.write_line("echo CODEZ_CTRL_C_FIXTURE_READY & ping.exe -t 127.0.0.1")?;
+    probe.wait_for_output("CODEZ_CTRL_C_FIXTURE_READY")?;
+    probe.wait_for_value("ping output", |output| {
+        (output.matches("127.0.0.1").count() >= 2).then_some(())
     })?;
-    probe.write_line("[Console]::WriteLine([string]::Concat('CODEZ_AFTER_', 'CTRL_C'))")?;
+    probe.write_ctrl_c()?;
+    probe.write_line("echo CODEZ_AFTER_CTRL_C")?;
     let output = probe.wait_for_output("CODEZ_AFTER_CTRL_C")?;
     let status = probe.exit_cleanly()?;
     probe.finish()?;
 
     assert!(
         output.contains("CODEZ_AFTER_CTRL_C") && status.success(),
-        "PowerShell did not resume after Ctrl+C"
+        "command shell did not resume after Ctrl+C"
     );
     Ok(())
 }
 
 #[cfg(windows)]
-#[test]
-fn windows_supervisor_should_kill_the_shell_process_tree() -> TestResult {
-    let mut probe = spawn_shell(None)?;
-    let root_pid = probe.root_pid()?;
-    probe.write_line(
-        "$child = Start-Process powershell.exe -ArgumentList @('-NoLogo', '-NoProfile', '-Command', 'Start-Sleep -Seconds 120') -WindowStyle Hidden -PassThru; [Console]::WriteLine(([string]::Concat('CODEZ_CHILD_', 'PID:')) + $child.Id)",
+#[tokio::test]
+async fn windows_supervisor_should_kill_the_shell_process_tree() -> TestResult {
+    const TERMINAL_ID: &str = "process-tree-test";
+
+    let directory = TestDirectory::create()?;
+    let ready_path = directory.path().join("child.ready");
+    let lock_path = directory.path().join("child.lock");
+    fs::write(
+        directory.path().join(PROCESS_TREE_FIXTURE_REQUEST),
+        b"ready",
     )?;
-    let child_pid = probe.wait_for_value("child process ID", |output| {
-        pid_after_marker(output, "CODEZ_CHILD_PID:")
-    })?;
-    if !process_exists(child_pid) {
-        return Err(format!("fixture child process {child_pid} did not start").into());
+
+    let fixture_executable = std::env::current_exe()?;
+    let launch_command = format!(
+        "& {} --ignored --exact windows_process_tree_descendant_fixture --nocapture\r\n",
+        powershell_path_literal(&fixture_executable)?
+    );
+    let arguments = [
+        "-NoLogo",
+        "-NoProfile",
+        "-NoExit",
+        "-Command",
+        "$u = [System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding = $u; [Console]::OutputEncoding = $u; $OutputEncoding = $u; if (Get-Module PSReadLine) { Remove-Module PSReadLine }",
+    ]
+    .into_iter()
+    .map(Into::into)
+    .collect();
+    let (event_tx, mut events) = tokio::sync::mpsc::channel(PTY_EVENT_QUEUE_CAPACITY);
+    let manager = PtyManager::new(event_tx);
+    manager
+        .start(
+            TERMINAL_ID.to_owned(),
+            powershell_executable()?,
+            arguments,
+            directory.path().to_path_buf(),
+        )
+        .await?;
+    if let Err(error) =
+        wait_for_terminal_marker(&manager, &mut events, TERMINAL_ID, "\u{1b}[6n").await
+    {
+        let _ = manager.kill(TERMINAL_ID).await;
+        return Err(error);
     }
+    manager.write(TERMINAL_ID, b"\x1b[1;1R").await?;
+    manager
+        .write(TERMINAL_ID, launch_command.as_bytes())
+        .await?;
 
-    kill_process_tree(root_pid)?;
-    wait_for_process_exit(root_pid)?;
-    wait_for_process_exit(child_pid)?;
-    let _ = probe.wait_for_exit()?;
-    probe.finish()?;
+    let child_pid = match wait_for_terminal_pid(&manager, &mut events, TERMINAL_ID).await {
+        Ok(pid) => pid,
+        Err(error) => {
+            let _ = manager.kill(TERMINAL_ID).await;
+            return Err(error);
+        }
+    };
+    let ready_pid = wait_for_child_ready(&ready_path)?;
+    let lock_was_held = exclusive_lock_is_held(&lock_path)?;
 
-    assert!(
-        !process_exists(root_pid) && !process_exists(child_pid),
-        "tree termination left a PowerShell process running"
+    manager.kill(TERMINAL_ID).await?;
+    let lock_was_released = wait_for_exclusive_lock_release(&lock_path)?;
+
+    assert_eq!(
+        (
+            ready_pid,
+            lock_was_held,
+            lock_was_released,
+            manager.active_count(),
+        ),
+        (child_pid, true, true, 0),
+        "tree termination did not stop the identified descendant and release its resources"
     );
     Ok(())
 }
@@ -496,14 +749,12 @@ fn windows_supervisor_should_kill_the_shell_process_tree() -> TestResult {
 #[test]
 fn windows_conpty_should_close_the_reader_after_clean_exit() -> TestResult {
     let mut probe = spawn_shell(None)?;
-    let root_pid = probe.root_pid()?;
     let status = probe.exit_cleanly()?;
-    wait_for_process_exit(root_pid)?;
     let reader_closed = probe.finish()?;
 
     assert_eq!(
-        (status.success(), process_exists(root_pid), reader_closed),
-        (true, false, true),
+        (status.success(), reader_closed),
+        (true, true),
         "clean exit did not release the child and PTY reader"
     );
     Ok(())

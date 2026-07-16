@@ -1,10 +1,10 @@
-﻿use std::{
+use dashmap::DashMap;
+use std::{
     collections::VecDeque,
     path::{Path, PathBuf},
     sync::Arc,
 };
 use tokio::sync::Mutex;
-use dashmap::DashMap;
 
 use codez_core::AppError;
 
@@ -28,16 +28,16 @@ struct SnapshotCacheEntry {
 pub struct ReadFingerprintStore {
     sessions: DashMap<String, DashMap<PathBuf, String>>,
     snapshots: DashMap<String, DashMap<PathBuf, Arc<ReadSnapshot>>>,
-    
+
     // Limits
     max_snapshot_entries: usize,
     max_snapshot_bytes: usize,
-    
+
     snapshot_bytes: std::sync::atomic::AtomicUsize,
     snapshot_order: Mutex<VecDeque<SnapshotCacheEntry>>,
-    
+
     deliveries: DashMap<String, DashMap<String, DashMap<PathBuf, String>>>,
-    
+
     inflight: DashMap<String, Arc<tokio::sync::Mutex<Option<Arc<ReadSnapshot>>>>>,
 }
 
@@ -80,22 +80,29 @@ impl ReadFingerprintStore {
         session.insert(normalized, sha256.to_string());
     }
 
-    pub async fn record_snapshot(&self, session_id: &str, abs_path: &Path, snapshot: Arc<ReadSnapshot>) {
+    pub async fn record_snapshot(
+        &self,
+        session_id: &str,
+        abs_path: &Path,
+        snapshot: Arc<ReadSnapshot>,
+    ) {
         let normalized = Self::normalize(abs_path);
         let session = self.sessions.entry(session_id.to_string()).or_default();
         session.insert(normalized.clone(), snapshot.sha256.clone());
-        
+
         let snapshots = self.snapshots.entry(session_id.to_string()).or_default();
         let old_size = if let Some(old) = snapshots.get(&normalized) {
             old.buffer.len()
         } else {
             0
         };
-        
+
         let new_size = snapshot.buffer.len();
         snapshots.insert(normalized.clone(), snapshot);
-        
-        let mut old_bytes = self.snapshot_bytes.load(std::sync::atomic::Ordering::SeqCst);
+
+        let mut old_bytes = self
+            .snapshot_bytes
+            .load(std::sync::atomic::Ordering::SeqCst);
         loop {
             let next_bytes = (old_bytes - old_size) + new_size;
             match self.snapshot_bytes.compare_exchange_weak(
@@ -108,22 +115,28 @@ impl ReadFingerprintStore {
                 Err(x) => old_bytes = x,
             }
         }
-        
+
         let mut order = self.snapshot_order.lock().await;
         order.push_back(SnapshotCacheEntry {
             session_id: session_id.to_string(),
             path: normalized,
         });
-        
+
         self.evict_snapshots(&mut order).await;
     }
 
     async fn evict_snapshots(&self, order: &mut VecDeque<SnapshotCacheEntry>) {
-        while order.len() > self.max_snapshot_entries || self.snapshot_bytes.load(std::sync::atomic::Ordering::SeqCst) > self.max_snapshot_bytes {
+        while order.len() > self.max_snapshot_entries
+            || self
+                .snapshot_bytes
+                .load(std::sync::atomic::Ordering::SeqCst)
+                > self.max_snapshot_bytes
+        {
             if let Some(entry) = order.pop_front() {
                 if let Some(session_snapshots) = self.snapshots.get(&entry.session_id) {
                     if let Some((_, old)) = session_snapshots.remove(&entry.path) {
-                        self.snapshot_bytes.fetch_sub(old.buffer.len(), std::sync::atomic::Ordering::SeqCst);
+                        self.snapshot_bytes
+                            .fetch_sub(old.buffer.len(), std::sync::atomic::Ordering::SeqCst);
                     }
                 }
             } else {
@@ -132,7 +145,12 @@ impl ReadFingerprintStore {
         }
     }
 
-    pub fn get_snapshot(&self, session_id: &str, abs_path: &Path, stat_signature: &str) -> Option<Arc<ReadSnapshot>> {
+    pub fn get_snapshot(
+        &self,
+        session_id: &str,
+        abs_path: &Path,
+        stat_signature: &str,
+    ) -> Option<Arc<ReadSnapshot>> {
         let normalized = Self::normalize(abs_path);
         if let Some(session_snapshots) = self.snapshots.get(session_id) {
             if let Some(snapshot) = session_snapshots.get(&normalized) {
@@ -160,9 +178,16 @@ impl ReadFingerprintStore {
         }
 
         let normalized = Self::normalize(abs_path);
-        let inflight_key = format!("{}:{}:{}", session_id, normalized.to_string_lossy(), stat_signature);
+        let inflight_key = format!(
+            "{}:{}:{}",
+            session_id,
+            normalized.to_string_lossy(),
+            stat_signature
+        );
 
-        let lock = self.inflight.entry(inflight_key.clone())
+        let lock = self
+            .inflight
+            .entry(inflight_key.clone())
             .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(None)))
             .clone();
 
@@ -173,7 +198,8 @@ impl ReadFingerprintStore {
         }
 
         let snapshot = loader().await?;
-        self.record_snapshot(session_id, abs_path, snapshot.clone()).await;
+        self.record_snapshot(session_id, abs_path, snapshot.clone())
+            .await;
         *guard = Some(snapshot.clone());
 
         self.inflight.remove(&inflight_key);
@@ -181,14 +207,26 @@ impl ReadFingerprintStore {
         Ok((snapshot, ReadSnapshotSource::Filesystem))
     }
 
-    pub fn record_delivery(&self, session_id: &str, context_scope_id: &str, abs_path: &Path, sha256: &str) {
+    pub fn record_delivery(
+        &self,
+        session_id: &str,
+        context_scope_id: &str,
+        abs_path: &Path,
+        sha256: &str,
+    ) {
         let normalized = Self::normalize(abs_path);
         let session = self.deliveries.entry(session_id.to_string()).or_default();
         let scope = session.entry(context_scope_id.to_string()).or_default();
         scope.insert(normalized, sha256.to_string());
     }
 
-    pub fn has_delivery(&self, session_id: &str, context_scope_id: &str, abs_path: &Path, sha256: &str) -> bool {
+    pub fn has_delivery(
+        &self,
+        session_id: &str,
+        context_scope_id: &str,
+        abs_path: &Path,
+        sha256: &str,
+    ) -> bool {
         let normalized = Self::normalize(abs_path);
         if let Some(session) = self.deliveries.get(session_id) {
             if let Some(scope) = session.get(context_scope_id) {
@@ -200,4 +238,3 @@ impl ReadFingerprintStore {
         false
     }
 }
-

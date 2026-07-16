@@ -1,7 +1,7 @@
-﻿use std::{
+use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
 };
 
 use codez_core::{AppError, CancellationToken};
@@ -9,7 +9,7 @@ use tokio::sync::Mutex as TokioMutex;
 
 /// Serializes CodeZ mutations per file while allowing unrelated files to run in parallel.
 pub struct FileMutationCoordinator {
-    locks: Mutex<HashMap<PathBuf, Arc<TokioMutex<()>>>>,
+    locks: Mutex<HashMap<PathBuf, Weak<TokioMutex<()>>>>,
 }
 
 impl Default for FileMutationCoordinator {
@@ -17,7 +17,6 @@ impl Default for FileMutationCoordinator {
         Self::new()
     }
 }
-
 impl FileMutationCoordinator {
     #[must_use]
     pub fn new() -> Self {
@@ -34,7 +33,7 @@ impl FileMutationCoordinator {
                 .map(|p| p.join(file_name))
                 .unwrap_or_else(|_| file_path.to_path_buf())
         });
-        
+
         #[cfg(windows)]
         {
             PathBuf::from(resolved.to_string_lossy().to_lowercase())
@@ -46,7 +45,7 @@ impl FileMutationCoordinator {
     }
 
     /// Executes `op` exclusively for the normalized `file_path`.
-    /// 
+    ///
     /// If `abort_signal` is provided and cancelled while waiting for the lock,
     /// returns an `AppError::cancellation()`.
     pub async fn run<F, Fut, T>(
@@ -57,7 +56,6 @@ impl FileMutationCoordinator {
     ) -> Result<T, AppError>
     where
         F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = Result<T, AppError>>,
         Fut: std::future::Future<Output = Result<T, AppError>>,
     {
         if let Some(token) = abort_signal {
@@ -74,24 +72,39 @@ impl FileMutationCoordinator {
     }
 
     pub async fn acquire(&self, file_path: &Path) -> tokio::sync::OwnedMutexGuard<()> {
-        let key = Self::normalize(file_path);
-        let lock = {
-            let mut map = self.locks.lock().unwrap();
-            map.entry(key).or_insert_with(|| Arc::new(TokioMutex::new(()))).clone()
-        };
+        let lock = self.lock_for(file_path);
         lock.lock_owned().await
     }
 
-    pub async fn acquire_with_cancellation(&self, file_path: &Path, abort_signal: &CancellationToken) -> Result<tokio::sync::OwnedMutexGuard<()>, AppError> {
-        let key = Self::normalize(file_path);
-        let lock = {
-            let mut map = self.locks.lock().unwrap();
-            map.entry(key).or_insert_with(|| Arc::new(TokioMutex::new(()))).clone()
-        };
+    pub async fn acquire_with_cancellation(
+        &self,
+        file_path: &Path,
+        abort_signal: &CancellationToken,
+    ) -> Result<tokio::sync::OwnedMutexGuard<()>, AppError> {
+        let lock = self.lock_for(file_path);
         tokio::select! {
             guard = lock.lock_owned() => Ok(guard),
             _ = abort_signal.cancelled() => Err(AppError::cancelled("File mutation was aborted while waiting for its lock.")),
         }
     }
-}
 
+    fn lock_for(&self, file_path: &Path) -> Arc<TokioMutex<()>> {
+        let key = Self::normalize(file_path);
+        let mut locks = match self.locks.lock() {
+            Ok(locks) => locks,
+            Err(poisoned) => {
+                tracing::warn!("recovering poisoned file mutation lock registry");
+                poisoned.into_inner()
+            }
+        };
+
+        if let Some(lock) = locks.get(&key).and_then(Weak::upgrade) {
+            return lock;
+        }
+
+        locks.retain(|_, lock| lock.strong_count() > 0);
+        let lock = Arc::new(TokioMutex::new(()));
+        locks.insert(key, Arc::downgrade(&lock));
+        lock
+    }
+}

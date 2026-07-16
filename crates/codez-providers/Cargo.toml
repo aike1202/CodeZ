@@ -7,8 +7,6 @@ license.workspace = true
 
 [dependencies]
 codez-core.workspace = true
-codez-contracts.workspace = true
-codez-storage.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -22,7 +20,6 @@ tokio-util.workspace = true
 async-trait = "0.1.83"
 uuid = { workspace = true, features = ["v4", "v7"] }
 chrono = "0.4"
-zeroize.workspace = true
 
 [lints]
 workspace = true

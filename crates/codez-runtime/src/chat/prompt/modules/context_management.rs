@@ -23,9 +23,10 @@ impl PromptModule for ContextManagementModule {
 
     fn build<'a>(&'a self, ctx: &'a PromptContext) -> BoxFuture<'a, Option<String>> {
         Box::pin(async move {
-            let has_resume_tool = ctx.available_tools.as_ref().map_or(false, |tools| {
-                tools.iter().any(|t| t.name == "update_resume_state")
-            });
+            let has_resume_tool = ctx
+                .available_tools
+                .as_ref()
+                .is_some_and(|tools| tools.iter().any(|t| t.name == "update_resume_state"));
 
             if has_resume_tool {
                 Some(format!(

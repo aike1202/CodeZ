@@ -2,18 +2,18 @@
 
 pub mod attachment;
 pub mod cancellation;
+pub mod context;
 pub mod edit_transaction;
 pub mod fingerprint;
-pub mod mutation_coordinator;
-pub mod tools;
 pub mod git;
 pub mod host;
+pub mod mutation_coordinator;
 mod observability;
 mod project_analysis;
 mod search;
 mod system;
+pub mod tools;
 pub mod workspace;
-pub mod context;
 
 pub use cancellation::{
     AgentCancellation, CancellationTree, ProcessCancellation, SessionCancellation, ToolCancellation,
@@ -30,7 +30,7 @@ pub use workspace::{
     FilePreview, FileTreeNode, ProjectInfo, WorkspaceEntryKind, WorkspaceLimits, WorkspacePathItem,
     WorkspaceService,
 };
-pub mod chat;
-pub mod permission;
 pub mod agent;
+pub mod chat;
 pub mod extension;
+pub mod permission;

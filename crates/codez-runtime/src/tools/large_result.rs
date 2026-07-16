@@ -1,9 +1,9 @@
-use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
-use sha2::{Sha256, Digest};
-use uuid::Uuid;
+use sha2::{Digest, Sha256};
+use std::path::{Path, PathBuf};
 use tokio::fs::{self, OpenOptions};
 use tokio::io::AsyncWriteExt;
+use uuid::Uuid;
 
 fn sha256_hex(data: impl AsRef<[u8]>) -> String {
     let mut hasher = Sha256::new();
@@ -52,7 +52,11 @@ impl LargeToolResultStore {
     fn session_dir(&self, workspace_root: &Path, session_id: &str) -> PathBuf {
         let ws_hash = sha256_hex(workspace_root.to_string_lossy().as_bytes());
         let session_hash = sha256_hex(session_id.as_bytes());
-        self.root.join("projects").join(ws_hash).join("sessions").join(session_hash)
+        self.root
+            .join("projects")
+            .join(ws_hash)
+            .join("sessions")
+            .join(session_hash)
     }
 
     pub async fn persist(
@@ -64,7 +68,11 @@ impl LargeToolResultStore {
         content: &str,
     ) -> std::io::Result<PersistedToolResult> {
         let call_id_hash = sha256_hex(call_id.as_bytes());
-        let id = format!("{}_{}", &call_id_hash[0..16], Uuid::new_v4().to_string().replace("-", ""));
+        let id = format!(
+            "{}_{}",
+            &call_id_hash[0..16],
+            Uuid::new_v4().to_string().replace("-", "")
+        );
         let handle = format!("tool-result://{}", id);
         let dir = self.session_dir(workspace_root, session_id);
 
@@ -72,7 +80,7 @@ impl LargeToolResultStore {
 
         let content_path = dir.join(format!("{}.txt", id));
         let metadata_path = dir.join(format!("{}.json", id));
-        
+
         let body_bytes = content.as_bytes();
         let persisted = PersistedToolResult {
             handle,
@@ -91,12 +99,22 @@ impl LargeToolResultStore {
             content_type: "text/plain".to_string(),
         };
 
-        let mut content_file = OpenOptions::new().write(true).create_new(true).open(&content_path).await?;
+        let mut content_file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&content_path)
+            .await?;
         content_file.write_all(body_bytes).await?;
         content_file.flush().await?;
 
-        let mut metadata_file = OpenOptions::new().write(true).create_new(true).open(&metadata_path).await?;
-        metadata_file.write_all(serde_json::to_string(&metadata).unwrap().as_bytes()).await?;
+        let mut metadata_file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&metadata_path)
+            .await?;
+        let metadata_json = serde_json::to_string(&metadata)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+        metadata_file.write_all(metadata_json.as_bytes()).await?;
         metadata_file.flush().await?;
 
         Ok(persisted)
@@ -112,7 +130,10 @@ impl LargeToolResultStore {
     ) -> std::io::Result<ReadResult> {
         let prefix = "tool-result://";
         if !handle.starts_with(prefix) {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid tool-result handle."));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Invalid tool-result handle.",
+            ));
         }
         let id = &handle[prefix.len()..];
         let dir = self.session_dir(workspace_root, session_id);
@@ -121,24 +142,27 @@ impl LargeToolResultStore {
         let metadata_content = fs::read_to_string(&metadata_path).await?;
         let metadata: ToolResultMetadata = serde_json::from_str(&metadata_content)?;
 
-        if metadata.persisted.handle != handle || metadata.session_hash != sha256_hex(session_id.as_bytes()) {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Tool-result handle does not belong to this session."));
+        if metadata.persisted.handle != handle
+            || metadata.session_hash != sha256_hex(session_id.as_bytes())
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Tool-result handle does not belong to this session.",
+            ));
         }
 
         let content_path = dir.join(format!("{}.txt", id));
         let full_content = fs::read_to_string(&content_path).await?;
-        
-        // This offset is roughly assumed to be in chars like TS does `full.slice(offset, end)` 
+
+        // This offset is roughly assumed to be in chars like TS does `full.slice(offset, end)`
         // In Rust, String slicing is by byte, so we collect to chars first to match TS behavior for safe truncation
         let chars: Vec<char> = full_content.chars().collect();
         let mut actual_offset = offset.unwrap_or(0);
         if actual_offset > chars.len() {
             actual_offset = chars.len();
         }
-        
-        let mut actual_limit = limit.unwrap_or(20_000);
-        if actual_limit < 1 { actual_limit = 1; }
-        if actual_limit > 50_000 { actual_limit = 50_000; }
+
+        let actual_limit = limit.unwrap_or(20_000).clamp(1, 50_000);
 
         let end = std::cmp::min(chars.len(), actual_offset + actual_limit);
         let content_slice: String = chars[actual_offset..end].iter().collect();
@@ -151,7 +175,11 @@ impl LargeToolResultStore {
         })
     }
 
-    pub async fn remove_session(&self, workspace_root: &Path, session_id: &str) -> std::io::Result<()> {
+    pub async fn remove_session(
+        &self,
+        workspace_root: &Path,
+        session_id: &str,
+    ) -> std::io::Result<()> {
         let dir = self.session_dir(workspace_root, session_id);
         fs::remove_dir_all(dir).await
     }

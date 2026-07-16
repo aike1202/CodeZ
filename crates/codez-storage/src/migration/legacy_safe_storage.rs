@@ -129,9 +129,11 @@ fn load_windows_master_key(
 
     const MAX_LOCAL_STATE_BYTES: u64 = 16 * 1024 * 1024;
 
+    super::layout::reject_filesystem_redirects(local_state_path)
+        .map_err(|_| LegacyCredentialReadError::InvalidLocalState)?;
     let metadata = fs::symlink_metadata(local_state_path)
         .map_err(|_| LegacyCredentialReadError::LocalStateUnavailable)?;
-    if metadata.file_type().is_symlink()
+    if super::layout::metadata_is_redirect(&metadata)
         || !metadata.is_file()
         || metadata.len() > MAX_LOCAL_STATE_BYTES
     {
@@ -149,7 +151,7 @@ fn load_windows_master_key(
     }
     let final_metadata = fs::symlink_metadata(local_state_path)
         .map_err(|_| LegacyCredentialReadError::LocalStateUnavailable)?;
-    if final_metadata.file_type().is_symlink() || !final_metadata.is_file() {
+    if super::layout::metadata_is_redirect(&final_metadata) || !final_metadata.is_file() {
         return Err(LegacyCredentialReadError::InvalidLocalState);
     }
     let local_state = serde_json::from_slice::<ChromiumLocalState>(&bytes)

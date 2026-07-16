@@ -1,6 +1,6 @@
-use codez_contracts::context::{
-    ModelContextItem, NormalizedModelMessage, PostCompactionFileContext,
-    PostCompactionSkillContext, ModelContextItemMessage
+use codez_core::context::{
+    ModelContextItem, ModelContextItemMessage, NormalizedModelMessage, PostCompactionFileContext,
+    PostCompactionSkillContext,
 };
 
 pub struct BuildModelContextItemsInput {
@@ -71,20 +71,23 @@ pub fn build_model_context_items(input: BuildModelContextItemsInput) -> Vec<Mode
             if message.id == input.current_input_message_id {
                 items.push(ModelContextItem {
                     kind: "skill_context".to_string(),
-                    message: ModelContextItemMessage::Normalized(NormalizedModelMessage {
-                        id: format!("skill-context:{}", skill_ctx.source_sequence.unwrap_or(0)),
-                        client_message_id: None,
-                        turn_id: message.turn_id.clone(),
-                        role: "assistant".to_string(),
-                        content: skill_ctx.content.clone(),
-                        tool_calls: None,
-                        tool_call_id: None,
-                        name: None,
-                        status: "complete".to_string(),
-                        created_at: skill_ctx.created_at.clone(),
-                        source_sequence: skill_ctx.source_sequence,
-                        file_references: None,
-                    }),
+                    message: ModelContextItemMessage::Normalized(Box::new(
+                        NormalizedModelMessage {
+                            id: format!("skill-context:{}", skill_ctx.source_sequence.unwrap_or(0)),
+                            client_message_id: None,
+                            turn_id: message.turn_id.clone(),
+                            role: "assistant".to_string(),
+                            content: skill_ctx.content.clone(),
+                            tool_calls: None,
+                            tool_call_id: None,
+                            name: None,
+                            status: "complete".to_string(),
+                            created_at: skill_ctx.created_at.clone(),
+                            source_sequence: skill_ctx.source_sequence,
+                            attachments: None,
+                            file_references: None,
+                        },
+                    )),
                 });
             }
         }
@@ -93,20 +96,23 @@ pub fn build_model_context_items(input: BuildModelContextItemsInput) -> Vec<Mode
             if message.id == input.current_input_message_id {
                 items.push(ModelContextItem {
                     kind: "skill_state".to_string(),
-                    message: ModelContextItemMessage::Normalized(NormalizedModelMessage {
-                        id: "session-skill-state".to_string(),
-                        client_message_id: None,
-                        turn_id: message.turn_id.clone(),
-                        role: "assistant".to_string(),
-                        content: session_skill_state.clone(),
-                        tool_calls: None,
-                        tool_call_id: None,
-                        name: None,
-                        status: "complete".to_string(),
-                        created_at: message.created_at.clone(),
-                        source_sequence: None,
-                        file_references: None,
-                    }),
+                    message: ModelContextItemMessage::Normalized(Box::new(
+                        NormalizedModelMessage {
+                            id: "session-skill-state".to_string(),
+                            client_message_id: None,
+                            turn_id: message.turn_id.clone(),
+                            role: "assistant".to_string(),
+                            content: session_skill_state.clone(),
+                            tool_calls: None,
+                            tool_call_id: None,
+                            name: None,
+                            status: "complete".to_string(),
+                            created_at: message.created_at.clone(),
+                            source_sequence: None,
+                            attachments: None,
+                            file_references: None,
+                        },
+                    )),
                 });
             }
         }
@@ -128,7 +134,7 @@ pub fn build_model_context_items(input: BuildModelContextItemsInput) -> Vec<Mode
         let kind = message.role.clone();
         items.push(ModelContextItem {
             kind,
-            message: ModelContextItemMessage::Normalized(message),
+            message: ModelContextItemMessage::Normalized(Box::new(message)),
         });
     }
 

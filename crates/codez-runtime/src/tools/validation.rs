@@ -1,8 +1,10 @@
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use jsonschema::{Validator, Draft};
+
+use jsonschema::{Draft, Validator};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
 use crate::tools::registry::ToolDescriptor;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,12 +21,14 @@ pub enum ToolInputValidationResult {
     #[serde(rename = "true")]
     Success { input: Value },
     #[serde(rename = "false")]
-    Failure { error: ToolInputValidationFailureError },
+    Failure {
+        error: ToolInputValidationFailureError,
+    },
 }
 
 pub struct ToolInputValidator {
     max_arguments_bytes: usize,
-    validators: Arc<RwLock<HashMap<String, Arc<Validator>>>>,
+    validators: Arc<RwLock<HashMap<String, Option<Arc<Validator>>>>>,
 }
 
 impl ToolInputValidator {
@@ -36,17 +40,19 @@ impl ToolInputValidator {
     }
 
     pub fn compile(&self, fingerprint: &str, descriptors: &[&dyn ToolDescriptor]) {
-        let mut cache = self.validators.write().unwrap();
+        let mut cache = self
+            .validators
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         for desc in descriptors {
             let key = format!("{}:{}:{}", fingerprint, desc.name(), desc.version());
-            if !cache.contains_key(&key) {
-                if let Ok(validator) = Validator::options()
+            cache.entry(key).or_insert_with(|| {
+                Validator::options()
                     .with_draft(Draft::Draft7)
-                    .build(&desc.input_schema()) 
-                {
-                    cache.insert(key, Arc::new(validator));
-                }
-            }
+                    .build(&desc.input_schema())
+                    .ok()
+                    .map(Arc::new)
+            });
         }
     }
 
@@ -60,7 +66,11 @@ impl ToolInputValidator {
             return ToolInputValidationResult::Failure {
                 error: ToolInputValidationFailureError {
                     code: "TOOL_ARGUMENTS_TOO_LARGE".to_string(),
-                    message: format!("{} arguments exceed the {} byte limit.", descriptor.name(), self.max_arguments_bytes),
+                    message: format!(
+                        "{} arguments exceed the {} byte limit.",
+                        descriptor.name(),
+                        self.max_arguments_bytes
+                    ),
                     issues: None,
                 },
             };
@@ -75,7 +85,11 @@ impl ToolInputValidator {
                     return ToolInputValidationResult::Failure {
                         error: ToolInputValidationFailureError {
                             code: "TOOL_ARGUMENTS_INVALID_JSON".to_string(),
-                            message: format!("{} arguments are not valid JSON: {}", descriptor.name(), e),
+                            message: format!(
+                                "{} arguments are not valid JSON: {}",
+                                descriptor.name(),
+                                e
+                            ),
                             issues: None,
                         },
                     };
@@ -93,25 +107,50 @@ impl ToolInputValidator {
             };
         }
 
-        let key = format!("{}:{}:{}", fingerprint, descriptor.name(), descriptor.version());
+        let key = format!(
+            "{}:{}:{}",
+            fingerprint,
+            descriptor.name(),
+            descriptor.version()
+        );
         let validator_arc = {
-            let cache = self.validators.read().unwrap();
+            let cache = self
+                .validators
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             cache.get(&key).cloned()
         };
 
-        let validator = match validator_arc {
-            Some(v) => v,
+        let validator = match validator_arc.flatten() {
+            Some(validator) => validator,
             None => {
-                let v = Validator::options().with_draft(Draft::Draft7).build(&descriptor.input_schema()).unwrap();
-                let arc_v = Arc::new(v);
-                let mut cache = self.validators.write().unwrap();
-                cache.insert(key, arc_v.clone());
-                arc_v
+                let Ok(validator) = Validator::options()
+                    .with_draft(Draft::Draft7)
+                    .build(&descriptor.input_schema())
+                else {
+                    return ToolInputValidationResult::Failure {
+                        error: ToolInputValidationFailureError {
+                            code: "TOOL_SCHEMA_INVALID".to_string(),
+                            message: format!("{} has an invalid input schema.", descriptor.name()),
+                            issues: None,
+                        },
+                    };
+                };
+                let validator = Arc::new(validator);
+                let mut cache = self
+                    .validators
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                cache.insert(key, Some(Arc::clone(&validator)));
+                validator
             }
         };
 
         if !validator.is_valid(&parsed) {
-            let issues: Vec<String> = validator.iter_errors(&parsed).map(|e| e.to_string()).collect();
+            let issues: Vec<String> = validator
+                .iter_errors(&parsed)
+                .map(|e| e.to_string())
+                .collect();
             return ToolInputValidationResult::Failure {
                 error: ToolInputValidationFailureError {
                     code: "TOOL_INPUT_INVALID".to_string(),

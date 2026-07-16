@@ -139,6 +139,7 @@ CodeZ 停止继续扩展 Electron 版本，桌面容器最终直接替换为 Tau
 - **FR-DATA-04** 首次迁移必须先建立清单和备份，迁移应幂等；失败时不得损坏旧数据。
 - **FR-DATA-05** Provider API Key、MCP 密钥与 OAuth 凭据不得因迁移降级为明文或 Base64 存储。
 - **FR-DATA-06** 无法解密旧 `safeStorage` 数据时，应用必须明确标记需重新录入，不得静默丢失或伪造成功。
+- **FR-DATA-07** 新 Rust/Tauri 运行时的唯一全局应用数据根必须为 `~/.codez`；cache、logs、temp 和 migrations 均位于该根下。Electron `userData` 只作为迁移源，不能成为日常兼容读取或双写目录，见 ADR 0007。
 
 ### FR-PROVIDER 模型 Provider
 
@@ -307,7 +308,7 @@ OS filesystem, processes, credential store, network
 - Schema：`schemars` + 支持所需 Draft 的 JSON Schema validator。
 - 文件检索：`ignore`/`globset`/`regex`，或继续以资源方式分发 `rg`。
 - Shell 解析：固定 `tree-sitter 0.25.10`、Bash grammar `0.25.0` 和 PowerShell grammar `0.25.10` 作为迁移起点；必须移植现有等长 masks、原生 PowerShell AST fallback 和失败安全语义，见 ADR 0004。
-- PTY：固定 `portable-pty 0.9.0` 作为 PTY 原语；Windows ConPTY 已通过中文、resize、Ctrl+C、kill tree 与退出清理验证，进程树和有界输出由 CodeZ adapter 负责，见 ADR 0003。
+- PTY：固定 `portable-pty 0.9.0` 作为当前 PTY 原语候选；Windows ConPTY 已验证中文、resize、生产树级 kill 与退出清理，但原生 `ping.exe -t` 的 Ctrl+C 不能恢复 shell prompt。Windows control-event helper/sidecar、替代 PTY 核心或等价方案必须先经 ADR 决策和真实原生命令复验；不得把裸 ETX 当作通用 Ctrl+C，见 ADR 0003。
 - 密钥：系统 credential store 或平台 API；旧 Electron 密文需要单独兼容探针。
 - MCP：优先评估成熟 Rust SDK；若能力不完整，以协议兼容和测试覆盖为选择标准，不能只比较 API 表面。
 
@@ -328,7 +329,7 @@ OS filesystem, processes, credential store, network
 
 ### 8.2 迁移流程
 
-1. 只读发现旧数据目录和版本，不扫描或打印密钥内容。
+1. 只读发现 Electron `userData`、已有 `~/.codez` 用户内容和工作区状态，不扫描或打印密钥内容；`~/.codez` 同时是新目标根这一事实不能导致旧内容被覆盖。
 2. 校验文件类型、大小、权限和 JSON 结构，拒绝跟随危险符号链接。
 3. 生成迁移清单与校验摘要，备份到带时间戳且权限受限的目录。
 4. 迁移到版本化目标结构；每个步骤记录完成标记并可重复执行。
@@ -379,7 +380,7 @@ OS filesystem, processes, credential store, network
 | --- | --- | --- | --- |
 | D-01 | 是否保留 React + TypeScript UI | 保留 | 改为 Rust UI 会显著扩大范围且无法复用现有 19k 行渲染层 |
 | D-02 | 首发平台顺序 | Windows x64 首验，随后 macOS/Linux | 当前开发环境和 Shell/编码风险集中在 Windows |
-| D-03 | 是否继续使用 `com.codez.desktop` | 保留 | 影响安装升级、数据路径和系统权限 |
+| D-03 | 是否继续使用 `com.codez.desktop` | 保留 | 影响安装升级身份和系统权限；数据根独立固定为 `~/.codez`，见 ADR 0007 |
 | D-04 | 初期持久化格式 | 保持 JSON/目录兼容 | 避免把框架迁移与数据库迁移耦合 |
 | D-05 | Provider 密钥是否继续回传前端明文 | 建议改为仅替换、不回显 | 更安全，但需要小幅调整设置 UI 与契约 |
 | D-06 | MCP Rust 实现策略 | `rmcp 2.2.0` 协议核心 + CodeZ 兼容/安全 adapters | spike 已验证 stdio、Streamable HTTP、OAuth、订阅和反向请求；legacy SSE 与严格 `-32001` 恢复由 CodeZ 补齐，见 ADR 0002 |

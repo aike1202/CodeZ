@@ -10,7 +10,7 @@ use super::{
     BACKUP_REPORT_SCHEMA_VERSION, BackupReport, CredentialMigrationReport,
     CredentialMigrationStatus, LegacyDataSet, LegacyFormat, LegacyRoots, LegacyValidation,
     ManifestScope, MigrationError, MigrationManifest, MigrationManifestEntry, MigrationPhase,
-    MigrationRunId, credentials::CREDENTIAL_REPORT_SCHEMA_VERSION, filesystem,
+    MigrationRunId, credentials, filesystem, layout,
 };
 use crate::{CredentialId, CredentialKind, CredentialStore, SchemaFamily, SchemaFormat};
 
@@ -117,7 +117,7 @@ pub(super) fn transform_blocking(
     validate_backup_prerequisite(manifest, backup_report)?;
     let repository_relative_path = repository_relative_path(&manifest.run_id);
     let repository_root = target_root.join(&repository_relative_path);
-    ensure_target_is_disjoint(roots, backup_root, target_root, &repository_root, manifest)?;
+    layout::validate_transform_layout(roots, manifest, backup_root, target_root)?;
 
     let mut files = Vec::with_capacity(manifest.entries.len());
     let mut skipped_secret_files = 0_usize;
@@ -182,6 +182,7 @@ pub(super) fn prepare_commit_blocking<S>(
 where
     S: CredentialStore,
 {
+    layout::reject_filesystem_redirects(target_root)?;
     validate_backup_prerequisite(manifest, backup_report)?;
     validate_transform_against_manifest(manifest, transform_report)?;
     let summary = verify_repository(target_root, transform_report)?;
@@ -304,39 +305,6 @@ fn validate_transform_against_manifest(
     Ok(())
 }
 
-fn ensure_target_is_disjoint(
-    roots: &LegacyRoots,
-    backup_root: &Path,
-    target_root: &Path,
-    repository_root: &Path,
-    manifest: &MigrationManifest,
-) -> Result<(), MigrationError> {
-    let mut protected_roots = vec![
-        roots.user_data().to_path_buf(),
-        roots.user_home().join(".codez"),
-    ];
-    for workspace in roots.workspaces() {
-        protected_roots.push(workspace.join(".codez"));
-        protected_roots.push(workspace.join(".codez-cache"));
-    }
-    let backup_run = backup_root.join(manifest.run_id.as_str());
-    let overlaps_source = protected_roots.iter().any(|source| {
-        target_root.starts_with(source)
-            || source.starts_with(target_root)
-            || repository_root.starts_with(source)
-            || source.starts_with(repository_root)
-    });
-    let overlaps_backup = repository_root.starts_with(&backup_run)
-        || backup_run.starts_with(repository_root)
-        || commit_marker_path(target_root).starts_with(&backup_run);
-    if overlaps_source || overlaps_backup {
-        return Err(MigrationError::OverlappingTargetRoot(
-            target_root.to_path_buf(),
-        ));
-    }
-    Ok(())
-}
-
 const fn blocks_data_transformation(validation: &LegacyValidation) -> bool {
     matches!(
         validation,
@@ -450,17 +418,26 @@ fn transform_providers(
             .get("id")
             .and_then(Value::as_str)
             .ok_or_else(|| invalid_document(entry))?;
-        let credential_id = CredentialId::new(CredentialKind::ProviderApiKey, provider_id)
+        let has_configured_credential = ["apiKeyRef", "apiKey", "api_key", "api-key"]
+            .iter()
+            .filter_map(|key| provider.get(*key).and_then(Value::as_str))
+            .any(|value| !value.is_empty());
+        let credential_id = has_configured_credential
+            .then(|| CredentialId::new(CredentialKind::ProviderApiKey, provider_id))
+            .transpose()
             .map_err(|_| invalid_document(entry))?;
+        provider.remove("credentialId");
         provider.remove("apiKeyRef");
         provider.remove("encryption");
         provider.remove("apiKey");
         provider.remove("api_key");
         provider.remove("api-key");
-        provider.insert(
-            "credentialId".to_string(),
-            Value::String(credential_id.account_name()),
-        );
+        if let Some(credential_id) = credential_id {
+            provider.insert(
+                "credentialId".to_string(),
+                Value::String(credential_id.account_name()),
+            );
+        }
         normalize_provider_models(entry, provider)?;
         normalize_provider_thinking(provider);
     }
@@ -704,6 +681,13 @@ fn verify_repository(
     validate_semantic_facts(facts)
 }
 
+pub(super) fn verify_repository_integrity(
+    target_root: &Path,
+    report: &TransformReport,
+) -> Result<(), MigrationError> {
+    verify_repository(target_root, report).map(|_| ())
+}
+
 pub(super) fn validate_transform_report(report: &TransformReport) -> Result<(), MigrationError> {
     if report.schema_version != TRANSFORM_REPORT_SCHEMA_VERSION
         || report.phase != MigrationPhase::Verified
@@ -833,7 +817,6 @@ fn collect_provider_facts(
                 value: provider_id.to_string(),
             });
         }
-        let credential = required_string(provider, "credentialId", file)?;
         if ["apiKeyRef", "encryption", "apiKey", "api_key", "api-key"]
             .iter()
             .any(|key| provider.get(*key).is_some())
@@ -843,6 +826,12 @@ fn collect_provider_facts(
                 relative_path: file.relative_path.clone(),
             });
         }
+        let Some(credential) = provider.get("credentialId") else {
+            continue;
+        };
+        let credential = credential
+            .as_str()
+            .ok_or_else(|| invalid_transformed_file(file))?;
         let credential_id =
             CredentialId::parse(credential).map_err(|_| invalid_transformed_file(file))?;
         if credential_id.kind() != CredentialKind::ProviderApiKey
@@ -1100,7 +1089,10 @@ where
         return Err(MigrationError::CredentialReportMismatch);
     }
     for entry in &report.entries {
-        if entry.status != CredentialMigrationStatus::Migrated {
+        if !matches!(
+            entry.status,
+            CredentialMigrationStatus::Migrated | CredentialMigrationStatus::Reentered
+        ) {
             continue;
         }
         let credential_id = entry
@@ -1121,58 +1113,13 @@ pub(super) fn validate_credential_report_metadata(
     transform_report: &TransformReport,
     report: &CredentialMigrationReport,
 ) -> Result<(), MigrationError> {
-    if report.schema_version != CREDENTIAL_REPORT_SCHEMA_VERSION
-        || report.run_id != transform_report.run_id
+    credentials::validate_credential_report_structure(report)?;
+    if report.run_id != transform_report.run_id
         || report.manifest_fingerprint != transform_report.manifest_fingerprint
         || !matches!(
             report.phase,
             MigrationPhase::Verified | MigrationPhase::AwaitingCredentials
         )
-    {
-        return Err(MigrationError::CredentialReportMismatch);
-    }
-    let mut migrated = 0_usize;
-    let mut not_present = 0_usize;
-    let mut requires_reentry = 0_usize;
-    for entry in &report.entries {
-        match entry.status {
-            CredentialMigrationStatus::Migrated => {
-                migrated = migrated.saturating_add(1);
-                if entry.reason.is_some() {
-                    return Err(MigrationError::CredentialReportMismatch);
-                }
-                if entry.credential_id.is_none() {
-                    return Err(MigrationError::CredentialReportMismatch);
-                }
-            }
-            CredentialMigrationStatus::NotPresent => {
-                not_present = not_present.saturating_add(1);
-                if entry.credential_id.is_some() || entry.reason.is_some() {
-                    return Err(MigrationError::CredentialReportMismatch);
-                }
-            }
-            CredentialMigrationStatus::RequiresReentry => {
-                requires_reentry = requires_reentry.saturating_add(1);
-                if entry.reason.is_none() {
-                    return Err(MigrationError::CredentialReportMismatch);
-                }
-            }
-        }
-    }
-    let expected_phase = if requires_reentry == 0 {
-        MigrationPhase::Verified
-    } else {
-        MigrationPhase::AwaitingCredentials
-    };
-    if migrated != report.migrated
-        || not_present != report.not_present
-        || requires_reentry != report.requires_reentry
-        || report
-            .migrated
-            .saturating_add(report.not_present)
-            .saturating_add(report.requires_reentry)
-            != report.entries.len()
-        || report.phase != expected_phase
     {
         return Err(MigrationError::CredentialReportMismatch);
     }

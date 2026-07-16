@@ -25,7 +25,23 @@ pub fn classify_known_command(argv: &[String]) -> Option<CommandAssessment> {
     let subcommand = argv.get(1).map(|s| s.to_lowercase()).unwrap_or_default();
     let args: Vec<String> = argv.iter().skip(1).map(|a| a.to_lowercase()).collect();
 
-    let read_commands = ["ls", "dir", "pwd", "which", "where", "cat", "head", "tail", "grep", "rg", "findstr", "get-content", "get-childitem", "get-location", "test-path"];
+    let read_commands = [
+        "ls",
+        "dir",
+        "pwd",
+        "which",
+        "where",
+        "cat",
+        "head",
+        "tail",
+        "grep",
+        "rg",
+        "findstr",
+        "get-content",
+        "get-childitem",
+        "get-location",
+        "test-path",
+    ];
     if read_commands.contains(&executable.as_str()) {
         return Some(CommandAssessment {
             permission: PermissionCapability::Shell,
@@ -63,13 +79,21 @@ pub fn classify_known_command(argv: &[String]) -> Option<CommandAssessment> {
         return Some(CommandAssessment {
             permission: PermissionCapability::Shell,
             risk_level: 1,
-            rule_id: format!("known.git.{}", if subcommand.is_empty() { "write" } else { &subcommand }),
+            rule_id: format!(
+                "known.git.{}",
+                if subcommand.is_empty() {
+                    "write"
+                } else {
+                    &subcommand
+                }
+            ),
             reason: "修改工作区 Git 状态".to_string(),
         });
     }
 
     if ["npm", "pnpm", "yarn", "bun"].contains(&executable.as_str()) {
-        if ["install", "add", "update", "ci", "remove", "uninstall"].contains(&subcommand.as_str()) {
+        if ["install", "add", "update", "ci", "remove", "uninstall"].contains(&subcommand.as_str())
+        {
             return Some(CommandAssessment {
                 permission: PermissionCapability::Network,
                 risk_level: 2,

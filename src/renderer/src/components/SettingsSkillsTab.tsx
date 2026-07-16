@@ -59,7 +59,7 @@ export default function SettingsSkillsTab({ onCreate }: Props): React.ReactEleme
     if (!ok) return
     setDeletingId(skill.id)
     try {
-      const success = await window.api.skill.remove(skill.id)
+      const success = await window.api.skill.remove(workspace?.rootPath || null, skill.id)
       if (success) {
         setSkills((prev) => prev.filter((s) => s.id !== skill.id))
       }

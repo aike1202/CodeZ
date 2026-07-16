@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use codez_runtime::fingerprint::ReadFingerprintStore;
+use std::path::PathBuf;
 
 #[tokio::test]
 async fn test_fingerprint_store_delivery_tracking() {

@@ -1,4 +1,7 @@
-use codez_contracts::context::{SessionSkillState, PostCompactionSkillContext, InvokedSkillContextEntry};
+use chrono::{SecondsFormat, Utc};
+use codez_core::context::{
+    InvokedSkillContextEntry, PostCompactionSkillContext, SessionSkillState,
+};
 
 pub struct SkillContextRestorer;
 
@@ -17,7 +20,11 @@ impl SkillContextRestorer {
         let mut references = Vec::new();
 
         for state in active_states {
-            content.push_str(&format!("- {}: {}\n", state.name, state.content.as_deref().unwrap_or("")));
+            content.push_str(&format!(
+                "- {}: {}\n",
+                state.name,
+                state.content.as_deref().unwrap_or("")
+            ));
             references.push(InvokedSkillContextEntry {
                 name: state.name.clone(),
                 content: state.content.as_deref().unwrap_or("").to_string(),
@@ -28,7 +35,7 @@ impl SkillContextRestorer {
         Some(PostCompactionSkillContext {
             content,
             skills: references,
-            created_at: "".to_string(), // TODO: ISO8601
+            created_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
             source_sequence: Some(source_sequence),
         })
     }

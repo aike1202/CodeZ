@@ -112,10 +112,7 @@ impl SearchService {
     /// # Errors
     ///
     /// Returns [`AppError`] when the ripgrep path is not absolute.
-    pub fn new(
-        rg_path: PathBuf,
-        process_runner: Arc<dyn ProcessRunner>,
-    ) -> Result<Self, AppError> {
+    pub fn new(rg_path: PathBuf, process_runner: Arc<dyn ProcessRunner>) -> Result<Self, AppError> {
         if !rg_path.is_absolute() {
             return Err(AppError::validation(
                 "Ripgrep executable path must be absolute",
@@ -216,7 +213,11 @@ impl SearchService {
             max_output_bytes: GREP_MAX_OUTPUT,
         };
 
-        let output = self.process_runner.as_ref().run(request, cancellation).await;
+        let output = self
+            .process_runner
+            .as_ref()
+            .run(request, cancellation)
+            .await;
         let output = match output {
             Ok(output) => output,
             Err(error) if error.kind() == codez_core::AppErrorKind::ProcessFailed => {
@@ -289,7 +290,11 @@ fn to_posix(path: &str) -> String {
 }
 
 fn build_rg_args(pattern: &str, search_dir: &Path, options: &GrepOptions) -> Vec<String> {
-    let mut args = vec!["--no-heading".to_string(), "--color".to_string(), "never".to_string()];
+    let mut args = vec![
+        "--no-heading".to_string(),
+        "--color".to_string(),
+        "never".to_string(),
+    ];
 
     match options.output_mode {
         GrepOutputMode::FilesWithMatches => args.push("-l".to_string()),

@@ -1,4 +1,6 @@
-use codez_contracts::context::ContextScopeId;
+use codez_core::context::ContextScopeId;
+use thiserror::Error;
+
 use crate::context::budget::ModelContextCapabilities;
 
 pub struct CompactionRequest {
@@ -27,9 +29,17 @@ pub struct CompactionResult {
 
 pub struct CompactionService;
 
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum CompactionError {
+    #[error("compaction session id cannot be empty")]
+    EmptySessionId,
+}
+
 impl CompactionService {
-    pub async fn compact(_request: CompactionRequest) -> Result<CompactionResult, String> {
-        // Dummy implementation for compaction service
+    pub async fn compact(request: CompactionRequest) -> Result<CompactionResult, CompactionError> {
+        if request.session_id.trim().is_empty() {
+            return Err(CompactionError::EmptySessionId);
+        }
         Ok(CompactionResult {
             status: "completed".to_string(),
             error_code: None,

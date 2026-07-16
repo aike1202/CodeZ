@@ -1,9 +1,13 @@
+use serde::{Deserialize, Serialize};
+
 use crate::permission::contract::{PermissionAction, PermissionCapability, PermissionDecision};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum PermissionMode {
+    #[default]
+    Auto,
     FullAccess,
-    SafeMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,28 +33,58 @@ pub struct PermissionDecisionEngine;
 impl PermissionDecisionEngine {
     pub fn decide(input: PermissionDecisionInput) -> PermissionDecision {
         if input.explicit_rule == Some(PermissionAction::Deny) {
-            return PermissionDecision { action: PermissionAction::Deny, reason: None };
+            return PermissionDecision {
+                action: PermissionAction::Deny,
+                reason: None,
+            };
         }
         if input.absolute_redline || input.permission == PermissionCapability::Hardline {
-            return PermissionDecision { action: PermissionAction::Ask, reason: None };
+            return PermissionDecision {
+                action: PermissionAction::Ask,
+                reason: None,
+            };
         }
         if input.approval_preference == Some(ToolApprovalPreference::User) {
-            return PermissionDecision { action: PermissionAction::Ask, reason: None };
+            return PermissionDecision {
+                action: PermissionAction::Ask,
+                reason: None,
+            };
         }
         if input.explicit_rule == Some(PermissionAction::Allow) {
-            return PermissionDecision { action: PermissionAction::Allow, reason: None };
+            return PermissionDecision {
+                action: PermissionAction::Allow,
+                reason: None,
+            };
+        }
+        if matches!(
+            input.permission,
+            PermissionCapability::Unknown
+                | PermissionCapability::ShellUnparsed
+                | PermissionCapability::ExternalDirectory
+        ) {
+            return PermissionDecision {
+                action: PermissionAction::Ask,
+                reason: None,
+            };
         }
         if input.mode == PermissionMode::FullAccess {
-            return PermissionDecision { action: PermissionAction::Allow, reason: None };
+            return PermissionDecision {
+                action: PermissionAction::Allow,
+                reason: None,
+            };
         }
-        
+
         let auto_allow = matches!(
             input.permission,
             PermissionCapability::Read | PermissionCapability::Edit | PermissionCapability::Shell
         );
 
         PermissionDecision {
-            action: if auto_allow { PermissionAction::Allow } else { PermissionAction::Ask },
+            action: if auto_allow {
+                PermissionAction::Allow
+            } else {
+                PermissionAction::Ask
+            },
             reason: None,
         }
     }

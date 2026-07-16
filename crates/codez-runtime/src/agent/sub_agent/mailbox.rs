@@ -11,16 +11,14 @@ pub struct SubAgentMessage {
     pub timestamp: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct SubAgentMailbox {
     queue: Arc<Mutex<VecDeque<SubAgentMessage>>>,
 }
 
 impl SubAgentMailbox {
     pub fn new() -> Self {
-        Self {
-            queue: Arc::new(Mutex::new(VecDeque::new())),
-        }
+        Self::default()
     }
 
     pub async fn send(&self, msg: SubAgentMessage) {

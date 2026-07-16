@@ -1,8 +1,27 @@
-import { invoke } from '@tauri-apps/api/core'
+import { Channel, invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 
 import { desktopApi } from '../shared/desktop/api'
+import type { PermissionMode } from '../shared/desktop/generated/contracts'
 import { defaultSettings, defaultWebSearchSettings } from '@shared/types/settings'
+import type {
+  McpListPayload,
+  McpServerCatalog,
+  McpServerConfig,
+  McpServerStatus,
+} from '../components/SettingsMcpTab/types'
+import type {
+  ChatAskUserAnswer,
+  ChatAskUserRequest,
+  ChatAskUserRequestEvent,
+} from '../shared/desktop/generated/contracts'
+
+function ignoredAskUserAnswers(request: ChatAskUserRequest): ChatAskUserAnswer[] {
+  return request.questions.map((question) => ({
+    question: question.question,
+    answer: question.multiSelect ? ['__IGNORED__'] : '__IGNORED__',
+  }))
+}
 
 /**
  * Merge raw settings from disk with defaultSettings, including deep-merge
@@ -42,18 +61,9 @@ export const tauriBridge: any = {
     detectInstalledEditors: () => desktopApi.workspace.detectInstalledEditors(),
   },
   permission: {
-    getMode: async (rootPath: string) => {
-      try {
-        const mode = await invoke<string>('permission_mode_get', { rootPath });
-        return mode === 'fullAccess' ? 'full-access' : 'auto';
-      } catch { return 'auto'; }
-    },
+    getMode: (rootPath: string) => invoke<PermissionMode>('permission_mode_get', { rootPath }),
     setMode: async (rootPath: string, mode: string) => {
-      try {
-        const mappedMode = mode === 'full-access' ? 'fullAccess' : 'auto';
-        const newMode = await invoke<string>('permission_mode_set', { rootPath, mode: mappedMode });
-        return newMode === 'fullAccess' ? 'full-access' : 'auto';
-      } catch { return mode; }
+      return invoke<PermissionMode>('permission_mode_set', { rootPath, mode })
     },
   },
   provider: {
@@ -90,27 +100,143 @@ export const tauriBridge: any = {
     save: (settings: any) => invoke('settings_save', { settings }),
   },
   chat: {
-    predictNextInput: async () => ({ predictions: [] }),
-    getRuntimeStatus: async (sessionId: string) => ({
-      sessionId,
-      status: 'idle',
-      totalTokens: 0,
-      activePlugins: []
-    }),
-    onRuntimeStatusChanged: () => () => {},
-    steer: async () => null,
-    interruptTool: async () => ({ ok: false }),
-    stream: (_providerId: string, _model: string, _sessionId: string, _input: any, callbacks: any) => {
-      // Tauri streaming not yet wired — immediately signal done so UI doesn't hang
-      setTimeout(() => callbacks.onError?.('Chat streaming is not yet available in Tauri mode.'), 100);
-      return { stop: () => {}, started: Promise.resolve() };
+    predictNextInput: async (request: any) => invoke('chat_predict_next_input', { request }),
+    getRuntimeStatus: async (sessionId: string) => invoke('chat_get_runtime_status', { sessionId }),
+    onRuntimeStatusChanged: (callback: (payload: any) => void) => {
+      let active = true
+      const unlisten = listen('chat:runtime-status-changed', (event: any) => {
+        if (active) callback(event.payload)
+      })
+      return () => {
+        active = false
+        void unlisten.then((dispose) => dispose())
+      }
     },
-    compact: async () => null,
-    acceptFile: async () => true,
-    rejectFile: async () => true,
-    getDiff: async () => [],
-    respondToApproval: async () => {},
-    respondAskUser: async () => {},
+    steer: async (sessionId: string, input: any) => invoke('chat_steer', { sessionId, input }),
+    interruptTool: async (toolCallId: string) => invoke('chat_interrupt_tool', { toolCallId }),
+    stream: (providerId: string, model: string, sessionId: string, input: any, callbacks: any) => {
+      const requestedRunId = `stream_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+      const events = new Channel<any>()
+      const askUserListener = listen<ChatAskUserRequestEvent>('chat:ask-user-request', (event) => {
+        const payload = event.payload
+        if (payload.runId !== activeRunId) return
+        try {
+          if (callbacks.onAskUserRequest) {
+            callbacks.onAskUserRequest(payload.request)
+            return
+          }
+        } catch (error) {
+          console.error('[CodeZ] Tauri ask-user callback failed', error)
+        }
+        void invoke('chat_respond_ask_user', {
+          requestId: payload.request.id,
+          answers: ignoredAskUserAnswers(payload.request),
+        }).catch(() => undefined)
+      })
+      let activeRunId: string | null = requestedRunId
+      let accumulatedContent = ''
+      let cleanedUp = false
+      let terminalReceived = false
+
+      const acknowledge = (frame: any): void => {
+        if (typeof frame?.runId !== 'string' || !Number.isSafeInteger(frame?.sequence)) return
+        void invoke('chat_stream_ack', {
+          runId: frame.runId,
+          sequence: frame.sequence,
+        }).catch(() => undefined)
+      }
+
+      const cleanup = (stopBackend: boolean): void => {
+        if (cleanedUp) return
+        cleanedUp = true
+        const runId = activeRunId
+        activeRunId = null
+        events.onmessage = () => undefined
+        void askUserListener.then((unlisten) => unlisten()).catch(() => undefined)
+        if (stopBackend && runId) {
+          void invoke('chat_stream_stop', { runId }).catch(() => undefined)
+        }
+      }
+
+      events.onmessage = (frame: any) => {
+        if (frame?.runId !== activeRunId || frame?.version !== 1) return
+        let terminal = false
+        try {
+          const payload = frame.payload || {}
+          switch (frame.kind) {
+            case 'delta':
+              accumulatedContent += typeof payload.delta === 'string' ? payload.delta : ''
+              callbacks.onChunk?.(payload.delta || '', payload.reasoningDelta)
+              break
+            case 'steerConsumed':
+              callbacks.onSteerConsumed?.(payload.input)
+              break
+            case 'completed':
+              terminal = true
+              terminalReceived = true
+              callbacks.onDone?.(
+                payload.fullContent || accumulatedContent,
+                payload.stopReason,
+                payload.txId,
+              )
+              break
+            case 'failed':
+              terminal = true
+              terminalReceived = true
+              callbacks.onError?.(payload.error?.message || 'The Rust chat run failed.')
+              break
+            case 'interrupted':
+              terminal = true
+              terminalReceived = true
+              callbacks.onError?.(payload.reason || 'The Rust chat run was interrupted.')
+              break
+            case 'usage':
+              break
+          }
+        } catch (error) {
+          console.error('[CodeZ] Tauri chat callback failed', error)
+        } finally {
+          acknowledge(frame)
+          if (terminal) cleanup(false)
+        }
+      }
+
+      const started = askUserListener.then(() => invoke<string>('chat_stream_start', {
+        request: {
+          streamId: requestedRunId,
+          providerId,
+          model,
+          sessionId,
+          input,
+        },
+        events,
+      })).then((runId) => {
+        if (runId !== requestedRunId) {
+          cleanup(true)
+          throw new Error('The backend returned a different chat run ID.')
+        }
+        if (!cleanedUp) activeRunId = runId
+      }).catch((error) => {
+        if (!terminalReceived) cleanup(false)
+        throw error
+      })
+
+      return {
+        stop: () => cleanup(true),
+        started,
+      }
+    },
+    compact: async (sessionId: string, instructions?: string) =>
+      invoke('chat_compact', { sessionId, instructions }),
+    acceptFile: async (txId: string, filePath: string) =>
+      invoke('chat_accept_file', { txId, filePath }),
+    rejectFile: async (txId: string, filePath: string) =>
+      invoke('chat_reject_file', { txId, filePath }),
+    getDiff: async (txId: string) => invoke('chat_get_diff', { txId }),
+    respondToApproval: async (requestId: string, response: any) =>
+      invoke('chat_respond_to_approval', { requestId, response }),
+    respondAskUser: async (requestId: string, answers: ChatAskUserAnswer[]) =>
+      invoke('chat_respond_ask_user', { requestId, answers }),
   },
   session: {
     list: () => invoke('session_list').catch(() => []),
@@ -126,7 +252,13 @@ export const tauriBridge: any = {
     onOutput: (callback: any) => {
       let active = true;
       const unlisten = listen('terminal:output', (event: any) => {
-        if (active) callback(event.payload.id, event.payload.data);
+        if (!active) return;
+        const { id, sequence, data } = event.payload;
+        try {
+          callback(id, data);
+        } finally {
+          void invoke('terminal_ack', { workspaceId: id, sequence }).catch(() => undefined);
+        }
       });
       return () => { active = false; unlisten.then((f) => f()); };
     },
@@ -159,11 +291,17 @@ export const tauriBridge: any = {
   skill: {
     getAll: async (rootPath?: string | null) => invoke('skill_get_all', { rootPath }),
     toggle: async (rootPath: string | null, id: string, enabled: boolean) => invoke('skill_toggle', { rootPath, id, enabled }),
-    checkExternal: async () => invoke('skill_check_external'),
-    importExternal: async () => invoke('skill_import_external'),
-    listExternal: async () => invoke('skill_list_external'),
-    importSingle: async (sourceName: string, dirName: string) => invoke('skill_import_single', { sourceName, dirName }),
-    remove: async (id: string) => invoke('skill_remove', { id }),
+    checkExternal: async (rootPath?: string | null) => invoke('skill_check_external', { rootPath }),
+    importExternal: async (
+      sourceName?: string,
+      customPath?: string,
+      forceOverwrite?: boolean,
+      rootPath?: string | null,
+    ) => invoke('skill_import_external', { sourceName, customPath, forceOverwrite, rootPath }),
+    listExternal: async (rootPath?: string | null) => invoke('skill_list_external', { rootPath }),
+    importSingle: async (sourceName: string, dirName: string, rootPath?: string | null) =>
+      invoke('skill_import_single', { sourceName, dirName, rootPath }),
+    remove: async (rootPath: string | null, id: string) => invoke('skill_remove', { rootPath, id }),
   },
   rules: {
     getList: async (workspaces?: any[]) => invoke('rules_get_list', { workspaces: workspaces || [] }),
@@ -172,20 +310,22 @@ export const tauriBridge: any = {
     rename: async (oldPath: string, newFilename: string, workspaceRoot: string, scope: string) => invoke('rules_rename', { oldPath, newFilename, workspaceRoot, scope }),
   },
   mcp: {
-    list: async () => invoke('mcp_list'),
-    saveUser: async (servers: Record<string, unknown>) => invoke('mcp_save_user', { servers }),
-    setEnabled: async (name: string, enabled: boolean) => invoke('mcp_set_enabled', { name, enabled }),
-    getCatalog: async (name: string) => invoke('mcp_get_catalog', { name }),
-    reconnect: async (name: string) => invoke('mcp_reconnect', { name }),
-    authorize: async (name: string) => invoke('mcp_authorize', { name }),
-    logout: async (name: string) => invoke('mcp_logout', { name }),
-    trustProject: async (fingerprint: string) => invoke('mcp_trust_project', { fingerprint }),
-    listSecretKeys: async () => invoke('mcp_list_secret_keys'),
-    setSecret: async (key: string, value: string) => invoke('mcp_set_secret', { key, value }),
-    deleteSecret: async (key: string) => invoke('mcp_delete_secret', { key }),
-    onChanged: (callback: (statuses: any[]) => void) => {
+    list: async (): Promise<McpListPayload> => invoke('mcp_list'),
+    saveUser: async (servers: Record<string, McpServerConfig>): Promise<McpListPayload> =>
+      invoke('mcp_save_user', { servers }),
+    setEnabled: async (name: string, enabled: boolean): Promise<McpListPayload> =>
+      invoke('mcp_set_enabled', { name, enabled }),
+    getCatalog: async (name: string): Promise<McpServerCatalog> => invoke('mcp_get_catalog', { name }),
+    reconnect: async (name: string): Promise<void> => invoke('mcp_reconnect', { name }),
+    authorize: async (name: string): Promise<void> => invoke('mcp_authorize', { name }),
+    logout: async (name: string): Promise<void> => invoke('mcp_logout', { name }),
+    trustProject: async (fingerprint: string): Promise<void> => invoke('mcp_trust_project', { fingerprint }),
+    listSecretKeys: async (): Promise<string[]> => invoke('mcp_list_secret_keys'),
+    setSecret: async (key: string, value: string): Promise<string[]> => invoke('mcp_set_secret', { key, value }),
+    deleteSecret: async (key: string): Promise<string[]> => invoke('mcp_delete_secret', { key }),
+    onChanged: (callback: (statuses: McpServerStatus[]) => void) => {
       let active = true;
-      const unlisten = listen('mcp:status-changed', (event: any) => {
+      const unlisten = listen<McpServerStatus[]>('mcp:status-changed', (event) => {
         if (active) callback(event.payload);
       });
       return () => { active = false; unlisten.then((f) => f()); };

@@ -1,7 +1,7 @@
+use std::cmp::Reverse;
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
-
 
 use crate::tools::large_result::LargeToolResultStore;
 use crate::tools::types::{ToolExecutionError, ToolExecutionResult, ToolPipelineResult};
@@ -11,7 +11,7 @@ fn truncate_middle(content: &str, limit: usize) -> String {
     if chars_count <= limit {
         return content.to_string();
     }
-    
+
     let head = (limit as f64 * 0.7).ceil() as usize;
     let tail = (limit as f64 * 0.3).floor() as usize;
 
@@ -19,7 +19,12 @@ fn truncate_middle(content: &str, limit: usize) -> String {
     let head_str: String = chars[0..head].iter().collect();
     let tail_str: String = chars[chars.len() - tail..].iter().collect();
 
-    format!("{}\n...[truncated {} chars]...\n{}", head_str, chars_count - limit, tail_str)
+    format!(
+        "{}\n...[truncated {} chars]...\n{}",
+        head_str,
+        chars_count - limit,
+        tail_str
+    )
 }
 
 pub struct ToolResultProcessorLimits {
@@ -49,7 +54,11 @@ pub struct ToolResultProcessor {
 }
 
 impl ToolResultProcessor {
-    pub fn new(store: Arc<LargeToolResultStore>, limits: Option<ToolResultProcessorLimits>, persistence_enabled: bool) -> Self {
+    pub fn new(
+        store: Arc<LargeToolResultStore>,
+        limits: Option<ToolResultProcessorLimits>,
+        persistence_enabled: bool,
+    ) -> Self {
         Self {
             store,
             limits: limits.unwrap_or_default(),
@@ -60,7 +69,7 @@ impl ToolResultProcessor {
     pub async fn process_batch(
         &self,
         results: Vec<ToolPipelineResult>,
-        workspace_root: &PathBuf,
+        workspace_root: &Path,
         session_id: Option<&str>,
     ) -> Vec<ToolPipelineResult> {
         let mut processed = Vec::new();
@@ -68,13 +77,29 @@ impl ToolResultProcessor {
         // Pass 1: truncate errors and stringify data
         for mut item in results {
             match &mut item.result {
-                ToolExecutionResult::Success { model_content: _, .. } => {
+                ToolExecutionResult::Success {
+                    model_content: _, ..
+                } => {
                     // It is already a string in Rust struct.
                 }
-                ToolExecutionResult::Error { error, model_content, .. } |
-                ToolExecutionResult::Denied { error, model_content, .. } |
-                ToolExecutionResult::Cancelled { error, model_content, .. } => {
-                    let content = model_content.clone().unwrap_or_else(|| format!("Error: {}", error.message));
+                ToolExecutionResult::Error {
+                    error,
+                    model_content,
+                    ..
+                }
+                | ToolExecutionResult::Denied {
+                    error,
+                    model_content,
+                    ..
+                }
+                | ToolExecutionResult::Cancelled {
+                    error,
+                    model_content,
+                    ..
+                } => {
+                    let content = model_content
+                        .clone()
+                        .unwrap_or_else(|| format!("Error: {}", error.message));
                     *model_content = Some(truncate_middle(&content, self.limits.error_chars));
                 }
             }
@@ -86,7 +111,6 @@ impl ToolResultProcessor {
             None => return processed,
         };
 
-        #[derive(Clone)]
         struct Candidate {
             index: usize,
             chars: usize,
@@ -100,7 +124,7 @@ impl ToolResultProcessor {
                 candidates.push(Candidate {
                     index: i,
                     chars: model_content.chars().count(),
-                    bytes: model_content.as_bytes().len(),
+                    bytes: model_content.len(),
                     soft_chars: item.max_result_chars.unwrap_or(self.limits.soft_chars),
                 });
             } else {
@@ -116,12 +140,15 @@ impl ToolResultProcessor {
         let mut batch_chars: usize = candidates.iter().map(|c| c.chars).sum();
         let mut must_persist = HashSet::new();
 
-        for candidate in candidates.iter().filter(|c| c.chars > c.soft_chars || c.bytes > self.limits.hard_bytes) {
+        for candidate in candidates
+            .iter()
+            .filter(|c| c.chars > c.soft_chars || c.bytes > self.limits.hard_bytes)
+        {
             must_persist.insert(processed[candidate.index].call.call_id.clone());
         }
 
-        let mut sorted_candidates = candidates.clone();
-        sorted_candidates.sort_by(|a, b| b.chars.cmp(&a.chars));
+        let mut sorted_candidates = candidates;
+        sorted_candidates.sort_by_key(|candidate| Reverse(candidate.chars));
 
         for candidate in sorted_candidates {
             if batch_chars <= self.limits.batch_chars {
@@ -157,14 +184,33 @@ impl ToolResultProcessor {
         for mut item in processed {
             let is_success = matches!(item.result, ToolExecutionResult::Success { .. });
             if is_success && must_persist.contains(&item.call.call_id) {
-                if let ToolExecutionResult::Success { model_content, ui_content, effects, data } = item.result {
+                if let ToolExecutionResult::Success {
+                    model_content,
+                    ui_content,
+                    effects,
+                    data,
+                } = item.result
+                {
                     let full_content = model_content;
-                    match self.store.persist(workspace_root, sid, &item.call.call_id, &item.canonical_name, &full_content).await {
+                    match self
+                        .store
+                        .persist(
+                            workspace_root,
+                            sid,
+                            &item.call.call_id,
+                            &item.canonical_name,
+                            &full_content,
+                        )
+                        .await
+                    {
                         Ok(persisted) => {
                             let preview = truncate_middle(&full_content, self.limits.preview_chars);
                             let new_content = format!(
                                 "<persisted-tool-result id=\"{}\" original_chars=\"{}\" sha256=\"{}\">\nOutput was too large. A preview follows.\n{}\n</persisted-tool-result>",
-                                persisted.handle, persisted.original_chars, persisted.sha256, preview
+                                persisted.handle,
+                                persisted.original_chars,
+                                persisted.sha256,
+                                preview
                             );
                             item.result = ToolExecutionResult::Success {
                                 data,

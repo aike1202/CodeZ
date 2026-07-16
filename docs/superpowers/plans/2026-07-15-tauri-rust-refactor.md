@@ -8,7 +8,7 @@
 >
 > 架构：`docs/superpowers/specs/2026-07-15-tauri-rust-architecture-design.md`
 
-> 实施状态：已于 2026-07-15 开始；进展与生成清单见 `docs/migration/README.md`
+> 实施状态：已于 2026-07-15 开始；进展与生成清单见 `docs/migration/README.md`。本计划中的 `[x]` 只表示所述局部实现或证据已出现，不表示整个 Phase、用户流程或 Electron 替代已完成；只有各 Phase 出口和 Phase 9 门禁可关闭迁移范围。
 
 ## 1. 目标与约束
 
@@ -149,16 +149,16 @@ src/renderer/src/desktop/
 
 ### 6.1 数据基础设施
 
-- [x] 实现 `AppPaths`，统一应用数据、缓存、日志、资源、临时和工作区状态路径；路径由 Tauri composition root 解析后以 `codez-core::AppPaths` 注入，core 不读取环境或当前目录，工作区 `.codez`/`.codez-cache` 只从已验证绝对根派生。
+- [x] 实现 `AppPaths`，将新运行时唯一全局应用数据根固定为 `~/.codez`，cache/logs/temp/migrations 均位于根下；路径由 Tauri composition root 解析后以 `codez-core::AppPaths` 注入，core 不读取环境或当前目录，工作区 `.codez`/`.codez-cache` 只从已验证绝对根派生，见 ADR 0007。
 - [x] 实现原子 JSON/JSONL 读写、权限设置、写队列、故障注入和损坏文件隔离；`codez-storage::AtomicFileStore` 使用同目录临时文件、flush/fsync、跨平台原子替换、每资源单写者和 64 MiB 默认上限，JSONL 追加的截断后缀会保留完整 quarantine 并原子恢复有效前缀；Windows 原子替换/故障/隔离测试通过，Unix owner-only `0700/0600` 权限测试由目标平台 CI 执行。
 - [x] 为 session、settings、provider、permission、MCP、context、execution 等定义版本化 schema；`codez-storage` 已提供 19 个稳定 schema family、统一 `schema`/`schemaVersion` envelope、JSON/JSONL 格式映射和 repository family/version 校验。
-- [x] 实现只读旧数据发现、清单、备份、幂等迁移、验证和完成标记；23 类 catalog 驱动的只读发现、脱敏确定性 manifest、源文件复核和 no-clobber 精确备份均已完成。transform 为 JSON/JSONL 写入版本头、保留 opaque 数据、剥离 Provider 密文字段并跳过 secret envelope，随后验证 Provider/Session/Settings/Attachment/Ledger/Permission/Execution/MCP 引用和记录数。转换文件、脱敏凭据报告及转换完成报告采用不可变 create-or-reuse 语义；只有重新验证 manifest、backup、目标哈希、凭据报告与 OS 凭据可读性后原子创建的 `migration-commit.json` 才能授权目标仓库，故障后的 staged run 保持非权威且可由 `inspect_phase` 识别安全重试点。
+- [ ] 完成启动迁移协调器的用户闭环：composition 已在 repositories 构造前运行 coordinator，以 Electron `userData` 和已有 `~/.codez` 用户内容为只读源、以 `~/.codez` 为新目标根，执行发现、no-clobber 备份、转换、凭据处理、引用验证与 activation。仍需验证真实旧安装升级/回退、已有根与迁移 staging 的不相交安全性，以及 `AwaitingCredentials` 的重录/恢复/activation；当前该状态 fail closed 阻止启动，不得把底层 primitive 或启动调用误写为端到端迁移完成。
 - [x] 建立真实但脱敏的旧数据 fixtures，覆盖旧版本字段、部分损坏和引用缺失；`legacy-data-v0` 覆盖 Provider/Session/Settings/MCP、部分损坏 JSONL、附件缺失引用、ledger、plan、execution、cache 和 rules，密钥只保留占位 envelope/引用。
 
 ### 6.2 密钥与日志
 
 - [x] 实现 OS 凭据存储 adapter，区分“不存在”“不可用”“权限拒绝”“密文损坏”；`codez-storage` 以 `CredentialId`/`SecretValue`/`CredentialStore` 隔离持久化引用与明文生命周期，`OsCredentialStore` 通过 `keyring 3.6.3` 分别接入 Windows Credential Manager、macOS Keychain 和 Linux Secret Service，并串行化底层访问。Windows workspace 测试和 Tauri debug build 已通过，macOS/Linux 编译与真实 keychain smoke 由目标平台 CI/Phase 9 承接。
-- [x] 实现旧 Provider/MCP/OAuth 密钥迁移或明确的重新录入标记；`codez-storage` 只从与 manifest 匹配且逐文件复核 SHA-256 的备份读取旧凭据，Windows migration-only reader 通过 `Local State` 的 user-scoped DPAPI key 解开 Chromium `v10` AES-256-GCM envelope，成功后直接写入 `CredentialStore`。Base64/明文 Provider、非 Windows 未验证平台、Local State/用户上下文/认证/JSON/ID 失败均写入不含密文、明文、绝对路径或底层错误的 `requires_reentry` 决策；OS 凭据库故障中止并支持幂等重试，不伪装为重录成功。
+- [ ] 接通旧 Provider/MCP/OAuth 密钥迁移后的用户闭环。`codez-storage` 已有仅从已验证备份读取的 migration-only reader，并会将无法安全迁移的条目记录为脱敏 `requires_reentry`；但 `AwaitingCredentials` 尚无凭据重录 UI/command、恢复迁移和 activation 链路。未完成前，不能把 re-entry 标记或底层 reader 计作可用的密钥迁移。
 - [x] 禁止 Base64/明文 fallback；为日志和错误加入结构化脱敏测试；`SecretValue` 继续不实现 `Debug`/`Serialize`/`Clone`，compile-fail rustdoc 锁定其不可 JSON 持久化，架构检查禁止 `codez-storage` 在 migration-only `legacy_safe_storage` 之外导入 Base64。`codez-core::RedactedText` 会清零传入缓冲并让 `Display`/`Debug` 只能看到脱敏值，`AppError` 以私有字段在构造时同时脱敏用户消息与诊断；真实 `tracing-subscriber` 输出测试覆盖 Authorization 与 OAuth token，Electron 冻结基线不在 Phase 10 前修改。
 - [x] 以 `tracing` 实现滚动日志、日志等级和 session/stream/tool span；Tauri composition root 在已验证的 `AppPaths::log_directory` 初始化每日 UTC JSONL appender，最多保留 8 个文件并以 8,192 行有界非阻塞队列写入，`CODEZ_LOG` 支持自有 `codez_*` target 的 level/target 指令且无效值回退 `info`，第三方 target 在 file/console layer 均被拒绝以避免依赖内部诊断泄密。全部 Tauri command 以 `skip_all` span 防止 DTO 自动进入日志，`codez-runtime` 提供 typed session/stream/tool span，tool span 显式携带三层 ID；等级过滤、第三方 target 隔离、span JSON 字段与只清理匹配日志文件已有行为测试。后续 Provider、Agent、Process 与 MCP 实现仍须在各自阶段接入对应 span，不能将本项完成视为全链路可观测性已完成。
 
@@ -176,8 +176,8 @@ src/renderer/src/desktop/
 
 - [x] 迁移目录选择、最近项目、项目识别、文件树和受限读取；Tauri 目录选择会在返回前打开并 canonicalize `NativeFileSystem`。`codez-runtime::WorkspaceService` 经 `FileSystem` port 提供最多 50,000 项/64 层的递归树和全路径扫描，统一忽略目录、隐藏项与二进制构建产物；文本预览以 5 MiB 拒绝上限及 1 MiB/1,000 行双输出上限处理 UTF-8、NUL magic、binary extension 和目录预览。项目检测优先 Next/Vite 等具体框架并识别 npm/pnpm/yarn/bun。`codez-storage::RecentProjectsStore` 使用 `recent-projects` 版本头、原子写、canonical root 去重、最多 10 项和串行 mutation。9 个 Workspace Tauri commands 及生成 DTO 已接入 `shared/desktop` typed adapter，Rust/native 集成、repository、wire 字段和 invoke 参数映射测试通过；React 全量切换仍由 Phase 8 完成。
 - [x] 实现统一 `SafeWorkspacePath`，处理规范化、大小写、符号链接和 TOCTOU 复检；`codez-core::WorkspaceRoot`/`SafeWorkspacePath` 使用私有字段保存 canonical root 与规范化相对路径，拒绝绝对相对值、父级逃逸和工作区外 canonical target，并为 Windows 提供大小写不敏感 identity key。`codez-platform::NativeFileSystem` 绑定单一 root 身份，用户路径只在最近存在祖先 canonicalize 后构造值对象，内部 symlink 折叠到物理目标、外部 symlink 失败关闭；`FileSystem` port 仅接受 `SafeWorkspacePath`。metadata/有界 read/原子 write 在 I/O 前复核 root、路径、父目录和既有目标身份，read 还比较打开句柄，Windows 真实测试覆盖 case variant、symlink 逃逸及验证后重定向。
-- [x] 迁移文件忽略、Glob/Grep/List/Read 与项目分析；先按 D-07 决定 `rg` 或纯 Rust。
-- [x] 迁移编辑器/资源管理器打开、Git 上下文和 worktree。
+- [ ] 完成文件忽略、Glob/Grep/List/Read 与项目分析的 Tauri 用户流程和等价测试；局部 Rust 模块不构成端到端迁移。
+- [ ] 迁移编辑器/资源管理器打开、Git 上下文和 worktree，并完成路径/权限/错误语义的 Rust 等价验证。
 
 ### 7.2 编辑事务和附件
 
@@ -189,7 +189,7 @@ src/renderer/src/desktop/
 
 - [ ] 实现受控进程启动、环境合并、stdout/stderr 上限、超时、取消和进程树终止。
 - [ ] 实现 Bash/PowerShell 平台选择和 UTF-8 约束。
-- [ ] 实现 PTY start/write/resize/kill/output/exit，终端事件使用有界 channel。
+- [ ] 完成 PTY start/write/resize/kill/output/exit 的用户流程与目标平台验证。平台实现已有有界 channel 与生产树级 kill 证据，但 Windows 原生 Ctrl+C 仍失败，见 ADR 0003 和 PTY spike。
 - [ ] 退出时停止所有 PTY 和进程，并验证没有遗留子进程。
 
 **Phase 3 出口：** 文件预览/搜索/编辑/回滚、Git/worktree、附件与终端可在目标平台运行；现有对应 golden/integration 测试完成 Rust 等价覆盖。
@@ -198,6 +198,7 @@ src/renderer/src/desktop/
 
 ### 8.1 Provider
 
+- 已落地的局部边界：Provider domain types、`CredentialStore`/`ProviderRepository` ports、storage/keychain adapter 和 Tauri wire/domain 显式转换已经存在，`codez-providers` 不再反向依赖 storage 或 contracts。这些是依赖方向进展，不是 Provider 用户流程验收：凭据重录、丢失 keychain 条目的真实状态、连接测试和完整迁移恢复仍未完成。
 - [ ] 迁移 Provider CRUD、模型能力、连接测试和安全凭据引用。
 - [ ] 分别实现 OpenAI、Anthropic、Gemini 请求 adapter 和流解析器。
 - [ ] 覆盖文本、推理、图片、工具调用、Usage、stop reason、错误、超时、取消和 overflow。
@@ -205,6 +206,7 @@ src/renderer/src/desktop/
 
 ### 8.2 Chat 与 Context
 
+- 已落地的局部边界：Context ledger、附件/Git domain types 与 `AtomicPersistence` port 已从 contracts/storage 方向抽离，runtime 可以注入 persistence adapter。它尚未接入启动迁移、会话恢复和 chat compact；当前 `chat_compact` 明确返回 `UNSUPPORTED`，因此不能把 ledger 的 unit/integration 测试写作完整 Context 迁移。
 - [ ] 迁移 ModelLedgerStore、ModelContextBuilder、消息归一化和 ProviderUsage fingerprint。
 - [ ] 迁移上下文预算、trigger policy、compaction、pruning、file/skill restore 和 crash recovery。
 - [ ] 建立 Chat stream 状态机：starting/running/stopping/completed/failed/interrupted。
@@ -216,6 +218,8 @@ src/renderer/src/desktop/
 ## 9. Phase 5：工具运行时与权限系统
 
 ### 9.1 工具运行时
+
+> 当前边界：Tool/Permission 领域模块和部分 handler 已在 Rust 中存在，但 Rust chat/provider run 没有 Agent tool loop。`chat_interrupt_tool`、approval 和 ask-user command 仍返回 `UNSUPPORTED`，所以以下局部实现不能作为工具或权限用户流程完成的证据。
 
 - [x] 迁移 ToolDescriptor/Registry、Schema decoration、input validation 和 exposure planner。
 - [x] 迁移 call assembler、scheduler、hook、journal、large result store 和 result processor。
@@ -229,7 +233,7 @@ src/renderer/src/desktop/
 - [x] 迁移 Bash/PowerShell parser、nested expansion、path impact、command policies 和 critical guard。
 - [x] 完整移植危险命令 corpus、绝对红线、模型审批偏好和 allowed scope 测试。
 - [x] 授权后重验输入/资源身份；MCP/Hook/模型不能绕过 runtime policy。
-- [x] 接通 UI 审批请求/响应和 AskUserQuestion 请求/响应，取消或 UI 消失时默认拒绝。
+- [ ] 接通 UI 审批请求/响应和 AskUserQuestion 请求/响应，取消或 UI 消失时默认拒绝；当前没有 Rust Agent 等待这些响应。
 
 **Phase 5 出口：** Read/Write/Edit/Shell/Web/Task 等工具通过运行时闭环；权限决策矩阵和危险命令语料达到 100% 预期结果；未分类或解析失败操作默认安全。
 
@@ -249,18 +253,18 @@ src/renderer/src/desktop/
 
 ### 11.1 MCP
 
-- [x] 迁移配置合并、校验、项目信任、secret expression 和 managed/dynamic scope。
-- [x] 实现 stdio、Streamable HTTP、SSE、握手超时、重连、session recovery 与状态事件。
-- [x] 实现 tools/resources/prompts、content normalization、resource subscription 和日志。
-- [x] 实现 OAuth、安全外链/回调、Token 存储、过期授权和 logout。
-- [x] 实现 sampling/elicitation reverse request policy 与请求防护。
-- [x] 将现有真实 MCP fixture server 测试迁移为 Rust 集成测试或跨进程测试。
+- [ ] 迁移配置合并、校验、项目信任、secret expression 和 managed/dynamic scope。`codez-mcp` 的配置/协议基础不等于 Tauri command 已接线。
+- [ ] 实现 stdio、Streamable HTTP、SSE、握手超时、重连、session recovery 与状态事件；必须把 `McpGateway` 和配置 reconciliation 注入 `AppState`，不能用空 catalog 或成功空操作伪装 live 状态。
+- [ ] 实现 tools/resources/prompts、content normalization、resource subscription 和日志。
+- [ ] 实现 OAuth、安全外链/回调、Token 存储、过期授权和 logout。
+- [ ] 实现 sampling/elicitation reverse request policy 与请求防护。
+- [ ] 将现有真实 MCP fixture server 测试迁移为 Rust 集成测试或跨进程测试，并覆盖 Tauri boundary。
 
 ### 11.2 扩展
 
-- [x] 迁移 builtin/external/workspace Skills 的发现、导入、切换、删除和 session lifecycle。
-- [x] 迁移 Rules、Memory、Prompt Prediction、系统通知和内置资源定位。
-- [x] 对外部配置和 Markdown front matter 保持兼容。
+- [ ] 迁移 builtin/external/workspace Skills 的发现、导入、切换、删除和 session lifecycle。现有 external import 会拒绝 destructive overwrite，并做文件级 identity/tree 复核；仍缺目录句柄级 TOCTOU 防护、更新的 fingerprint/CAS/备份恢复以及崩溃可恢复事务。
+- [ ] 迁移 Rules、Memory、Prompt Prediction、系统通知和内置资源定位。
+- [ ] 对外部配置和 Markdown front matter 保持兼容，并用真实用户目录/权限场景验证。
 
 **Phase 7 出口：** 本地 stdio 与真实 HTTP MCP 集成测试通过；OAuth、信任和反向请求安全用例通过；Skills/Rules/Memory 的现有用户流程可用。
 
@@ -268,21 +272,21 @@ src/renderer/src/desktop/
 
 ### 12.1 前端迁移
 
-- [x] 将 preload 中的 API 迁入 `desktopApi`，使用生成类型和稳定错误码。
-- [x] 一次性把 stores/components 从 `window.api` 切换到 adapter。
-- [x] 将 Chat 多回调 API 改为单一 typed event stream，集中分发到 Zustand slices。
-- [x] 将 Terminal、MCP、Theme 等订阅改为显式 dispose，补组件卸载测试。
-- [x] 保持现有 UI 与文案，仅处理 Tauri WebView/平台差异。
-- [x] 删除前端对 Electron 类型、IPC channel 字符串 and preload global declaration 的依赖。
+- [ ] 将 preload 中的 API 迁入 `desktopApi`，使用生成类型和稳定错误码；迁移期 adapter 可以共存，但 Electron preload 仍是保留基线，不得据此删除。
+- [ ] 一次性把 stores/components 从 `window.api` 切换到 adapter，并以真实 Tauri command 覆盖验证。
+- [ ] 将 Chat 多回调 API 改为单一 typed event stream，集中分发到 Zustand slices；需要先补全 Rust Agent/tool/approval 生命周期。
+- [ ] 将 Terminal、MCP、Theme 等订阅改为显式 dispose，补组件卸载测试。
+- [ ] 保持现有 UI 与文案，仅处理 Tauri WebView/平台差异。
+- [ ] 在 Phase 9 删除门禁前，不以“清理”方式删除前端 Electron 类型、IPC channel 字符串或 preload global declaration；先确认无有效消费者和等价 Tauri 覆盖。
 
 ### 12.2 E2E 场景
 
-- [x] 首次启动与旧数据迁移。
-- [x] 打开中文路径项目、文件树、搜索、预览和编辑回滚。
-- [x] 配置 Provider、三类协议流式聊天、停止、重试、会话恢复。
-- [x] 工具审批、绝对红线拒绝、Shell 输出和中断。
-- [x] PTY 输入/resize/退出与多终端清理。
-- [x] 子 Agent、并行任务、worktree、暂停/恢复和应用重启。
+- [ ] 首次启动与旧数据迁移；必须包括 `AwaitingCredentials` 的重录、恢复与 activation，以及失败/回退不修改 Electron 源。
+- [ ] 打开中文路径项目、文件树、搜索、预览和编辑回滚。
+- [ ] 配置 Provider、三类协议流式聊天、停止、重试、会话恢复。
+- [ ] 工具审批、绝对红线拒绝、Shell 输出和中断。
+- [ ] PTY 输入/resize/退出与多终端清理；Windows 原生 Ctrl+C 当前失败，不能通过该场景。
+- [ ] 子 Agent、并行任务、worktree、暂停/恢复和应用重启。
 - [ ] MCP stdio/HTTP/OAuth、项目信任、资源/Prompt/Tool。
 - [ ] 主题、窗口、外链、全局快捷键、单实例和退出清理。
 

@@ -1,5 +1,5 @@
-use chrono::Utc;
 use crate::chat::prompt::types::{PromptContext, PromptLayer, PromptModule};
+use chrono::Utc;
 
 pub struct EnvironmentModule;
 
@@ -27,7 +27,11 @@ impl PromptModule for EnvironmentModule {
                 "Bash"
             };
             let cwd = ctx.workspace_root.to_string_lossy();
-            let date = ctx.now.unwrap_or_else(Utc::now).format("%Y-%m-%d").to_string();
+            let date = ctx
+                .now
+                .unwrap_or_else(Utc::now)
+                .format("%Y-%m-%d")
+                .to_string();
 
             let mut lines = vec![
                 "# Environment".to_string(),

@@ -1,14 +1,21 @@
 #![forbid(unsafe_code)]
 
+mod attachment_boundary;
+mod chat_interaction;
+mod chat_runtime;
 mod commands;
 mod composition;
+mod context_boundary;
 mod error;
+mod git_boundary;
 mod lifecycle;
 mod logging;
+mod mcp_boundary;
+mod provider_boundary;
 mod state;
 
 use codez_core::{AppError, RedactedText};
-use tauri::{Manager, WebviewWindow, Emitter};
+use tauri::{Emitter, Manager, WebviewWindow};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 fn log_window_error(window: &WebviewWindow, operation: &str, source: impl std::fmt::Display) {
@@ -92,6 +99,7 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::terminal::terminal_start,
             commands::terminal::terminal_write,
             commands::terminal::terminal_resize,
+            commands::terminal::terminal_ack,
             commands::terminal::terminal_kill,
             commands::provider::provider_get_all,
             commands::provider::provider_create,
@@ -164,6 +172,19 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::subagent::subagent_toggle,
             commands::subagent::subagent_get_detail,
             commands::subagent::subagent_set_model,
+            commands::chat::chat_predict_next_input,
+            commands::chat::chat_stream_start,
+            commands::chat::chat_stream_ack,
+            commands::chat::chat_stream_stop,
+            commands::chat::chat_get_runtime_status,
+            commands::chat::chat_steer,
+            commands::chat::chat_interrupt_tool,
+            commands::chat::chat_compact,
+            commands::chat::chat_accept_file,
+            commands::chat::chat_reject_file,
+            commands::chat::chat_get_diff,
+            commands::chat::chat_respond_to_approval,
+            commands::chat::chat_respond_ask_user,
         ])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::ThemeChanged(_)) {
@@ -171,32 +192,57 @@ pub fn run() -> Result<(), tauri::Error> {
             }
         })
         .setup(|app| {
-            let (pty_tx, mut pty_rx) = tokio::sync::mpsc::unbounded_channel();
-            
+            let (pty_tx, mut pty_rx) = tokio::sync::mpsc::channel(
+                codez_platform::pty::PTY_EVENT_QUEUE_CAPACITY,
+            );
+
             let state = composition::compose_app_state(app, pty_tx)?;
-            
+
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 #[derive(serde::Serialize, Clone)]
-                struct OutputPayload { id: String, data: String }
-                
+                struct OutputPayload {
+                    id: String,
+                    sequence: u64,
+                    data: String,
+                }
+
                 #[derive(serde::Serialize, Clone)]
-                struct ExitPayload { id: String }
+                struct ExitPayload {
+                    id: String,
+                    exit_code: Option<u32>,
+                }
 
                 while let Some(event) = pty_rx.recv().await {
                     match event {
-                        codez_platform::pty::PtyEvent::Output { id, data } => {
+                        codez_platform::pty::PtyEvent::Output { id, sequence, data } => {
                             let text = String::from_utf8_lossy(&data).to_string();
-                            let _ = handle.emit("terminal:output", OutputPayload { id, data: text });
+                            if let Err(source) = handle.emit(
+                                "terminal:output",
+                                OutputPayload { id, sequence, data: text },
+                            ) {
+                                tracing::warn!(diagnostic = %source, "terminal output event could not be emitted");
+                            }
                         }
-                        codez_platform::pty::PtyEvent::Exit { id } => {
-                            let _ = handle.emit("terminal:exit", ExitPayload { id });
+                        codez_platform::pty::PtyEvent::Exit { id, exit_code } => {
+                            if let Err(source) = handle.emit(
+                                "terminal:exit",
+                                ExitPayload { id, exit_code },
+                            ) {
+                                tracing::warn!(diagnostic = %source, "terminal exit event could not be emitted");
+                            }
                         }
                     }
                 }
             });
 
-            lifecycle::register_shutdown_hooks(app.handle(), &state.shutdown, &state.cancellation)?;
+            lifecycle::register_shutdown_hooks(
+                app.handle(),
+                &state.shutdown,
+                &state.cancellation,
+                &state.process_runner,
+                &state.pty_manager,
+            )?;
             tracing::debug!(
                 data_path_ready = state.paths.data_directory().is_absolute(),
                 max_document_bytes = state.storage.max_document_bytes(),

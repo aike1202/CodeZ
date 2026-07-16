@@ -16,11 +16,17 @@ tauri-build = { version = "2.5.3", features = [] }
 [dependencies]
 codez-contracts.workspace = true
 codez-core.workspace = true
+codez-mcp.workspace = true
 codez-platform.workspace = true
 codez-runtime.workspace = true
 codez-providers.workspace = true
 codez-storage.workspace = true
+dunce.workspace = true
+futures-util.workspace = true
+rustix.workspace = true
+same-file.workspace = true
 serde.workspace = true
+serde_yaml.workspace = true
 tauri = { version = "2.11.5", features = [] }
 tauri-plugin-dialog = "2.7.1"
 tauri-plugin-global-shortcut = "2.3.2"
@@ -34,10 +40,11 @@ thiserror.workspace = true
 url = "2.5.8"
 tokio = { workspace = true, features = ["process"] }
 serde_json.workspace = true
+tempfile.workspace = true
+chrono = { version = "0.4.45", features = ["serde"] }
 
 [dev-dependencies]
 serde_json.workspace = true
-tempfile.workspace = true
 
 
 [lints]

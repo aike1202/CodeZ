@@ -28,12 +28,18 @@ impl PromptModule for RepositoryRulesModule {
             }
             if let Some(workspace) = &ctx.workspace_rules {
                 if !workspace.is_empty() {
-                    sections.push(format!("<workspace_rules>\n{}\n</workspace_rules>", workspace));
+                    sections.push(format!(
+                        "<workspace_rules>\n{}\n</workspace_rules>",
+                        workspace
+                    ));
                 }
             }
             if let Some(directory) = &ctx.directory_rules {
                 if !directory.is_empty() {
-                    sections.push(format!("<directory_rules>\n{}\n</directory_rules>", directory));
+                    sections.push(format!(
+                        "<directory_rules>\n{}\n</directory_rules>",
+                        directory
+                    ));
                 }
             }
 

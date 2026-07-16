@@ -152,11 +152,12 @@ export default function SettingsPage({ onBack, initialTab, onCreateFromSkill }: 
                 name: activeProvider.name,
                 baseUrl: activeProvider.baseUrl,
                 apiFormat: activeProvider.apiFormat,
-                apiKey: activeProvider.apiKey,
+                apiKey: '',
                 models: activeProvider.models,
                 thinking: activeProvider.thinking || { enabled: true, mode: 'auto', effort: 'auto' }
               }}
               isNew={false}
+              apiKeyConfigured={activeProvider.apiKeyConfigured}
               onSave={async (data) => await updateProvider(activeProvider.id, data)}
               onDelete={async () => {
                  await removeProvider(activeProvider.id)

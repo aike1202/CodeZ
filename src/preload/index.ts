@@ -448,7 +448,7 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.SKILL_LIST_EXTERNAL),
     importSingle: (sourceName: string, dirName: string): Promise<boolean> =>
       ipcRenderer.invoke(IPC_CHANNELS.SKILL_IMPORT_SINGLE, sourceName, dirName),
-    remove: (id: string): Promise<boolean> =>
+    remove: (_workspaceRoot: string | null, id: string): Promise<boolean> =>
       ipcRenderer.invoke(IPC_CHANNELS.SKILL_DELETE, id)
   },
 

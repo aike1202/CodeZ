@@ -1,2 +1,2 @@
-pub mod skills;
 pub mod rules;
+pub mod skills;

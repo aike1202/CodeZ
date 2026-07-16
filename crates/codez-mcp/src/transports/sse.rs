@@ -1,20 +1,9 @@
-pub struct SseTransport {
-    pub endpoint: String,
-}
+use crate::{McpError, McpTransportKind};
 
-impl SseTransport {
-    pub fn new(endpoint: String) -> Self {
-        Self { endpoint }
-    }
-
-    pub async fn send_message(&self, payload: &str) -> Result<(), String> {
-        let client = reqwest::Client::new();
-        let _res = client.post(&self.endpoint)
-            .header("Content-Type", "application/json")
-            .body(payload.to_string())
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(())
+/// Returns the stable production error for the unsupported legacy `/sse` +
+/// `/messages` MCP transport.
+pub fn unsupported() -> McpError {
+    McpError::UnsupportedTransport {
+        transport: McpTransportKind::LegacySse,
     }
 }

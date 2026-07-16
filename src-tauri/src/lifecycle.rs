@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use codez_core::AppError;
+use codez_platform::{NativeProcessRunner, PtyManager};
 use codez_runtime::{
     CancellationTree, ShutdownCoordinator, ShutdownFuture, ShutdownHook, ShutdownPhase,
     ShutdownReport,
@@ -14,11 +15,63 @@ pub(crate) fn register_shutdown_hooks(
     app_handle: &AppHandle,
     shutdown: &ShutdownCoordinator,
     cancellation: &Arc<CancellationTree>,
+    process_runner: &Arc<NativeProcessRunner>,
+    pty_manager: &Arc<PtyManager>,
 ) -> Result<(), AppError> {
     shutdown.register(Arc::clone(cancellation) as Arc<dyn ShutdownHook>)?;
+    shutdown.register(Arc::new(ProcessShutdown {
+        runner: Arc::clone(process_runner),
+    }))?;
+    shutdown.register(Arc::new(PtyShutdown {
+        manager: Arc::clone(pty_manager),
+    }))?;
     shutdown.register(Arc::new(GlobalShortcutShutdown {
         app_handle: app_handle.clone(),
     }))
+}
+
+struct ProcessShutdown {
+    runner: Arc<NativeProcessRunner>,
+}
+
+impl ShutdownHook for ProcessShutdown {
+    fn name(&self) -> &'static str {
+        "process-runner"
+    }
+
+    fn run(&self, phase: ShutdownPhase) -> ShutdownFuture<'_> {
+        Box::pin(async move {
+            match phase {
+                ShutdownPhase::StopAccepting => self.runner.stop_accepting(),
+                ShutdownPhase::Cancel => self.runner.cancel_active(),
+                ShutdownPhase::ForceCleanup => self.runner.wait_for_idle().await,
+                ShutdownPhase::Flush => {}
+            }
+            Ok(())
+        })
+    }
+}
+
+struct PtyShutdown {
+    manager: Arc<PtyManager>,
+}
+
+impl ShutdownHook for PtyShutdown {
+    fn name(&self) -> &'static str {
+        "terminal-registry"
+    }
+
+    fn run(&self, phase: ShutdownPhase) -> ShutdownFuture<'_> {
+        Box::pin(async move {
+            match phase {
+                ShutdownPhase::StopAccepting => self.manager.stop_accepting(),
+                ShutdownPhase::Cancel => self.manager.request_stop_all(),
+                ShutdownPhase::ForceCleanup => self.manager.kill_all().await?,
+                ShutdownPhase::Flush => {}
+            }
+            Ok(())
+        })
+    }
 }
 
 pub(crate) fn handle_run_event(app_handle: &AppHandle, event: RunEvent) {

@@ -86,6 +86,7 @@ export type {
   ContextErrorCode,
   ObservedProviderInputLimit,
   LedgerPayloadByType,
+  LedgerAppendRequest,
   LedgerEvent,
   AnyLedgerEvent,
   SessionRuntimeScopeSnapshot,

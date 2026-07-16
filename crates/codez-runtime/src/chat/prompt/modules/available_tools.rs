@@ -24,7 +24,10 @@ impl PromptModule for AvailableToolsModule {
             if let Some(deferred) = &ctx.deferred_tools {
                 if !deferred.is_empty() {
                     lines.push("<deferred_tools>".to_string());
-                    lines.push("Use ToolSearch to activate one of these capabilities for the next turn:".to_string());
+                    lines.push(
+                        "Use ToolSearch to activate one of these capabilities for the next turn:"
+                            .to_string(),
+                    );
                     for tool in deferred {
                         lines.push(format!("- {}: {}", tool.name, tool.summary));
                     }
@@ -33,7 +36,7 @@ impl PromptModule for AvailableToolsModule {
             }
 
             // TODO: Port McpInstructionRegistry logic here
-            
+
             if lines.is_empty() {
                 None
             } else {

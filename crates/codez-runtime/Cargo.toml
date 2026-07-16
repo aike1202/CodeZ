@@ -8,7 +8,6 @@ license.workspace = true
 [dependencies]
 async-trait = "0.1.89"
 chrono = { version = "0.4.45", features = ["serde"] }
-codez-contracts.workspace = true
 codez-core.workspace = true
 dashmap = "6.0"
 dunce.workspace = true
@@ -24,6 +23,7 @@ serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 

@@ -23,15 +23,15 @@ impl PromptModule for TaskManagementModule {
 
     fn is_enabled<'a>(&'a self, ctx: &'a PromptContext) -> BoxFuture<'a, bool> {
         Box::pin(async move {
-            ctx.available_tools.as_ref().map_or(true, |tools| {
-                tools.iter().any(|t| t.name == "TaskCreate" || t.name == "TaskUpdate")
+            ctx.available_tools.as_ref().is_none_or(|tools| {
+                tools
+                    .iter()
+                    .any(|t| t.name == "TaskCreate" || t.name == "TaskUpdate")
             })
         })
     }
 
     fn build<'a>(&'a self, _ctx: &'a PromptContext) -> BoxFuture<'a, Option<String>> {
-        Box::pin(async move {
-            Some(TEXT.to_string())
-        })
+        Box::pin(async move { Some(TEXT.to_string()) })
     }
 }

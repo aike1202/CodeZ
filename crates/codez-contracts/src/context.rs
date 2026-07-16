@@ -1,20 +1,83 @@
-use serde::{Deserialize, Serialize};
+use std::{borrow::Cow, fmt};
+
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use ts_rs::TS;
-use crate::provider::ProviderTokenUsage;
-use crate::chat::AgentStopReason;
+
+use crate::{ComposerImageAttachment, chat::AgentStopReason, provider::ProviderTokenUsage};
 
 pub const MAIN_CONTEXT_SCOPE: &str = "main";
 pub const CONTEXT_SCHEMA_VERSION: u16 = 1;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(untagged)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, TS)]
+#[ts(type = "string")]
 pub enum ContextScopeId {
     Main,
-    #[serde(rename = "subagent:{0}")]
     Subagent(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("context scope must be 'main' or a non-empty 'subagent:<id>' value")]
+pub struct ContextScopeIdError;
+
+impl ContextScopeId {
+    /// Parses the stable wire representation used by Electron and Tauri.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ContextScopeIdError`] for unknown, empty, oversized, or
+    /// control-character-containing scope identifiers.
+    pub fn parse(value: &str) -> Result<Self, ContextScopeIdError> {
+        if value == MAIN_CONTEXT_SCOPE {
+            return Ok(Self::Main);
+        }
+        let Some(identifier) = value.strip_prefix("subagent:") else {
+            return Err(ContextScopeIdError);
+        };
+        if identifier.is_empty()
+            || identifier.len() > 160
+            || identifier.chars().any(char::is_control)
+        {
+            return Err(ContextScopeIdError);
+        }
+        Ok(Self::Subagent(identifier.to_string()))
+    }
+
+    /// Returns the stable map key used in runtime snapshots.
+    #[must_use]
+    pub fn as_key(&self) -> Cow<'_, str> {
+        match self {
+            Self::Main => Cow::Borrowed(MAIN_CONTEXT_SCOPE),
+            Self::Subagent(identifier) => Cow::Owned(format!("subagent:{identifier}")),
+        }
+    }
+}
+
+impl fmt::Display for ContextScopeId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.as_key())
+    }
+}
+
+impl Serialize for ContextScopeId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for ContextScopeId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).map_err(D::Error::custom)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(rename_all = "snake_case")]
 pub enum LedgerEventType {
@@ -30,6 +93,25 @@ pub enum LedgerEventType {
     CompactionFailed,
     HistoryReverted,
     LegacyImportCompleted,
+}
+
+impl LedgerEventType {
+    /// Reports whether an event changes the model-visible history version.
+    #[must_use]
+    pub const fn changes_history(self) -> bool {
+        matches!(
+            self,
+            Self::UserMessage
+                | Self::AssistantMessage
+                | Self::ToolResult
+                | Self::SkillStateUpdated
+                | Self::TurnInterrupted
+                | Self::ResumeStateUpdated
+                | Self::CompactionCompleted
+                | Self::HistoryReverted
+                | Self::LegacyImportCompleted
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -194,8 +276,7 @@ pub struct NormalizedModelMessage {
     pub status: String, // "complete" | "interrupted"
     pub created_at: String,
     pub source_sequence: Option<u32>,
-    // TODO attachments
-    // pub attachments: Option<Vec<ImageAttachment>>,
+    pub attachments: Option<Vec<ComposerImageAttachment>>,
     pub file_references: Option<Vec<FileContextReference>>,
 }
 
@@ -216,12 +297,32 @@ pub struct LedgerEvent {
     pub payload: serde_json::Value,
 }
 
+/// Client-authored portion of a ledger event.
+///
+/// Sequence and history versions are assigned while holding the session writer
+/// lock so concurrent callers cannot create conflicting records.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct LedgerAppendRequest {
+    pub event_id: String,
+    pub session_id: String,
+    pub context_scope_id: ContextScopeId,
+    pub turn_id: Option<String>,
+    pub created_at: String,
+    pub r#type: LedgerEventType,
+    #[ts(type = "any")]
+    pub payload: serde_json::Value,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 pub struct SessionRuntimeScopeSnapshot {
     pub history_version: u32,
     pub active_messages: Vec<NormalizedModelMessage>,
+    #[ts(type = "any")]
+    pub latest_compaction: Option<serde_json::Value>,
     #[ts(type = "any")]
     pub observed_provider_input_limit: Option<serde_json::Value>,
     pub resume_state: Option<VersionedResumeState>,
@@ -254,11 +355,10 @@ pub struct SessionRuntimeSnapshot {
     pub scopes: std::collections::HashMap<String, SessionRuntimeScopeSnapshot>,
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(untagged)]
 pub enum ModelContextItemMessage {
-    Normalized(NormalizedModelMessage),
+    Normalized(Box<NormalizedModelMessage>),
     System {
         role: String, // "system"
         content: String,
@@ -274,7 +374,6 @@ pub struct ModelContextItem {
     pub kind: String, // "system" | "compaction_summary" | "resume_state" | "skill_context" | "skill_state" | "file_context" | "user" | "assistant" | "tool"
     pub message: ModelContextItemMessage,
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -333,6 +432,13 @@ pub struct TurnCompletedPayload {
 pub struct TurnInterruptedPayload {
     pub reason: String,
     pub interrupted_messages: Vec<NormalizedModelMessage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ResumeStateUpdatedPayload {
+    pub resume_state: VersionedResumeState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -401,3 +507,86 @@ pub struct LegacyImportCompletedPayload {
     pub summary: Option<serde_json::Value>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{ContextScopeId, LedgerEventType, ModelContextItemMessage, NormalizedModelMessage};
+    use ts_rs::{Config, TS};
+
+    #[test]
+    fn context_scope_uses_the_legacy_string_wire_format() {
+        let main = serde_json::to_string(&ContextScopeId::Main)
+            .expect("fixed context scope must serialize");
+        let subagent = serde_json::to_string(&ContextScopeId::Subagent("run-7".to_string()))
+            .expect("fixed context scope must serialize");
+
+        assert_eq!(
+            (main.as_str(), subagent.as_str()),
+            (r#""main""#, r#""subagent:run-7""#)
+        );
+    }
+
+    #[test]
+    fn context_scope_rejects_unknown_wire_values() {
+        let parsed = serde_json::from_str::<ContextScopeId>(r#""../outside""#);
+
+        assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn context_scope_typescript_contract_is_a_string() {
+        assert_eq!(ContextScopeId::inline(&Config::default()), "string");
+    }
+
+    #[test]
+    fn only_model_visible_events_advance_history() {
+        assert!(LedgerEventType::UserMessage.changes_history());
+        assert!(!LedgerEventType::TurnCompleted.changes_history());
+    }
+
+    #[test]
+    fn normalized_messages_round_trip_session_attachments() {
+        let source = serde_json::json!({
+            "id": "message-1",
+            "turnId": "turn-1",
+            "role": "user",
+            "content": "inspect image",
+            "status": "complete",
+            "createdAt": "2026-07-16T00:00:00.000Z",
+            "attachments": [{
+                "id": "image-1",
+                "kind": "image",
+                "name": "fixture.png",
+                "mimeType": "image/png",
+                "width": 10,
+                "height": 10,
+                "sizeBytes": 100,
+                "storageKey": "attachments/image-1.png",
+                "scope": "session",
+                "sessionId": "session-1"
+            }]
+        });
+        let message: NormalizedModelMessage =
+            serde_json::from_value(source).expect("attachment fixture must deserialize");
+        let restored = serde_json::to_value(message).expect("attachment fixture must serialize");
+
+        assert_eq!(restored["attachments"][0]["scope"], "session");
+    }
+
+    #[test]
+    fn boxed_model_context_message_keeps_the_untagged_wire_shape() {
+        let message: NormalizedModelMessage = serde_json::from_value(serde_json::json!({
+            "id": "message-1",
+            "turnId": "turn-1",
+            "role": "user",
+            "content": "hello",
+            "status": "complete",
+            "createdAt": "2026-07-16T00:00:00.000Z"
+        }))
+        .expect("message fixture must deserialize");
+        let value = serde_json::to_value(ModelContextItemMessage::Normalized(Box::new(message)))
+            .expect("boxed message must serialize");
+
+        assert_eq!(value["id"], "message-1");
+        assert!(value.get("Normalized").is_none());
+    }
+}

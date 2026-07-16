@@ -2,6 +2,9 @@ use std::path::{Component, Path, PathBuf};
 
 use thiserror::Error;
 
+/// Directory below the user's home that owns all CodeZ application data.
+pub const CODEZ_DATA_DIRECTORY_NAME: &str = ".codez";
+
 /// Validated application-owned roots supplied by the desktop composition layer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppPaths {
@@ -25,6 +28,33 @@ pub enum AppPathError {
 }
 
 impl AppPaths {
+    /// Creates the canonical CodeZ directory layout for one user home.
+    ///
+    /// Durable data, caches, logs, and temporary files all remain below
+    /// `<home>/.codez`. The immutable packaged resource directory is supplied
+    /// separately by the desktop host.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppPathError`] when the home or resource root is relative or
+    /// contains an unresolved `..` component.
+    pub fn for_user_home(
+        home_directory: PathBuf,
+        resource_directory: PathBuf,
+    ) -> Result<Self, AppPathError> {
+        validate_borrowed_root("user home", &home_directory)?;
+        let data_directory = home_directory.join(CODEZ_DATA_DIRECTORY_NAME);
+
+        Self::new(
+            data_directory.clone(),
+            data_directory.join("cache"),
+            data_directory.join("logs"),
+            resource_directory,
+            data_directory.join("temp"),
+            home_directory,
+        )
+    }
+
     /// Creates application paths from roots resolved by the desktop host.
     ///
     /// # Errors
@@ -85,10 +115,10 @@ impl AppPaths {
         &self.home_directory
     }
 
-    /// Returns the global user-authored CodeZ state directory.
+    /// Returns the authoritative root for global CodeZ state.
     #[must_use]
     pub fn user_state_directory(&self) -> PathBuf {
-        self.home_directory.join(".codez")
+        self.data_directory.clone()
     }
 
     /// Returns the directory used for versioned migration state and backups.
@@ -170,6 +200,39 @@ mod tests {
             fixture_root("home"),
         )
         .expect("fixture paths are absolute")
+    }
+
+    #[test]
+    fn canonical_layout_keeps_all_runtime_directories_below_codez_data() {
+        let home = fixture_root("canonical-home");
+        let resources = fixture_root("canonical-resources");
+        let paths = AppPaths::for_user_home(home.clone(), resources.clone())
+            .expect("fixture paths are absolute");
+        let data = home.join(".codez");
+
+        assert_eq!(paths.data_directory(), data);
+        assert_eq!(paths.user_state_directory(), data);
+        assert_eq!(paths.cache_directory(), data.join("cache"));
+        assert_eq!(paths.log_directory(), data.join("logs"));
+        assert_eq!(paths.temporary_directory(), data.join("temp"));
+        assert_eq!(paths.resource_directory(), resources);
+        assert_eq!(paths.home_directory(), home);
+    }
+
+    #[test]
+    fn canonical_layout_rejects_a_relative_user_home() {
+        let result = AppPaths::for_user_home(
+            PathBuf::from("relative-home"),
+            fixture_root("canonical-resources"),
+        );
+
+        assert!(matches!(
+            result,
+            Err(AppPathError::NotAbsolute {
+                kind: "user home",
+                ..
+            })
+        ));
     }
 
     #[test]

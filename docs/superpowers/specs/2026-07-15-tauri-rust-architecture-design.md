@@ -410,7 +410,7 @@ not_started -> discovered -> backed_up -> transforming -> verified -> committed
                                            +---- failed <--+
 ```
 
-只有 `committed` 可让新 repository 把迁移结果作为权威数据；失败状态可重试且不修改旧数据。
+只有 `committed` 可让新 repository 把迁移结果作为权威数据；失败状态可重试且不修改旧数据。Electron `userData` 与升级前已有的 `~/.codez` 内容都是迁移源，新运行时的目标根固定为 `~/.codez`。由于目标根可能预先包含用户内容，backup/staging 必须使用 catalog 明确排除的受控路径，并按实际读写文件验证不相交；禁止用整个目录覆盖、重命名或清空来完成提交。
 
 ## 10. 并发、取消与背压
 
@@ -464,7 +464,9 @@ Repository 接收 domain model 或专用 persistence model，不接收 Tauri DTO
 - 第一阶段保持 JSON/JSONL/目录格式兼容，避免框架和数据库同时迁移。
 - 统一 atomic file 实现，禁止每个 service 自行拼临时文件逻辑。
 - 大对象使用内容寻址或独立文件，session index 不重复嵌入无界内容。
-- 所有路径由 `AppPaths` 提供，模块不能自行推测 `%APPDATA%`、home 或临时目录。
+- 新运行时的全局应用数据根固定为 `~/.codez`；cache、logs、temp 与 migrations 分别位于该根的同名子目录，见 ADR 0007。
+- 所有路径由 `AppPaths` 提供，模块不能自行推测 `%APPDATA%`、XDG、home、Tauri app-data 或临时目录。
+- 工作区 `.codez`/`.codez-cache` 是从受验证 workspace root 派生的项目状态，不构成第二个全局应用数据根。
 - 将来切换 SQLite 必须通过 repository adapter 和独立 ADR，不改变应用层接口。
 
 ### 11.3 Secret

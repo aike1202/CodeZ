@@ -1,12 +1,14 @@
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+
 use regex::Regex;
 use tokio::fs;
 
-lazy_static::lazy_static! {
-    static ref SENSITIVE_PATTERN: Regex = Regex::new(
-        r#"/(?:\.ssh|\.aws)(?:/|$)|\/(?:etc|private/etc)(?:/|$)|\/(?:\.bashrc|\.zshrc|\.profile)$|\/(?:\.npmrc|\.pypirc|\.netrc)$|/codez/(?:permission-rules|workspace-permissions)\.json$"#
-    ).unwrap();
-}
+static SENSITIVE_PATTERN: LazyLock<Result<Regex, regex::Error>> = LazyLock::new(|| {
+    Regex::new(
+        r#"/(?:\.ssh|\.aws)(?:/|$)|\/(?:etc|private/etc)(?:/|$)|\/(?:\.bashrc|\.zshrc|\.profile)$|\/(?:\.npmrc|\.pypirc|\.netrc)$|/codez/(?:permission-rules|workspace-permissions)\.json$"#,
+    )
+});
 
 pub struct PathImpactResult {
     pub input_path: String,
@@ -41,17 +43,6 @@ async fn nearest_existing_parent(target: &Path) -> (PathBuf, Vec<String>) {
     }
 }
 
-fn normalize_for_compare(value: &Path) -> String {
-    #[cfg(windows)]
-    {
-        value.to_string_lossy().to_lowercase()
-    }
-    #[cfg(not(windows))]
-    {
-        value.to_string_lossy().to_string()
-    }
-}
-
 pub struct PathImpactAnalyzer;
 
 impl PathImpactAnalyzer {
@@ -64,7 +55,7 @@ impl PathImpactAnalyzer {
         };
 
         let (nearest_parent, suffix) = nearest_existing_parent(&resolved_path).await;
-        
+
         let real_parent_path = match fs::canonicalize(&nearest_parent).await {
             Ok(p) => p,
             Err(_) => nearest_parent.clone(),
@@ -80,14 +71,16 @@ impl PathImpactAnalyzer {
             Err(_) => Path::new(workspace_root).to_path_buf(),
         };
 
-        // Simplified inside_workspace logic
-        let canonical_str = normalize_for_compare(&canonical_target);
-        let root_str = normalize_for_compare(&real_root);
-        let inside_workspace = canonical_str.starts_with(&root_str);
+        let inside_workspace = canonical_target.starts_with(&real_root);
 
-        let normalized = canonical_target.to_string_lossy().replace("\\", "/").to_lowercase();
+        let normalized = canonical_target
+            .to_string_lossy()
+            .replace("\\", "/")
+            .to_lowercase();
         // Regex isn't matching perfectly without 'estimés' artifacts, fixing regex literal:
-        let sensitive = SENSITIVE_PATTERN.is_match(&normalized);
+        let sensitive = SENSITIVE_PATTERN
+            .as_ref()
+            .is_ok_and(|pattern| pattern.is_match(&normalized));
 
         PathImpactResult {
             input_path: input_path.to_string(),

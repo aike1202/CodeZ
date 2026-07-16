@@ -1,6 +1,6 @@
 # ADR 0003: Rust PTY 与进程树责任边界
 
-> 状态：Accepted
+> 状态：Accepted（Windows Ctrl+C 交付策略仍为未决后续 ADR）
 >
 > 日期：2026-07-15
 
@@ -25,11 +25,15 @@ CodeZ 保留以下平台适配责任：
 
 ## 后果
 
-- Windows x64 已用真实 ConPTY 验证 UTF-8、中文工作目录、132x41 resize、前台 Ctrl+C、隐藏后代进程树终止、clean exit 和 reader EOF。
+- Windows x64 已用真实 ConPTY 验证 UTF-8、中文工作目录、132x41 resize、隐藏后代进程树终止、clean exit 和 reader EOF。原生 `ping.exe -t` 前台命令的 Ctrl+C 验收失败：写入裸 `0x03` 后 shell 不能恢复，不得声称 Ctrl+C 已验证。
 - 现有 `TerminalInstance` 的 xterm.js output -> `term.write()` -> `onData` -> backend write 回路必须在 Tauri channel 迁移中保持，否则 ConPTY 可能停在首次光标查询。
 - `portable-pty` 是同步阻塞接口；Phase 3 不能在 Tokio async worker 上直接阻塞读取，也不能使用无界输出队列。
-- Windows 探针用数字 PID 调用 `taskkill /T /F` 验证树语义。这是能力证据，不免除生产 adapter 的 PID 归属校验、幂等和退出确认。
+- Windows 树级终止现在经生产 `PtyManager.kill` 验证：受测后代报告 PID、持有独占文件锁，kill 后锁释放且 registry 为零。这不免除 PID owner 校验、并发 kill 和退出竞态测试。
 - macOS/Linux 条件编译 smoke 已加入测试源码，但尚未在真实平台运行，不能据此宣称平台验收完成。
 - 依赖未声明 MSRV；当前证据来自 Rust 1.95.0。工作区 Rust 1.85 门禁仍需由 CI 单独验证。
 
 验证证据见 `docs/migration/spikes/rust-pty.md`。
+
+## Windows Ctrl+C 后续 ADR
+
+本 ADR 只固定 `portable-pty` 的创建、读写、resize 和树级终止责任边界，不授权把裸 ETX 当作 Windows 通用 Ctrl+C。Phase 3 退出前必须新增或更新 ADR，选择并在真实原生前台程序上验证下列之一：受控的 Windows control-event helper/sidecar，替代 PTY 核心，或另一种能保持现有终端字节流语义的方案。该 ADR 必须同时规定进程归属、权限边界、取消超时、清理/回收、打包方式和失败时的安全行为；不得通过弱化 `ping.exe -t` 复验来关闭该阻断项。

@@ -1,22 +1,13 @@
-use crate::chat::prompt::pipeline::PromptPipeline;
 use crate::chat::prompt::modules::{
-    identity::IdentityModule,
-    engineering_philosophy::EngineeringPhilosophyModule,
-    memory::MemoryModule,
-    context_management::ContextManagementModule,
-    repository_rules::RepositoryRulesModule,
-    environment::EnvironmentModule,
-    git_status::GitStatusModule,
-    skills::SkillsModule,
-    verification_strategy::VerificationStrategyModule,
-    editing::EditingModule,
-    verification::VerificationModule,
-    task_management::TaskManagementModule,
-    worker_delegation::WorkerDelegationModule,
-    output_policy::OutputPolicyModule,
-    available_tools::AvailableToolsModule,
-    sub_agents::SubAgentsModule,
+    available_tools::AvailableToolsModule, context_management::ContextManagementModule,
+    editing::EditingModule, engineering_philosophy::EngineeringPhilosophyModule,
+    environment::EnvironmentModule, git_status::GitStatusModule, identity::IdentityModule,
+    memory::MemoryModule, output_policy::OutputPolicyModule,
+    repository_rules::RepositoryRulesModule, skills::SkillsModule, sub_agents::SubAgentsModule,
+    task_management::TaskManagementModule, verification::VerificationModule,
+    verification_strategy::VerificationStrategyModule, worker_delegation::WorkerDelegationModule,
 };
+use crate::chat::prompt::pipeline::PromptPipeline;
 
 pub fn create_default_pipeline() -> PromptPipeline {
     PromptPipeline::new()

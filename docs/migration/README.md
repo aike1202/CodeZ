@@ -4,14 +4,20 @@
 
 ## 当前状态
 
-- Phase 0：Windows x64 基线已闭环。D-01 至 D-08 已按 ADR 0001 冻结；六项高风险 spike、88 个 `window.api` 方法语义、23 类持久化数据、183 个测试文件分类、79 条 FR/NFR 追踪矩阵和性能基线均已有可重复证据。macOS/Linux safeStorage、PTY、资源与性能验证仍由目标平台 CI 完成，Phase 9 的签名主体和升级 feed 仍未冻结。
-- Phase 1：基座已闭环。Cargo workspace、依赖方向门禁、三平台 CI、Tauri v2 宿主、typed command、前端 `shared/desktop`、统一错误/脱敏诊断、迁移期启动页和有界四阶段安全退出已经建立；Tauri debug build、聚焦 host 测试和非视觉 smoke 通过。
-- Phase 2：实现清单已闭环，阶段出口仍待后续真实运行状态与目标平台证据。`AppPaths` 已统一应用数据、缓存、日志、资源、临时和工作区状态根并由 Tauri composition root 注入；`AtomicFileStore` 已提供按资源串行的原子 JSON/JSONL、同步落盘、大小限制、故障注入、安全权限、损坏 quarantine/有效前缀恢复及不可变 create-or-reuse 写入。`codez-storage` 现已定义 19 个版本化 schema family，并按 23 类持久化清单实现只读发现、脱敏 manifest、源文件复核、幂等 no-clobber 精确备份及脱敏 `legacy-data-v0` fixtures。迁移 transform 会为 JSON/JSONL 写入版本头、保留 opaque 数据、剥离 Provider 密文字段并跳过 secret envelope；Provider/Session/Settings/Attachment/Ledger/Permission/Execution/MCP 跨文件引用和记录数会在生成不可变完成报告前验证。只有重新复核 manifest、backup、transform、凭据状态、OS 凭据可读性和目标哈希后原子创建的 `migration-commit.json` 才能授权仓库，故障后的 staged run 不具权威性，`inspect_phase` 可在重启后识别安全重试点。类型安全的 `CredentialStore` port 与 Windows Credential Manager/macOS Keychain/Linux Secret Service adapter 已注入 Tauri composition root，secret 不实现 `Debug`/`Serialize`/`Clone` 并在 drop 时清零。旧 Provider/MCP secret/MCP OAuth 迁移现已绑定已验证备份：Windows 通过 DPAPI + AES-256-GCM 只读旧 `safeStorage`，成功值直接进入 OS 凭据库，无法安全迁移的条目只写脱敏 `requires_reentry` 决策。Base64 依赖现由架构门禁限制在 migration-only reader；`RedactedText` 与私有字段 `AppError` 在错误构造时清零原始缓冲并完成结构化脱敏，真实 `tracing` 输出已有防泄密回归。Tauri 现向应用日志目录写入每日轮转、8 文件保留的 JSONL 诊断日志，`CODEZ_LOG` 控制自有 `codez_*` target 的等级/target 并拒绝第三方 target，command 与 typed session/stream/tool span 已建立。`codez-core` 已定义有界 FileSystem、ProcessRunner、EventSink、Clock、IdGenerator ports 和独立 `PROCESS_FAILED` 错误类；`codez-runtime::CancellationTree` 建立 application -> session -> agent -> tool -> process 的 typed scope，并接入 shutdown admission/Cancel 阶段。macOS/Linux 真实凭据与权限证据，以及 session/Agent 持久化出现后的异常退出运行状态识别，仍是 Phase 2 出口的保留门禁。
-- Phase 3：进行中。`WorkspaceRoot`/`SafeWorkspacePath` 已作为私有字段值对象落地，`FileSystem` port 不再接受裸 `Path`；绑定单一 canonical root 的 `NativeFileSystem` 已实现最近存在祖先解析、Windows 大小写身份、内部 symlink 物理折叠、外部 symlink 防逃逸、root/path/父目录/目标 TOCTOU 复检、打开句柄身份校验、有界读取、目录枚举和同目录原子写入。Windows 真实 symlink 逃逸与验证后重定向测试通过。目录选择、版本化 recent repository、具体框架/包管理器识别、最多 50,000 项/64 层递归树、全路径扫描及 5 MiB 输入/1 MiB/1,000 行输出受限预览已通过 9 个 typed Tauri commands 接入 `shared/desktop` adapter。Glob/Grep、项目深度分析、编辑器/资源管理器、Git/worktree、编辑、附件与进程/PTY 仍未迁移，React 全量切换留在 Phase 8。
-- Phase 4 至 Phase 10：未开始。
-- Electron 基线：完整保留，禁止提前删除。
+下列状态按当前工作树的代码边界记录。某个 crate、command 或测试存在，不等于对应用户流程已经由 Rust/Tauri 完整承接；只有各 Phase 的出口和 Phase 9 删除门禁才构成迁移完成证据。
 
-## 首轮验证
+- Phase 0-1：迁移清单、ADR、Cargo/Tauri 基座、契约和前端 adapter 已建立。当前仍有并行整合中的 workspace/Cargo 变更，历史绿灯必须在整合完成后重跑，不能据此宣布任一完整 Phase 已验收。
+- Phase 2：底层 primitives 已覆盖大部分清单，但阶段尚未闭环。ADR 0007 已把新运行时唯一应用数据根固定为 `~/.codez`，cache/logs/temp/migrations 均位于其下；Electron `userData` 和升级前已有的 `~/.codez` 用户内容只作为迁移源。`AtomicFileStore`、19 个 schema family、23 类只读 discovery、no-clobber backup、transform、凭据决策、引用验证和 commit marker 已存在，且 composition 已在构造 repositories 前运行 migration coordinator。它仍缺少真实旧安装升级/回退的端到端证据，以及 `AwaitingCredentials` 的凭据重录、恢复和 activation 链路；当前该状态会 fail closed 阻止启动。因此不得宣称端到端数据或密钥迁移完成。
+- Phase 3：进行中。`WorkspaceRoot`/`SafeWorkspacePath`、受限文件系统、recent projects 和部分 Workspace commands 已实现。平台 PTY 已有创建、读写、resize、树级 kill 和有界事件实现；2026-07-16 的真实生产 `PtyManager.kill` 树终止用例通过，但原生 `ping.exe -t` 的 Ctrl+C 用例未能恢复 prompt，是 Phase 3 和发布阻断项。编辑事务、附件、Git/worktree、完整终端命令与前端流程仍未验收。
+- Phase 4：Provider domain、存储边界、协议流解析、Context ledger 与 `AtomicPersistence` port 已有实现；它们尚未形成含凭据重录、compact、持久化恢复和 tool/Agent loop 的完整会话。当前 Rust chat commands 对 tool interrupt、compact、文件 accept/reject/diff、approval 和 ask-user 明确返回 `UNSUPPORTED`。
+- Phase 5-6：工具、权限、Agent 和并行执行存在部分 Rust domain 模块，但尚未接入 Rust chat/Agent 调用闭环，不能作为用户可用功能或 Electron 替代品计入完成。
+- Phase 7：`codez-mcp` 协议/配置基础和外部 Skills 的部分安全导入检查正在实现；Tauri `AppState` 尚未提供可用的 MCP live gateway/reconciliation，MCP live 操作不能视为已迁移。外部 Skills 也尚无目录句柄级 TOCTOU 防护、可恢复事务日志和可验证的更新/CAS 覆盖流程。
+- Phase 8-10：尚未开始端到端验收、跨平台发布验证或 Electron 清理。React/Tauri adapter 的局部迁移不等于前端已脱离 Electron。
+- Electron 基线：源码、测试、配置和依赖必须完整保留。Phase 0-9 禁止删除；仅在 Phase 9 全部迁移、安全、升级/回退、跨平台和人工批准门禁通过后，才能在独立的 Phase 10 删除。
+
+## 历史基线与当前验证
+
+以下是 2026-07-15 记录的历史基线，用于后续对比，不是当前工作树的统一验收结果。当前存在并行 Rust/Cargo 整合；Cargo.lock 稳定后必须重新执行严格 Rust、前端、契约和目标平台门禁。尤其不得用这些旧结果掩盖 Windows 原生 Ctrl+C、凭据重录、Tool/Agent loop、MCP live gateway 或外部 Skills 事务安全的未完成项。
 
 - `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings -D clippy::perf`：通过。
 - `cargo test --workspace --locked`：通过，共 101 项 Rust 单元/集成测试；其中 storage 37 项覆盖路径、原子替换、不可变创建、版本化 recent repository、备份、凭据适配、三类旧凭据迁移、transform、语义引用、重启阶段识别、完成标记、脱敏、幂等与篡改阻断；core/runtime/platform/desktop 覆盖进程边界、错误分类、UUID、取消树、路径值对象、Windows 大小写、symlink/TOCTOU、有界读取、原子写入、递归树、忽略规则、项目识别与预览，另有 1 项 `SecretValue` 不可序列化的 compile-fail rustdoc。
@@ -26,7 +32,7 @@
 - 迁移清单重复生成 SHA-256 稳定，当前 119 个声明 channel、0 个未声明 transport 引用。
 - Windows `safeStorage` sentinel spike：通过，确认旧密文需要 `Local State` DPAPI 主密钥 + Chromium `v10` AES-256-GCM 只读兼容层；见 `docs/migration/spikes/windows-safe-storage.md`。
 - Rust MCP SDK spike：通过，采用 `rmcp 2.2.0` 作为协议核心，legacy SSE、严格 session recovery 和安全策略由 CodeZ adapter 负责；见 `docs/migration/spikes/rust-mcp-sdk.md`。
-- Windows PTY/进程树 spike：6 项真实 ConPTY 测试通过，采用 `portable-pty 0.9.0` 作为 PTY 原语，树级终止和有界输出由 CodeZ adapter 负责；见 `docs/migration/spikes/rust-pty.md`。
+- Windows PTY/进程树 spike：2026-07-16 复验证实生产 `PtyManager.kill` 的树级终止通过，但 ConPTY 对原生 `ping.exe -t` 写入裸 `0x03` 后不能恢复 shell prompt；Windows Ctrl+C 仍是发布阻断项。`portable-pty 0.9.0` 仅是当前 PTY 原语候选，见 `docs/migration/spikes/rust-pty.md`。
 - Rust Shell parser spike：29 条共享语料中裸 Rust 完全一致 18 条，确认必须迁移 Bash/PowerShell masks 和原生 PowerShell AST fallback；见 `docs/migration/spikes/rust-shell-parser.md`。
 - Tauri 流/backpressure spike：2.56 MiB 慢消费和组件卸载模型通过，确认使用有界上游、4 KiB frame、累计 ACK 窗口与显式 cancel；见 `docs/migration/spikes/tauri-stream-backpressure.md`。
 - Tauri 资源打包 spike：20 个 builtin skill 文件、`rg 15.0.0`、固定安装目标和 Tauri debug 构建通过；见 `docs/migration/spikes/tauri-resource-packaging.md`。

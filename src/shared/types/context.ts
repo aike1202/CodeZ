@@ -393,6 +393,19 @@ export interface LedgerEvent<
   payload: TPayload
 }
 
+export interface LedgerAppendRequest<
+  TType extends LedgerEventType = LedgerEventType,
+  TPayload = LedgerPayloadByType[TType]
+> {
+  eventId: string
+  sessionId: string
+  contextScopeId: ContextScopeId
+  turnId?: string
+  createdAt: string
+  type: TType
+  payload: TPayload
+}
+
 export type AnyLedgerEvent = {
   [TType in LedgerEventType]: LedgerEvent<TType, LedgerPayloadByType[TType]>
 }[LedgerEventType]

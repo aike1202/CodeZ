@@ -26,7 +26,11 @@ import type {
   ProviderFormData,
   ConnectionTestResult,
 } from './generated/contracts'
-import type { LedgerEvent, SessionRuntimeSnapshot } from '@shared/types/context'
+import type {
+  LedgerAppendRequest,
+  LedgerEvent,
+  SessionRuntimeSnapshot
+} from '@shared/types/context'
 import { normalizeDesktopError } from './errors'
 
 async function command<T>(name: string, args?: Record<string, unknown>): Promise<T> {
@@ -102,7 +106,7 @@ export interface DesktopApi {
     deleteSession(sessionId: string): Promise<void>
   }
   context: {
-    ledgerAppendEvent(sessionId: string, event: LedgerEvent): Promise<void>
+    ledgerAppendEvent(sessionId: string, event: LedgerAppendRequest): Promise<LedgerEvent>
     ledgerGetSnapshot(sessionId: string): Promise<SessionRuntimeSnapshot | null>
   }
   provider: {
@@ -207,16 +211,15 @@ export const desktopApi: DesktopApi = {
     deleteSession: (sessionId) => command('attachment_delete_session', { sessionId })
   },
   provider: {
-    getAll: () => command('providerGetAll'),
-    create: (data) => command('providerCreate', { data }),
-    update: (id, data) => command('providerUpdate', { id, data }),
-    delete: (id) => command('providerDelete', { id }),
-    setActive: (id) => command('providerSetActive', { id }),
-    testConnection: (id) => command('providerTestConnection', { id })
+    getAll: () => command('provider_get_all'),
+    create: (data) => command('provider_create', { data }),
+    update: (id, data) => command('provider_update', { id, data }),
+    delete: (id) => command('provider_delete', { id }),
+    setActive: (id) => command('provider_set_active', { id }),
+    testConnection: (id) => command('provider_test_connection', { id })
   },
   context: {
     ledgerAppendEvent: async (sessionId, event) => command('ledger_append_event', { sessionId, event }),
     ledgerGetSnapshot: async (sessionId) => command('ledger_get_snapshot', { sessionId }),
   }
 }
-

@@ -1,15 +1,18 @@
 use std::{
     collections::HashSet,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     sync::Arc,
     time::SystemTime,
 };
-use tokio::fs;
-use serde::{Serialize, Deserialize};
 
-use codez_contracts::{AttachmentPreviewBytes, ComposerImageAttachment, DraftImageAttachment, SessionImageAttachment};
-use codez_core::{AppError, AppPaths};
+use serde::{Deserialize, Serialize};
+use tokio::fs;
 use uuid::Uuid;
+
+use codez_core::{
+    AppError, AppPaths, AttachmentPreviewBytes, ComposerImageAttachment, DraftImageAttachment,
+    SessionImageAttachment,
+};
 
 const DRAFT_TTL_SECS: u64 = 24 * 60 * 60;
 
@@ -29,8 +32,12 @@ pub struct DecodedImage {
 pub struct ImageCodec;
 
 impl ImageCodec {
-    pub fn inspect(bytes: &[u8], _declared_mime_type: Option<&str>) -> Result<DecodedImage, AppError> {
-        let format = image::guess_format(bytes).map_err(|e| AppError::validation(format!("Invalid image format: {}", e)))?;
+    pub fn inspect(
+        bytes: &[u8],
+        _declared_mime_type: Option<&str>,
+    ) -> Result<DecodedImage, AppError> {
+        let format = image::guess_format(bytes)
+            .map_err(|e| AppError::validation(format!("Invalid image format: {}", e)))?;
         let img = image::load_from_memory_with_format(bytes, format)
             .map_err(|e| AppError::validation(format!("Failed to load image: {}", e)))?;
 
@@ -50,36 +57,44 @@ impl ImageCodec {
     }
 
     pub fn thumbnail(image: &DecodedImage) -> Result<Vec<u8>, AppError> {
-        let img = image::load_from_memory(&image.bytes)
-            .map_err(|e| AppError::internal(format!("Failed to parse image for thumbnail: {}", e)))?;
+        let img = image::load_from_memory(&image.bytes).map_err(|e| {
+            AppError::internal(format!("Failed to parse image for thumbnail: {}", e))
+        })?;
         let thumb = img.thumbnail(256, 256);
         let mut bytes: Vec<u8> = Vec::new();
         let mut cursor = std::io::Cursor::new(&mut bytes);
-        thumb.write_to(&mut cursor, image::ImageFormat::Jpeg)
+        thumb
+            .write_to(&mut cursor, image::ImageFormat::Jpeg)
             .map_err(|e| AppError::internal(format!("Failed to generate thumbnail: {}", e)))?;
         Ok(bytes)
     }
 
     pub fn optimize(image: &DecodedImage, max_bytes: usize) -> Result<DecodedImage, AppError> {
-        let img = image::load_from_memory(&image.bytes)
-            .map_err(|e| AppError::internal(format!("Failed to parse image for optimization: {}", e)))?;
-        
+        let img = image::load_from_memory(&image.bytes).map_err(|e| {
+            AppError::internal(format!("Failed to parse image for optimization: {}", e))
+        })?;
+
         let mut bytes: Vec<u8> = Vec::new();
         let mut cursor = std::io::Cursor::new(&mut bytes);
         img.write_to(&mut cursor, image::ImageFormat::Jpeg)
             .map_err(|e| AppError::internal(format!("Failed to optimize image: {}", e)))?;
-        
+
         if bytes.len() > max_bytes {
-            let smaller = img.resize(img.width() / 2, img.height() / 2, image::imageops::FilterType::Triangle);
+            let smaller = img.resize(
+                img.width() / 2,
+                img.height() / 2,
+                image::imageops::FilterType::Triangle,
+            );
             let mut bytes2: Vec<u8> = Vec::new();
             let mut cursor2 = std::io::Cursor::new(&mut bytes2);
-            smaller.write_to(&mut cursor2, image::ImageFormat::Jpeg)
+            smaller
+                .write_to(&mut cursor2, image::ImageFormat::Jpeg)
                 .map_err(|e| AppError::internal(format!("Failed to resize image: {}", e)))?;
             bytes = bytes2;
         }
 
         Ok(DecodedImage {
-            bytes: bytes.clone(),
+            bytes,
             mime_type: "image/jpeg".to_string(),
             width: img.width(),
             height: img.height(),
@@ -100,8 +115,14 @@ impl AttachmentService {
     }
 
     fn assert_identifier(value: &str, label: &str) -> Result<(), AppError> {
-        if !value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
-            return Err(AppError::validation(format!("Invalid {} identifier", label)));
+        if !value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            return Err(AppError::validation(format!(
+                "Invalid {} identifier",
+                label
+            )));
         }
         Ok(())
     }
@@ -114,22 +135,38 @@ impl AttachmentService {
     }
 
     fn directory_for(&self, storage_key: &str) -> Result<PathBuf, AppError> {
-        if let Some(rest) = storage_key.strip_prefix("attachment:") {
-            let resolved = self.root_path.join(rest);
-            self.assert_contained(&resolved)?;
-            Ok(resolved)
-        } else {
-            Err(AppError::validation("Invalid attachment storage key"))
+        let Some(rest) = storage_key.strip_prefix("attachment:") else {
+            return Err(AppError::validation("Invalid attachment storage key"));
+        };
+        let relative = Path::new(rest);
+        if relative.as_os_str().is_empty()
+            || relative
+                .components()
+                .any(|component| !matches!(component, Component::Normal(_)))
+        {
+            return Err(AppError::validation("Invalid attachment storage key"));
         }
+        let resolved = self.root_path.join(relative);
+        self.assert_contained(&resolved)?;
+        Ok(resolved)
     }
 
     fn path_for(&self, storage_key: &str, variant: &str) -> Result<PathBuf, AppError> {
+        let mut components = Path::new(variant).components();
+        if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
+            return Err(AppError::validation("Invalid attachment variant"));
+        }
         let resolved = self.directory_for(storage_key)?.join(variant);
         self.assert_contained(&resolved)?;
         Ok(resolved)
     }
 
-    pub async fn import_draft(&self, name: &str, declared_mime_type: Option<&str>, bytes: &[u8]) -> Result<DraftImageAttachment, AppError> {
+    pub async fn import_draft(
+        &self,
+        name: &str,
+        declared_mime_type: Option<&str>,
+        bytes: &[u8],
+    ) -> Result<DraftImageAttachment, AppError> {
         if name.trim().is_empty() {
             return Err(AppError::validation("Image name is required"));
         }
@@ -149,7 +186,11 @@ impl AttachmentService {
             draft_id,
             scope: "draft".to_string(),
             kind: "image".to_string(),
-            name: Path::new(name).file_name().unwrap_or_default().to_string_lossy().to_string(),
+            name: Path::new(name)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
             mime_type: decoded.mime_type,
             width: decoded.width,
             height: decoded.height,
@@ -157,11 +198,21 @@ impl AttachmentService {
             storage_key: storage_key.clone(),
         };
 
-        self.write_attachment(&ComposerImageAttachment::Draft(attachment.clone()), &decoded.bytes, &thumbnail).await?;
+        self.write_attachment(
+            &ComposerImageAttachment::Draft(attachment.clone()),
+            &decoded.bytes,
+            &thumbnail,
+        )
+        .await?;
         Ok(attachment)
     }
 
-    async fn write_attachment(&self, attachment: &ComposerImageAttachment, original: &[u8], thumbnail: &[u8]) -> Result<(), AppError> {
+    async fn write_attachment(
+        &self,
+        attachment: &ComposerImageAttachment,
+        original: &[u8],
+        thumbnail: &[u8],
+    ) -> Result<(), AppError> {
         let storage_key = match attachment {
             ComposerImageAttachment::Session(s) => &s.storage_key,
             ComposerImageAttachment::Draft(d) => &d.storage_key,
@@ -169,20 +220,28 @@ impl AttachmentService {
         let final_dir = self.directory_for(storage_key)?;
         let temp_dir = final_dir.with_extension(format!("tmp-{}", Uuid::new_v4()));
 
-        fs::create_dir_all(&temp_dir).await.map_err(|e| AppError::internal(format!("Failed to create temp dir: {}", e)))?;
+        fs::create_dir_all(&temp_dir)
+            .await
+            .map_err(|e| AppError::internal(format!("Failed to create temp dir: {}", e)))?;
 
         let meta = AttachmentMetadata {
             attachment: attachment.clone(),
-            created_at: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
+            created_at: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
         };
+        let meta_json = serde_json::to_vec(&meta).map_err(|source| {
+            AppError::internal(format!("Failed to serialize attachment metadata: {source}"))
+        })?;
 
         let res = async {
             fs::write(temp_dir.join("original"), original).await?;
             fs::write(temp_dir.join("thumbnail"), thumbnail).await?;
-            let meta_json = serde_json::to_string(&meta).unwrap();
             fs::write(temp_dir.join("meta.json"), meta_json).await?;
             Ok::<_, std::io::Error>(())
-        }.await;
+        }
+        .await;
 
         if res.is_err() {
             let _ = fs::remove_dir_all(&temp_dir).await;
@@ -193,15 +252,21 @@ impl AttachmentService {
             let _ = fs::create_dir_all(parent).await;
         }
 
-        fs::rename(&temp_dir, &final_dir).await.map_err(|e| {
-            let _ = fs::remove_dir_all(&temp_dir);
-            AppError::internal(format!("Failed to rename attachment dir: {}", e))
-        })?;
+        if let Err(error) = fs::rename(&temp_dir, &final_dir).await {
+            let _ = fs::remove_dir_all(&temp_dir).await;
+            return Err(AppError::internal(format!(
+                "Failed to rename attachment dir: {error}"
+            )));
+        }
 
         Ok(())
     }
 
-    pub async fn promote_drafts(&self, session_id: &str, attachments: Vec<ComposerImageAttachment>) -> Result<Vec<SessionImageAttachment>, AppError> {
+    pub async fn promote_drafts(
+        &self,
+        session_id: &str,
+        attachments: Vec<ComposerImageAttachment>,
+    ) -> Result<Vec<SessionImageAttachment>, AppError> {
         Self::assert_identifier(session_id, "session")?;
         let mut created = Vec::new();
         let mut promoted = Vec::new();
@@ -211,7 +276,9 @@ impl AttachmentService {
                 ComposerImageAttachment::Session(s) => {
                     if s.session_id != session_id {
                         self.rollback_promotion(session_id, &created).await;
-                        return Err(AppError::validation("Attachment does not belong to this session"));
+                        return Err(AppError::validation(
+                            "Attachment does not belong to this session",
+                        ));
                     }
                     promoted.push(s);
                 }
@@ -226,7 +293,10 @@ impl AttachmentService {
 
                     if let Err(e) = Self::copy_dir_recursive(&source_dir, &destination_dir).await {
                         self.rollback_promotion(session_id, &created).await;
-                        return Err(AppError::internal(format!("Failed to promote attachment: {}", e)));
+                        return Err(AppError::internal(format!(
+                            "Failed to promote attachment: {}",
+                            e
+                        )));
                     }
 
                     created.push(d.id.clone());
@@ -245,9 +315,14 @@ impl AttachmentService {
                     };
 
                     let meta_path = self.path_for(&destination_key, "meta.json")?;
-                    let mut created_at = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+                    let mut created_at = SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
                     if let Ok(existing_meta_str) = fs::read_to_string(&meta_path).await {
-                        if let Ok(existing_meta) = serde_json::from_str::<AttachmentMetadata>(&existing_meta_str) {
+                        if let Ok(existing_meta) =
+                            serde_json::from_str::<AttachmentMetadata>(&existing_meta_str)
+                        {
                             created_at = existing_meta.created_at;
                         }
                     }
@@ -272,7 +347,11 @@ impl AttachmentService {
         while let Ok(Some(entry)) = entries.next_entry().await {
             let ty = entry.file_type().await?;
             if ty.is_dir() {
-                Box::pin(Self::copy_dir_recursive(&entry.path(), &dst.join(entry.file_name()))).await?;
+                Box::pin(Self::copy_dir_recursive(
+                    &entry.path(),
+                    &dst.join(entry.file_name()),
+                ))
+                .await?;
             } else {
                 fs::copy(entry.path(), dst.join(entry.file_name())).await?;
             }
@@ -286,7 +365,9 @@ impl AttachmentService {
         }
         for id in attachment_ids {
             if Self::assert_identifier(id, "attachment").is_ok() {
-                if let Ok(dir) = self.directory_for(&format!("attachment:sessions/{}/{}", session_id, id)) {
+                if let Ok(dir) =
+                    self.directory_for(&format!("attachment:sessions/{}/{}", session_id, id))
+                {
                     let _ = fs::remove_dir_all(dir).await;
                 }
             }
@@ -303,7 +384,14 @@ impl AttachmentService {
         Ok(())
     }
 
-    pub async fn read_preview(&self, attachment: &ComposerImageAttachment, variant: &str) -> Result<AttachmentPreviewBytes, AppError> {
+    pub async fn read_preview(
+        &self,
+        attachment: &ComposerImageAttachment,
+        variant: &str,
+    ) -> Result<AttachmentPreviewBytes, AppError> {
+        if !matches!(variant, "original" | "thumbnail") {
+            return Err(AppError::validation("Invalid attachment preview variant"));
+        }
         let (storage_key, mime_type) = match attachment {
             ComposerImageAttachment::Session(s) => (&s.storage_key, &s.mime_type),
             ComposerImageAttachment::Draft(d) => (&d.storage_key, &d.mime_type),
@@ -337,7 +425,11 @@ impl AttachmentService {
         Ok(())
     }
 
-    pub async fn cleanup_orphans(&self, live_session_ids: &HashSet<String>, now_millis: u64) -> Result<(), AppError> {
+    pub async fn cleanup_orphans(
+        &self,
+        live_session_ids: &HashSet<String>,
+        now_millis: u64,
+    ) -> Result<(), AppError> {
         let session_root = self.root_path.join("sessions");
         if let Ok(mut entries) = fs::read_dir(&session_root).await {
             while let Ok(Some(entry)) = entries.next_entry().await {
@@ -363,7 +455,9 @@ impl AttachmentService {
                             if let Ok(Some(att_entry)) = att_entries.next_entry().await {
                                 let meta_path = att_entry.path().join("meta.json");
                                 if let Ok(meta_str) = fs::read_to_string(&meta_path).await {
-                                    if let Ok(meta) = serde_json::from_str::<AttachmentMetadata>(&meta_str) {
+                                    if let Ok(meta) =
+                                        serde_json::from_str::<AttachmentMetadata>(&meta_str)
+                                    {
                                         created_at = meta.created_at;
                                     }
                                 }
@@ -378,5 +472,51 @@ impl AttachmentService {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{path::Path, sync::Arc};
+
+    use codez_core::{AppErrorKind, AppPaths};
+
+    use super::AttachmentService;
+
+    fn attachment_service(root: &Path) -> AttachmentService {
+        let paths = AppPaths::new(
+            root.join("data"),
+            root.join("cache"),
+            root.join("logs"),
+            root.join("resources"),
+            root.join("temp"),
+            root.join("home"),
+        )
+        .expect("absolute fixture paths must be valid");
+        AttachmentService::new(Arc::new(paths))
+    }
+
+    #[test]
+    fn directory_for_rejects_parent_traversal_in_a_storage_key() {
+        let directory = tempfile::tempdir().expect("temporary fixture directory must exist");
+        let service = attachment_service(directory.path());
+
+        let error = service
+            .directory_for("attachment:drafts/draft-1/../../outside")
+            .expect_err("attachment storage must not escape through a parent component");
+
+        assert_eq!(error.kind(), AppErrorKind::Validation);
+    }
+
+    #[test]
+    fn path_for_rejects_a_multicomponent_variant() {
+        let directory = tempfile::tempdir().expect("temporary fixture directory must exist");
+        let service = attachment_service(directory.path());
+
+        let error = service
+            .path_for("attachment:drafts/draft-1/image-1", "../original")
+            .expect_err("attachment variants must be direct child names");
+
+        assert_eq!(error.kind(), AppErrorKind::Validation);
     }
 }

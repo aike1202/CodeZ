@@ -20,6 +20,7 @@ license = "UNLICENSED"
 [workspace.dependencies]
 codez-contracts = { path = "crates/codez-contracts" }
 codez-core = { path = "crates/codez-core" }
+codez-mcp = { path = "crates/codez-mcp" }
 codez-platform = { path = "crates/codez-platform" }
 codez-providers = { path = "crates/codez-providers" }
 codez-runtime = { path = "crates/codez-runtime" }
@@ -32,8 +33,10 @@ globset = "0.4.16"
 keyring = { version = "3.6.3", default-features = false }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
+serde_yaml = "0.9.34"
 regex = "1.12.2"
 reqwest = { version = "0.12.12", features = ["json", "stream", "rustls-tls"], default-features = false }
+rustix = { version = "1.1.4", features = ["fs"] }
 eventsource-stream = "0.2.3"
 futures-util = "0.3.30"
 same-file = "1.0.6"

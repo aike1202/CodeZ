@@ -67,10 +67,7 @@ impl ProjectAnalysisService {
         let entrypoints = find_entrypoints(filesystem, &package_json).await?;
 
         let default_paths = vec![".".to_string()];
-        let target_paths = options
-            .dir_paths
-            .as_deref()
-            .unwrap_or(&default_paths);
+        let target_paths = options.dir_paths.as_deref().unwrap_or(&default_paths);
         let max_depth = options.max_depth.unwrap_or(DEFAULT_TREE_DEPTH);
         let include_files = options.include_files;
 
@@ -138,7 +135,10 @@ async fn detect_project_type(
     }
 
     let markers = [
-        (&["requirements.txt", "pyproject.toml", "setup.py"][..], "python"),
+        (
+            &["requirements.txt", "pyproject.toml", "setup.py"][..],
+            "python",
+        ),
         (&["pom.xml", "build.gradle"], "java"),
         (&["go.mod"], "go"),
         (&["Cargo.toml"], "rust"),
@@ -279,8 +279,21 @@ async fn file_exists(filesystem: &dyn FileSystem, relative: &str) -> Result<bool
 }
 
 const IGNORED_TREE_DIRS: &[&str] = &[
-    "node_modules", ".git", "dist", "build", ".next", "coverage", "out", "__pycache__", ".idea",
-    ".vscode", ".cache", ".turbo", "target", ".nuxt", ".output",
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    ".next",
+    "coverage",
+    "out",
+    "__pycache__",
+    ".idea",
+    ".vscode",
+    ".cache",
+    ".turbo",
+    "target",
+    ".nuxt",
+    ".output",
 ];
 
 fn should_ignore_tree(name: &str) -> bool {
@@ -306,7 +319,17 @@ async fn build_tree(
         display
     }];
     let mut count = 0usize;
-    build_tree_recursive(filesystem, &root, 0, max_depth, include_files, "", &mut lines, &mut count).await?;
+    build_tree_recursive(
+        filesystem,
+        &root,
+        0,
+        max_depth,
+        include_files,
+        "",
+        &mut lines,
+        &mut count,
+    )
+    .await?;
     if count >= DEFAULT_MAX_TREE_ENTRIES {
         lines.push("[TRUNCATED] tree output limit reached".to_string());
     }
@@ -350,9 +373,7 @@ fn build_tree_recursive<'a>(
         entries.sort_by(|a, b| {
             let a_is_dir = a.kind == FileKind::Directory;
             let b_is_dir = b.kind == FileKind::Directory;
-            b_is_dir
-                .cmp(&a_is_dir)
-                .then_with(|| a.name.cmp(&b.name))
+            b_is_dir.cmp(&a_is_dir).then_with(|| a.name.cmp(&b.name))
         });
 
         for entry in entries {
@@ -426,7 +447,11 @@ fn collect_docs<'a>(
             } else if entry.kind == FileKind::File {
                 let lower = name.to_lowercase();
                 if lower.ends_with(".md") || lower.ends_with(".mdx") {
-                    let path = entry.path.relative_path().to_string_lossy().replace('\\', "/");
+                    let path = entry
+                        .path
+                        .relative_path()
+                        .to_string_lossy()
+                        .replace('\\', "/");
                     lines.push(path);
                     *count += 1;
                 }

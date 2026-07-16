@@ -28,7 +28,10 @@ impl ToolCallAssembler {
         let pos = fragment.position;
         let prefix = &self.id_prefix;
         let current = self.calls.entry(pos).or_insert_with(|| AccumulatedCall {
-            call_id: fragment.call_id.clone().unwrap_or_else(|| format!("{}_{}", prefix, pos)),
+            call_id: fragment
+                .call_id
+                .clone()
+                .unwrap_or_else(|| format!("{}_{}", prefix, pos)),
             name: String::new(),
             arguments: String::new(),
             thought_signature: None,
@@ -58,13 +61,18 @@ impl ToolCallAssembler {
         let mut entries: Vec<_> = self.calls.iter().collect();
         entries.sort_by_key(|(pos, _)| **pos);
 
-        entries.into_iter()
+        entries
+            .into_iter()
             .filter(|(_, call)| !require_final || call.complete)
             .map(|(pos, call)| NormalizedToolCall {
                 call_id: call.call_id.clone(),
                 position: *pos,
                 name: call.name.clone(),
-                raw_arguments: if call.arguments.is_empty() { "{}".to_string() } else { call.arguments.clone() },
+                raw_arguments: if call.arguments.is_empty() {
+                    "{}".to_string()
+                } else {
+                    call.arguments.clone()
+                },
                 thought_signature: call.thought_signature.clone(),
             })
             .collect()

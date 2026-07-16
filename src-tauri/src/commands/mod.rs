@@ -1,8 +1,11 @@
 pub mod attachment;
+pub mod chat;
 pub mod context;
+mod external_skills;
 pub mod git;
 pub mod host;
 pub mod mcp;
+mod path_security;
 pub mod permission;
 pub mod provider;
 pub mod rules;

@@ -24,24 +24,30 @@ impl PromptModule for SkillsModule {
                 return None;
             }
 
-            let has_activate_skill_tool = ctx.available_tools.as_deref().map_or(true, |tools| {
-                tools.iter().any(|t| t.name == "ActivateSkill" || t.name == "Skill")
+            let has_activate_skill_tool = ctx.available_tools.as_deref().is_none_or(|tools| {
+                tools
+                    .iter()
+                    .any(|t| t.name == "ActivateSkill" || t.name == "Skill")
             });
 
-            let has_deactivate_skill_tool = ctx.available_tools.as_deref().map_or(true, |tools| {
-                tools.iter().any(|t| t.name == "DeactivateSkill")
-            });
+            let has_deactivate_skill_tool = ctx
+                .available_tools
+                .as_deref()
+                .is_none_or(|tools| tools.iter().any(|t| t.name == "DeactivateSkill"));
 
             let mut lines = Vec::new();
             lines.push("<skills_instructions>".to_string());
-            
+
             if has_activate_skill_tool {
                 lines.push("When an available skill matches the request, activate it with ActivateSkill before doing the task. The legacy Skill tool is only a compatibility fallback.".to_string());
             } else {
                 lines.push("Follow a skill only when its instructions are already present in the conversation.".to_string());
             }
 
-            lines.push("The latest <session_skill_state> block is authoritative for this conversation.".to_string());
+            lines.push(
+                "The latest <session_skill_state> block is authoritative for this conversation."
+                    .to_string(),
+            );
             lines.push("Continue following active skills without activating them again merely to reload their instructions.".to_string());
             lines.push("Do not use inactive skills unless the current request needs them. Never activate a disabled skill unless the user explicitly asks to re-enable it; then use ActivateSkill with force=true.".to_string());
 

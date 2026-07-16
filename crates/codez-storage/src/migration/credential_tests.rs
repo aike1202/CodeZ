@@ -219,6 +219,58 @@ async fn credential_migration_is_redacted_and_idempotent_across_all_three_famili
 }
 
 #[tokio::test]
+async fn empty_provider_api_key_is_a_verified_absence_instead_of_a_reentry_requirement() {
+    const PROVIDERS: &str = r#"{
+      "providers": [
+        {"id":"provider-without-key","apiKeyRef":"","encryption":"none"}
+      ]
+    }"#;
+    let fixture = CredentialFixture::new([("providers.json", PROVIDERS)]);
+    let service = LegacyMigrationService::default();
+    let manifest = service
+        .discover(
+            &fixture.roots,
+            MigrationRunId::parse("credential-not-configured")
+                .expect("fixture migration ID must be valid"),
+        )
+        .await
+        .expect("credential fixture discovery must succeed");
+    let backup = service
+        .backup(&fixture.roots, &manifest, &fixture.backup_root)
+        .await
+        .expect("credential fixture backup must succeed");
+    let credential_store = Arc::new(MemoryCredentialStore::default());
+
+    let report = service
+        .migrate_credentials(
+            &manifest,
+            &backup,
+            &fixture.backup_root,
+            Arc::new(FakeLegacyReader::new([])),
+            Arc::clone(&credential_store),
+        )
+        .await
+        .expect("an empty API key must not require credential recovery");
+
+    assert_eq!(
+        (
+            report.phase,
+            report.migrated,
+            report.requires_reentry,
+            report.not_present,
+            credential_store.snapshot().len(),
+        ),
+        (MigrationPhase::Verified, 0, 0, 3, 0)
+    );
+    assert!(report.entries.iter().any(|entry| {
+        entry.data_set == super::LegacyDataSet::Providers
+            && entry.source_index == 0
+            && entry.status == CredentialMigrationStatus::NotPresent
+            && entry.credential_id.is_none()
+    }));
+}
+
+#[tokio::test]
 async fn malformed_aggregate_plaintext_requires_reentry_without_writing_credentials() {
     let fixture = CredentialFixture::new([
         ("mcp-secrets.secure", "bad-secret-envelope"),

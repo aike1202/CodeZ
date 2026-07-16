@@ -1,6 +1,9 @@
+mod activation;
 mod catalog;
+mod coordinator;
 mod credentials;
 mod filesystem;
+mod layout;
 mod legacy_safe_storage;
 mod transform;
 
@@ -23,13 +26,17 @@ use thiserror::Error;
 
 use crate::{AtomicFileStore, SchemaFamily, StorageError};
 
+pub use activation::{
+    ActivatedFile, ActivationScope, MigrationActivationMarker, MigrationActivationService,
+};
 pub use catalog::{
     DataSensitivity, DiscoveryRule, LEGACY_DATA_CATALOG, LegacyDataSet, LegacyDataSpec,
     LegacyFormat, RootScope, SchemaSelector, TreeSelector,
 };
+pub use coordinator::{LegacyMigrationCoordinator, StartupMigrationOutcome};
 pub use credentials::{
     CredentialMigrationEntry, CredentialMigrationReason, CredentialMigrationReport,
-    CredentialMigrationStatus,
+    CredentialMigrationStatus, CredentialReentry,
 };
 pub use legacy_safe_storage::{
     ElectronSafeStorageReader, LegacyCredentialReadError, LegacyCredentialReader,
@@ -437,6 +444,112 @@ impl LegacyMigrationService {
         Ok(report)
     }
 
+    /// Loads the redacted credential decision report for one backed-up run.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MigrationError`] when the persisted report is malformed, was
+    /// created for another run, or cannot be read safely.
+    pub async fn credential_migration_report(
+        &self,
+        manifest: &MigrationManifest,
+        backup_root: &Path,
+    ) -> Result<Option<CredentialMigrationReport>, MigrationError> {
+        validate_root("migration backup", backup_root)?;
+        let report_path = credential_report_path(backup_root, &manifest.run_id);
+        let Some(report) = self.store.read_json::<CredentialMigrationReport>(&report_path).await?
+        else {
+            return Ok(None);
+        };
+        credentials::validate_credential_report_structure(&report)?;
+        if report.run_id != manifest.run_id || report.manifest_fingerprint != manifest.fingerprint {
+            return Err(MigrationError::CredentialReportMismatch);
+        }
+        Ok(Some(report))
+    }
+
+    /// Writes explicit user re-entry values to secure storage and records an
+    /// immutable, redacted completion receipt.
+    ///
+    /// The original awaiting report is never replaced. A retry can safely
+    /// rewrite the same keychain values, but only an identical receipt may be
+    /// reused, preventing a partial or unrelated request from authorizing a
+    /// commit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MigrationError`] when the report is not awaiting re-entry,
+    /// the supplied identities are incomplete or unexpected, secure storage
+    /// rejects a value, or receipt persistence conflicts.
+    pub async fn complete_credential_reentry<S>(
+        &self,
+        manifest: &MigrationManifest,
+        backup_report: &BackupReport,
+        backup_root: &Path,
+        entries: Vec<CredentialReentry>,
+        credential_store: std::sync::Arc<S>,
+    ) -> Result<CredentialMigrationReport, MigrationError>
+    where
+        S: crate::CredentialStore + 'static,
+    {
+        validate_root("migration backup", backup_root)?;
+        let awaiting_report = self
+            .credential_migration_report(manifest, backup_root)
+            .await?
+            .ok_or(MigrationError::CredentialReportMismatch)?;
+        let worker_backup_report = backup_report.clone();
+        let worker_manifest = manifest.clone();
+        let completed_report = tokio::task::spawn_blocking(move || {
+            credentials::validate_backup_prerequisite(&worker_manifest, &worker_backup_report)?;
+            credentials::complete_credential_reentry_blocking(
+                awaiting_report,
+                entries,
+                credential_store.as_ref(),
+            )
+        })
+        .await
+        .map_err(MigrationError::CredentialTaskJoin)??;
+        let awaiting_report = self
+            .credential_migration_report(manifest, backup_root)
+            .await?
+            .ok_or(MigrationError::CredentialReportMismatch)?;
+        let receipt = credentials::new_credential_reentry_receipt(
+            &awaiting_report,
+            completed_report.clone(),
+        )?;
+        self.store
+            .create_json(
+                &credential_reentry_receipt_path(backup_root, &manifest.run_id),
+                &receipt,
+            )
+            .await?;
+        Ok(completed_report)
+    }
+
+    /// Returns the completed report selected by an immutable re-entry receipt.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MigrationError`] when either report is invalid, unrelated, or
+    /// the receipt fingerprint does not match its redacted content.
+    pub async fn completed_credential_reentry(
+        &self,
+        manifest: &MigrationManifest,
+        backup_root: &Path,
+        awaiting_report: &CredentialMigrationReport,
+    ) -> Result<Option<CredentialMigrationReport>, MigrationError> {
+        validate_root("migration backup", backup_root)?;
+        let path = credential_reentry_receipt_path(backup_root, &manifest.run_id);
+        let Some(receipt) = self
+            .store
+            .read_json::<credentials::CredentialReentryReceipt>(&path)
+            .await?
+        else {
+            return Ok(None);
+        };
+        credentials::completed_report_from_receipt(awaiting_report, receipt).map(Some)
+    }
+
     /// Transforms a verified backup into one immutable versioned repository run.
     ///
     /// Secret envelopes are never copied. Structured JSON and JSONL receive
@@ -553,6 +666,13 @@ impl LegacyMigrationService {
             .await?
             .ok_or(MigrationError::CompletionMarkerMismatch)?;
         transform::validate_marker_report(&marker, &report)?;
+        let worker_target_root = target_root.to_path_buf();
+        let worker_report = report.clone();
+        tokio::task::spawn_blocking(move || {
+            transform::verify_repository_integrity(&worker_target_root, &worker_report)
+        })
+        .await
+        .map_err(MigrationError::RepositoryVerificationTaskJoin)??;
         Ok(Some(marker))
     }
 
@@ -630,24 +750,39 @@ impl LegacyMigrationService {
 
 async fn directory_exists(path: PathBuf) -> Result<bool, MigrationError> {
     let error_path = path.clone();
-    tokio::task::spawn_blocking(move || match fs::symlink_metadata(&path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => {
-            Err(MigrationError::SymbolicLink(path))
+    tokio::task::spawn_blocking(move || {
+        layout::reject_filesystem_redirects(&path)?;
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if layout::metadata_is_redirect(&metadata) => {
+                Err(MigrationError::SymbolicLink(path))
+            }
+            Ok(metadata) if metadata.is_dir() => Ok(true),
+            Ok(_) => Err(MigrationError::UnsupportedFileType(path)),
+            Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(source) => Err(MigrationError::Io {
+                operation: "inspect migration run directory",
+                path,
+                source,
+            }),
         }
-        Ok(metadata) if metadata.is_dir() => Ok(true),
-        Ok(_) => Err(MigrationError::UnsupportedFileType(path)),
-        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(source) => Err(MigrationError::Io {
-            operation: "inspect migration run directory",
-            path,
-            source,
-        }),
     })
     .await
     .map_err(|source| MigrationError::StatusTaskJoin {
         path: error_path,
         source,
     })?
+}
+
+fn credential_report_path(backup_root: &Path, run_id: &MigrationRunId) -> PathBuf {
+    backup_root
+        .join(run_id.as_str())
+        .join("credential-migration.json")
+}
+
+fn credential_reentry_receipt_path(backup_root: &Path, run_id: &MigrationRunId) -> PathBuf {
+    backup_root
+        .join(run_id.as_str())
+        .join("credential-reentry.json")
 }
 
 /// Failures that preserve legacy source data and prevent migration commit.
@@ -662,8 +797,8 @@ pub enum MigrationError {
     /// A serialized workspace scope no longer has an authorized root.
     #[error("migration manifest references unknown workspace index {index}")]
     UnknownWorkspaceScope { index: usize },
-    /// A source or backup path contains a symlink.
-    #[error("migration refuses to follow symbolic link: {0}")]
+    /// A source or migration path contains a symlink or Windows reparse point.
+    #[error("migration refuses to follow filesystem redirection: {0}")]
     SymbolicLink(PathBuf),
     /// A catalog path resolved to an unsupported filesystem object.
     #[error("migration source is not a regular file or directory: {0}")]
@@ -761,6 +896,24 @@ pub enum MigrationError {
     /// Credential decisions are incomplete or belong to another run.
     #[error("migration credential report cannot authorize commit")]
     CredentialReportMismatch,
+    /// A blocked legacy record has no safe stable identity for re-entry.
+    #[error("migration credential re-entry cannot identify {data_set:?} record {source_index}")]
+    CredentialReentryIdentifierMissing {
+        data_set: LegacyDataSet,
+        source_index: usize,
+    },
+    /// The same re-entry identity appeared more than once in one request or report.
+    #[error("migration credential re-entry contains a duplicate identity: {id:?}")]
+    CredentialReentryDuplicate { id: crate::CredentialId },
+    /// A supplied re-entry value does not belong to the current migration report.
+    #[error("migration credential re-entry supplied an unexpected identity: {id:?}")]
+    CredentialReentryUnexpected { id: crate::CredentialId },
+    /// A required credential value was not supplied during explicit re-entry.
+    #[error("migration credential re-entry is missing an identity: {id:?}")]
+    CredentialReentryMissing { id: crate::CredentialId },
+    /// A redacted credential receipt could not be serialized deterministically.
+    #[error("migration credential re-entry receipt could not be serialized")]
+    CredentialReentrySerialization(#[source] serde_json::Error),
     /// A credential marked as migrated is no longer readable from secure storage.
     #[error("required migrated credential is unavailable: {id:?}")]
     CredentialUnavailable {
@@ -771,6 +924,25 @@ pub enum MigrationError {
     /// The authority marker is not internally consistent.
     #[error("migration completion marker is invalid")]
     CompletionMarkerMismatch,
+    /// A committed repository does not match the activation proof.
+    #[error("migration activation marker is invalid")]
+    ActivationMarkerMismatch,
+    /// Two migrated records would write different content to one active path.
+    #[error("migration activation contains a duplicate target: {0}")]
+    DuplicateActivationTarget(PathBuf),
+    /// Existing active data is neither the backed-up source nor the committed target.
+    #[error("migration activation refuses to replace changed data: {0}")]
+    ActivationConflict(PathBuf),
+    /// A migrated session index cannot be represented by the active session repository.
+    #[error("migrated session data is invalid")]
+    InvalidSessionDocument,
+    /// A blocking activation verification task could not be joined.
+    #[error("migration activation worker failed for {path}")]
+    ActivationTaskJoin {
+        path: PathBuf,
+        #[source]
+        source: tokio::task::JoinError,
+    },
     /// A filesystem operation failed.
     #[error("migration I/O failed while attempting to {operation}: {path}")]
     Io {
@@ -800,6 +972,9 @@ pub enum MigrationError {
     /// The commit verification worker could not be joined.
     #[error("legacy migration commit worker failed")]
     CommitTaskJoin(#[source] tokio::task::JoinError),
+    /// Restart-time verification of a committed repository could not be joined.
+    #[error("committed migration repository verification worker failed")]
+    RepositoryVerificationTaskJoin(#[source] tokio::task::JoinError),
     /// Durable migration phase inspection could not be joined.
     #[error("legacy migration status inspection failed for {path}")]
     StatusTaskJoin {

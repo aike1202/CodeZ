@@ -1,6 +1,6 @@
 # Windows safeStorage compatibility spike
 
-> 状态：Windows sentinel 验证通过，生产迁移 reader 已落地
+> 状态：Windows sentinel 验证通过，migration-only reader 已落地；启动接线与凭据重录闭环未完成
 >
 > 日期：2026-07-15
 
@@ -28,6 +28,8 @@
 Windows 迁移实现因此采用专用只读 legacy reader：读取旧 CodeZ `Local State` 与 Base64 密文，完成 DPAPI + AES-256-GCM 解密后立即写入新的 OS CredentialStore。legacy reader 不进入日常凭据 API，不用于新密钥加密。若 Local State 缺失、DPAPI 用户上下文不匹配、envelope 未知或 GCM 认证失败，则保留非敏感配置并标记 `requires_reentry`。
 
 该 reader 现已实现在 `codez-storage` 的 migration 边界，并启用 AES 临时 key material 清零。Provider、MCP secret 与 MCP OAuth 只从 manifest 对应的已验证备份读取；迁移报告仅包含数据族、稳定凭据 ID、状态与原因码。Base64/明文 Provider 不进入新凭据库，OS 凭据库故障会中止并允许幂等重试。
+
+这不是可交付的首次启动迁移：composition 已在 repositories 构造前运行 migration coordinator，但当前 `AwaitingCredentials` 会 fail closed 阻止启动，尚无 Tauri 凭据重录 UI/command，以及恢复、重新验证和 activation 的用户链路。只有这些步骤和真实旧安装升级/回退演练完成后，才可以把 `requires_reentry` 视为用户可完成的安全迁移状态。
 
 ## 限制
 

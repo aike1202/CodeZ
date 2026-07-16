@@ -1,6 +1,13 @@
 /// <reference types="vite/client" />
 /// <reference types="@electron-toolkit/preload" />
 
+import type {
+  McpListPayload,
+  McpServerCatalog,
+  McpServerConfig,
+  McpServerStatus,
+} from './components/SettingsMcpTab/types'
+
 declare global {
   interface Window {
     api: {
@@ -92,7 +99,9 @@ declare global {
             ) => void
             onToolEnd?: (toolCallId: string, result: string) => void
             onPermissionRequest?: (request: any) => void
-            onAskUserRequest?: (request: any) => void
+            onAskUserRequest?: (
+              request: import('./shared/desktop/generated/contracts').ChatAskUserRequest
+            ) => void
             onContextBudget?: (snapshot: import('@shared/types/context').ContextBudgetSnapshot) => void
             onCompactionStarted?: (payload: any) => void
             onCompactionCompleted?: (payload: any) => void
@@ -110,7 +119,10 @@ declare global {
           requestId: string,
           response: import('@shared/types/permission').PermissionApprovalResponse
         ) => Promise<void>
-        respondAskUser: (requestId: string, answers: any) => Promise<void>
+        respondAskUser: (
+          requestId: string,
+          answers: import('./shared/desktop/generated/contracts').ChatAskUserAnswer[]
+        ) => Promise<void>
       }
       session: {
         list: () => Promise<any>
@@ -142,11 +154,11 @@ declare global {
       skill: {
         getAll: (workspaceRoot: string | null) => Promise<any[]>
         toggle: (workspaceRoot: string | null, id: string, enabled: boolean) => Promise<void>
-        checkExternal: () => Promise<{ hasUpdates: boolean; totalCount: number; sources: { sourceName: string; count: number }[] }>
-        importExternal: (sourceName?: string, customPath?: string, forceOverwrite?: boolean) => Promise<boolean>
-        listExternal: () => Promise<import('@shared/types/skill').ExternalSkillGroup[]>
-        importSingle: (sourceName: string, dirName: string) => Promise<boolean>
-        remove: (id: string) => Promise<boolean>
+        checkExternal: (workspaceRoot?: string | null) => Promise<{ hasUpdates: boolean; totalCount: number; sources: { sourceName: string; count: number }[] }>
+        importExternal: (sourceName?: string, customPath?: string, forceOverwrite?: boolean, workspaceRoot?: string | null) => Promise<boolean>
+        listExternal: (workspaceRoot?: string | null) => Promise<import('@shared/types/skill').ExternalSkillGroup[]>
+        importSingle: (sourceName: string, dirName: string, workspaceRoot?: string | null) => Promise<boolean>
+        remove: (workspaceRoot: string | null, id: string) => Promise<boolean>
       }
       rules: {
         getList: (workspaces: any[]) => Promise<any[]>
@@ -159,18 +171,18 @@ declare global {
         save: (settings: any) => Promise<boolean>
       }
       mcp: {
-        list: () => Promise<any>
-        saveUser: (servers: Record<string, unknown>) => Promise<any>
-        setEnabled: (name: string, enabled: boolean) => Promise<any>
-        getCatalog: (name: string) => Promise<any>
-        reconnect: (name: string) => Promise<any>
-        authorize: (name: string) => Promise<any>
-        logout: (name: string) => Promise<any>
-        trustProject: (fingerprint: string) => Promise<any>
+        list: () => Promise<McpListPayload>
+        saveUser: (servers: Record<string, McpServerConfig>) => Promise<McpListPayload>
+        setEnabled: (name: string, enabled: boolean) => Promise<McpListPayload>
+        getCatalog: (name: string) => Promise<McpServerCatalog>
+        reconnect: (name: string) => Promise<void>
+        authorize: (name: string) => Promise<void>
+        logout: (name: string) => Promise<void>
+        trustProject: (fingerprint: string) => Promise<void>
         listSecretKeys: () => Promise<string[]>
         setSecret: (key: string, value: string) => Promise<string[]>
         deleteSecret: (key: string) => Promise<string[]>
-        onChanged: (callback: (statuses: any[]) => void) => () => void
+        onChanged: (callback: (statuses: McpServerStatus[]) => void) => () => void
       }
       subAgent: {
         list: () => Promise<import('@shared/types/subagent').SubAgentInfo[]>

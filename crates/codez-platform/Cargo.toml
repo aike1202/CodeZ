@@ -15,6 +15,14 @@ tokio.workspace = true
 uuid.workspace = true
 portable-pty = "=0.9.0"
 dashmap = "6.2.1"
+process-wrap = { version = "=9.1.0", features = ["tokio1"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = ["Win32_System_Threading"] }
+win32job = "=2.0.3"
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.31.3", features = ["process", "signal"] }
 
 [dev-dependencies]
 serde.workspace = true

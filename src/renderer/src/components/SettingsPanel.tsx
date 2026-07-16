@@ -34,6 +34,7 @@ interface ProviderFormData {
 interface SettingsPanelProps {
   initialData: ProviderFormData
   isNew: boolean
+  apiKeyConfigured?: boolean
   onSave: (data: ProviderFormData) => void
   onDelete?: () => void
   onTest?: () => void
@@ -56,6 +57,7 @@ function getDefaultThinking(): ThinkingConfig {
 export default function SettingsPanel({
   initialData,
   isNew,
+  apiKeyConfigured = false,
   onSave,
   onDelete,
   onTest,
@@ -184,7 +186,7 @@ export default function SettingsPanel({
             <div className="settings-apikey-wrapper">
               <Input
                 type={showKey ? 'text' : 'password'}
-                placeholder="sk-..."
+                placeholder={apiKeyConfigured ? '已配置，留空则保留' : 'sk-...'}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
               />

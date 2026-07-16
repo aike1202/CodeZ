@@ -1,6 +1,6 @@
-use regex::Regex;
-use crate::permission::contract::{PermissionCapability};
+use crate::permission::contract::PermissionCapability;
 use crate::permission::shell::types::NormalizedOperationGraph;
+use regex::Regex;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PermissionImpactKind {
@@ -28,7 +28,7 @@ pub struct CriticalOperationFinding {
 
 struct CriticalPattern {
     id: &'static str,
-    pattern: Regex,
+    pattern: Option<Regex>,
     reason: &'static str,
     impact: PermissionImpactKind,
     enforcement: CriticalEnforcement,
@@ -39,7 +39,7 @@ lazy_static::lazy_static! {
     static ref PATTERNS: Vec<CriticalPattern> = vec![
         CriticalPattern {
             id: "critical.privilege.sudo",
-            pattern: Regex::new(r"(?i)(?:^|[;&|\n]\s*)sudo\b|\bStart-Process\b[^\n]*-Verb\s+RunAs").unwrap(),
+            pattern: Regex::new(r"(?i)(?:^|[;&|\n]\s*)sudo\b|\bStart-Process\b[^\n]*-Verb\s+RunAs").ok(),
             reason: "请求管理员或根权限",
             impact: PermissionImpactKind::System,
             enforcement: CriticalEnforcement::AbsoluteRedline,
@@ -47,7 +47,7 @@ lazy_static::lazy_static! {
         },
         CriticalPattern {
             id: "critical.delete.system-root",
-            pattern: Regex::new(r#"(?i)\brm\s+(?:-[^\s]+\s+)*(?:["']?/(?:["']?|\s|$)|["']?/(?:etc|usr|var|bin|sbin|boot|lib)(?:/|["']|\s|$))"#).unwrap(),
+            pattern: Regex::new(r#"(?i)\brm\s+(?:-[^\s]+\s+)*(?:["']?/(?:["']?|\s|$)|["']?/(?:etc|usr|var|bin|sbin|boot|lib)(?:/|["']|\s|$))"#).ok(),
             reason: "递归删除系统根目录或系统目录",
             impact: PermissionImpactKind::System,
             enforcement: CriticalEnforcement::AbsoluteRedline,
@@ -55,7 +55,7 @@ lazy_static::lazy_static! {
         },
         CriticalPattern {
             id: "critical.disk.format",
-            pattern: Regex::new(r"(?i)\b(?:mkfs(?:\.\w+)?|format\s+[a-z]:)\b").unwrap(),
+            pattern: Regex::new(r"(?i)\b(?:mkfs(?:\.\w+)?|format\s+[a-z]:)\b").ok(),
             reason: "格式化文件系统",
             impact: PermissionImpactKind::System,
             enforcement: CriticalEnforcement::AbsoluteRedline,
@@ -63,7 +63,7 @@ lazy_static::lazy_static! {
         },
         CriticalPattern {
             id: "critical.remote.execute",
-            pattern: Regex::new(r"(?i)\b(?:curl|wget)\b[^|]*\|\s*(?:bash|sh|zsh)|\b(?:invoke-expression|iex)\b[^\n]*(?:invoke-webrequest|invoke-restmethod|iwr|irm)|\b(?:invoke-webrequest|invoke-restmethod|iwr|irm)\b[^|]*\|\s*(?:invoke-expression|iex)\b").unwrap(),
+            pattern: Regex::new(r"(?i)\b(?:curl|wget)\b[^|]*\|\s*(?:bash|sh|zsh)|\b(?:invoke-expression|iex)\b[^\n]*(?:invoke-webrequest|invoke-restmethod|iwr|irm)|\b(?:invoke-webrequest|invoke-restmethod|iwr|irm)\b[^|]*\|\s*(?:invoke-expression|iex)\b").ok(),
             reason: "下载或获取远程内容后直接执行",
             impact: PermissionImpactKind::Network,
             enforcement: CriticalEnforcement::ModelDirected,
@@ -71,7 +71,7 @@ lazy_static::lazy_static! {
         },
         CriticalPattern {
             id: "critical.hidden.encoded-command",
-            pattern: Regex::new(r"(?i)\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*-(?:encodedcommand|enc|e)\b|\b(?:base64|xxd|openssl)\b[^|]*\|\s*(?:bash|sh|zsh)").unwrap(),
+            pattern: Regex::new(r"(?i)\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*-(?:encodedcommand|enc|e)\b|\b(?:base64|xxd|openssl)\b[^|]*\|\s*(?:bash|sh|zsh)").ok(),
             reason: "编码或解码后隐藏执行",
             impact: PermissionImpactKind::System,
             enforcement: CriticalEnforcement::ModelDirected,
@@ -79,7 +79,7 @@ lazy_static::lazy_static! {
         },
         CriticalPattern {
             id: "critical.permission-config.write",
-            pattern: Regex::new(r"(?i)(?:>|>>|\btee\b|\bset-content\b|\badd-content\b|\bout-file\b|\bremove-item\b|\brm\b|\bdel\b)[^\n]*(?:[\\/]codez[\\/](?:permission-rules|workspace-permissions)\.json)\b").unwrap(),
+            pattern: Regex::new(r"(?i)(?:>|>>|\btee\b|\bset-content\b|\badd-content\b|\bout-file\b|\bremove-item\b|\brm\b|\bdel\b)[^\n]*(?:[\\/]codez[\\/](?:permission-rules|workspace-permissions)\.json)\b").ok(),
             reason: "修改 CodeZ 权限配置",
             impact: PermissionImpactKind::System,
             enforcement: CriticalEnforcement::AbsoluteRedline,
@@ -93,11 +93,17 @@ pub struct CriticalOperationGuard;
 impl CriticalOperationGuard {
     pub fn scan_raw(command: &str) -> Option<CriticalOperationFinding> {
         for p in PATTERNS.iter() {
-            if p.pattern.is_match(command) {
+            if p.pattern
+                .as_ref()
+                .is_some_and(|pattern| pattern.is_match(command))
+            {
                 return Some(CriticalOperationFinding {
                     rule_id: p.id.to_string(),
                     reason: p.reason.to_string(),
-                    pattern: p.pattern.as_str().to_string(),
+                    pattern: p
+                        .pattern
+                        .as_ref()
+                        .map_or_else(String::new, |pattern| pattern.as_str().to_string()),
                     impact: p.impact.clone(),
                     enforcement: p.enforcement.clone(),
                     permission: p.permission.clone(),

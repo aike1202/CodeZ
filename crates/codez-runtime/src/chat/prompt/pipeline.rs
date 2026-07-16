@@ -1,17 +1,18 @@
-use std::sync::Arc;
 use futures::future::join_all;
+use std::sync::Arc;
 
 use super::types::{PromptContext, PromptLayer, PromptModule};
 
 pub const SYSTEM_PROMPT_DYNAMIC_BOUNDARY: &str = "<codez_dynamic_capabilities>";
 
+#[derive(Default)]
 pub struct PromptPipeline {
     modules: Vec<Arc<dyn PromptModule>>,
 }
 
 impl PromptPipeline {
     pub fn new() -> Self {
-        Self { modules: Vec::new() }
+        Self::default()
     }
 
     pub fn register<M: PromptModule + 'static>(mut self, module: M) -> Self {

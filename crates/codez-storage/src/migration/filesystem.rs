@@ -15,7 +15,7 @@ use super::{
     LEGACY_DATA_CATALOG, LegacyDataSet, LegacyDataSpec, LegacyFormat, LegacyRoots,
     LegacyValidation, MANIFEST_SCHEMA_VERSION, ManifestScope, MigrationError, MigrationManifest,
     MigrationManifestEntry, MigrationPhase, MigrationRunId, RootScope, SchemaSelector,
-    TreeSelector,
+    TreeSelector, layout,
 };
 
 const HASH_BUFFER_BYTES: usize = 64 * 1024;
@@ -40,7 +40,7 @@ pub(super) fn backup_blocking(
     backup_root: &Path,
 ) -> Result<BackupReport, MigrationError> {
     verify_manifest_fingerprint(manifest)?;
-    ensure_backup_is_disjoint(roots, backup_root)?;
+    layout::validate_backup_layout(roots, manifest, backup_root)?;
     let run_directory = backup_root.join(manifest.run_id.as_str());
     reject_symlink_if_present(&run_directory)?;
     create_secure_directory(&run_directory)?;
@@ -127,9 +127,10 @@ pub(super) fn read_verified_backup_entry(
 }
 
 pub(super) fn write_immutable_target(path: &Path, bytes: &[u8]) -> Result<(), MigrationError> {
+    layout::reject_filesystem_redirects(path)?;
     match fs::symlink_metadata(path) {
         Ok(metadata) => {
-            if metadata.file_type().is_symlink() {
+            if layout::metadata_is_redirect(&metadata) {
                 return Err(MigrationError::SymbolicLink(path.to_path_buf()));
             }
             if !metadata.is_file() {
@@ -333,6 +334,9 @@ fn discover_rule(
         match rule {
             DiscoveryRule::ExactFile { relative_path, .. } => {
                 let source_path = scope_root.join(relative_path);
+                if layout::is_reserved_migration_path(roots, &source_path) {
+                    continue;
+                }
                 match fs::symlink_metadata(&source_path) {
                     Ok(_) => {
                         discovery.visit_filesystem_entry()?;
@@ -349,6 +353,7 @@ fn discover_rule(
                 prefix,
                 ..
             } => discover_prefix_files(
+                roots,
                 spec,
                 scope,
                 scope_root,
@@ -361,6 +366,7 @@ fn discover_rule(
                 selector,
                 ..
             } => discover_tree(
+                roots,
                 spec,
                 scope,
                 scope_root,
@@ -374,6 +380,7 @@ fn discover_rule(
 }
 
 fn discover_prefix_files(
+    roots: &LegacyRoots,
     spec: LegacyDataSpec,
     scope: ManifestScope,
     scope_root: &Path,
@@ -382,11 +389,17 @@ fn discover_prefix_files(
     discovery: &mut DiscoveryAccumulator,
 ) -> Result<(), MigrationError> {
     let directory = scope_root.join(relative_directory);
+    if layout::is_reserved_migration_path(roots, &directory) {
+        return Ok(());
+    }
     let Some(mut paths) = read_directory_paths(&directory, discovery)? else {
         return Ok(());
     };
     paths.sort();
     for path in paths {
+        if layout::is_reserved_migration_path(roots, &path) {
+            continue;
+        }
         let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
             return Err(MigrationError::UnsafeRelativePath(path));
         };
@@ -403,6 +416,7 @@ fn discover_prefix_files(
 }
 
 fn discover_tree(
+    roots: &LegacyRoots,
     spec: LegacyDataSpec,
     scope: ManifestScope,
     scope_root: &Path,
@@ -411,12 +425,16 @@ fn discover_tree(
     discovery: &mut DiscoveryAccumulator,
 ) -> Result<(), MigrationError> {
     let tree_root = scope_root.join(relative_directory);
+    if layout::is_reserved_migration_path(roots, &tree_root) {
+        return Ok(());
+    }
+    layout::reject_filesystem_redirects(&tree_root)?;
     let metadata = match fs::symlink_metadata(&tree_root) {
         Ok(metadata) => metadata,
         Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(source) => return Err(io_error("inspect tree root", &tree_root, source)),
     };
-    if metadata.file_type().is_symlink() {
+    if layout::metadata_is_redirect(&metadata) {
         return Err(MigrationError::SymbolicLink(tree_root));
     }
     if !metadata.is_dir() {
@@ -430,6 +448,9 @@ fn discover_tree(
         };
         paths.sort_by(|left, right| right.cmp(left));
         for path in paths {
+            if layout::is_reserved_migration_path(roots, &path) {
+                continue;
+            }
             let metadata = reject_symlink(&path)?;
             if metadata.is_dir() {
                 pending.push(path);
@@ -462,12 +483,13 @@ fn read_directory_paths(
     directory: &Path,
     discovery: &mut DiscoveryAccumulator,
 ) -> Result<Option<Vec<PathBuf>>, MigrationError> {
+    layout::reject_filesystem_redirects(directory)?;
     let metadata = match fs::symlink_metadata(directory) {
         Ok(metadata) => metadata,
         Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(source) => return Err(io_error("inspect directory", directory, source)),
     };
-    if metadata.file_type().is_symlink() {
+    if layout::metadata_is_redirect(&metadata) {
         return Err(MigrationError::SymbolicLink(directory.to_path_buf()));
     }
     if !metadata.is_dir() {
@@ -648,7 +670,7 @@ fn copy_verified_source(
 ) -> Result<CopyOutcome, MigrationError> {
     match fs::symlink_metadata(target_path) {
         Ok(metadata) => {
-            if metadata.file_type().is_symlink() {
+            if layout::metadata_is_redirect(&metadata) {
                 return Err(MigrationError::SymbolicLink(target_path.to_path_buf()));
             }
             if !metadata.is_file() {
@@ -745,9 +767,10 @@ fn inspect_regular_file(path: &Path) -> Result<fs::Metadata, MigrationError> {
 }
 
 fn reject_symlink(path: &Path) -> Result<fs::Metadata, MigrationError> {
+    layout::reject_filesystem_redirects(path)?;
     let metadata = fs::symlink_metadata(path)
         .map_err(|source| io_error("inspect filesystem entry", path, source))?;
-    if metadata.file_type().is_symlink() {
+    if layout::metadata_is_redirect(&metadata) {
         Err(MigrationError::SymbolicLink(path.to_path_buf()))
     } else {
         Ok(metadata)
@@ -755,9 +778,10 @@ fn reject_symlink(path: &Path) -> Result<fs::Metadata, MigrationError> {
 }
 
 fn reject_symlink_if_present(path: &Path) -> Result<(), MigrationError> {
+    layout::reject_filesystem_redirects(path)?;
     match fs::symlink_metadata(path) {
         Ok(metadata) => {
-            if metadata.file_type().is_symlink() {
+            if layout::metadata_is_redirect(&metadata) {
                 Err(MigrationError::SymbolicLink(path.to_path_buf()))
             } else {
                 Ok(())
@@ -770,6 +794,7 @@ fn reject_symlink_if_present(path: &Path) -> Result<(), MigrationError> {
 
 fn reject_symlink_descendants(root: &Path, relative_path: &Path) -> Result<(), MigrationError> {
     validate_relative_path(relative_path)?;
+    layout::reject_filesystem_redirects(root)?;
     let mut current = root.to_path_buf();
     for component in relative_path.components() {
         let Component::Normal(value) = component else {
@@ -777,7 +802,7 @@ fn reject_symlink_descendants(root: &Path, relative_path: &Path) -> Result<(), M
         };
         current.push(value);
         match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
+            Ok(metadata) if layout::metadata_is_redirect(&metadata) => {
                 return Err(MigrationError::SymbolicLink(current));
             }
             Ok(_) => {}
@@ -894,29 +919,6 @@ pub(super) fn verify_manifest_fingerprint(
     }
 }
 
-fn ensure_backup_is_disjoint(
-    roots: &LegacyRoots,
-    backup_root: &Path,
-) -> Result<(), MigrationError> {
-    let mut protected_roots = vec![
-        roots.user_data().to_path_buf(),
-        roots.user_home().join(".codez"),
-    ];
-    for workspace in roots.workspaces() {
-        protected_roots.push(workspace.join(".codez"));
-        protected_roots.push(workspace.join(".codez-cache"));
-    }
-    if protected_roots.iter().any(|source_root| {
-        backup_root.starts_with(source_root) || source_root.starts_with(backup_root)
-    }) {
-        Err(MigrationError::OverlappingBackupRoot(
-            backup_root.to_path_buf(),
-        ))
-    } else {
-        Ok(())
-    }
-}
-
 pub(super) fn sha256_bytes(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
@@ -945,14 +947,18 @@ fn io_error(operation: &'static str, path: &Path, source: io::Error) -> Migratio
 fn create_secure_directory(path: &Path) -> Result<(), MigrationError> {
     use std::os::unix::fs::PermissionsExt;
 
+    layout::reject_filesystem_redirects(path)?;
     fs::create_dir_all(path).map_err(|source| io_error("create backup directory", path, source))?;
+    layout::reject_filesystem_redirects(path)?;
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))
         .map_err(|source| io_error("set backup directory permissions", path, source))
 }
 
 #[cfg(not(unix))]
 fn create_secure_directory(path: &Path) -> Result<(), MigrationError> {
-    fs::create_dir_all(path).map_err(|source| io_error("create backup directory", path, source))
+    layout::reject_filesystem_redirects(path)?;
+    fs::create_dir_all(path).map_err(|source| io_error("create backup directory", path, source))?;
+    layout::reject_filesystem_redirects(path)
 }
 
 #[cfg(unix)]

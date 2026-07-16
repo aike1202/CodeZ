@@ -10,7 +10,9 @@ impl RulesLoader {
             return Ok(String::new());
         }
 
-        let content = fs::read_to_string(rules_path).await.map_err(|e| e.to_string())?;
+        let content = fs::read_to_string(rules_path)
+            .await
+            .map_err(|e| e.to_string())?;
         Ok(content)
     }
 

@@ -21,7 +21,10 @@ impl PromptModule for GitStatusModule {
         Box::pin(async move {
             let snapshot = ctx.git_status.as_deref().unwrap_or("");
             if snapshot.is_empty() {
-                Some("<git_status>not a git repository or status unavailable</git_status>".to_string())
+                Some(
+                    "<git_status>not a git repository or status unavailable</git_status>"
+                        .to_string(),
+                )
             } else {
                 Some(format!("<git_status>\n{}\n</git_status>", snapshot))
             }

@@ -1,2 +1,2 @@
-pub mod stream_state;
 pub mod prompt;
+pub mod stream_state;

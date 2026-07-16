@@ -7,7 +7,8 @@ use std::{
     sync::{Arc, Mutex, Weak},
 };
 
-use codez_core::AppError;
+pub use codez_core::AtomicCreateOutcome;
+use codez_core::{AppError, AtomicPersistence, PortFuture};
 use serde::{Serialize, de::DeserializeOwned};
 use tempfile::Builder;
 use thiserror::Error;
@@ -25,15 +26,6 @@ pub enum AtomicWriteStage {
     BeforeTemporaryFile,
     /// After temporary data is synced but before the target is replaced or appended.
     BeforeCommit,
-}
-
-/// Outcome of atomically creating an immutable JSON document.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AtomicCreateOutcome {
-    /// No target existed and the new document was committed.
-    Created,
-    /// An existing regular file contained the same serialized bytes.
-    Reused,
 }
 
 /// Deterministic failure used to verify crash-safe storage behavior.
@@ -165,6 +157,11 @@ pub enum StorageError {
 impl From<StorageError> for AppError {
     fn from(error: StorageError) -> Self {
         let public_message = match &error {
+            StorageError::ImmutableConflict(_) => {
+                return AppError::conflict(
+                    "An immutable local data resource already contains different content",
+                );
+            }
             StorageError::CorruptJson { .. } => "Some local data was corrupt and was isolated",
             StorageError::JsonLinesRecovery { .. } => {
                 "Some local data was isolated and requires recovery"
@@ -175,7 +172,6 @@ impl From<StorageError> for AppError {
             StorageError::DocumentTooLarge { .. } => "A local data file is too large",
             StorageError::InvalidDocumentLimit
             | StorageError::UnsafeFileType(_)
-            | StorageError::ImmutableConflict(_)
             | StorageError::InvalidPath(_)
             | StorageError::Io { .. }
             | StorageError::Serialize { .. }
@@ -215,6 +211,36 @@ impl AtomicFileStore {
     #[must_use]
     pub const fn max_document_bytes(&self) -> u64 {
         self.max_document_bytes
+    }
+
+    /// Reads one bounded regular file without following a target symlink.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] for unsafe file types, excessive input, I/O,
+    /// or worker failures.
+    pub async fn read_bytes(&self, path: &Path) -> Result<Option<Vec<u8>>, StorageError> {
+        let resource_lock = self.resource_lock(path);
+        let _guard = resource_lock.lock().await;
+        let task_path = path.to_path_buf();
+        let error_path = task_path.clone();
+        let max_document_bytes = self.max_document_bytes;
+        tokio::task::spawn_blocking(move || read_bounded(&task_path, max_document_bytes))
+            .await
+            .map_err(|source| StorageError::TaskJoin {
+                path: error_path,
+                source,
+            })?
+    }
+
+    /// Atomically replaces one bounded regular file with raw bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] when validation, temporary-file persistence,
+    /// fault injection, or atomic replacement fails.
+    pub async fn write_bytes(&self, path: &Path, bytes: &[u8]) -> Result<(), StorageError> {
+        self.replace_bytes(path, bytes.to_vec()).await
     }
 
     /// Creates a store with an explicit maximum JSON/JSONL file size.
@@ -310,7 +336,7 @@ impl AtomicFileStore {
             path: path.to_path_buf(),
             source,
         })?;
-        self.create_bytes(path, bytes).await
+        self.create_bytes_no_clobber(path, &bytes).await
     }
 
     /// Reads JSONL records and repairs a malformed suffix from the valid prefix.
@@ -387,14 +413,24 @@ impl AtomicFileStore {
             source,
         })?;
         bytes.push(b'\n');
-        ensure_size(path, bytes.len(), self.max_document_bytes)?;
+        self.append_bytes(path, &bytes).await
+    }
 
+    /// Appends and synchronizes one bounded raw byte segment.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] when size validation, fault injection, append,
+    /// synchronization, or the blocking worker fails.
+    pub async fn append_bytes(&self, path: &Path, bytes: &[u8]) -> Result<(), StorageError> {
+        ensure_size(path, bytes.len(), self.max_document_bytes)?;
         let resource_lock = self.resource_lock(path);
         let _guard = resource_lock.lock().await;
         let task_path = path.to_path_buf();
         let error_path = task_path.clone();
         let max_document_bytes = self.max_document_bytes;
         let fault_injector = Arc::clone(&self.fault_injector);
+        let bytes = bytes.to_vec();
         tokio::task::spawn_blocking(move || {
             append_bytes_blocking(
                 &task_path,
@@ -408,6 +444,28 @@ impl AtomicFileStore {
             path: error_path,
             source,
         })?
+    }
+
+    /// Removes one regular file while holding the same per-resource lock used by writes.
+    ///
+    /// Returns `false` when the target does not exist. Symlinks and non-file
+    /// targets are rejected instead of followed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] when path validation, removal, directory
+    /// synchronization, or the blocking worker fails.
+    pub async fn remove_file(&self, path: &Path) -> Result<bool, StorageError> {
+        let resource_lock = self.resource_lock(path);
+        let _guard = resource_lock.lock().await;
+        let task_path = path.to_path_buf();
+        let error_path = task_path.clone();
+        tokio::task::spawn_blocking(move || remove_file_blocking(&task_path))
+            .await
+            .map_err(|source| StorageError::TaskJoin {
+                path: error_path,
+                source,
+            })?
     }
 
     fn from_parts(
@@ -452,10 +510,16 @@ impl AtomicFileStore {
         })?
     }
 
-    async fn create_bytes(
+    /// Creates bounded raw bytes without replacing a different existing resource.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] when validation, persistence, fault injection,
+    /// or the no-clobber comparison fails.
+    pub async fn create_bytes_no_clobber(
         &self,
         path: &Path,
-        bytes: Vec<u8>,
+        bytes: &[u8],
     ) -> Result<AtomicCreateOutcome, StorageError> {
         ensure_size(path, bytes.len(), self.max_document_bytes)?;
         let resource_lock = self.resource_lock(path);
@@ -463,6 +527,7 @@ impl AtomicFileStore {
         let task_path = path.to_path_buf();
         let error_path = task_path.clone();
         let fault_injector = Arc::clone(&self.fault_injector);
+        let bytes = bytes.to_vec();
         tokio::task::spawn_blocking(move || {
             atomic_create_bytes_blocking(&task_path, &bytes, fault_injector.as_ref())
         })
@@ -471,6 +536,36 @@ impl AtomicFileStore {
             path: error_path,
             source,
         })?
+    }
+}
+
+impl AtomicPersistence for AtomicFileStore {
+    fn read<'a>(&'a self, path: &'a Path) -> PortFuture<'a, Option<Vec<u8>>> {
+        Box::pin(async move { self.read_bytes(path).await.map_err(AppError::from) })
+    }
+
+    fn replace<'a>(&'a self, path: &'a Path, bytes: &'a [u8]) -> PortFuture<'a, ()> {
+        Box::pin(async move { self.write_bytes(path, bytes).await.map_err(AppError::from) })
+    }
+
+    fn create_no_clobber<'a>(
+        &'a self,
+        path: &'a Path,
+        bytes: &'a [u8],
+    ) -> PortFuture<'a, AtomicCreateOutcome> {
+        Box::pin(async move {
+            self.create_bytes_no_clobber(path, bytes)
+                .await
+                .map_err(AppError::from)
+        })
+    }
+
+    fn append<'a>(&'a self, path: &'a Path, bytes: &'a [u8]) -> PortFuture<'a, ()> {
+        Box::pin(async move { self.append_bytes(path, bytes).await.map_err(AppError::from) })
+    }
+
+    fn remove<'a>(&'a self, path: &'a Path) -> PortFuture<'a, bool> {
+        Box::pin(async move { self.remove_file(path).await.map_err(AppError::from) })
     }
 }
 
@@ -686,6 +781,21 @@ fn atomic_create_bytes_blocking(
             error.error,
         )),
     }
+}
+
+fn remove_file_blocking(path: &Path) -> Result<bool, StorageError> {
+    let parent = storage_parent(path)?;
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            return Err(StorageError::UnsafeFileType(path.to_path_buf()));
+        }
+        Ok(_) => {}
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(source) => return Err(io_error("inspect removal target", path, source)),
+    }
+    fs::remove_file(path).map_err(|source| io_error("remove file", path, source))?;
+    sync_parent_directory(parent, path)?;
+    Ok(true)
 }
 
 fn immutable_existing_outcome(
@@ -952,6 +1062,7 @@ mod tests {
         time::Duration,
     };
 
+    use codez_core::{AppErrorKind, AtomicPersistence};
     use serde::{Deserialize, Serialize};
 
     use super::{
@@ -1000,6 +1111,68 @@ mod tests {
             }
             Ok(())
         }
+    }
+
+    #[tokio::test]
+    async fn raw_persistence_port_round_trips_replace_append_read_and_remove() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let path = directory.path().join("raw.bin");
+        let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
+
+        persistence
+            .replace(&path, b"first")
+            .await
+            .expect("raw replacement must succeed");
+        persistence
+            .append(&path, b"-second")
+            .await
+            .expect("raw append must succeed");
+        let bytes = persistence
+            .read(&path)
+            .await
+            .expect("raw read must succeed");
+        let removed = persistence
+            .remove(&path)
+            .await
+            .expect("raw removal must succeed");
+        let missing = persistence
+            .read(&path)
+            .await
+            .expect("removed target read must succeed");
+
+        assert_eq!(
+            (bytes, removed, missing),
+            (Some(b"first-second".to_vec()), true, None)
+        );
+    }
+
+    #[tokio::test]
+    async fn raw_persistence_port_reports_no_clobber_outcomes_and_typed_conflicts() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let path = directory.path().join("immutable.bin");
+        let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
+
+        let created = persistence
+            .create_no_clobber(&path, b"content")
+            .await
+            .expect("first no-clobber create must succeed");
+        let reused = persistence
+            .create_no_clobber(&path, b"content")
+            .await
+            .expect("identical no-clobber create must be idempotent");
+        let conflict = persistence
+            .create_no_clobber(&path, b"different")
+            .await
+            .expect_err("different no-clobber bytes must conflict");
+
+        assert_eq!(
+            (created, reused, conflict.kind()),
+            (
+                AtomicCreateOutcome::Created,
+                AtomicCreateOutcome::Reused,
+                AppErrorKind::Conflict,
+            )
+        );
     }
 
     #[tokio::test]

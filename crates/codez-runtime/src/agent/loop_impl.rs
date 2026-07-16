@@ -21,14 +21,15 @@ impl AgentLoop {
         }
 
         state.status = AgentStatus::Running;
-        
+
         // Simulating the execution step: LLM call -> Tool call -> Result
         state.steps_completed += 1;
-        
+
         // Stagnation protection / test check: limit total steps
         if state.steps_completed > 100 {
             state.status = AgentStatus::Failed;
-            state.current_error = Some("Agent execution stagnated (step count exceeded 100)".to_string());
+            state.current_error =
+                Some("Agent execution stagnated (step count exceeded 100)".to_string());
             return Err("Execution stagnated".to_string());
         }
 

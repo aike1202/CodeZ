@@ -101,6 +101,56 @@ impl MigrationFixture {
         Self::from_root(directory, root)
     }
 
+    fn with_reserved_codez_layout() -> Self {
+        let directory = tempfile::tempdir().expect("fixture directory must be available");
+        let root = directory.path().join("legacy-data-v0");
+        let user_data = root.join("electron-user-data");
+        let user_home = root.join("home");
+        let workspace = root.join("workspace");
+        let codez_root = user_home.join(".codez");
+        fs::create_dir_all(&user_data).expect("fixture user data must be created");
+        fs::create_dir_all(codez_root.join("projects"))
+            .expect("fixture projects directory must be created");
+        fs::create_dir_all(codez_root.join("rules"))
+            .expect("fixture rules directory must be created");
+        fs::create_dir_all(codez_root.join("memory"))
+            .expect("fixture memory directory must be created");
+        fs::create_dir_all(codez_root.join("migrations/previous"))
+            .expect("fixture migration artifact directory must be created");
+        fs::create_dir_all(&workspace).expect("fixture workspace must be created");
+        fs::write(user_data.join("settings.json"), r#"{"theme":"system"}"#)
+            .expect("fixture Electron settings must be written");
+        fs::write(codez_root.join("projects/plan.md"), "# retained plan\n")
+            .expect("fixture plan must be written");
+        fs::write(codez_root.join("rules/user.md"), "Use UTF-8.\n")
+            .expect("fixture rule must be written");
+        fs::write(
+            codez_root.join("memory/user.md"),
+            "Remember migration state.\n",
+        )
+        .expect("fixture memory must be written");
+        fs::write(
+            codez_root.join("skills-config.json"),
+            r#"{"enabledSkills":["rust-best-practices"]}"#,
+        )
+        .expect("fixture skill config must be written");
+        fs::write(
+            codez_root.join("migrations/previous/migration-manifest.json"),
+            r#"{"artifact":true}"#,
+        )
+        .expect("fixture migration artifact must be written");
+        let roots = LegacyRoots::new(user_data, user_home, vec![workspace])
+            .expect("fixture roots must be valid");
+        let backup_root = codez_root.join("migrations/backups");
+        let target_root = codez_root.join("migrations/staging");
+        Self {
+            _directory: directory,
+            roots,
+            backup_root,
+            target_root,
+        }
+    }
+
     fn from_root(directory: tempfile::TempDir, root: PathBuf) -> Self {
         let roots = LegacyRoots::new(
             root.join("user-data"),
@@ -117,6 +167,37 @@ impl MigrationFixture {
             target_root,
         }
     }
+}
+
+fn reserved_layout_source_paths(fixture: &MigrationFixture) -> Vec<PathBuf> {
+    vec![
+        fixture.roots.user_data().join("settings.json"),
+        fixture.roots.user_home().join(".codez/projects/plan.md"),
+        fixture.roots.user_home().join(".codez/rules/user.md"),
+        fixture.roots.user_home().join(".codez/memory/user.md"),
+        fixture.roots.user_home().join(".codez/skills-config.json"),
+    ]
+}
+
+fn source_hashes(paths: &[PathBuf]) -> Vec<String> {
+    paths
+        .iter()
+        .map(|path| {
+            let bytes = fs::read(path).expect("fixture source must remain readable");
+            super::filesystem::sha256_bytes(&bytes)
+        })
+        .collect()
+}
+
+#[cfg(unix)]
+fn create_directory_redirect(source: &Path, target: &Path) {
+    std::os::unix::fs::symlink(source, target).expect("fixture directory symlink must be created");
+}
+
+#[cfg(windows)]
+fn create_directory_redirect(source: &Path, target: &Path) {
+    std::os::windows::fs::symlink_dir(source, target)
+        .expect("fixture directory reparse point must be created");
 }
 
 fn replace_in_file(path: &Path, from: &str, to: &str) {
@@ -680,4 +761,263 @@ async fn pre_commit_fault_keeps_staged_repository_non_authoritative_and_retryabl
             .expect("restart inspection must find committed authority"),
         MigrationPhase::Committed
     );
+}
+
+#[tokio::test]
+async fn committed_repository_is_reverified_before_restart_activation() {
+    let fixture = MigrationFixture::with_files([("settings.json", r#"{"theme":"system"}"#)]);
+    let service = LegacyMigrationService::default();
+    let (manifest, backup) =
+        discover_and_backup(&service, &fixture, "restart-reverification").await;
+    let transform = service
+        .transform(
+            &fixture.roots,
+            &manifest,
+            &backup,
+            &fixture.backup_root,
+            &fixture.target_root,
+        )
+        .await
+        .expect("fixture must transform");
+    let credentials = Arc::new(MemoryCredentialStore::default());
+    let credential_report = service
+        .migrate_credentials(
+            &manifest,
+            &backup,
+            &fixture.backup_root,
+            Arc::new(FixtureCredentialReader),
+            Arc::clone(&credentials),
+        )
+        .await
+        .expect("empty credential set must verify");
+    service
+        .commit(
+            &manifest,
+            &backup,
+            &transform,
+            &credential_report,
+            &fixture.target_root,
+            credentials,
+        )
+        .await
+        .expect("fixture migration must commit");
+    let settings_path = fixture
+        .target_root
+        .join(&transform.repository_relative_path)
+        .join("user-data/settings.json");
+    fs::write(
+        settings_path,
+        br#"{"schema":"settings","schemaVersion":1,"appTheme":"dark"}"#,
+    )
+    .expect("fixture repository must be tampered after commit");
+
+    let error = service
+        .committed_migration(&fixture.target_root)
+        .await
+        .expect_err("changed repository bytes must block restart activation");
+
+    assert!(matches!(error, MigrationError::TransformConflict(_)));
+}
+
+#[tokio::test]
+async fn reserved_codez_migration_layout_completes_without_mutating_or_rediscovering_sources() {
+    let fixture = MigrationFixture::with_reserved_codez_layout();
+    let service = LegacyMigrationService::default();
+    let source_paths = reserved_layout_source_paths(&fixture);
+    let hashes_before = source_hashes(&source_paths);
+    let run_id =
+        MigrationRunId::parse("reserved-codez-layout").expect("fixture migration ID must be valid");
+    let manifest = service
+        .discover(&fixture.roots, run_id)
+        .await
+        .expect("Electron and existing CodeZ sources must be discovered");
+    assert_eq!(manifest.entries.len(), source_paths.len());
+    assert!(manifest.entries.iter().all(|entry| {
+        !entry
+            .relative_path
+            .starts_with(Path::new(".codez/migrations"))
+    }));
+
+    let first_backup = service
+        .backup(&fixture.roots, &manifest, &fixture.backup_root)
+        .await
+        .expect("reserved backup subtree must be accepted");
+    let retried_backup = service
+        .backup(&fixture.roots, &manifest, &fixture.backup_root)
+        .await
+        .expect("reserved backup retry must reuse immutable copies");
+    let first_transform = service
+        .transform(
+            &fixture.roots,
+            &manifest,
+            &first_backup,
+            &fixture.backup_root,
+            &fixture.target_root,
+        )
+        .await
+        .expect("reserved staging subtree must be accepted");
+    let retried_transform = service
+        .transform(
+            &fixture.roots,
+            &manifest,
+            &retried_backup,
+            &fixture.backup_root,
+            &fixture.target_root,
+        )
+        .await
+        .expect("reserved staging retry must reuse immutable outputs");
+    let credentials = Arc::new(MemoryCredentialStore::default());
+    let first_credentials = service
+        .migrate_credentials(
+            &manifest,
+            &first_backup,
+            &fixture.backup_root,
+            Arc::new(FixtureCredentialReader),
+            Arc::clone(&credentials),
+        )
+        .await
+        .expect("absent legacy credentials must produce verified decisions");
+    let retried_credentials = service
+        .migrate_credentials(
+            &manifest,
+            &retried_backup,
+            &fixture.backup_root,
+            Arc::new(FixtureCredentialReader),
+            Arc::clone(&credentials),
+        )
+        .await
+        .expect("credential decision retry must be idempotent");
+    assert!(
+        service
+            .committed_migration(&fixture.target_root)
+            .await
+            .expect("pre-commit authority state must be readable")
+            .is_none()
+    );
+
+    let first_commit = service
+        .commit(
+            &manifest,
+            &first_backup,
+            &first_transform,
+            &first_credentials,
+            &fixture.target_root,
+            Arc::clone(&credentials),
+        )
+        .await
+        .expect("verified migration must commit atomically");
+    let retried_commit = service
+        .commit(
+            &manifest,
+            &retried_backup,
+            &retried_transform,
+            &retried_credentials,
+            &fixture.target_root,
+            credentials,
+        )
+        .await
+        .expect("commit retry must reuse the authority marker");
+    let rediscovered = service
+        .discover(
+            &fixture.roots,
+            MigrationRunId::parse("reserved-codez-rediscovery")
+                .expect("fixture migration ID must be valid"),
+        )
+        .await
+        .expect("migration artifacts must not contaminate rediscovery");
+
+    assert_eq!(source_hashes(&source_paths), hashes_before);
+    assert_eq!(first_transform, retried_transform);
+    assert_eq!(first_credentials, retried_credentials);
+    assert_eq!(first_commit, retried_commit);
+    assert_eq!(rediscovered.entries, manifest.entries);
+    assert_eq!(retried_backup.reused_files, manifest.entries.len());
+    assert_eq!(
+        service
+            .inspect_phase(&fixture.backup_root, &fixture.target_root, &manifest.run_id)
+            .await
+            .expect("committed reserved layout must be inspectable"),
+        MigrationPhase::Committed
+    );
+}
+
+#[tokio::test]
+async fn backup_rejects_a_location_inside_a_catalog_recursive_source() {
+    let fixture = MigrationFixture::with_reserved_codez_layout();
+    let service = LegacyMigrationService::default();
+    let manifest = service
+        .discover(
+            &fixture.roots,
+            MigrationRunId::parse("backup-source-overlap")
+                .expect("fixture migration ID must be valid"),
+        )
+        .await
+        .expect("fixture discovery must succeed");
+    let unsafe_backup = fixture
+        .roots
+        .user_home()
+        .join(".codez/rules/migration-backup");
+
+    let error = service
+        .backup(&fixture.roots, &manifest, &unsafe_backup)
+        .await
+        .expect_err("a backup below a recursive source must be rejected");
+
+    assert!(matches!(error, MigrationError::OverlappingBackupRoot(path) if path == unsafe_backup));
+}
+
+#[tokio::test]
+async fn transform_rejects_electron_catalog_and_backup_target_overlaps() {
+    let fixture = MigrationFixture::with_reserved_codez_layout();
+    let service = LegacyMigrationService::default();
+    let (manifest, backup) = discover_and_backup(&service, &fixture, "target-source-overlap").await;
+    let unsafe_targets = [
+        fixture.roots.user_data().join("migration-target"),
+        fixture.roots.user_home().join(".codez/rules/staging"),
+        fixture.roots.user_home().join(".codez/projects/staging"),
+        fixture.backup_root.join("nested-target"),
+    ];
+
+    for unsafe_target in unsafe_targets {
+        let error = service
+            .transform(
+                &fixture.roots,
+                &manifest,
+                &backup,
+                &fixture.backup_root,
+                &unsafe_target,
+            )
+            .await
+            .expect_err("overlapping target must be rejected before transformation");
+        assert!(
+            matches!(error, MigrationError::OverlappingTargetRoot(path) if path == unsafe_target)
+        );
+    }
+}
+
+#[tokio::test]
+async fn transform_rejects_a_symlink_or_reparse_point_in_the_staging_path() {
+    let fixture = MigrationFixture::with_reserved_codez_layout();
+    let service = LegacyMigrationService::default();
+    let (manifest, backup) = discover_and_backup(&service, &fixture, "redirected-staging").await;
+    let redirected_directory = fixture
+        ._directory
+        .path()
+        .join("redirected-staging-outside-codez");
+    fs::create_dir_all(&redirected_directory)
+        .expect("fixture redirect destination must be created");
+    create_directory_redirect(&redirected_directory, &fixture.target_root);
+
+    let error = service
+        .transform(
+            &fixture.roots,
+            &manifest,
+            &backup,
+            &fixture.backup_root,
+            &fixture.target_root,
+        )
+        .await
+        .expect_err("filesystem redirection must not escape migration staging");
+
+    assert!(matches!(error, MigrationError::SymbolicLink(path) if path == fixture.target_root));
 }

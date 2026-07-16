@@ -1,4 +1,4 @@
-use crate::tools::types::{PreparedToolCall, ToolExecutionWave, ToolConcurrency};
+use crate::tools::types::{PreparedToolCall, ToolConcurrency, ToolExecutionWave};
 
 fn resource_base(key: &str) -> String {
     if let Some(stripped) = key.strip_suffix(":read") {
@@ -36,18 +36,20 @@ struct PlacedCall {
     wave_index: usize,
 }
 
+#[derive(Debug, Default)]
 pub struct ToolScheduler;
 
 impl ToolScheduler {
-    pub fn plan(calls: &[PreparedToolCall]) -> Vec<ToolExecutionWave> {
+    pub fn plan(&self, calls: &[PreparedToolCall]) -> Vec<ToolExecutionWave> {
         let mut waves: Vec<ToolExecutionWave> = Vec::new();
         let mut placed: Vec<PlacedCall> = Vec::new();
-        
+
         let mut sorted_calls = calls.to_vec();
         sorted_calls.sort_by_key(|c| c.call.position);
 
         for call in sorted_calls {
-            let exclusive = call.handler.descriptor().behavior().concurrency == ToolConcurrency::Exclusive;
+            let exclusive =
+                call.handler.descriptor().behavior().concurrency == ToolConcurrency::Exclusive;
             let mut wave_index = if exclusive { waves.len() } else { 0 };
 
             for previous in &placed {
@@ -65,7 +67,7 @@ impl ToolScheduler {
             }
 
             waves[wave_index].calls.push(call.clone());
-            
+
             waves[wave_index].reason = if exclusive {
                 "exclusive".to_string()
             } else if wave_index == 0 {

@@ -1,9 +1,9 @@
+use codez_runtime::mutation_coordinator::FileMutationCoordinator;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::time::sleep;
-use codez_runtime::mutation_coordinator::FileMutationCoordinator;
 
 #[tokio::test]
 async fn test_mutation_coordinator_serializes_same_file() {
@@ -67,7 +67,9 @@ async fn test_mutation_coordinator_allows_parallel_different_files() {
         })
     };
 
-    let _ = tokio::time::timeout(Duration::from_secs(1), async { tokio::try_join!(t1, t2).unwrap() })
-        .await
-        .expect("Timeout: tasks did not run in parallel");
+    let _ = tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::try_join!(t1, t2).unwrap()
+    })
+    .await
+    .expect("Timeout: tasks did not run in parallel");
 }

@@ -1,19 +1,18 @@
+use futures::future::join_all;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use futures::future::join_all;
 
 use crate::agent::loop_impl::AgentLoop;
 use crate::agent::state::AgentStatus;
 
+#[derive(Default)]
 pub struct ParallelOrchestrator {
     agents: Arc<Mutex<Vec<Arc<AgentLoop>>>>,
 }
 
 impl ParallelOrchestrator {
     pub fn new() -> Self {
-        Self {
-            agents: Arc::new(Mutex::new(Vec::new())),
-        }
+        Self::default()
     }
 
     pub async fn add_agent(&self, agent: Arc<AgentLoop>) {
@@ -23,12 +22,13 @@ impl ParallelOrchestrator {
 
     pub async fn run_wave(&self) -> Vec<Result<AgentStatus, String>> {
         let list = self.agents.lock().await;
-        let futures: Vec<_> = list.iter().map(|agent| {
-            let a = agent.clone();
-            async move {
-                a.run_step().await
-            }
-        }).collect();
+        let futures: Vec<_> = list
+            .iter()
+            .map(|agent| {
+                let a = agent.clone();
+                async move { a.run_step().await }
+            })
+            .collect();
 
         join_all(futures).await
     }
