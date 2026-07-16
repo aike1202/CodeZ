@@ -31,3 +31,6 @@ pub use workspace::{
     WorkspaceService,
 };
 pub mod chat;
+pub mod permission;
+pub mod agent;
+pub mod extension;

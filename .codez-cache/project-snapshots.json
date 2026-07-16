@@ -92,8 +92,8 @@
     },
     "F:\\MyProjectF\\CodeZ": {
       "rootPath": "F:\\MyProjectF\\CodeZ",
-      "packageJsonHash": "87f4a042f0d4349621dcd493378a9eab4abd36090da4fa7cc55661ade92824cf",
-      "lockfileHash": "9fd770e7fe7580fc0503241bffbe667de5a83de08831a1c8b6f018d5d0ecd19c",
+      "packageJsonHash": "fd41660014d61fbbac0ba219e6e7b483a6f3a8159206a4bbd420d5bfdcbfd652",
+      "lockfileHash": "8ad54625aefd433966f37f43110eac79e3e7267304a60ae4151d3dec76a6e6f5",
       "options": {
         "dirPaths": [
           "src/main",
@@ -108,7 +108,18 @@
         "packageManager": "npm",
         "scripts": {
           "dev": "electron-vite dev",
+          "dev:renderer:tauri": "vite --config vite.tauri.config.ts",
+          "dev:tauri": "tauri dev",
+          "analyze:rust-shell-parser": "vite-node scripts/tauri/generate-shell-parser-diff.ts",
           "analyze:shell-corpus": "vite-node scripts/analyze-shell-command-corpus.ts",
+          "analyze:tauri-resources": "vite-node scripts/tauri/analyze-resource-bundle.ts",
+          "analyze:tauri-migration": "vite-node scripts/tauri/generate-migration-inventory.ts",
+          "measure:tauri-baseline": "vite-node scripts/tauri/measure-performance-baseline.ts",
+          "build:renderer:tauri": "vite build --config vite.tauri.config.ts",
+          "build:tauri": "tauri build",
+          "check:architecture": "vite-node scripts/tauri/check-rust-dependencies.ts",
+          "contracts:generate": "cargo run -p codez-contracts --example export_bindings",
+          "check:rust": "cargo fmt --all -- --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo test --workspace --all-targets",
           "typecheck": "tsc --noEmit",
           "test": "vitest run",
           "build": "electron-vite build",
@@ -123,6 +134,7 @@
           "@electron-toolkit/utils": "^3.0.0",
           "@modelcontextprotocol/sdk": "^1.29.0",
           "@react-symbols/icons": "^1.4.1",
+          "@tauri-apps/api": "^2.11.1",
           "@uiw/codemirror-theme-vscode": "^4.25.10",
           "@uiw/react-codemirror": "^4.25.10",
           "@vscode/ripgrep": "^1.18.0",
@@ -148,6 +160,7 @@
         },
         "devDependencies": {
           "@google/generative-ai": "^0.24.1",
+          "@tauri-apps/cli": "^2.11.4",
           "@types/lodash": "^4.17.24",
           "@types/node": "^20.14.0",
           "@types/prismjs": "^1.26.6",
@@ -166,7 +179,8 @@
           "README.md",
           "electron.vite.config.ts",
           "tsconfig.json",
-          "vitest.config.ts"
+          "vitest.config.ts",
+          "Cargo.toml"
         ],
         "entrypoints": [
           "out/main/index.js",
@@ -181,6 +195,7 @@
           "electron.vite.config.ts",
           "tsconfig.json",
           "vitest.config.ts",
+          "Cargo.toml",
           "out/main/index.js",
           "src/main/index.ts",
           "src/preload/index.ts",
@@ -194,9 +209,9 @@
           "src/shared/types/provider.ts"
         ],
         "tree": "=== Directory: src/main ===\nsrc/main\n[DIR] agent\n[DIR] ipc\n[DIR] services\n[DIR] todo\n[DIR] tools\n[FILE] index.ts\n[FILE] logger.ts\n\n=== Directory: src/shared ===\nsrc/shared\n[DIR] constants\n[DIR] ipc\n[DIR] types\n[DIR] utils",
-        "docsTree": "[Documentation Files]\n.agents/AGENTS.md\n.claude/plans/no-reply-diagnosis.md\nAGENTS.md\nClaudeCodelogs/ClaudeCode-Tools-Analysis.md\nCONTEXT_DISTILLER_SCOUT_PLAN.md\ndocs/api_protocols/Anthropic_Messages.md\ndocs/api_protocols/Gemini_streamGenerateContent.md\ndocs/api_protocols/OpenAI_Chat_Completions.md\ndocs/claude-code-context-management-research.md\ndocs/claude-code-read-edit-context-flow.md\ndocs/context-management-optimization-research-handoff.md\ndocs/project_analysis.md\ndocs/superpowers/plans/2026-06-29-context-rules.md\ndocs/superpowers/plans/2026-06-29-general-settings.md\ndocs/superpowers/plans/2026-06-29-markdown-editor-refactor-plan.md\ndocs/superpowers/plans/2026-06-30-claude-tool-alignment.md\ndocs/superpowers/plans/2026-06-30-interleaved-chat.md\ndocs/superpowers/plans/2026-06-30-react-markdown-migration.md\ndocs/superpowers/plans/2026-07-01-plan-mode.md\ndocs/superpowers/plans/2026-07-01-system-prompt-alignment-plan.md\ndocs/superpowers/plans/2026-07-01-task-management-plan.md\ndocs/superpowers/plans/2026-07-02-component-architecture-plan.md\ndocs/superpowers/plans/2026-07-02-main-services-refactoring-plan.md\ndocs/superpowers/plans/2026-07-02-permission-levels-plan.md\ndocs/superpowers/plans/2026-07-02-state-and-utils-refactoring-plan.md\ndocs/superpowers/plans/2026-07-02-ui-components-refactoring-plan.md\ndocs/superpowers/plans/2026-07-03-chat-autoscroll-vs-user-action.md\ndocs/superpowers/plans/2026-07-03-system-prompt-optimization.md\ndocs/superpowers/plans/2026-07-05-builtin-skills-and-creation-flow.md\ndocs/superpowers/plans/2026-07-05-chat-auto-scroll.md\ndocs/superpowers/plans/2026-07-06-anthropic-provider-compatibility.md\ndocs/superpowers/plans/2026-07-07-task-capsule-theme-colors.md\ndocs/superpowers/plans/2026-07-10-context-management-optimization.md\ndocs/superpowers/plans/2026-07-10-cross-platform-permission-policy.md\ndocs/superpowers/plans/2026-07-10-model-reasoning-capabilities.md\ndocs/superpowers/plans/2026-07-10-task-group-reset.md\ndocs/superpowers/plans/2026-07-11-context-token-stability-fix.md\ndocs/superpowers/plans/2026-07-11-image-input-and-preview.md\ndocs/superpowers/plans/2026-07-11-package-manager-version-permission.md\ndocs/superpowers/plans/2026-07-11-parallel-tool-batch-log.md\ndocs/superpowers/plans/2026-07-11-pattern-permission-hardline.md\ndocs/superpowers/plans/2026-07-11-read-batching-policy.md\ndocs/superpowers/plans/2026-07-11-read-files-batch.md\ndocs/superpowers/plans/2026-07-11-read-initial-range-policy.md\ndocs/superpowers/plans/2026-07-11-research-subagent-handoff.md\ndocs/superpowers/plans/2026-07-11-session-list-status.md\ndocs/superpowers/plans/2026-07-11-session-scoped-task-capsule.md\ndocs/superpowers/plans/2026-07-11-shared-agent-tool-policy.md\ndocs/superpowers/plans/2026-07-11-skill-invocation-detail-polish.md\ndocs/superpowers/plans/2026-07-11-subagent-interruption-authority.md\ndocs/superpowers/plans/claude-tool-alignment/HANDOFF.md\ndocs/superpowers/plans/claude-tool-alignment/task-01-read-fingerprint-store.md\ndocs/superpowers/plans/claude-tool-alignment/task-02-read-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-03-edit-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-04-write-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-05-glob-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-06-grep-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-07-notebook-edit-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-08-spawn-runner.md\ndocs/superpowers/plans/claude-tool-alignment/task-09-bash-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-10-powershell-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-11-push-provider.md\ndocs/superpowers/plans/claude-tool-alignment/task-12-push-notification-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-13-skill-tool.md\ndocs/superpowers/plans/claude-tool-alignment/task-14-askuserquestion-ipc-tool-widget.md\ndocs/superpowers/plans/claude-tool-alignment/task-15-permission-manager-cleanup.md\ndocs/superpowers/plans/claude-tool-alignment/task-16-register-delete-old-tools.md\ndocs/superpowers/plans/claude-tool-alignment/task-17-renderer-tool-name-wiring.md\ndocs/superpowers/plans/claude-tool-alignment/task-18-regression-and-final-acceptance.md\ndocs/superpowers/specs/2026-06-29-general-settings-design.md\ndocs/superpowers/specs/2026-06-29-markdown-editor-refactor-design.md\ndocs/superpowers/specs/2026-06-29-rules-ui-design.md\ndocs/superpowers/specs/2026-06-30-chat-area-optimization-design.md\ndocs/superpowers/specs/2026-06-30-claude-tool-alignment-design.md\ndocs/superpowers/specs/2026-06-30-context-manager-truncation-design.md\ndocs/superpowers/specs/2026-06-30-interleaved-chat-design.md\ndocs/superpowers/specs/2026-06-30-react-markdown-migration-design.md\ndocs/superpowers/specs/2026-07-01-plan-mode-design.md\ndocs/superpowers/specs/2026-07-01-scheduler-system-design.md\ndocs/superpowers/specs/2026-07-01-system-prompt-alignment-design.md\ndocs/superpowers/specs/2026-07-01-task-management-design.md\ndocs/superpowers/specs/2026-07-01-worktree-service-design.md\ndocs/superpowers/specs/2026-07-02-component-architecture-design.md\ndocs/superpowers/specs/2026-07-02-main-services-refactoring-design.md\ndocs/superpowers/specs/2026-07-02-permission-levels-design.md\ndocs/superpowers/specs/2026-07-02-permission-system-redesign-design.md\ndocs/superpowers/specs/2026-07-02-plan-capsule-redesign-design.md\ndocs/superpowers/specs/2026-07-02-plan-subagent-refactor-design.md\ndocs/superpowers/specs/2026-07-02-session-scoped-plans-design.md\ndocs/superpowers/specs/2026-07-02-state-and-utils-refactoring-design.md\ndocs/superpowers/specs/2026-07-02-system-prompt-association-design.md\ndocs/superpowers/specs/2026-07-02-ui-components-refactoring-design.md\ndocs/superpowers/specs/2026-07-03-chat-autoscroll-vs-user-action-design.md\ndocs/superpowers/specs/2026-07-03-system-prompt-optimization-design.md\ndocs/superpowers/specs/2026-07-05-builtin-skills-and-creation-flow-design.md\ndocs/superpowers/specs/2026-07-05-chat-auto-scroll-design.md\ndocs/superpowers/specs/2026-07-05-parallel-plan-execution-design.md\ndocs/superpowers/specs/2026-07-05-subagent-io-design.md\ndocs/superpowers/specs/2026-07-05-todo-plan-layering-design.md\ndocs/superpowers/specs/2026-07-05-websearch-design.md\n[TRUNCATED] docs tree limit reached",
+        "docsTree": "[Documentation Files]\n.agents/AGENTS.md\n.agents/skills/rust-best-practices/references/chapter_01.md\n.agents/skills/rust-best-practices/references/chapter_02.md\n.agents/skills/rust-best-practices/references/chapter_03.md\n.agents/skills/rust-best-practices/references/chapter_04.md\n.agents/skills/rust-best-practices/references/chapter_05.md\n.agents/skills/rust-best-practices/references/chapter_06.md\n.agents/skills/rust-best-practices/references/chapter_07.md\n.agents/skills/rust-best-practices/references/chapter_08.md\n.agents/skills/rust-best-practices/references/chapter_09.md\n.agents/skills/rust-best-practices/SKILL.md\nAGENTS.md\ndist-app/win-unpacked/resources/builtin-skills/find-skills/SKILL.md\ndist-app/win-unpacked/resources/builtin-skills/rule-creator/SKILL.md\ndist-app/win-unpacked/resources/builtin-skills/skill-creator/agents/analyzer.md\ndist-app/win-unpacked/resources/builtin-skills/skill-creator/agents/comparator.md\ndist-app/win-unpacked/resources/builtin-skills/skill-creator/agents/grader.md\ndist-app/win-unpacked/resources/builtin-skills/skill-creator/references/schemas.md\ndist-app/win-unpacked/resources/builtin-skills/skill-creator/SKILL.md\ndocs/api_protocols/Anthropic_Messages.md\ndocs/api_protocols/Gemini_streamGenerateContent.md\ndocs/api_protocols/OpenAI_Chat_Completions.md\ndocs/claude-code-context-management-research.md\ndocs/claude-code-read-edit-context-flow.md\ndocs/context-management-optimization-research-handoff.md\ndocs/decisions/0001-tauri-rust-migration-defaults.md\ndocs/decisions/0002-rust-mcp-sdk.md\ndocs/decisions/0003-rust-pty.md\ndocs/decisions/0004-rust-shell-parser.md\ndocs/decisions/0005-tauri-stream-backpressure.md\ndocs/decisions/0006-tauri-resource-packaging.md\ndocs/migration/generated/inventory-summary.md\ndocs/migration/README.md\ndocs/migration/spikes/rust-mcp-sdk.md\ndocs/migration/spikes/rust-pty.md\ndocs/migration/spikes/rust-shell-parser.md\ndocs/migration/spikes/tauri-resource-packaging.md\ndocs/migration/spikes/tauri-stream-backpressure.md\ndocs/migration/spikes/windows-safe-storage.md\ndocs/superpowers/plans/2026-07-15-model-directed-tool-approval.md\ndocs/superpowers/plans/2026-07-15-tauri-rust-refactor.md\ndocs/superpowers/specs/2026-06-29-rules-ui-design.md\ndocs/superpowers/specs/2026-06-30-chat-area-optimization-design.md\ndocs/superpowers/specs/2026-06-30-context-manager-truncation-design.md\ndocs/superpowers/specs/2026-07-01-scheduler-system-design.md\ndocs/superpowers/specs/2026-07-01-worktree-service-design.md\ndocs/superpowers/specs/2026-07-02-permission-system-redesign-design.md\ndocs/superpowers/specs/2026-07-02-plan-capsule-redesign-design.md\ndocs/superpowers/specs/2026-07-02-plan-subagent-refactor-design.md\ndocs/superpowers/specs/2026-07-02-session-scoped-plans-design.md\ndocs/superpowers/specs/2026-07-02-system-prompt-association-design.md\ndocs/superpowers/specs/2026-07-05-parallel-plan-execution-design.md\ndocs/superpowers/specs/2026-07-05-subagent-io-design.md\ndocs/superpowers/specs/2026-07-05-todo-plan-layering-design.md\ndocs/superpowers/specs/2026-07-05-websearch-design.md\ndocs/superpowers/specs/2026-07-06-prompt-architecture-v2-design.md\ndocs/superpowers/specs/2026-07-11-agent-unbounded-task-continuation-design.md\ndocs/superpowers/specs/2026-07-12-main-agent-executor-control-plane-design.md\ndocs/superpowers/specs/2026-07-13-claude-code-tool-runtime-v2-design.md\ndocs/superpowers/specs/2026-07-15-model-directed-tool-approval-design.md\ndocs/superpowers/specs/2026-07-15-permission-mode-selector-design.md\ndocs/superpowers/specs/2026-07-15-tauri-rust-architecture-design.md\ndocs/superpowers/specs/2026-07-15-tauri-rust-refactor-requirements.md\nREADME.md\nresources/builtin-skills/find-skills/SKILL.md\nresources/builtin-skills/rule-creator/SKILL.md\nresources/builtin-skills/skill-creator/agents/analyzer.md\nresources/builtin-skills/skill-creator/agents/comparator.md\nresources/builtin-skills/skill-creator/agents/grader.md\nresources/builtin-skills/skill-creator/references/schemas.md\nresources/builtin-skills/skill-creator/SKILL.md\nsrc/tests/fixtures/migration/legacy-data-v0/home/.codez/projects/workspace-fixture/plans/migration-plan.md\nsrc/tests/fixtures/migration/legacy-data-v0/workspace/.codez/rules/fixture.md",
         "fromCache": false,
-        "updatedAt": "2026-07-13T17:34:15.482Z"
+        "updatedAt": "2026-07-16T05:03:35.829Z"
       }
     },
     "C:\\Users\\CodexSandboxOffline\\.codex\\.sandbox\\cwd\\bf6f746d9b46fb06": {

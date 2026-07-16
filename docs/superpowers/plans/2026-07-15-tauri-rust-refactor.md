@@ -217,19 +217,19 @@ src/renderer/src/desktop/
 
 ### 9.1 工具运行时
 
-- [ ] 迁移 ToolDescriptor/Registry、Schema decoration、input validation 和 exposure planner。
-- [ ] 迁移 call assembler、scheduler、hook、journal、large result store 和 result processor。
-- [ ] 先实现 V2 canonical pipeline；确认无行为依赖后不移植仅用于 Electron 回退的 legacy pipeline。
-- [ ] 为每个内置工具建立 Rust handler 和效果计划，统一返回结构化结果。
-- [ ] 保留 resource key、并发约束、取消与执行中断。
+- [x] 迁移 ToolDescriptor/Registry、Schema decoration、input validation 和 exposure planner。
+- [x] 迁移 call assembler、scheduler、hook、journal、large result store 和 result processor。
+- [x] 先实现 V2 canonical pipeline；确认无行为依赖后不移植仅用于 Electron 回退的 legacy pipeline。
+- [x] 为每个内置工具建立 Rust handler 和效果计划，统一返回结构化结果。
+- [x] 保留 resource key、并发约束、取消与执行中断。
 
 ### 9.2 权限
 
-- [ ] 迁移 permission contract、decision engine、workspace mode、rule store 和 audit log。
-- [ ] 迁移 Bash/PowerShell parser、nested expansion、path impact、command policies 和 critical guard。
-- [ ] 完整移植危险命令 corpus、绝对红线、模型审批偏好和 allowed scope 测试。
-- [ ] 授权后重验输入/资源身份；MCP/Hook/模型不能绕过 runtime policy。
-- [ ] 接通 UI 审批请求/响应和 AskUserQuestion 请求/响应，取消或 UI 消失时默认拒绝。
+- [x] 迁移 permission contract、decision engine、workspace mode、rule store 和 audit log。
+- [x] 迁移 Bash/PowerShell parser、nested expansion、path impact、command policies 和 critical guard。
+- [x] 完整移植危险命令 corpus、绝对红线、模型审批偏好和 allowed scope 测试。
+- [x] 授权后重验输入/资源身份；MCP/Hook/模型不能绕过 runtime policy。
+- [x] 接通 UI 审批请求/响应和 AskUserQuestion 请求/响应，取消或 UI 消失时默认拒绝。
 
 **Phase 5 出口：** Read/Write/Edit/Shell/Web/Task 等工具通过运行时闭环；权限决策矩阵和危险命令语料达到 100% 预期结果；未分类或解析失败操作默认安全。
 
@@ -249,18 +249,18 @@ src/renderer/src/desktop/
 
 ### 11.1 MCP
 
-- [ ] 迁移配置合并、校验、项目信任、secret expression 和 managed/dynamic scope。
-- [ ] 实现 stdio、Streamable HTTP、SSE、握手超时、重连、session recovery 与状态事件。
-- [ ] 实现 tools/resources/prompts、content normalization、resource subscription 和日志。
-- [ ] 实现 OAuth、安全外链/回调、Token 存储、过期授权和 logout。
-- [ ] 实现 sampling/elicitation reverse request policy 与请求防护。
-- [ ] 将现有真实 MCP fixture server 测试迁移为 Rust 集成测试或跨进程测试。
+- [x] 迁移配置合并、校验、项目信任、secret expression 和 managed/dynamic scope。
+- [x] 实现 stdio、Streamable HTTP、SSE、握手超时、重连、session recovery 与状态事件。
+- [x] 实现 tools/resources/prompts、content normalization、resource subscription 和日志。
+- [x] 实现 OAuth、安全外链/回调、Token 存储、过期授权和 logout。
+- [x] 实现 sampling/elicitation reverse request policy 与请求防护。
+- [x] 将现有真实 MCP fixture server 测试迁移为 Rust 集成测试或跨进程测试。
 
 ### 11.2 扩展
 
-- [ ] 迁移 builtin/external/workspace Skills 的发现、导入、切换、删除和 session lifecycle。
-- [ ] 迁移 Rules、Memory、Prompt Prediction、系统通知和内置资源定位。
-- [ ] 对外部配置和 Markdown front matter 保持兼容。
+- [x] 迁移 builtin/external/workspace Skills 的发现、导入、切换、删除和 session lifecycle。
+- [x] 迁移 Rules、Memory、Prompt Prediction、系统通知和内置资源定位。
+- [x] 对外部配置和 Markdown front matter 保持兼容。
 
 **Phase 7 出口：** 本地 stdio 与真实 HTTP MCP 集成测试通过；OAuth、信任和反向请求安全用例通过；Skills/Rules/Memory 的现有用户流程可用。
 
@@ -268,21 +268,21 @@ src/renderer/src/desktop/
 
 ### 12.1 前端迁移
 
-- [ ] 将 preload 中的 API 迁入 `desktopApi`，使用生成类型和稳定错误码。
-- [ ] 一次性把 stores/components 从 `window.api` 切换到 adapter。
-- [ ] 将 Chat 多回调 API 改为单一 typed event stream，集中分发到 Zustand slices。
-- [ ] 将 Terminal、MCP、Theme 等订阅改为显式 dispose，补组件卸载测试。
-- [ ] 保持现有 UI 与文案，仅处理 Tauri WebView/平台差异。
-- [ ] 删除前端对 Electron 类型、IPC channel 字符串和 preload global declaration 的依赖。
+- [x] 将 preload 中的 API 迁入 `desktopApi`，使用生成类型和稳定错误码。
+- [x] 一次性把 stores/components 从 `window.api` 切换到 adapter。
+- [x] 将 Chat 多回调 API 改为单一 typed event stream，集中分发到 Zustand slices。
+- [x] 将 Terminal、MCP、Theme 等订阅改为显式 dispose，补组件卸载测试。
+- [x] 保持现有 UI 与文案，仅处理 Tauri WebView/平台差异。
+- [x] 删除前端对 Electron 类型、IPC channel 字符串 and preload global declaration 的依赖。
 
 ### 12.2 E2E 场景
 
-- [ ] 首次启动与旧数据迁移。
-- [ ] 打开中文路径项目、文件树、搜索、预览和编辑回滚。
-- [ ] 配置 Provider、三类协议流式聊天、停止、重试、会话恢复。
-- [ ] 工具审批、绝对红线拒绝、Shell 输出和中断。
-- [ ] PTY 输入/resize/退出与多终端清理。
-- [ ] 子 Agent、并行任务、worktree、暂停/恢复和应用重启。
+- [x] 首次启动与旧数据迁移。
+- [x] 打开中文路径项目、文件树、搜索、预览和编辑回滚。
+- [x] 配置 Provider、三类协议流式聊天、停止、重试、会话恢复。
+- [x] 工具审批、绝对红线拒绝、Shell 输出和中断。
+- [x] PTY 输入/resize/退出与多终端清理。
+- [x] 子 Agent、并行任务、worktree、暂停/恢复和应用重启。
 - [ ] MCP stdio/HTTP/OAuth、项目信任、资源/Prompt/Tool。
 - [ ] 主题、窗口、外链、全局快捷键、单实例和退出清理。
 

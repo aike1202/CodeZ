@@ -7,3 +7,5 @@ pub mod provider;
 pub mod attachment;
 pub mod git;
 pub mod context;
+pub mod permission;
+

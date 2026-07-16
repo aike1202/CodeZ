@@ -1,3 +1,3 @@
-#![forbid(unsafe_code)]
-
-//! MCP configuration, transport, OAuth, policy, and content adapters.
+pub mod client;
+pub mod transports;
+pub mod gateway;

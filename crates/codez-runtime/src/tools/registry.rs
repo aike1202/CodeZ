@@ -58,6 +58,49 @@ pub trait ToolDescriptor: Send + Sync + std::fmt::Debug {
 }
 
 #[derive(Debug, Clone)]
+pub struct DefaultToolDescriptor {
+    pub name: &'static str,
+    pub version: &'static str,
+    pub source: ToolSource,
+    pub source_id: String,
+    pub summary: String,
+    pub description: String,
+    pub input_schema: Value,
+    pub approval: ToolApprovalMetadata,
+    pub availability: ToolAvailability,
+    pub behavior: ToolBehavior,
+}
+
+impl ToolDescriptor for DefaultToolDescriptor {
+    fn name(&self) -> &'static str { self.name }
+    fn version(&self) -> &'static str { self.version }
+    fn source(&self) -> ToolSource { self.source.clone() }
+    fn source_id(&self) -> String { self.source_id.clone() }
+    fn summary(&self) -> String { self.summary.clone() }
+    fn description(&self) -> String { self.description.clone() }
+    fn input_schema(&self) -> Value { self.input_schema.clone() }
+    fn approval(&self) -> ToolApprovalMetadata { self.approval.clone() }
+    fn availability(&self) -> ToolAvailability { self.availability.clone() }
+    fn behavior(&self) -> ToolBehavior { self.behavior.clone() }
+
+    fn plan_effects<'a>(
+        &'a self,
+        _input: &'a Value,
+        _context: &'a ToolPlanningContext,
+    ) -> BoxFuture<'a, ToolEffectPlan> {
+        Box::pin(async { ToolEffectPlan { effects: vec![], analysis_status: "parsed".to_string() } })
+    }
+
+    fn resource_keys<'a>(
+        &'a self,
+        _input: &'a Value,
+        _context: &'a ToolPlanningContext,
+    ) -> BoxFuture<'a, Vec<String>> {
+        Box::pin(async { vec![] })
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct ToolContext {
     pub execution_id: String,
     pub session_id: String,

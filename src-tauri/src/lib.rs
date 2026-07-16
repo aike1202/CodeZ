@@ -125,6 +125,8 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::attachment::attachment_delete_session,
             commands::theme::theme_get,
             commands::theme::theme_set,
+            commands::permission::permission_mode_get,
+            commands::permission::permission_mode_set,
         ])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::ThemeChanged(_)) {

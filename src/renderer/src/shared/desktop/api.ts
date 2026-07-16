@@ -25,9 +25,8 @@ import type {
   ProviderInfo,
   ProviderFormData,
   ConnectionTestResult,
-  LedgerEvent,
-  SessionRuntimeSnapshot,
 } from './generated/contracts'
+import type { LedgerEvent, SessionRuntimeSnapshot } from '@shared/types/context'
 import { normalizeDesktopError } from './errors'
 
 async function command<T>(name: string, args?: Record<string, unknown>): Promise<T> {

@@ -1,3 +1,4 @@
-pub mod edit;
+pub mod bash;
+pub mod read;
 pub mod write;
-pub mod notebook_edit;
+pub mod edit;

@@ -7,6 +7,10 @@ license.workspace = true
 
 [dependencies]
 codez-core.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 async-trait = "0.1.89"

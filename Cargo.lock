@@ -840,8 +840,10 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "codez-core",
+ "reqwest 0.12.28",
  "reqwest 0.13.4",
  "rmcp",
+ "serde",
  "serde_json",
  "tokio",
 ]
@@ -904,6 +906,8 @@ dependencies = [
  "hex",
  "image",
  "jsonschema",
+ "lazy_static",
+ "regex",
  "serde",
  "serde_json",
  "sha2",
