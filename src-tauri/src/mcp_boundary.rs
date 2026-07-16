@@ -134,26 +134,26 @@ pub(crate) fn list_payload(
             shadowed_by: None,
             policy_disabled: None,
         });
-        statuses.push(
-            statuses_by_name
-                .remove(&name)
-                .unwrap_or(wire::McpServerStatus {
-                    name,
-                    scope: wire::McpConfigScope::User,
-                    state,
-                    fingerprint,
-                    transport,
-                    capabilities: None,
-                    server_info: None,
-                    tool_count: 0,
-                    resource_count: 0,
-                    prompt_count: 0,
-                    error: None,
-                    next_retry_at: None,
-                    updated_at: updated_at.clone(),
-                    logs: Vec::new(),
-                }),
-        );
+        let status = match statuses_by_name.remove(&name) {
+            Some(status) => status,
+            None => wire::McpServerStatus {
+                name,
+                scope: wire::McpConfigScope::User,
+                state,
+                fingerprint,
+                transport,
+                capabilities: None,
+                server_info: None,
+                tool_count: 0,
+                resource_count: 0,
+                prompt_count: 0,
+                error: None,
+                next_retry_at: None,
+                updated_at: updated_at.clone(),
+                logs: Vec::new(),
+            },
+        };
+        statuses.push(status);
     }
 
     wire::McpListPayload { configs, statuses }

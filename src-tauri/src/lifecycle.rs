@@ -68,7 +68,7 @@ impl ShutdownHook for PtyShutdown {
             match phase {
                 ShutdownPhase::StopAccepting => self.manager.stop_accepting(),
                 ShutdownPhase::Cancel => self.manager.request_stop_all(),
-                ShutdownPhase::ForceCleanup => self.manager.kill_all().await?,
+                ShutdownPhase::ForceCleanup => self.manager.shutdown_all().await?,
                 ShutdownPhase::Flush => {}
             }
             Ok(())
@@ -143,5 +143,44 @@ fn log_shutdown_report(reporter: &ErrorReporter, report: ShutdownReport) {
         reporter.log(&AppError::timeout(format!(
             "Shutdown phase {phase:?} exceeded its deadline"
         )));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use codez_core::AppErrorKind;
+    use codez_platform::pty::PTY_EVENT_QUEUE_CAPACITY;
+    use tokio::sync::mpsc;
+
+    use super::{PtyManager, PtyShutdown, ShutdownHook, ShutdownPhase};
+
+    #[tokio::test]
+    async fn terminal_shutdown_hook_should_close_registry_admission() {
+        let (events, _receiver) = mpsc::channel(PTY_EVENT_QUEUE_CAPACITY);
+        let manager = Arc::new(PtyManager::new(events));
+        let hook = PtyShutdown {
+            manager: Arc::clone(&manager),
+        };
+
+        hook.run(ShutdownPhase::ForceCleanup)
+            .await
+            .expect("empty terminal registry shutdown must succeed");
+
+        let current_directory =
+            std::env::current_dir().expect("test working directory must be available");
+        let executable = std::env::current_exe().expect("test executable path must be available");
+        let error = manager
+            .start(
+                "after-lifecycle-shutdown".to_owned(),
+                executable,
+                Vec::new(),
+                current_directory,
+            )
+            .await
+            .expect_err("terminal shutdown hook must reject later starts");
+
+        assert_eq!(error.kind(), AppErrorKind::Conflict);
     }
 }

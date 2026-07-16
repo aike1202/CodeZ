@@ -104,6 +104,20 @@ export type ChatAskUserRequest = { id: string, questions: Array<ChatAskUserQuest
 
 export type ChatAskUserRequestEvent = { runId: string, request: ChatAskUserRequest, };
 
+export type ChatPermissionApprovalScope = "once" | "session" | "workspace";
+
+export type ChatPermissionApprovalResponse = { approved: boolean, scope: ChatPermissionApprovalScope, };
+
+export type ChatPermissionCheck = { permission: string, pattern: string, action: string, reason: string, absoluteRedline: boolean, };
+
+export type ChatPermissionApprovalRequest = { id: string, sessionId?: string, agentRole: string, toolName: string, description: string, input: Record<string, any>, checks: Array<ChatPermissionCheck>, allowedScopes: Array<ChatPermissionApprovalScope>, };
+
+export type ChatPermissionApprovalEvent = { runId: string, request: ChatPermissionApprovalRequest, };
+
+export type ChatCompactionResult = { status: string, errorCode?: string, message?: string, tokensBefore?: number, tokensAfter?: number, snapshotStatus?: string, historyVersion?: number, };
+
+export type ChatCompactionResponse = { accepted: boolean, result: ChatCompactionResult, reason?: string, };
+
 export type McpTransport = "stdio" | "http" | "sse";
 
 export type McpConfigScope = "managed" | "user" | "project" | "local" | "dynamic";
@@ -143,5 +157,19 @@ export type McpPromptSummary = { server: string, name: string, description?: str
 export type McpServerCatalog = { server: string, tools: Array<McpToolSummary>, resources: Array<McpResourceSummary>, prompts: Array<McpPromptSummary>, updatedAt?: string, stale: boolean, };
 
 export type McpListPayload = { configs: Array<ScopedMcpServerConfig>, statuses: Array<McpServerStatus>, };
+
+export type SubAgentModelSelection = { providerId: string, model: string, };
+
+export type SubAgentInfo = { type: string, description: string, whenToUse?: string, costHint?: string, enabled: boolean, configuredModels?: Array<SubAgentModelSelection>, };
+
+export type SubAgentOutputField = { name: string, type: string, description: string, required: boolean, };
+
+export type SubAgentOutputSpec = { description: string, fields: Array<SubAgentOutputField>, };
+
+export type SubAgentUnavailableDetail = "systemPrompt" | "toolCatalog";
+
+export type SubAgentSettingsDetail = { type: string, description: string, whenToUse: string, whenNotToUse?: string, costHint?: string, maxLoops: number, canRunInBackground?: boolean, isolation?: string, outputSpec?: SubAgentOutputSpec, enabled: boolean, configuredModels?: Array<SubAgentModelSelection>, };
+
+export type SubAgentDetailResult = { "kind": "available", detail: SubAgentSettingsDetail, } | { "kind": "partial", detail: SubAgentSettingsDetail, unavailable: Array<SubAgentUnavailableDetail>, } | { "kind": "notFound", subagentType: string, };
 
 export type DesktopEvent<T> = { version: number, streamId: string | null, sequence: number | null, kind: string, payload: T, };

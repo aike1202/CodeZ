@@ -4,6 +4,7 @@ import { useChatStore } from '../../stores/chatStore'
 import type { WorkspaceInfo } from '@shared/types/workspace'
 import type { SidebarProject, SidebarSession } from '../../components/Sidebar'
 import { deriveSessionListStatus } from './sessionListStatus'
+import { desktopApi } from '../../shared/desktop'
 
 function genId(): string {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -18,15 +19,15 @@ export function useAppWorkspace() {
   const selectSession = useChatStore((s: any) => s.selectSession)
 
   const handleOpenProject = useCallback(async () => {
-    const dirPath = await window.api.workspace.openDirectory()
+    const dirPath = await desktopApi.workspace.openDirectory()
     if (!dirPath) return
 
     const store = useWorkspaceStore.getState()
     store.setLoading(true)
     try {
       const [fileTree, projectInfo] = await Promise.all([
-        window.api.workspace.scanFileTree(dirPath),
-        window.api.workspace.detectProject(dirPath)
+        desktopApi.workspace.scanFileTree(dirPath),
+        desktopApi.workspace.detectProject(dirPath)
       ])
 
       const name = dirPath.split(/[/\\]/).pop() || dirPath
@@ -41,9 +42,9 @@ export function useAppWorkspace() {
       store.setWorkspace(ws)
       store.setFileTree(fileTree)
       store.setProjectInfo(projectInfo)
-      await window.api.workspace.addRecentProject(ws)
+      await desktopApi.workspace.addRecentProject(ws)
 
-      const updated = await window.api.workspace.getRecentProjects()
+      const updated = await desktopApi.workspace.getRecentProjects()
       store.setRecentProjects(updated)
 
       createSession(ws.id)
@@ -63,8 +64,8 @@ export function useAppWorkspace() {
       store.setLoading(true)
       try {
         const [fileTree, projectInfo] = await Promise.all([
-          window.api.workspace.scanFileTree(existing.rootPath),
-          window.api.workspace.detectProject(existing.rootPath)
+          desktopApi.workspace.scanFileTree(existing.rootPath),
+          desktopApi.workspace.detectProject(existing.rootPath)
         ])
 
         store.setWorkspace(existing)
@@ -81,8 +82,8 @@ export function useAppWorkspace() {
 
   const handleRenameProject = useCallback(async (id: string, newName: string) => {
     try {
-      await window.api.workspace.renameRecentProject(id, newName)
-      const updated = await window.api.workspace.getRecentProjects()
+      await desktopApi.workspace.renameRecentProject(id, newName)
+      const updated = await desktopApi.workspace.getRecentProjects()
       useWorkspaceStore.getState().setRecentProjects(updated)
 
       const currentWs = useWorkspaceStore.getState().workspace
@@ -99,8 +100,8 @@ export function useAppWorkspace() {
 
   const handleRemoveProject = useCallback(async (id: string) => {
     try {
-      await window.api.workspace.removeRecentProject(id)
-      const updated = await window.api.workspace.getRecentProjects()
+      await desktopApi.workspace.removeRecentProject(id)
+      const updated = await desktopApi.workspace.getRecentProjects()
       useWorkspaceStore.getState().setRecentProjects(updated)
 
       const currentWs = useWorkspaceStore.getState().workspace
@@ -118,7 +119,7 @@ export function useAppWorkspace() {
     async (id: string) => {
       const proj = recentProjects.find((p: any) => p.id === id)
       if (proj) {
-        await window.api.workspace.openInExplorer(proj.rootPath)
+        await desktopApi.workspace.openInExplorer(proj.rootPath)
       }
     },
     [recentProjects]

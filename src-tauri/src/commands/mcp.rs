@@ -94,7 +94,7 @@ pub async fn mcp_reconnect(
 #[tracing::instrument(name = "desktop.command", skip(state))]
 pub async fn mcp_authorize(name: String, state: State<'_, AppState>) -> Result<(), CommandError> {
     let result = Err(AppError::unsupported(format!(
-        "MCP authorization for '{name}' is unavailable until the live MCP gateway is connected"
+        "OAuth authorization for MCP server '{name}' is not implemented by the Rust desktop host"
     )));
     command_result(&state.errors, result)
 }
@@ -103,7 +103,7 @@ pub async fn mcp_authorize(name: String, state: State<'_, AppState>) -> Result<(
 #[tracing::instrument(name = "desktop.command", skip(state))]
 pub async fn mcp_logout(name: String, state: State<'_, AppState>) -> Result<(), CommandError> {
     let result = Err(AppError::unsupported(format!(
-        "MCP logout for '{name}' is unavailable until the live MCP gateway is connected"
+        "OAuth logout for MCP server '{name}' is not implemented by the Rust desktop host"
     )));
     command_result(&state.errors, result)
 }
@@ -115,7 +115,7 @@ pub async fn mcp_trust_project(
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
     let result = Err(AppError::unsupported(format!(
-        "Project trust for '{fingerprint}' is unavailable until project MCP configuration is connected"
+        "Project-scoped MCP trust for '{fingerprint}' is not implemented by the Rust desktop host"
     )));
     command_result(&state.errors, result)
 }

@@ -129,6 +129,33 @@ impl SubAgentManager {
             .collect()
     }
 
+    /// Removes one run after its terminal snapshot has been durably persisted.
+    ///
+    /// Active and resumable agents stay registered so callers cannot discard
+    /// lifecycle ownership while work is still in flight.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SubAgentError::NotFound`] for an unknown ID and
+    /// [`SubAgentError::NotTerminal`] when the run is still active.
+    pub async fn remove_terminal(&self, id: &SubAgentId) -> Result<(), SubAgentError> {
+        let mut sub_agents = self.sub_agents.write().await;
+        let Some(entry) = sub_agents.get(id) else {
+            return Err(SubAgentError::NotFound { id: id.clone() });
+        };
+        if !matches!(
+            entry.status,
+            SubAgentStatus::Completed | SubAgentStatus::Failed | SubAgentStatus::Interrupted
+        ) {
+            return Err(SubAgentError::NotTerminal {
+                id: id.clone(),
+                status: entry.status,
+            });
+        }
+        sub_agents.remove(id);
+        Ok(())
+    }
+
     /// Applies a validated lifecycle transition using the current UTC time.
     ///
     /// # Errors
@@ -419,6 +446,55 @@ mod tests {
                 to: SubAgentStatus::Running,
             }
         );
+    }
+
+    #[tokio::test]
+    async fn remove_terminal_should_release_only_a_completed_registration() {
+        let manager = SubAgentManager::new();
+        let id = agent_id("completed");
+        manager
+            .register(SubAgentRegistration::new(id.clone(), role("worker")))
+            .await
+            .expect("test registration must succeed");
+        manager
+            .transition(&id, SubAgentStatus::Running)
+            .await
+            .expect("test run must start");
+        manager
+            .transition(&id, SubAgentStatus::Completed)
+            .await
+            .expect("test run must complete");
+
+        manager
+            .remove_terminal(&id)
+            .await
+            .expect("completed run must be removable");
+
+        assert!(matches!(
+            manager.snapshot(&id).await,
+            Err(SubAgentError::NotFound { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn remove_terminal_should_reject_a_running_registration() {
+        let manager = SubAgentManager::new();
+        let id = agent_id("running");
+        manager
+            .register(SubAgentRegistration::new(id.clone(), role("worker")))
+            .await
+            .expect("test registration must succeed");
+        manager
+            .transition(&id, SubAgentStatus::Running)
+            .await
+            .expect("test run must start");
+
+        let error = manager
+            .remove_terminal(&id)
+            .await
+            .expect_err("running work must retain lifecycle ownership");
+
+        assert!(matches!(error, SubAgentError::NotTerminal { .. }));
     }
 
     #[tokio::test]

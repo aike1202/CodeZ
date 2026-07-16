@@ -7,6 +7,7 @@ import Input from './ui/Input'
 import { IconAdd, IconDownload, IconRefreshCw, IconPackage, IconSearch, IconTrash, IconFolderOpen } from './Icons'
 import SkillImportModal from './SkillImportModal'
 import './SettingsSkillsTab.css'
+import { desktopApi } from '../shared/desktop'
 
 interface Props {
   onCreate?: () => void
@@ -73,7 +74,7 @@ export default function SettingsSkillsTab({ onCreate }: Props): React.ReactEleme
   const handleOpenFolder = async () => {
     if (!workspace) return
     try {
-      await window.api.workspace.openInExplorer(workspace.rootPath + '/.skills')
+      await desktopApi.workspace.openInExplorer(workspace.rootPath + '/.skills')
     } catch (e) {
       console.error(e)
     }

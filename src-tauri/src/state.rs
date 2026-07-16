@@ -45,6 +45,7 @@ pub(crate) struct AppState {
     pub(crate) process_runner: Arc<NativeProcessRunner>,
     pub(crate) pty_manager: Arc<PtyManager>,
     pub(crate) provider_service: Arc<ProviderService>,
+    pub(crate) subagent_settings: Mutex<()>,
     pub(crate) workspace_permissions: Arc<WorkspacePermissionStore>,
     pub(crate) mcp_config: Arc<McpUserConfigService>,
     pub(crate) mcp_secrets: Arc<McpSecretService>,

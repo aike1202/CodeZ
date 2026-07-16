@@ -1,4 +1,5 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 
 import type {
   DesktopEvent,
@@ -36,6 +37,64 @@ import { normalizeDesktopError } from './errors'
 async function command<T>(name: string, args?: Record<string, unknown>): Promise<T> {
   try {
     return await invoke<T>(name, args)
+  } catch (error) {
+    throw normalizeDesktopError(error)
+  }
+}
+
+function isTauriRuntime(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+}
+
+function legacyWorkspace(): Window['api']['workspace'] {
+  const workspace = (window as unknown as { api?: Window['api'] }).api?.workspace
+  if (!workspace) throw new Error('The desktop workspace API is unavailable.')
+  return workspace
+}
+
+function legacyProvider(): Window['api']['provider'] {
+  const provider = (window as unknown as { api?: Window['api'] }).api?.provider
+  if (!provider) throw new Error('The desktop provider API is unavailable.')
+  return provider
+}
+
+function legacyTheme(): Window['api']['theme'] {
+  const theme = (window as unknown as { api?: Window['api'] }).api?.theme
+  if (!theme) throw new Error('The desktop theme API is unavailable.')
+  return theme
+}
+
+async function legacyEditorInfo(): Promise<EditorInfo[]> {
+  const editors = await legacyWorkspace().detectInstalledEditors()
+  return editors.map((editor) => ({
+    id: editor.id,
+    name: editor.name,
+    exePath: editor.exePath ?? undefined,
+    iconData: editor.iconPath ?? undefined
+  }))
+}
+
+async function workspaceCommand<T>(
+  name: string,
+  args: Record<string, unknown> | undefined,
+  electron: () => Promise<T>
+): Promise<T> {
+  if (isTauriRuntime()) return command<T>(name, args)
+  try {
+    return await electron()
+  } catch (error) {
+    throw normalizeDesktopError(error)
+  }
+}
+
+async function providerCommand<T>(
+  name: string,
+  args: Record<string, unknown> | undefined,
+  electron: () => Promise<T>
+): Promise<T> {
+  if (isTauriRuntime()) return command<T>(name, args)
+  try {
+    return await electron()
   } catch (error) {
     throw normalizeDesktopError(error)
   }
@@ -97,6 +156,7 @@ export interface DesktopApi {
   theme: {
     get(): Promise<ThemeInfo>
     set(source: ThemeSource): Promise<ThemeInfo>
+    onUpdated(callback: (info: ThemeInfo) => void): () => void
   }
   attachment: {
     importDraft(name: string, declaredMimeType?: string, bytes?: number[] | Uint8Array): Promise<DraftImageAttachment>
@@ -112,7 +172,7 @@ export interface DesktopApi {
   provider: {
     getAll(): Promise<ProviderInfo[]>
     create(data: ProviderFormData): Promise<ProviderInfo>
-    update(id: string, data: ProviderFormData): Promise<ProviderInfo>
+    update(id: string, data: ProviderFormData): Promise<ProviderInfo | null>
     delete(id: string): Promise<void>
     setActive(id: string): Promise<void>
     testConnection(id: string): Promise<ConnectionTestResult>
@@ -152,15 +212,37 @@ export const desktopApi: DesktopApi = {
     openExternal: (target) => command('open_external', { target })
   },
   workspace: {
-    openDirectory: () => command('workspace_open_directory'),
-    scanFileTree: (rootPath) => command('workspace_scan_file_tree', { rootPath }),
+    openDirectory: () =>
+      workspaceCommand('workspace_open_directory', undefined, () => legacyWorkspace().openDirectory()),
+    scanFileTree: (rootPath) =>
+      workspaceCommand('workspace_scan_file_tree', { rootPath }, () =>
+        legacyWorkspace().scanFileTree(rootPath)
+      ),
     getAllPaths: (rootPath) => command('workspace_get_all_paths', { rootPath }),
-    readFile: (filePath, rootPath) => command('workspace_read_file', { filePath, rootPath }),
-    detectProject: (rootPath) => command('workspace_detect_project', { rootPath }),
-    getRecentProjects: () => command('workspace_get_recent_projects'),
-    addRecentProject: (project) => command('workspace_add_recent_project', { project }),
-    removeRecentProject: (id) => command('workspace_remove_recent_project', { id }),
-    renameRecentProject: (id, newName) => command('workspace_rename_recent_project', { id, newName }),
+    readFile: (filePath, rootPath) =>
+      workspaceCommand('workspace_read_file', { filePath, rootPath }, () =>
+        legacyWorkspace().readFile(filePath, rootPath)
+      ),
+    detectProject: (rootPath) =>
+      workspaceCommand('workspace_detect_project', { rootPath }, () =>
+        legacyWorkspace().detectProject(rootPath)
+      ),
+    getRecentProjects: () =>
+      workspaceCommand('workspace_get_recent_projects', undefined, () =>
+        legacyWorkspace().getRecentProjects()
+      ),
+    addRecentProject: (project) =>
+      workspaceCommand('workspace_add_recent_project', { project }, () =>
+        legacyWorkspace().addRecentProject(project)
+      ),
+    removeRecentProject: (id) =>
+      workspaceCommand('workspace_remove_recent_project', { id }, () =>
+        legacyWorkspace().removeRecentProject(id)
+      ),
+    renameRecentProject: (id, newName) =>
+      workspaceCommand('workspace_rename_recent_project', { id, newName }, () =>
+        legacyWorkspace().renameRecentProject(id, newName)
+      ),
     glob: (rootPath, pattern, path, headLimit) =>
       command('workspace_glob', { rootPath, pattern, path, headLimit }),
     grep: (rootPath, pattern, options) =>
@@ -181,10 +263,18 @@ export const desktopApi: DesktopApi = {
         headLimit: options?.headLimit,
         offset: options?.offset
       }),
-    openInExplorer: (rootPath) => command('workspace_open_in_explorer', { rootPath }),
+    openInExplorer: (rootPath) =>
+      workspaceCommand('workspace_open_in_explorer', { rootPath }, () =>
+        legacyWorkspace().openInExplorer(rootPath)
+      ),
     openInEditor: (rootPath, editorId, exePath) =>
-      command('workspace_open_in_editor', { rootPath, editorId, exePath }),
-    detectInstalledEditors: () => command('workspace_detect_installed_editors'),
+      workspaceCommand('workspace_open_in_editor', { rootPath, editorId, exePath }, () =>
+        legacyWorkspace().openInEditor(rootPath, editorId, exePath ?? null)
+      ),
+    detectInstalledEditors: () =>
+      workspaceCommand('workspace_detect_installed_editors', undefined, () =>
+        legacyEditorInfo()
+      ),
     getProjectSnapshot: (rootPath, options) =>
       command('workspace_get_project_snapshot', {
         rootPath,
@@ -200,8 +290,26 @@ export const desktopApi: DesktopApi = {
     listWorktrees: (rootPath) => command('workspace_list_worktrees', { rootPath })
   },
   theme: {
-    get: () => command('theme_get'),
-    set: (source) => command('theme_set', { source })
+    get: () => {
+      if (isTauriRuntime()) return command('theme_get')
+      return legacyTheme().get()
+    },
+    set: (source) => {
+      if (isTauriRuntime()) return command('theme_set', { source })
+      return legacyTheme().set(source)
+    },
+    onUpdated: (callback) => {
+      if (!isTauriRuntime()) return legacyTheme().onUpdated(callback)
+
+      let disposed = false
+      const unlisten = listen<ThemeInfo>('desktop://theme-changed', (event) => {
+        if (!disposed) callback(event.payload)
+      })
+      return () => {
+        disposed = true
+        void unlisten.then((dispose) => dispose()).catch(() => undefined)
+      }
+    }
   },
   attachment: {
     importDraft: (name, declaredMimeType, bytes) => command('attachment_import_draft', { name, declaredMimeType, bytes: Array.from(bytes || []) }),
@@ -211,12 +319,23 @@ export const desktopApi: DesktopApi = {
     deleteSession: (sessionId) => command('attachment_delete_session', { sessionId })
   },
   provider: {
-    getAll: () => command('provider_get_all'),
-    create: (data) => command('provider_create', { data }),
-    update: (id, data) => command('provider_update', { id, data }),
-    delete: (id) => command('provider_delete', { id }),
-    setActive: (id) => command('provider_set_active', { id }),
-    testConnection: (id) => command('provider_test_connection', { id })
+    getAll: () =>
+      providerCommand('provider_get_all', undefined, () => legacyProvider().list()),
+    create: (data) =>
+      providerCommand('provider_create', { data }, () => legacyProvider().add(data)),
+    update: (id, data) =>
+      providerCommand('provider_update', { id, data }, () => legacyProvider().update(id, data)),
+    delete: async (id) => {
+      await providerCommand('provider_delete', { id }, async () => {
+        await legacyProvider().remove(id)
+      })
+    },
+    setActive: (id) =>
+      providerCommand('provider_set_active', { id }, () => legacyProvider().setActive(id)),
+    testConnection: (id) =>
+      providerCommand('provider_test_connection', { id }, () =>
+        legacyProvider().testConnection(id)
+      )
   },
   context: {
     ledgerAppendEvent: async (sessionId, event) => command('ledger_append_event', { sessionId, event }),

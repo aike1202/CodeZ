@@ -811,6 +811,7 @@ dependencies = [
 name = "codez-desktop"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "codez-contracts",
  "codez-core",
@@ -872,6 +873,7 @@ dependencies = [
  "codez-core",
  "dashmap",
  "dunce",
+ "futures-util",
  "nix 0.31.3",
  "portable-pty",
  "process-wrap",

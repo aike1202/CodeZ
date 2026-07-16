@@ -1,8 +1,10 @@
 #![forbid(unsafe_code)]
 
 mod attachment_boundary;
+mod chat_compaction;
 mod chat_interaction;
 mod chat_runtime;
+mod chat_tool_runtime;
 mod commands;
 mod composition;
 mod context_boundary;

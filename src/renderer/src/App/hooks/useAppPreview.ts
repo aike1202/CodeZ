@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import type { FileContent } from '@shared/types/workspace'
+import { desktopApi } from '../../shared/desktop'
 
 export interface PreviewDiff {
   filePath: string
@@ -99,7 +100,7 @@ export function useAppPreview() {
 
     let content: FileContent
     try {
-      content = await window.api.workspace.readFile(cleanPath, ws.rootPath)
+      content = await desktopApi.workspace.readFile(cleanPath, ws.rootPath)
     } catch {
       content = {
         path: cleanPath,

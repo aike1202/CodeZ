@@ -13,6 +13,65 @@ pub struct SubAgentModelSelection {
     pub model: String,
 }
 
+/// Input for one bounded, tool-free built-in sub-agent run.
+///
+/// The desktop host validates identifiers, persisted enablement, configured
+/// model candidates, and task size before the run is admitted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
+pub struct SubAgentRunRequest {
+    #[serde(rename = "subagentType")]
+    #[ts(rename = "subagentType")]
+    pub subagent_type: String,
+    pub session_id: String,
+    pub task: String,
+}
+
+/// Public lifecycle state for an individual delegated run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub enum SubAgentRunStatus {
+    Running,
+    Completed,
+    Failed,
+    Interrupted,
+}
+
+/// Redacted, durable state for one built-in sub-agent run.
+///
+/// The host persists this only after the run becomes terminal. It deliberately
+/// excludes the task prompt, credentials, and private Provider diagnostics.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", optional_fields)]
+pub struct SubAgentRunState {
+    pub run_id: String,
+    #[serde(rename = "subagentType")]
+    #[ts(rename = "subagentType")]
+    pub subagent_type: String,
+    pub session_id: String,
+    pub provider_id: String,
+    pub model: String,
+    pub status: SubAgentRunStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Result of requesting cancellation for one sub-agent run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct SubAgentRunCancelResult {
+    pub accepted: bool,
+    pub state: SubAgentRunState,
+}
+
 /// Stable settings-facing information for one built-in sub-agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -112,7 +171,11 @@ pub enum SubAgentDetailResult {
         unavailable: Vec<SubAgentUnavailableDetail>,
     },
     /// No built-in sub-agent has the requested type.
-    NotFound { subagent_type: String },
+    NotFound {
+        #[serde(rename = "subagentType")]
+        #[ts(rename = "subagentType")]
+        subagent_type: String,
+    },
 }
 
 #[cfg(test)]
@@ -150,6 +213,19 @@ mod tests {
         .expect("fixed detail fixture must serialize");
 
         assert_eq!(value["kind"], "partial");
-        assert_eq!(value["unavailable"], ["systemPrompt", "toolCatalog"]);
+        assert_eq!(
+            value["unavailable"],
+            serde_json::json!(["systemPrompt", "toolCatalog"])
+        );
+    }
+
+    #[test]
+    fn command_model_selection_should_reject_unknown_fields() {
+        let error = serde_json::from_str::<SubAgentModelSelection>(
+            r#"{"providerId":"provider-1","model":"model-1","extra":"reject"}"#,
+        )
+        .expect_err("command payload extensions must be rejected");
+
+        assert!(error.to_string().contains("extra"));
     }
 }

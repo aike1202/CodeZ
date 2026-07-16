@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import type { SubAgentInfo } from '@shared/types/subagent'
+import type { SubAgentInfo } from '../shared/desktop/generated/contracts'
 import Flex from './ui/Flex'
 import Button from './ui/Button'
 import { IconRefreshCw, IconZap, IconPackage } from './Icons'

@@ -116,6 +116,20 @@ pub enum ChatStreamEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase", optional_fields)]
+pub struct ChatCommandMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ui_message_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub command_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub referenced_files: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", optional_fields)]
 pub struct ChatStreamInput {
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -123,8 +137,8 @@ pub struct ChatStreamInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_system: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(type = "unknown")]
-    pub command_metadata: Option<serde_json::Value>,
+    #[ts(optional)]
+    pub command_metadata: Option<ChatCommandMetadata>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -135,6 +149,13 @@ pub struct ChatStreamRequest {
     pub provider_id: String,
     pub model: String,
     pub session_id: String,
+    /// Workspace selected by the desktop UI for this run.
+    ///
+    /// The Tauri command canonicalizes this untrusted string before it can
+    /// become tool execution authority. Omitting it keeps tool exposure off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub workspace_root: Option<String>,
     pub input: ChatStreamInput,
 }
 
@@ -222,6 +243,42 @@ pub struct ChatToolInterruptResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", optional_fields)]
+pub struct ChatCompactionResult {
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub error_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tokens_before: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tokens_after: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub snapshot_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub history_version: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", optional_fields)]
+pub struct ChatCompactionResponse {
+    pub accepted: bool,
+    pub result: ChatCompactionResult,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 pub struct ChatFileDiff {
     pub path: String,
@@ -243,6 +300,42 @@ pub enum ChatPermissionApprovalScope {
 pub struct ChatPermissionApprovalResponse {
     pub approved: bool,
     pub scope: ChatPermissionApprovalScope,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ChatPermissionCheck {
+    pub permission: String,
+    pub pattern: String,
+    pub action: String,
+    pub reason: String,
+    pub absolute_redline: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", optional_fields)]
+pub struct ChatPermissionApprovalRequest {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub session_id: Option<String>,
+    pub agent_role: String,
+    pub tool_name: String,
+    pub description: String,
+    #[ts(type = "Record<string, any>")]
+    pub input: serde_json::Value,
+    pub checks: Vec<ChatPermissionCheck>,
+    pub allowed_scopes: Vec<ChatPermissionApprovalScope>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ChatPermissionApprovalEvent {
+    pub run_id: String,
+    pub request: ChatPermissionApprovalRequest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -351,6 +444,12 @@ pub enum ChatStreamFrameEvent {
     },
     ToolCalls {
         calls: Vec<ToolCall>,
+    },
+    ToolResult {
+        #[serde(rename = "callId")]
+        #[ts(rename = "callId")]
+        call_id: String,
+        result: String,
     },
     SteerConsumed {
         input: ChatSteerInput,

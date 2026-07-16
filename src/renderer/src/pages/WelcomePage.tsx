@@ -6,6 +6,7 @@ import Flex from '../components/ui/Flex'
 import Stack from '../components/ui/Stack'
 import Card from '../components/ui/Card'
 import './WelcomePage.css'
+import { desktopApi } from '../shared/desktop'
 
 export default function WelcomePage(): React.ReactElement {
   const recentProjects = useWorkspaceStore((s) => s.recentProjects)
@@ -22,7 +23,7 @@ export default function WelcomePage(): React.ReactElement {
 
   async function loadRecentProjects(): Promise<void> {
     try {
-      const projects = await window.api.workspace.getRecentProjects()
+      const projects = await desktopApi.workspace.getRecentProjects()
       setRecentProjects(projects)
     } catch {
       setRecentProjects([])
@@ -30,7 +31,7 @@ export default function WelcomePage(): React.ReactElement {
   }
 
   async function handleOpenProject(): Promise<void> {
-    const dirPath = await window.api.workspace.openDirectory()
+    const dirPath = await desktopApi.workspace.openDirectory()
     if (!dirPath) return
     await openWorkspace(dirPath)
   }
@@ -43,8 +44,8 @@ export default function WelcomePage(): React.ReactElement {
     setLoading(true)
     try {
       const [fileTree, projectInfo] = await Promise.all([
-        window.api.workspace.scanFileTree(rootPath),
-        window.api.workspace.detectProject(rootPath)
+        desktopApi.workspace.scanFileTree(rootPath),
+        desktopApi.workspace.detectProject(rootPath)
       ])
 
       const name = rootPath.split(/[/\\]/).pop() || rootPath
@@ -61,7 +62,7 @@ export default function WelcomePage(): React.ReactElement {
       setProjectInfo(projectInfo)
       setView('workspace')
 
-      await window.api.workspace.addRecentProject(ws)
+      await desktopApi.workspace.addRecentProject(ws)
     } catch (error) {
       console.error('Failed to open workspace:', error)
     } finally {

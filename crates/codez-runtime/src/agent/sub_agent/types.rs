@@ -278,6 +278,14 @@ pub enum SubAgentError {
         /// Timestamp attached to the rejected event.
         attempted: DateTime<Utc>,
     },
+    /// A caller tried to release a run that may still need lifecycle ownership.
+    #[error("sub-agent `{id}` is not terminal ({status:?})")]
+    NotTerminal {
+        /// The run that must remain registered.
+        id: SubAgentId,
+        /// Its current active or resumable state.
+        status: SubAgentStatus,
+    },
     /// A recipient mailbox cannot accept another message without dropping one.
     #[error("sub-agent `{recipient}` mailbox is full at capacity {capacity}")]
     MailboxFull {

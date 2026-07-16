@@ -12,6 +12,7 @@ import IconMaximize from '../icons/IconMaximize'
 import IconWindowRestore from '../icons/IconWindowRestore'
 import IconClose from '../icons/IconClose'
 import { IPC_CHANNELS } from '@shared/ipc/channels'
+import { desktopApi } from '../../shared/desktop'
 
 import './TopBar.css'
 import type { TopBarProps } from './types'
@@ -68,21 +69,24 @@ export default function TopBar({
       win.electron.ipcRenderer.on(IPC_CHANNELS.WINDOW_MAXIMIZED_STATE, handler)
 
       let cleanup: (() => void) | undefined
-      if (window.api?.theme) {
-        window.api.theme.get().then((info) => {
-          setThemeSource(info.themeSource)
-        })
+      void desktopApi.theme.get().then((info) => {
+        setThemeSource(info.themeSource)
+      }).catch(() => undefined)
 
-        cleanup = window.api.theme.onUpdated((info) => {
-          setThemeSource(info.themeSource)
-        })
-      }
+      cleanup = desktopApi.theme.onUpdated((info) => {
+        setThemeSource(info.themeSource)
+      })
 
-      window.api.workspace
+      desktopApi.workspace
         .detectInstalledEditors()
         .then((editors) => {
           if (editors && editors.length > 0) {
-            setInstalledEditors(editors)
+            setInstalledEditors(editors.map((editor) => ({
+              id: editor.id,
+              name: editor.name,
+              exePath: editor.exePath ?? null,
+              iconPath: editor.iconData ?? null
+            })))
             const editorIds = editors.map((e) => e.id)
 
             let defaultIDE = editors[0].id

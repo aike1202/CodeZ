@@ -192,12 +192,14 @@ declare global {
         onChanged: (callback: (statuses: McpServerStatus[]) => void) => () => void
       }
       subAgent: {
-        list: () => Promise<import('@shared/types/subagent').SubAgentInfo[]>
+        list: () => Promise<import('./shared/desktop/generated/contracts').SubAgentInfo[]>
         toggle: (type: string, enabled: boolean) => Promise<void>
-        getDetail: (type: string) => Promise<import('@shared/types/subagent').SubAgentDetail | null>
+        getDetail: (
+          type: string
+        ) => Promise<import('./shared/desktop/generated/contracts').SubAgentDetailResult>
         setModel: (
           type: string,
-          selections: import('@shared/types/subagent').SubAgentModelSelection[]
+          selections: import('./shared/desktop/generated/contracts').SubAgentModelSelection[]
         ) => Promise<void>
       }
       logger: {

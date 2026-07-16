@@ -3,6 +3,7 @@ import Button from '../../ui/Button'
 import Flex from '../../ui/Flex'
 import Card from '../../ui/Card'
 import type { WorkspaceInfo } from '@shared/types/workspace'
+import { desktopApi } from '../../../shared/desktop'
 
 interface ProjectSelectorProps {
   workspace: WorkspaceInfo | null
@@ -85,7 +86,11 @@ export default function ProjectSelector({
           onClick={() => {
             if (workspace) {
               const cur = installedEditors.find((e) => e.id === selectedIDE)
-              window.api.workspace.openInEditor(workspace.rootPath, selectedIDE, cur?.exePath || null)
+              void desktopApi.workspace.openInEditor(
+                workspace.rootPath,
+                selectedIDE,
+                cur?.exePath ?? undefined
+              )
             }
           }}
           disabled={!workspace}

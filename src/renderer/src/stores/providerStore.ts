@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ProviderFormData, ProviderInfo } from '../shared/desktop'
+import { desktopApi, type ProviderFormData, type ProviderInfo } from '../shared/desktop'
 
 type ProviderBridgeInfo = Omit<ProviderInfo, 'apiKeyConfigured'> & {
   apiKeyConfigured?: boolean
@@ -41,7 +41,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   loadProviders: async () => {
     set({ loading: true })
     try {
-      const data = await window.api.provider.list()
+      const data = await desktopApi.provider.getAll()
       const providers = (data || []).map((provider) =>
         normalizeProviderInfo(provider as ProviderBridgeInfo)
       )
@@ -56,7 +56,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
 
   addProvider: async (form) => {
     const info = normalizeProviderInfo(
-      await window.api.provider.add(form) as ProviderBridgeInfo
+      await desktopApi.provider.create(form) as ProviderBridgeInfo
     )
     set((s) => ({
       providers: [...s.providers, info],
@@ -79,7 +79,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       ...form
     }
 
-    const response = await window.api.provider.update(id, formData)
+    const response = await desktopApi.provider.update(id, formData)
     const updated = response
       ? normalizeProviderInfo(response as ProviderBridgeInfo)
       : null
@@ -91,7 +91,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
 
   removeProvider: async (id) => {
-    await window.api.provider.remove(id)
+    await desktopApi.provider.delete(id)
     set((s) => ({
       providers: s.providers.filter((p) => p.id !== id),
       activeProviderId: s.activeProviderId === id
@@ -101,11 +101,11 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
 
   testConnection: async (id) => {
-    return window.api.provider.testConnection(id)
+    return desktopApi.provider.testConnection(id)
   },
 
   setActiveProvider: async (id) => {
-    await window.api.provider.setActive(id)
+    await desktopApi.provider.setActive(id)
     set({ activeProviderId: id })
   }
 }))

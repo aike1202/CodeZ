@@ -6,6 +6,9 @@ import type {
   MigrationCredentialInput,
   MigrationRecoveryStatus,
   PermissionMode,
+  SubAgentDetailResult,
+  SubAgentInfo,
+  SubAgentModelSelection,
 } from '../shared/desktop/generated/contracts'
 import { defaultSettings, defaultWebSearchSettings } from '@shared/types/settings'
 import type {
@@ -18,7 +21,35 @@ import type {
   ChatAskUserAnswer,
   ChatAskUserRequest,
   ChatAskUserRequestEvent,
+  ChatPermissionApprovalEvent,
 } from '../shared/desktop/generated/contracts'
+
+function permissionRequestForUi(request: any): any {
+  const checks = Array.isArray(request?.checks) ? request.checks : []
+  const absoluteRedline = checks.some((check: any) => check?.absoluteRedline)
+  return {
+    id: request?.id || '',
+    sessionId: request?.sessionId,
+    agentId: request?.agentRole,
+    toolName: request?.toolName || 'Unknown',
+    description: request?.description || '',
+    args: request?.input ?? {},
+    checks,
+    allowedScopes: request?.allowedScopes || ['once'],
+    action: 'ask',
+    permission: absoluteRedline ? 'hardline' : 'unknown',
+    analysisStatus: 'parsed',
+    hardline: absoluteRedline,
+    riskLevel: absoluteRedline ? 4 : 2,
+    reason: request?.description || 'Tool execution requires approval.',
+    ruleId: 'runtime-policy',
+    normalizedPattern: request?.toolName || 'unknown',
+    impacts: [],
+    snapshots: [],
+    critical: absoluteRedline,
+    absoluteRedline,
+  }
+}
 
 function ignoredAskUserAnswers(request: ChatAskUserRequest): ChatAskUserAnswer[] {
   return request.questions.map((question) => ({
@@ -124,7 +155,14 @@ export const tauriBridge: any = {
     },
     steer: async (sessionId: string, input: any) => invoke('chat_steer', { sessionId, input }),
     interruptTool: async (toolCallId: string) => invoke('chat_interrupt_tool', { toolCallId }),
-    stream: (providerId: string, model: string, sessionId: string, input: any, callbacks: any) => {
+    stream: (
+      providerId: string,
+      model: string,
+      sessionId: string,
+      input: any,
+      callbacks: any,
+      workspaceRoot?: string,
+    ) => {
       const requestedRunId = `stream_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
       const events = new Channel<any>()
       let activeRunId: string | null = requestedRunId
@@ -147,6 +185,23 @@ export const tauriBridge: any = {
           answers: ignoredAskUserAnswers(payload.request),
         }).catch(() => undefined)
       })
+      const permissionListener = listen<ChatPermissionApprovalEvent>('chat:permission-request', (event) => {
+        const payload = event.payload
+        if (payload.runId !== activeRunId) return
+        const request = permissionRequestForUi(payload.request)
+        try {
+          if (callbacks.onPermissionRequest) {
+            callbacks.onPermissionRequest(request)
+            return
+          }
+        } catch (error) {
+          console.error('[CodeZ] Tauri permission callback failed', error)
+        }
+        void invoke('chat_respond_to_approval', {
+          requestId: request.id,
+          response: { approved: false, scope: 'once' },
+        }).catch(() => undefined)
+      })
 
       const acknowledge = (frame: any): void => {
         if (typeof frame?.runId !== 'string' || !Number.isSafeInteger(frame?.sequence)) return
@@ -163,6 +218,7 @@ export const tauriBridge: any = {
         activeRunId = null
         events.onmessage = () => undefined
         void askUserListener.then((unlisten) => unlisten()).catch(() => undefined)
+        void permissionListener.then((unlisten) => unlisten()).catch(() => undefined)
         if (stopBackend && runId) {
           void invoke('chat_stream_stop', { runId }).catch(() => undefined)
         }
@@ -202,6 +258,19 @@ export const tauriBridge: any = {
               break
             case 'usage':
               break
+            case 'toolCalls':
+              for (const call of payload.calls || []) {
+                callbacks.onToolStart?.(
+                  call.id,
+                  call.function?.name || 'Unknown',
+                  call.function?.arguments || '{}',
+                  call.thoughtSignature,
+                )
+              }
+              break
+            case 'toolResult':
+              callbacks.onToolEnd?.(payload.callId, payload.result || '')
+              break
           }
         } catch (error) {
           console.error('[CodeZ] Tauri chat callback failed', error)
@@ -217,6 +286,7 @@ export const tauriBridge: any = {
           providerId,
           model,
           sessionId,
+          workspaceRoot,
           input,
         },
         events,
@@ -342,10 +412,13 @@ export const tauriBridge: any = {
     },
   },
   subAgent: {
-    list: async () => invoke('subagent_list'),
-    toggle: async (type: string, enabled: boolean) => invoke('subagent_toggle', { subagentType: type, enabled }),
-    getDetail: async (type: string) => invoke('subagent_get_detail', { subagentType: type }),
-    setModel: async (type: string, selections: any[]) => invoke('subagent_set_model', { subagentType: type, selections }),
+    list: async (): Promise<SubAgentInfo[]> => invoke('subagent_list'),
+    toggle: async (type: string, enabled: boolean): Promise<void> =>
+      invoke('subagent_toggle', { subagentType: type, enabled }),
+    getDetail: async (type: string): Promise<SubAgentDetailResult> =>
+      invoke('subagent_get_detail', { subagentType: type }),
+    setModel: async (type: string, selections: SubAgentModelSelection[]): Promise<void> =>
+      invoke('subagent_set_model', { subagentType: type, selections }),
   },
   logger: {
     info: (...args: any[]) => console.log('[CodeZ]', ...args),

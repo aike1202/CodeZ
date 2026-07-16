@@ -403,7 +403,8 @@ export function useSendMessage() {
             endSubAgent(activeAgentId, subAgentId, result)
             useChatStore.getState().persistSession(sid)
           }
-        }
+        },
+        ws.rootPath
       )
 
       firstByteTimer = setTimeout(() => {

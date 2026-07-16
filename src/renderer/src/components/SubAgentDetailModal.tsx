@@ -1,5 +1,9 @@
 import React, { useEffect, useState } from 'react'
-import type { SubAgentDetail } from '@shared/types/subagent'
+import type {
+  SubAgentDetailResult,
+  SubAgentModelSelection,
+  SubAgentSettingsDetail
+} from '../shared/desktop/generated/contracts'
 import Button from './ui/Button'
 import Flex from './ui/Flex'
 import Stack from './ui/Stack'
@@ -12,7 +16,6 @@ import {
   IconZap
 } from './Icons'
 import { useProviderStore } from '../stores/providerStore'
-import type { SubAgentModelSelection } from '@shared/types/subagent'
 import './SubAgentDetailModal.css'
 
 interface Props {
@@ -25,10 +28,22 @@ const ISOLATION_LABELS: Record<string, string> = {
   worktree: '独立 worktree'
 }
 
+function detailFromBridgeResult(result: unknown): SubAgentSettingsDetail | null {
+  if (!result || typeof result !== 'object') return null
+  const typed = result as SubAgentDetailResult
+  if (typed.kind === 'available' || typed.kind === 'partial') return typed.detail
+  if (typed.kind === 'notFound') return null
+
+  // Electron remains a frozen rollback baseline and returns its older shape.
+  const legacy = result as Partial<SubAgentSettingsDetail>
+  return typeof legacy.type === 'string' && typeof legacy.description === 'string'
+    ? legacy as SubAgentSettingsDetail
+    : null
+}
+
 export default function SubAgentDetailModal({ type, onClose }: Props): React.ReactElement {
-  const [detail, setDetail] = useState<SubAgentDetail | null>(null)
+  const [detail, setDetail] = useState<SubAgentSettingsDetail | null>(null)
   const [loading, setLoading] = useState(true)
-  const [promptCopied, setPromptCopied] = useState(false)
   const [savingModel, setSavingModel] = useState(false)
   const [modelError, setModelError] = useState('')
   const providers = useProviderStore((state) => state.providers)
@@ -39,8 +54,8 @@ export default function SubAgentDetailModal({ type, onClose }: Props): React.Rea
     setLoading(true)
     window.api.subAgent
       .getDetail(type)
-      .then((d) => {
-        if (alive) setDetail(d)
+      .then((result) => {
+        if (alive) setDetail(detailFromBridgeResult(result))
       })
       .catch((e) => console.error('Failed to load subagent detail', e))
       .finally(() => {
@@ -62,17 +77,6 @@ export default function SubAgentDetailModal({ type, onClose }: Props): React.Rea
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
-
-  const handleCopyPrompt = async () => {
-    if (!detail) return
-    try {
-      await navigator.clipboard.writeText(detail.systemPrompt)
-      setPromptCopied(true)
-      setTimeout(() => setPromptCopied(false), 1500)
-    } catch (e) {
-      console.error(e)
-    }
-  }
 
   const saveModels = async (selections: SubAgentModelSelection[]) => {
     if (!detail) return
@@ -314,24 +318,6 @@ export default function SubAgentDetailModal({ type, onClose }: Props): React.Rea
                   </section>
                 )}
 
-                {/* 可用工具 */}
-                <section className="sad-section">
-                  <h4 className="sad-section-title">
-                    可用工具 <span className="sad-count">{detail.tools.length}</span>
-                  </h4>
-                  {detail.tools.length > 0 ? (
-                    <Flex className="sad-tags" gap={2}>
-                      {detail.tools.map((t) => (
-                        <span key={t} className="sad-tag">
-                          {t}
-                        </span>
-                      ))}
-                    </Flex>
-                  ) : (
-                    <p className="sad-text sad-muted">无</p>
-                  )}
-                </section>
-
                 {/* 结构化输出 */}
                 {detail.outputSpec && (
                   <section className="sad-section">
@@ -352,24 +338,6 @@ export default function SubAgentDetailModal({ type, onClose }: Props): React.Rea
                   </section>
                 )}
 
-                {/* 系统提示词 */}
-                <section className="sad-section">
-                  <Flex align="center" justify="between">
-                    <h4 className="sad-section-title">系统提示词</h4>
-                    <Button
-                      variant="ghost"
-                      size="none"
-                      className="sad-copy-btn"
-                      onClick={handleCopyPrompt}
-                    >
-                      {promptCopied ? '已复制' : '复制'}
-                    </Button>
-                  </Flex>
-                  <p className="sad-text sad-muted sad-prompt-hint">
-                    运行时才注入的动态值以 <code>{'{{...}}'}</code> 占位标注。
-                  </p>
-                  <pre className="sad-prompt">{detail.systemPrompt}</pre>
-                </section>
               </Stack>
             )}
           </Stack>

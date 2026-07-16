@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import type { FileTreeNode } from '@shared/types/workspace'
 import { useWorkspaceStore } from '../stores/workspaceStore'
+import { desktopApi } from '../shared/desktop'
 
 interface FileTreeProps {
   nodes: FileTreeNode[]
@@ -52,7 +53,7 @@ function FileTreeNodeItem({
     setSelectedFile(node.path)
     if (!workspace) return
     try {
-      const content = await window.api.workspace.readFile(node.path, workspace.rootPath)
+      const content = await desktopApi.workspace.readFile(node.path, workspace.rootPath)
       useWorkspaceStore.getState().setFileContent(content)
     } catch {
       // ignore

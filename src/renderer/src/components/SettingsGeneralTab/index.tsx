@@ -6,6 +6,7 @@ import Select from '../ui/Select'
 import Input from '../ui/Input'
 import Button from '../ui/Button'
 import './SettingsGeneralTab.css'
+import { desktopApi } from '../../shared/desktop'
 
 export default function SettingsGeneralTab(): React.ReactElement {
   const settings = useSettingsStore((s) => s.settings)
@@ -42,9 +43,7 @@ export default function SettingsGeneralTab(): React.ReactElement {
               onChange={(e) => {
                 const val = e.target.value
                 handleUpdate('appTheme', val)
-                if (window.api?.theme) {
-                  window.api.theme.set(val as any)
-                }
+                void desktopApi.theme.set(val as 'system' | 'light' | 'dark').catch(() => undefined)
               }}
             >
               <option value="system">跟随系统</option>

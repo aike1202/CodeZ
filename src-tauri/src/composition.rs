@@ -21,6 +21,7 @@ use thiserror::Error;
 
 use crate::{
     chat_runtime::ChatRuntime,
+    chat_tool_runtime::ChatToolRuntime,
     error::ErrorReporter,
     logging::{self, LoggingError},
     mcp_boundary::StorageMcpSecretStore,
@@ -72,6 +73,8 @@ pub(crate) enum CompositionError {
         #[from]
         source: PermissionStoreError,
     },
+    #[error(transparent)]
+    ChatTools(#[from] crate::chat_tool_runtime::ChatToolRuntimeError),
 }
 
 pub(crate) enum CompositionOutcome {
@@ -120,9 +123,24 @@ pub(crate) fn compose_app_state(
             ));
         }
     }
+    let model_ledger = Arc::new(codez_runtime::context::ledger::ModelLedgerStore::new(
+        paths.data_directory().join("session-runtime"),
+        Arc::clone(&persistence),
+    ));
+    let workspace_permissions = Arc::new(WorkspacePermissionStore::new(
+        paths.data_directory(),
+        Arc::clone(&persistence),
+    )?);
+    let chat_tools = Arc::new(ChatToolRuntime::new(
+        paths.as_ref(),
+        Arc::clone(&persistence),
+        Arc::clone(&workspace_permissions),
+    )?);
     let chat_runtime = Arc::new(ChatRuntime::new(
         Arc::clone(&cancellation),
         Arc::clone(&errors),
+        Arc::clone(&model_ledger),
+        chat_tools,
     ));
     let recent_projects = Arc::new(RecentProjectsStore::new(
         paths.data_directory().to_path_buf(),
@@ -183,17 +201,12 @@ pub(crate) fn compose_app_state(
             .map_err(|source| CompositionError::Provider { source })?;
             Arc::new(service)
         },
-        workspace_permissions: Arc::new(WorkspacePermissionStore::new(
-            paths.data_directory(),
-            Arc::clone(&persistence),
-        )?),
+        subagent_settings: tokio::sync::Mutex::new(()),
+        workspace_permissions,
         mcp_config,
         mcp_secrets,
         mcp_runtime,
-        model_ledger: Arc::new(codez_runtime::context::ledger::ModelLedgerStore::new(
-            paths.data_directory().join("session-runtime"),
-            persistence,
-        )),
+        model_ledger,
         chat_runtime,
     }))
 }

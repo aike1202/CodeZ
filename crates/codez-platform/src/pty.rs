@@ -13,6 +13,7 @@ use std::{
 
 use codez_core::AppError;
 use dashmap::DashMap;
+use futures_util::{StreamExt, stream::FuturesUnordered};
 #[cfg(unix)]
 use nix::{
     errno::Errno,
@@ -43,6 +44,8 @@ const SUPERVISOR_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const SUPERVISOR_START_TIMEOUT: Duration = Duration::from_secs(10);
 const TERMINAL_COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
 const TERMINAL_CLOSE_TIMEOUT: Duration = Duration::from_secs(8);
+const TERMINAL_REGISTRY_SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(1_500);
+const SUPERVISOR_REAP_TIMEOUT: Duration = Duration::from_secs(1);
 const EXIT_EVENT_TIMEOUT: Duration = Duration::from_secs(1);
 const PROCESS_TREE_EXIT_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -207,6 +210,13 @@ impl PtyManager {
                 false,
             ));
         }
+        if !self.accepting.load(Ordering::Acquire) {
+            handle.request_stop();
+            let completion = self.wait_for_completion(&handle).await;
+            let joined = self.reap_handle(handle).await;
+            let _ = completion.and(joined);
+            return Err(AppError::conflict("The terminal registry is shutting down"));
+        }
         Ok(())
     }
 
@@ -273,29 +283,20 @@ impl PtyManager {
         self.accepting.store(false, Ordering::Release);
     }
 
-    /// Stops every terminal concurrently and waits for every owned supervisor thread.
+    /// Stops every currently managed terminal and waits for each owned supervisor.
+    ///
+    /// This method does not reject new terminal starts. Use [`Self::shutdown_all`] while
+    /// shutting down the desktop host.
+    ///
+    /// # Errors
+    ///
+    /// Returns a timeout when one or more supervisors do not complete within the shared
+    /// registry deadline. The manager retains unfinished handles so a later call can retry
+    /// cleanup rather than detaching their threads.
     pub async fn kill_all(&self) -> Result<(), AppError> {
         self.request_stop_all();
-        let handles = self
-            .instances
-            .iter()
-            .map(|entry| Arc::clone(entry.value()))
-            .collect::<Vec<_>>();
-
-        let mut first_error = None;
-        for handle in handles {
-            if let Err(error) = self.wait_for_completion(&handle).await
-                && first_error.is_none()
-            {
-                first_error = Some(error);
-            }
-            if let Err(error) = self.reap_handle(handle).await
-                && first_error.is_none()
-            {
-                first_error = Some(error);
-            }
-        }
-        first_error.map_or(Ok(()), Err)
+        self.reap_all_before(TERMINAL_REGISTRY_SHUTDOWN_TIMEOUT)
+            .await
     }
 
     /// Requests cooperative closure for all terminals without waiting.
@@ -306,9 +307,31 @@ impl PtyManager {
     }
 
     /// Stops admission and fully reclaims every terminal owned by this registry.
+    ///
+    /// The deadline is shared across the full registry, not applied once per terminal. This
+    /// keeps desktop shutdown bounded even when several terminals are active.
+    ///
+    /// # Errors
+    ///
+    /// Returns a timeout after retaining any unfinished terminal handles for a later retry.
+    /// The error is intended for redacted host diagnostics; callers can still exit safely.
     pub async fn shutdown(&self) -> Result<(), AppError> {
-        self.stop_accepting();
-        self.kill_all().await
+        self.shutdown_all().await
+    }
+
+    /// Stops admission and reclaims every terminal within one shared shutdown deadline.
+    ///
+    /// This operation is idempotent. Calls after a prior successful shutdown return once the
+    /// registry is empty; calls after a timed-out attempt retry the handles still retained by
+    /// the registry.
+    ///
+    /// # Errors
+    ///
+    /// Returns a timeout when terminal cleanup cannot be confirmed before the bounded
+    /// deadline. The manager retains those handles instead of detaching supervisor threads.
+    pub async fn shutdown_all(&self) -> Result<(), AppError> {
+        self.shutdown_all_before(TERMINAL_REGISTRY_SHUTDOWN_TIMEOUT)
+            .await
     }
 
     /// Returns the number of terminal IDs currently retained by the registry.
@@ -350,15 +373,58 @@ impl PtyManager {
 
     async fn reap_handle(&self, handle: Arc<TerminalHandle>) -> Result<(), AppError> {
         let id = handle.id.clone();
-        let join_owner = Arc::clone(&handle);
-        let join_result = tokio::task::spawn_blocking(move || join_owner.join_supervisor())
-            .await
-            .map_err(|source| {
-                AppError::internal(format!("terminal supervisor join task failed: {source}"))
-            })?;
+        self.wait_for_supervisor_exit(&handle).await?;
+        handle.join_finished_supervisor()?;
         self.instances
             .remove_if(&id, |_, current| Arc::ptr_eq(current, &handle));
-        join_result
+        Ok(())
+    }
+
+    async fn reap_all_before(&self, deadline: Duration) -> Result<(), AppError> {
+        let mut pending = self
+            .instances
+            .iter()
+            .map(|entry| self.stop_and_reap(Arc::clone(entry.value())))
+            .collect::<FuturesUnordered<_>>();
+        let cleanup = async {
+            let mut first_error = None;
+            while let Some(result) = pending.next().await {
+                if let Err(error) = result
+                    && first_error.is_none()
+                {
+                    first_error = Some(error);
+                }
+            }
+            first_error.map_or(Ok(()), Err)
+        };
+
+        tokio::time::timeout(deadline, cleanup).await.map_err(|_| {
+            AppError::timeout(
+                "One or more terminal processes did not close before the shutdown deadline",
+            )
+        })?
+    }
+
+    async fn shutdown_all_before(&self, deadline: Duration) -> Result<(), AppError> {
+        self.stop_accepting();
+        self.request_stop_all();
+        self.reap_all_before(deadline).await
+    }
+
+    async fn stop_and_reap(&self, handle: Arc<TerminalHandle>) -> Result<(), AppError> {
+        let completion = self.wait_for_completion(&handle).await;
+        let joined = self.reap_handle(handle).await;
+        completion.and(joined)
+    }
+
+    async fn wait_for_supervisor_exit(&self, handle: &TerminalHandle) -> Result<(), AppError> {
+        tokio::time::timeout(SUPERVISOR_REAP_TIMEOUT, async {
+            while !handle.is_supervisor_finished() {
+                tokio::time::sleep(SUPERVISOR_POLL_INTERVAL).await;
+            }
+        })
+        .await
+        .map_err(|_| AppError::timeout("The terminal supervisor did not finish cleanup"))
     }
 }
 
@@ -407,13 +473,28 @@ impl TerminalHandle {
         *owner = Some(supervisor);
     }
 
-    fn join_supervisor(&self) -> Result<(), AppError> {
-        let supervisor = self
-            .supervisor
+    fn is_supervisor_finished(&self) -> bool {
+        self.supervisor
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .take();
-        if let Some(supervisor) = supervisor {
+            .as_ref()
+            .is_none_or(JoinHandle::is_finished)
+    }
+
+    fn join_finished_supervisor(&self) -> Result<(), AppError> {
+        let mut owner = self
+            .supervisor
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if owner
+            .as_ref()
+            .is_some_and(|supervisor| !supervisor.is_finished())
+        {
+            return Err(AppError::timeout(
+                "The terminal supervisor did not finish cleanup",
+            ));
+        }
+        if let Some(supervisor) = owner.take() {
             supervisor.join().map_err(|_| {
                 AppError::internal("terminal supervisor thread panicked during cleanup")
             })?;
@@ -1035,7 +1116,17 @@ mod tests {
     use codez_core::AppErrorKind;
     use tokio::sync::mpsc as tokio_mpsc;
 
-    use super::{OutputFlowControl, PTY_ACK_WINDOW, PTY_EVENT_QUEUE_CAPACITY, PtyManager};
+    use super::{
+        OutputFlowControl, PTY_ACK_WINDOW, PTY_EVENT_QUEUE_CAPACITY, PtyManager, TerminalHandle,
+    };
+
+    fn completed_terminal(id: &str) -> Arc<TerminalHandle> {
+        let (commands, _receiver) = mpsc::sync_channel(1);
+        let handle = Arc::new(TerminalHandle::new(id.to_owned(), commands));
+        handle.set_supervisor(thread::spawn(|| {}));
+        handle.complete(None);
+        handle
+    }
 
     #[test]
     fn output_flow_should_block_after_the_ack_window() {
@@ -1091,6 +1182,79 @@ mod tests {
             .kill("not-running")
             .await
             .expect("repeated absent kill must succeed");
+
+        assert_eq!(manager.active_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn terminal_shutdown_all_should_reap_completed_handles_and_stop_admission() {
+        let (events, _receiver) = tokio_mpsc::channel(PTY_EVENT_QUEUE_CAPACITY);
+        let manager = PtyManager::new(events);
+        let handle = completed_terminal("completed-terminal");
+        manager
+            .instances
+            .insert("completed-terminal".to_owned(), handle);
+
+        manager
+            .shutdown_all()
+            .await
+            .expect("completed terminal must be reaped during shutdown");
+
+        let current_directory =
+            std::env::current_dir().expect("test working directory must be available");
+        let executable = std::env::current_exe().expect("test executable path must be available");
+        let error = manager
+            .start(
+                "after-shutdown".to_owned(),
+                executable,
+                Vec::new(),
+                current_directory,
+            )
+            .await
+            .expect_err("shutdown terminal registry must reject later starts");
+
+        assert_eq!(
+            (manager.active_count(), error.kind()),
+            (0, AppErrorKind::Conflict)
+        );
+    }
+
+    #[tokio::test]
+    async fn terminal_shutdown_all_should_retain_timed_out_handles_for_a_later_retry() {
+        let (events, _receiver) = tokio_mpsc::channel(PTY_EVENT_QUEUE_CAPACITY);
+        let manager = PtyManager::new(events);
+        let (commands, _commands_rx) = mpsc::sync_channel(1);
+        let handle = Arc::new(TerminalHandle::new("stalled-terminal".to_owned(), commands));
+        let (release, wait_for_release) = mpsc::sync_channel(1);
+        let supervisor_handle = Arc::clone(&handle);
+        handle.set_supervisor(thread::spawn(move || {
+            let _ = wait_for_release.recv();
+            supervisor_handle.complete(None);
+        }));
+        manager
+            .instances
+            .insert("stalled-terminal".to_owned(), handle);
+
+        let error = tokio::time::timeout(
+            Duration::from_secs(1),
+            manager.shutdown_all_before(Duration::from_millis(25)),
+        )
+        .await
+        .expect("shutdown must respect its shared deadline")
+        .expect_err("stalled supervisor must report a bounded cleanup failure");
+
+        assert_eq!(
+            (manager.active_count(), error.kind()),
+            (1, AppErrorKind::Timeout)
+        );
+
+        release
+            .send(())
+            .expect("fixture supervisor must still be waiting for release");
+        manager
+            .shutdown_all()
+            .await
+            .expect("a later shutdown attempt must reap the completed supervisor");
 
         assert_eq!(manager.active_count(), 0);
     }

@@ -27,6 +27,7 @@ import {
   useAppPreview
 } from './hooks/useAppPreview'
 import type { MigrationCredentialInput, MigrationRecoveryStatus } from '../shared/desktop'
+import { desktopApi } from '../shared/desktop'
 
 export default function App(): React.ReactElement {
   const [status, setStatus] = useState<MigrationRecoveryStatus | null>(null)
@@ -145,7 +146,7 @@ function ActiveApp(): React.ReactElement {
     : rightTabIds[0] ?? null
 
   useEffect(() => {
-    window.api.workspace.getRecentProjects().then((p) => useWorkspaceStore.getState().setRecentProjects(p)).catch(() => {})
+    desktopApi.workspace.getRecentProjects().then((p) => useWorkspaceStore.getState().setRecentProjects(p)).catch(() => {})
     loadProviders()
     const cleanupRuntimeStatusListener = window.api.chat.onRuntimeStatusChanged(
       useChatStore.getState().applyRuntimeStatus
@@ -156,22 +157,16 @@ function ActiveApp(): React.ReactElement {
     })
     const cleanupPlanStateListener = useChatStore.getState().initPlanStateListener()
 
-    if (window.api?.theme) {
-      window.api.theme.get().then((info) => {
-        if (info.shouldUseDarkColors) document.documentElement.classList.add('dark')
-        else document.documentElement.classList.remove('dark')
-      })
-      const cleanupTheme = window.api.theme.onUpdated((info) => {
-        if (info.shouldUseDarkColors) document.documentElement.classList.add('dark')
-        else document.documentElement.classList.remove('dark')
-      })
-      return () => {
-        cleanupTheme()
-        cleanupPlanStateListener()
-        cleanupRuntimeStatusListener()
-      }
-    }
+    void desktopApi.theme.get().then((info) => {
+      if (info.shouldUseDarkColors) document.documentElement.classList.add('dark')
+      else document.documentElement.classList.remove('dark')
+    }).catch(() => undefined)
+    const cleanupTheme = desktopApi.theme.onUpdated((info) => {
+      if (info.shouldUseDarkColors) document.documentElement.classList.add('dark')
+      else document.documentElement.classList.remove('dark')
+    })
     return () => {
+      cleanupTheme()
       cleanupPlanStateListener()
       cleanupRuntimeStatusListener()
     }

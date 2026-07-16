@@ -57,6 +57,21 @@ struct ActiveConnection {
     gateway: Arc<McpGateway>,
 }
 
+struct ResolvedValue {
+    value: String,
+    secret_redaction_values: Vec<String>,
+}
+
+struct ResolvedArguments {
+    values: Vec<String>,
+    secret_redaction_values: Vec<String>,
+}
+
+struct ResolvedStringMap {
+    values: BTreeMap<String, String>,
+    secret_redaction_values: Vec<String>,
+}
+
 #[derive(Debug)]
 enum ConnectionFailure {
     AdmissionClosed,
@@ -318,11 +333,15 @@ impl McpRuntimeManager {
             let mut state = self.state.lock().await;
             state.catalogs.clear();
             std::mem::take(&mut state.active)
-                .into_values()
+                .into_iter()
                 .collect::<Vec<_>>()
         };
+        let active_names = active
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<BTreeSet<_>>();
         let mut cleanup_failed = false;
-        for connection in active {
+        for (_, connection) in active {
             if connection
                 .gateway
                 .shutdown()
@@ -333,6 +352,8 @@ impl McpRuntimeManager {
                 cleanup_failed = true;
             }
         }
+        self.record_cleanup_statuses(&active_names, cleanup_failed)
+            .await;
         if cleanup_failed {
             return Err(AppError::external(
                 "One or more MCP connections did not close cleanly",
@@ -441,7 +462,7 @@ impl McpRuntimeManager {
         }
         let server_id = user_server_id(&server.name)?;
         let gateway = Arc::new(McpGateway::with_config(
-            timeouts_for(&server.config),
+            timeouts_for(&server.config)?,
             McpGatewayLimits::default(),
         ));
         let info = match server.config.transport {
@@ -479,12 +500,19 @@ impl McpRuntimeManager {
             .command
             .as_deref()
             .ok_or(ConnectionFailure::InvalidConfiguration)?;
-        let arguments = self
+        let ResolvedArguments {
+            values: arguments,
+            mut secret_redaction_values,
+        } = self
             .resolve_arguments(config.args.as_deref().unwrap_or_default())
             .await?;
-        let environment = self.resolve_string_map(config.env.as_ref()).await?;
+        let ResolvedStringMap {
+            values: environment,
+            secret_redaction_values: environment_redaction_values,
+        } = self.resolve_string_map(config.env.as_ref()).await?;
+        secret_redaction_values.extend(environment_redaction_values);
         let working_directory = config.cwd.as_deref().map(PathBuf::from);
-        StdioServerConfig::new(
+        let config = StdioServerConfig::new(
             PathBuf::from(command),
             arguments.into_iter().map(OsString::from).collect(),
             environment
@@ -493,7 +521,8 @@ impl McpRuntimeManager {
                 .collect(),
             working_directory,
         )
-        .map_err(ConnectionFailure::Gateway)
+        .map_err(ConnectionFailure::Gateway)?;
+        Ok(config.with_redaction_values(secret_redaction_values))
     }
 
     async fn http_config(
@@ -507,40 +536,59 @@ impl McpRuntimeManager {
             .url
             .as_deref()
             .ok_or(ConnectionFailure::InvalidConfiguration)?;
-        let headers = self.resolve_string_map(config.headers.as_ref()).await?;
+        let ResolvedStringMap {
+            values: headers,
+            secret_redaction_values: _,
+        } = self.resolve_string_map(config.headers.as_ref()).await?;
         StreamableHttpServerConfig::new(endpoint, headers).map_err(ConnectionFailure::Gateway)
     }
 
     async fn resolve_arguments(
         &self,
         arguments: &[String],
-    ) -> Result<Vec<String>, ConnectionFailure> {
-        let mut resolved = Vec::with_capacity(arguments.len());
+    ) -> Result<ResolvedArguments, ConnectionFailure> {
+        let mut values = Vec::with_capacity(arguments.len());
+        let mut secret_redaction_values = Vec::new();
         for argument in arguments {
-            resolved.push(self.resolve_value(argument).await?);
+            let resolved = self.resolve_value(argument).await?;
+            secret_redaction_values.extend(resolved.secret_redaction_values);
+            values.push(resolved.value);
         }
-        Ok(resolved)
+        Ok(ResolvedArguments {
+            values,
+            secret_redaction_values,
+        })
     }
 
     async fn resolve_string_map(
         &self,
         values: Option<&BTreeMap<String, String>>,
-    ) -> Result<BTreeMap<String, String>, ConnectionFailure> {
+    ) -> Result<ResolvedStringMap, ConnectionFailure> {
         let Some(values) = values else {
-            return Ok(BTreeMap::new());
+            return Ok(ResolvedStringMap {
+                values: BTreeMap::new(),
+                secret_redaction_values: Vec::new(),
+            });
         };
-        let mut resolved = BTreeMap::new();
+        let mut resolved_values = BTreeMap::new();
+        let mut secret_redaction_values = Vec::new();
         for (key, value) in values {
-            resolved.insert(key.clone(), self.resolve_value(value).await?);
+            let resolved = self.resolve_value(value).await?;
+            secret_redaction_values.extend(resolved.secret_redaction_values);
+            resolved_values.insert(key.clone(), resolved.value);
         }
-        Ok(resolved)
+        Ok(ResolvedStringMap {
+            values: resolved_values,
+            secret_redaction_values,
+        })
     }
 
-    async fn resolve_value(&self, configured: &str) -> Result<String, ConnectionFailure> {
-        let mut resolved = String::with_capacity(configured.len());
+    async fn resolve_value(&self, configured: &str) -> Result<ResolvedValue, ConnectionFailure> {
+        let mut value = String::with_capacity(configured.len());
+        let mut secret_redaction_values = Vec::new();
         let mut remaining = configured;
         while let Some(start) = remaining.find("${") {
-            resolved.push_str(&remaining[..start]);
+            value.push_str(&remaining[..start]);
             let expression = &remaining[start + 2..];
             let end = expression
                 .find('}')
@@ -551,9 +599,9 @@ impl McpRuntimeManager {
                 .ok_or(ConnectionFailure::InvalidExpression)?;
             match source {
                 "env" if valid_environment_key(key) => {
-                    let value =
+                    let environment_value =
                         std::env::var(key).map_err(|_| ConnectionFailure::MissingEnvironment)?;
-                    resolved.push_str(&value);
+                    value.push_str(&environment_value);
                 }
                 "secret" => {
                     let key = McpSecretKey::parse(key.to_owned())
@@ -564,14 +612,19 @@ impl McpRuntimeManager {
                         .await
                         .map_err(ConnectionFailure::SecretStore)?
                         .ok_or(ConnectionFailure::MissingSecret)?;
-                    resolved.push_str(secret.expose_secret());
+                    let secret_value = secret.expose_secret();
+                    value.push_str(secret_value);
+                    secret_redaction_values.push(secret_value.to_string());
                 }
                 _ => return Err(ConnectionFailure::InvalidExpression),
             }
             remaining = &expression[end + 1..];
         }
-        resolved.push_str(remaining);
-        Ok(resolved)
+        value.push_str(remaining);
+        Ok(ResolvedValue {
+            value,
+            secret_redaction_values,
+        })
     }
 
     async fn remove_active_connection(&self, name: &str) {
@@ -630,6 +683,26 @@ impl McpRuntimeManager {
             state
                 .statuses
                 .insert(server.name.clone(), stopped_status(server));
+        }
+    }
+
+    async fn record_cleanup_statuses(&self, active_names: &BTreeSet<String>, cleanup_failed: bool) {
+        let mut state = self.state.lock().await;
+        for (name, status) in &mut state.statuses {
+            if !active_names.contains(name) {
+                continue;
+            }
+            status.state = wire::McpServerState::Stopped;
+            status.capabilities = None;
+            status.server_info = None;
+            status.tool_count = 0;
+            status.resource_count = 0;
+            status.prompt_count = 0;
+            status.error = cleanup_failed.then(|| wire::McpStatusError {
+                code: "CONNECTION_CLEANUP_FAILED".to_string(),
+                message: "The MCP connection did not close cleanly.".to_string(),
+            });
+            status.updated_at = now();
         }
     }
 
@@ -723,7 +796,7 @@ fn user_server_id(name: &str) -> Result<McpServerId, ConnectionFailure> {
         .map_err(|_| ConnectionFailure::InvalidConfiguration)
 }
 
-fn timeouts_for(config: &McpServerConfig) -> McpTimeouts {
+fn timeouts_for(config: &McpServerConfig) -> Result<McpTimeouts, ConnectionFailure> {
     let connect = config
         .handshake_timeout_ms
         .map_or(DEFAULT_CONNECT_TIMEOUT, |milliseconds| {
@@ -734,7 +807,7 @@ fn timeouts_for(config: &McpServerConfig) -> McpTimeouts {
         .map_or(DEFAULT_REQUEST_TIMEOUT, |milliseconds| {
             Duration::from_millis(u64::from(milliseconds))
         });
-    McpTimeouts::new(connect, request, DEFAULT_CLOSE_TIMEOUT).unwrap_or_default()
+    McpTimeouts::new(connect, request, DEFAULT_CLOSE_TIMEOUT).map_err(ConnectionFailure::Gateway)
 }
 
 fn valid_environment_key(value: &str) -> bool {
@@ -892,12 +965,19 @@ fn clone_gateway_error_kind(error: &McpError) -> McpError {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, sync::Arc};
+    use std::{
+        collections::BTreeMap,
+        env,
+        path::{Path, PathBuf},
+        sync::Arc,
+    };
 
     use codez_mcp::{McpSecretValue, SecretFuture};
     use tokio::sync::Mutex;
 
     use super::*;
+
+    type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
     #[derive(Default)]
     struct TestSecretStore {
@@ -975,12 +1055,85 @@ mod tests {
         }
     }
 
+    fn workspace_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("src-tauri must be located below the workspace root")
+            .to_path_buf()
+    }
+
+    fn node_executable() -> TestResult<PathBuf> {
+        let executable_name = if cfg!(windows) { "node.exe" } else { "node" };
+        let path =
+            env::var_os("PATH").ok_or("PATH is required to locate the MCP stdio fixture host")?;
+        for directory in env::split_paths(&path) {
+            let candidate = directory.join(executable_name);
+            if candidate.is_file() {
+                return Ok(std::fs::canonicalize(candidate)?);
+            }
+        }
+        Err("Node executable was not found on PATH".into())
+    }
+
+    fn fixture_environment() -> BTreeMap<String, String> {
+        [
+            "HOME",
+            "USERPROFILE",
+            "HOMEDRIVE",
+            "HOMEPATH",
+            "SystemRoot",
+            "WINDIR",
+            "TEMP",
+            "TMP",
+            "TMPDIR",
+            "PATH",
+        ]
+        .into_iter()
+        .filter_map(|key| env::var(key).ok().map(|value| (key.to_string(), value)))
+        .collect()
+    }
+
+    fn fixture_server() -> TestResult<UserMcpServer> {
+        let root = workspace_root();
+        let mut fixture = config(McpTransport::Stdio);
+        fixture.command = Some(node_executable()?.to_string_lossy().into_owned());
+        fixture.args = Some(vec![
+            root.join("src")
+                .join("tests")
+                .join("fixtures")
+                .join("mcp-stdio-server.cjs")
+                .to_string_lossy()
+                .into_owned(),
+        ]);
+        fixture.env = Some(fixture_environment());
+        fixture.cwd = Some(root.to_string_lossy().into_owned());
+        fixture.url = None;
+        Ok(server("fixture", fixture))
+    }
+
     #[tokio::test]
     async fn reconcile_reports_disabled_servers_without_opening_a_gateway() {
         let manager = manager();
         let mut config = config(McpTransport::Stdio);
         config.enabled = Some(false);
         let statuses = manager.reconcile(&[server("disabled", config)]).await;
+
+        assert_eq!(statuses[0].state, wire::McpServerState::Disabled);
+    }
+
+    #[tokio::test]
+    async fn force_cleanup_preserves_non_running_statuses() {
+        let manager = manager();
+        let mut config = config(McpTransport::Stdio);
+        config.enabled = Some(false);
+        let server = server("disabled", config);
+        manager.reconcile(std::slice::from_ref(&server)).await;
+
+        manager
+            .force_cleanup()
+            .await
+            .expect("cleaning up no active gateways must succeed");
+        let statuses = manager.statuses().await;
 
         assert_eq!(statuses[0].state, wire::McpServerState::Disabled);
     }
@@ -1054,6 +1207,53 @@ mod tests {
             .await
             .expect("configured secret must resolve");
 
-        assert_eq!(resolved, "Bearer runtime-secret");
+        assert_eq!(resolved.value, "Bearer runtime-secret");
+        assert_eq!(resolved.secret_redaction_values, vec!["runtime-secret"]);
+    }
+
+    #[tokio::test]
+    async fn manager_runs_a_local_stdio_fixture_and_reports_stopped_after_cleanup() -> TestResult {
+        let manager = manager();
+        let server = fixture_server()?;
+
+        let statuses = manager.reconcile(std::slice::from_ref(&server)).await;
+        assert_eq!(statuses[0].state, wire::McpServerState::Connected);
+        assert_eq!(
+            statuses[0]
+                .server_info
+                .as_ref()
+                .map(|identity| identity.name.as_str()),
+            Some("codez-test-server")
+        );
+
+        let catalog = manager.catalog(&server.name).await?;
+        assert!(catalog.tools.iter().any(|tool| tool.name == "echo"));
+        assert!(
+            catalog
+                .resources
+                .iter()
+                .any(|resource| resource.uri == "test://example")
+        );
+        assert!(catalog.prompts.iter().any(|prompt| prompt.name == "review"));
+
+        manager.force_cleanup().await?;
+        let statuses = manager.statuses().await;
+        let stopped = statuses
+            .iter()
+            .find(|status| status.name == server.name)
+            .ok_or("fixture status must remain visible after cleanup")?;
+        assert_eq!(stopped.state, wire::McpServerState::Stopped);
+        assert!(stopped.server_info.is_none());
+        assert_eq!(
+            (
+                stopped.tool_count,
+                stopped.resource_count,
+                stopped.prompt_count,
+                stopped.error.as_ref().map(|error| error.code.as_str()),
+            ),
+            (0, 0, 0, None)
+        );
+        assert!(manager.catalog(&server.name).await.is_err());
+        Ok(())
     }
 }

@@ -9,6 +9,7 @@ use codez_runtime::agent::{
     registry::{self, SubAgentDefinition},
     sub_agent::{SubAgentModelId, SubAgentRole},
 };
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::state::AppState;
@@ -24,11 +25,57 @@ pub(crate) struct ValidatedSubAgentModelSelection {
     model: SubAgentModelId,
 }
 
-impl ValidatedSubAgentModelSelection {
-    fn into_wire(self) -> SubAgentModelSelection {
+/// One enabled built-in sub-agent paired with its first configured model
+/// candidate. Candidate fallback remains a future execution policy; this
+/// initial runtime never silently switches models after a failed request.
+#[derive(Debug, Clone)]
+pub(crate) struct SubAgentRunConfiguration {
+    pub(crate) role: SubAgentRole,
+    pub(crate) selection: SubAgentModelSelection,
+}
+
+/// Legacy-compatible persisted model selection.
+///
+/// Serde deliberately ignores unknown legacy fields here. The typed command
+/// input uses the stricter wire DTO; the next sub-agent settings mutation
+/// rewrites this stored form without those extensions.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredSubAgentModelSelection {
+    provider_id: String,
+    model: String,
+}
+
+impl StoredSubAgentModelSelection {
+    fn to_wire(&self) -> SubAgentModelSelection {
         SubAgentModelSelection {
-            provider_id: self.provider_id,
-            model: self.model.as_str().to_string(),
+            provider_id: self.provider_id.clone(),
+            model: self.model.clone(),
+        }
+    }
+}
+
+impl From<ValidatedSubAgentModelSelection> for StoredSubAgentModelSelection {
+    fn from(value: ValidatedSubAgentModelSelection) -> Self {
+        Self {
+            provider_id: value.provider_id,
+            model: value.model.as_str().to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum StoredModelCandidates {
+    Many(Vec<StoredSubAgentModelSelection>),
+    One(StoredSubAgentModelSelection),
+}
+
+impl StoredModelCandidates {
+    fn into_many(self) -> Vec<StoredSubAgentModelSelection> {
+        match self {
+            Self::Many(selections) => selections,
+            Self::One(selection) => vec![selection],
         }
     }
 }
@@ -58,6 +105,10 @@ impl KnownSubAgent {
         }
     }
 
+    pub(crate) fn role(&self) -> &SubAgentRole {
+        &self.role
+    }
+
     fn detail(&self, settings: &SubAgentSettings) -> SubAgentSettingsDetail {
         SubAgentSettingsDetail {
             kind: self.definition.r#type.clone(),
@@ -82,16 +133,16 @@ impl KnownSubAgent {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SubAgentSettings {
     disabled_sub_agents: BTreeSet<String>,
-    sub_agent_models: BTreeMap<String, Vec<SubAgentModelSelection>>,
+    sub_agent_models: BTreeMap<String, Vec<StoredSubAgentModelSelection>>,
 }
 
 impl SubAgentSettings {
     fn from_root(root: &Map<String, Value>) -> Result<Self, AppError> {
-        let disabled_sub_agents = decode_optional_field(root, "disabledSubAgents")?
+        let disabled_sub_agents = decode_optional_field::<Vec<String>>(root, "disabledSubAgents")?
             .unwrap_or_default()
             .into_iter()
             .collect();
-        let sub_agent_models = decode_optional_field(root, "subAgentModels")?.unwrap_or_default();
+        let sub_agent_models = decode_stored_model_candidates(root)?;
         Ok(Self {
             disabled_sub_agents,
             sub_agent_models,
@@ -109,7 +160,7 @@ impl SubAgentSettings {
                 selections
                     .iter()
                     .filter(|selection| is_structurally_valid_selection(selection))
-                    .cloned()
+                    .map(StoredSubAgentModelSelection::to_wire)
                     .collect::<Vec<_>>()
             })
             .filter(|selections| !selections.is_empty())
@@ -135,7 +186,7 @@ impl SubAgentSettings {
                 role.as_str().to_string(),
                 selections
                     .into_iter()
-                    .map(ValidatedSubAgentModelSelection::into_wire)
+                    .map(StoredSubAgentModelSelection::from)
                     .collect(),
             );
         }
@@ -162,13 +213,13 @@ pub(crate) struct SubAgentSettingsDocument {
 
 impl SubAgentSettingsDocument {
     fn from_value(value: Value) -> Result<Self, AppError> {
-        let root = value.as_object().cloned().ok_or_else(|| {
-            AppError::storage(
+        let Value::Object(root) = value else {
+            return Err(AppError::storage(
                 "Settings data is invalid",
                 "settings document root is not an object",
                 false,
-            )
-        })?;
+            ));
+        };
         let settings = SubAgentSettings::from_root(&root)?;
         Ok(Self { root, settings })
     }
@@ -261,6 +312,30 @@ pub(crate) fn detail_for_subagent(
     })
 }
 
+/// Resolves the admission-time sub-agent configuration without fabricating a
+/// default Provider or model.
+pub(crate) fn resolve_run_configuration(
+    subagent_type: &str,
+    settings: &SubAgentSettings,
+) -> Result<SubAgentRunConfiguration, AppError> {
+    let agent = find_known_subagent(subagent_type)?;
+    if !settings.is_enabled(agent.role()) {
+        return Err(AppError::conflict("The selected sub-agent is disabled"));
+    }
+    let selection = settings
+        .models_for(agent.role())
+        .and_then(|mut selections| selections.drain(..).next())
+        .ok_or_else(|| {
+            AppError::validation(
+                "Configure at least one valid Provider and model before running this sub-agent",
+            )
+        })?;
+    Ok(SubAgentRunConfiguration {
+        role: agent.role().clone(),
+        selection,
+    })
+}
+
 /// Converts a Provider snapshot into the lookup structure needed for validation.
 pub(crate) fn provider_model_catalog(
     providers: &[codez_core::provider::ProviderInfo],
@@ -334,7 +409,29 @@ where
         .transpose()
 }
 
-fn is_structurally_valid_selection(selection: &SubAgentModelSelection) -> bool {
+fn decode_stored_model_candidates(
+    root: &Map<String, Value>,
+) -> Result<BTreeMap<String, Vec<StoredSubAgentModelSelection>>, AppError> {
+    let Some(value) = root.get("subAgentModels") else {
+        return Ok(BTreeMap::new());
+    };
+    let selections = serde_json::from_value::<BTreeMap<String, StoredModelCandidates>>(
+        value.clone(),
+    )
+    .map_err(|error| {
+        AppError::storage(
+            "Settings data is invalid",
+            format!("settings field `subAgentModels` is invalid: {error}"),
+            false,
+        )
+    })?;
+    Ok(selections
+        .into_iter()
+        .map(|(role, candidates)| (role, candidates.into_many()))
+        .collect())
+}
+
+fn is_structurally_valid_selection(selection: &StoredSubAgentModelSelection) -> bool {
     SubAgentRole::parse(selection.provider_id.clone()).is_ok()
         && SubAgentModelId::parse(selection.model.clone()).is_ok()
 }
@@ -359,7 +456,9 @@ fn output_spec_from_registry(spec: &registry::SubAgentOutputSpec) -> SubAgentOut
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
-    use codez_contracts::subagent::{SubAgentDetailResult, SubAgentModelSelection};
+    use codez_contracts::subagent::{
+        SubAgentDetailResult, SubAgentModelSelection, SubAgentUnavailableDetail,
+    };
     use serde_json::json;
 
     use super::{
@@ -396,8 +495,33 @@ mod tests {
             .expect("Reviewer must be registered");
 
         assert_eq!(
-            (explore.enabled, explore.configured_models.as_ref().map(Vec::len), reviewer.enabled),
+            (
+                explore.enabled,
+                explore.configured_models.as_ref().map(Vec::len),
+                reviewer.enabled
+            ),
             (true, Some(1), false)
+        );
+    }
+
+    #[test]
+    fn legacy_single_model_selection_should_normalize_extension_fields_on_write() {
+        let document = SubAgentSettingsDocument::from_value(json!({
+            "subAgentModels": {
+                "Explore": {
+                    "providerId": "provider-1",
+                    "model": "fast-model",
+                    "legacyHint": "ignored"
+                }
+            }
+        }))
+        .expect("legacy single selections with extensions must parse");
+
+        let value = document.into_value().expect("settings must serialize");
+
+        assert_eq!(
+            value["subAgentModels"]["Explore"],
+            json!([{ "providerId": "provider-1", "model": "fast-model" }])
         );
     }
 
@@ -415,14 +539,18 @@ mod tests {
         let value = document.into_value().expect("settings must serialize");
 
         assert_eq!(
-            (value["otherPreference"].as_str(), value["disabledSubAgents"]),
+            (
+                value["otherPreference"].as_str(),
+                value["disabledSubAgents"].clone(),
+            ),
             (Some("keep"), json!(["Explore"]))
         );
     }
 
     #[test]
     fn detail_should_report_dynamic_fields_as_unavailable_instead_of_fabricating_them() {
-        let document = SubAgentSettingsDocument::from_value(json!({})).expect("empty settings are valid");
+        let document =
+            SubAgentSettingsDocument::from_value(json!({})).expect("empty settings are valid");
 
         let result = detail_for_subagent("Explore", document.settings())
             .expect("known detail lookup must succeed");
@@ -436,8 +564,42 @@ mod tests {
         };
         assert!(
             detail.kind == "Explore"
-                && unavailable.iter().any(|value| value.to_string() == "SystemPrompt")
+                && unavailable.contains(&SubAgentUnavailableDetail::SystemPrompt)
         );
+    }
+
+    #[test]
+    fn detail_should_return_a_typed_not_found_result_for_an_unknown_registered_type() {
+        let document =
+            SubAgentSettingsDocument::from_value(json!({})).expect("empty settings are valid");
+
+        let result = detail_for_subagent("Missing", document.settings())
+            .expect("unknown detail lookups are a normal result");
+
+        assert_eq!(
+            result,
+            SubAgentDetailResult::NotFound {
+                subagent_type: "Missing".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn empty_model_selection_should_remove_the_electron_settings_entry() {
+        let mut document = SubAgentSettingsDocument::from_value(json!({
+            "subAgentModels": {
+                "Explore": [{ "providerId": "provider-1", "model": "fast-model" }]
+            }
+        }))
+        .expect("settings fixture must parse");
+        let explorer = find_known_subagent("Explore").expect("Explore must be registered");
+
+        document
+            .settings_mut()
+            .set_models(&explorer.role, Vec::new());
+        let value = document.into_value().expect("settings must serialize");
+
+        assert_eq!(value["subAgentModels"], json!({}));
     }
 
     #[test]
@@ -451,7 +613,10 @@ mod tests {
         )
         .expect_err("unknown providers must not be persisted");
 
-        assert_eq!(error.public_message(), "The selected sub-agent Provider is not available");
+        assert_eq!(
+            error.public_message(),
+            "The selected sub-agent Provider is not available"
+        );
     }
 
     #[test]

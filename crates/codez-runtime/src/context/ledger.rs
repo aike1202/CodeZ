@@ -41,6 +41,14 @@ pub enum LedgerError {
     SequenceOverflow { session_id: String },
     #[error("ledger history version overflowed for scope {scope_id}")]
     HistoryVersionOverflow { scope_id: String },
+    #[error(
+        "ledger history version changed for scope {scope_id}: expected {expected}, found {actual}"
+    )]
+    HistoryVersionConflict {
+        scope_id: String,
+        expected: u32,
+        actual: u32,
+    },
     #[error("event identifier {event_id} was already used for different content")]
     DuplicateEventId { event_id: String },
     #[error("ledger event payload is invalid for event {event_id}")]
@@ -92,7 +100,8 @@ impl From<LedgerError> for AppError {
             | LedgerError::InvalidEventPayload { .. }) => AppError::validation(error.to_string()),
             error @ (LedgerError::DuplicateEventId { .. }
             | LedgerError::SequenceOverflow { .. }
-            | LedgerError::HistoryVersionOverflow { .. }) => AppError::conflict(error.to_string()),
+            | LedgerError::HistoryVersionOverflow { .. }
+            | LedgerError::HistoryVersionConflict { .. }) => AppError::conflict(error.to_string()),
             error @ (LedgerError::InvalidSnapshot { .. }
             | LedgerError::MissingLedgerPrefix { .. }
             | LedgerError::UnsafeDirectory(_)
@@ -262,6 +271,39 @@ impl ModelLedgerStore {
         session_id: &SessionId,
         request: LedgerAppendRequest,
     ) -> Result<LedgerEvent, LedgerError> {
+        self.append_event_for_expected_history_version(session_id, None, request)
+            .await
+    }
+
+    /// Appends a request only when the target scope still has the expected history version.
+    ///
+    /// The version check and append share the session writer lock, so callers can safely
+    /// discard work derived from an older history rather than overwrite newer state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LedgerError::HistoryVersionConflict`] when the scope changed before the
+    /// append could be committed, plus the errors documented by [`Self::append_event_for`].
+    pub async fn append_event_if_history_version(
+        &self,
+        session_id: &SessionId,
+        expected_history_version: u32,
+        request: LedgerAppendRequest,
+    ) -> Result<LedgerEvent, LedgerError> {
+        self.append_event_for_expected_history_version(
+            session_id,
+            Some(expected_history_version),
+            request,
+        )
+        .await
+    }
+
+    async fn append_event_for_expected_history_version(
+        &self,
+        session_id: &SessionId,
+        expected_history_version: Option<u32>,
+        request: LedgerAppendRequest,
+    ) -> Result<LedgerEvent, LedgerError> {
         if request.session_id != session_id.as_str() {
             return Err(LedgerError::SessionMismatch);
         }
@@ -288,6 +330,23 @@ impl ModelLedgerStore {
             });
         }
 
+        let scope_id = request.context_scope_id.as_key();
+        let current_history_version = cache_entry
+            .runtime
+            .snapshot
+            .scopes
+            .get(scope_id.as_ref())
+            .map_or(0, |scope| scope.history_version);
+        if let Some(expected) = expected_history_version {
+            if current_history_version != expected {
+                return Err(LedgerError::HistoryVersionConflict {
+                    scope_id: scope_id.into_owned(),
+                    expected,
+                    actual: current_history_version,
+                });
+            }
+        }
+
         let sequence = cache_entry
             .runtime
             .snapshot
@@ -296,13 +355,6 @@ impl ModelLedgerStore {
             .ok_or_else(|| LedgerError::SequenceOverflow {
                 session_id: session_id.as_str().to_string(),
             })?;
-        let scope_id = request.context_scope_id.as_key();
-        let current_history_version = cache_entry
-            .runtime
-            .snapshot
-            .scopes
-            .get(scope_id.as_ref())
-            .map_or(0, |scope| scope.history_version);
         let history_version = if request.r#type.changes_history() {
             current_history_version.checked_add(1).ok_or_else(|| {
                 LedgerError::HistoryVersionOverflow {

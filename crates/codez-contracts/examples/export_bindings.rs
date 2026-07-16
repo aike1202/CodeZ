@@ -8,7 +8,9 @@ use codez_contracts::{
     WorkspacePathItem, WorktreeInfo,
     chat::{
         ChatAskUserAnswer, ChatAskUserAnswerValue, ChatAskUserOption, ChatAskUserQuestion,
-        ChatAskUserRequest, ChatAskUserRequestEvent,
+        ChatAskUserRequest, ChatAskUserRequestEvent, ChatCompactionResponse, ChatCompactionResult,
+        ChatPermissionApprovalEvent, ChatPermissionApprovalRequest, ChatPermissionApprovalResponse,
+        ChatPermissionApprovalScope, ChatPermissionCheck,
     },
     mcp::{
         McpApprovalPolicy, McpConfigScope, McpInstructionsPolicy, McpListPayload, McpLogEntry,
@@ -28,7 +30,8 @@ use codez_contracts::{
     },
     subagent::{
         SubAgentDetailResult, SubAgentInfo, SubAgentModelSelection, SubAgentOutputField,
-        SubAgentOutputSpec, SubAgentSettingsDetail, SubAgentUnavailableDetail,
+        SubAgentOutputSpec, SubAgentRunCancelResult, SubAgentRunRequest, SubAgentRunState,
+        SubAgentRunStatus, SubAgentSettingsDetail, SubAgentUnavailableDetail,
     },
 };
 use ts_rs::{Config, TS};
@@ -92,6 +95,13 @@ fn main() -> std::io::Result<()> {
         format!("export {}", ChatAskUserQuestion::decl(&config)),
         format!("export {}", ChatAskUserRequest::decl(&config)),
         format!("export {}", ChatAskUserRequestEvent::decl(&config)),
+        format!("export {}", ChatPermissionApprovalScope::decl(&config)),
+        format!("export {}", ChatPermissionApprovalResponse::decl(&config)),
+        format!("export {}", ChatPermissionCheck::decl(&config)),
+        format!("export {}", ChatPermissionApprovalRequest::decl(&config)),
+        format!("export {}", ChatPermissionApprovalEvent::decl(&config)),
+        format!("export {}", ChatCompactionResult::decl(&config)),
+        format!("export {}", ChatCompactionResponse::decl(&config)),
         format!("export {}", McpTransport::decl(&config)),
         format!("export {}", McpConfigScope::decl(&config)),
         format!("export {}", McpApprovalPolicy::decl(&config)),
@@ -113,6 +123,10 @@ fn main() -> std::io::Result<()> {
         format!("export {}", McpServerCatalog::decl(&config)),
         format!("export {}", McpListPayload::decl(&config)),
         format!("export {}", SubAgentModelSelection::decl(&config)),
+        format!("export {}", SubAgentRunRequest::decl(&config)),
+        format!("export {}", SubAgentRunStatus::decl(&config)),
+        format!("export {}", SubAgentRunState::decl(&config)),
+        format!("export {}", SubAgentRunCancelResult::decl(&config)),
         format!("export {}", SubAgentInfo::decl(&config)),
         format!("export {}", SubAgentOutputField::decl(&config)),
         format!("export {}", SubAgentOutputSpec::decl(&config)),
