@@ -138,7 +138,7 @@ CodeZ 停止继续扩展 Electron 版本，桌面容器最终直接替换为 Tau
 - **FR-DATA-03** 写入必须采用临时文件、刷新和原子替换策略；并发写入必须串行化或事务化。
 - **FR-DATA-04** 首次迁移必须先建立清单和备份，迁移应幂等；失败时不得损坏旧数据。
 - **FR-DATA-05** Provider API Key、MCP 密钥与 OAuth 凭据不得因迁移降级为明文或 Base64 存储。
-- **FR-DATA-06** 无法解密旧 `safeStorage` 数据时，应用必须明确标记需重新录入，不得静默丢失或伪造成功。
+- **FR-DATA-06** 无法解密旧 `safeStorage` 数据时，应用必须明确标记需重新录入，不得静默丢失或伪造成功。仅当旧条目可安全映射到 credential ID 时，才可展示 typed 重录入口；写入 OS credential store 后必须重新验证、activation，并要求显式重启。其间正常应用状态不得可用；无法映射、取消或校验失败时必须 fail closed。
 - **FR-DATA-07** 新 Rust/Tauri 运行时的唯一全局应用数据根必须为 `~/.codez`；cache、logs、temp 和 migrations 均位于该根下。Electron `userData` 只作为迁移源，不能成为日常兼容读取或双写目录，见 ADR 0007。
 
 ### FR-PROVIDER 模型 Provider
@@ -155,6 +155,7 @@ CodeZ 停止继续扩展 Electron 版本，桌面容器最终直接替换为 Tau
 - **FR-CHAT-03** 每个流必须使用稳定 `streamId`；事件必须带序号或满足可证明的有序单通道语义，终止后不得继续更新 UI。
 - **FR-CHAT-04** 会话删除、软删除保留期、任务/Agent 运行时状态和历史回退行为保持兼容。
 - **FR-CHAT-05** 应用重启后不得把已完成任务错误恢复为运行中，也不得把未完成副作用自动重放。
+- **FR-CHAT-06** AskUserQuestion 必须只接受当前 pending request 的已验证响应；停止、超时、renderer 不可用或订阅释放时必须取消/拒绝等待，不能伪造答案。该边界只有在 Rust tool loop 实际拥有 AskUserQuestion 生命周期后才可作为用户功能发布。
 
 ### FR-TOOL 工具运行时与编辑事务
 
@@ -194,6 +195,8 @@ CodeZ 停止继续扩展 Electron 版本，桌面容器最终直接替换为 Tau
 - **FR-TERM-01** PTY 支持启动、输入、尺寸调整、输出、退出和关闭；中文与 UTF-8 输出不能回退到 ANSI 默认编码。
 - **FR-TERM-02** Skills、Rules、Memory、系统通知、附件导入/预览/清理保持可用。
 - **FR-TERM-03** 内置 Skills、解析器或搜索二进制等随包资源必须能在开发与安装环境中可靠定位。
+- **FR-TERM-04** Windows 发布前，原生前台控制台程序的 Ctrl+C 必须在真实 PTY 中终止前台工作并恢复 shell prompt；裸 ETX 失败不得以树级 kill 成功或脚本用例替代。
+- **FR-TERM-05** 外部 Skill 导入不得覆盖既有目标，并必须抵御同权限进程在预检、写入、验证和回滚之间的路径替换；预检加 path-based identity 复核只能作为过渡性缓解，不能替代 directory-handle-relative no-follow/no-replace 与可恢复事务。
 
 ### FR-MIG 迁移保留与 Electron 删除门禁
 
@@ -213,6 +216,7 @@ CodeZ 停止继续扩展 Electron 版本，桌面容器最终直接替换为 Tau
 - WebView CSP 禁止不必要的远程脚本、`eval` 和任意导航；远程内容以数据处理，不作为应用页面执行。
 - 日志、错误、事件、崩溃信息不得包含 API Key、OAuth Token、MCP 密钥或完整 Authorization Header。
 - 所有外部路径、URL、命令、MCP 配置和模型返回的工具参数均视为不可信输入。
+- 外部 Skill 的 staged/reserved 路径也属于不可信文件系统状态；安全验收必须覆盖同权限路径替换，不能把 no-clobber 预检视为原子保证。
 
 ### NFR-REL 可靠性
 
@@ -220,6 +224,7 @@ CodeZ 停止继续扩展 Electron 版本，桌面容器最终直接替换为 Tau
 - 后端错误使用稳定错误码、用户可读消息和仅用于诊断的上下文，不向前端泄露敏感内部信息。
 - 持久化和事件处理不得因单个会话失败导致其他会话状态损坏。
 - 新版本应能检测并隔离损坏的数据文件，保留原件并给出恢复路径。
+- `requires_reentry` 恢复必须在正常 `AppState` 之外 fail closed 运行；只有 OS credential store 写入、重新验证、activation 和显式重启全部成功后才可进入正常应用。
 
 ### NFR-PERF 性能
 
@@ -233,7 +238,7 @@ Phase 0 Windows x64 证据记录在 `docs/migration/generated/performance-baseli
 ### NFR-PORT 跨平台
 
 - 路径比较、大小写、符号链接、Shell、PTY、进程树、系统密钥环、全局快捷键和安装升级必须按平台测试。
-- Windows 中文路径与 PowerShell UTF-8 是必须通过的发布用例。
+- Windows 中文路径与 PowerShell UTF-8 是必须通过的发布用例；原生前台命令 Ctrl+C 恢复 prompt 同样是 release blocker。
 - 若选择 Windows 优先，macOS/Linux 未通过验收前不得宣称已完成对应平台迁移。
 
 ### NFR-TEST 测试与可追踪性
@@ -352,8 +357,8 @@ OS filesystem, processes, credential store, network
 2. React 全部主流程通过 typed Tauri API 工作，不再依赖 `window.api` Electron bridge，且追踪矩阵无未迁移调用。
 3. FR-APP 至 FR-TERM 的核心行为完成自动化或人工验收，并有追踪矩阵。
 4. 危险操作、路径逃逸、密钥、OAuth、MCP 信任、编辑回滚等安全测试通过。
-5. 旧版非敏感数据迁移完整；密钥要么安全迁移，要么明确要求重新录入，且旧数据未被破坏。
-6. Windows 中文路径、PTY、PowerShell、Git/worktree、ripgrep/搜索、MCP stdio 和安装升级通过。
+5. 旧版非敏感数据迁移完整；密钥要么安全迁移，要么通过已验证的重录、activation 和显式重启恢复，且旧数据未被破坏。
+6. Windows 中文路径、PTY（含原生前台程序 Ctrl+C 后恢复 prompt）、PowerShell、Git/worktree、ripgrep/搜索、MCP stdio 和安装升级通过。
 7. 目标平台发布构建从干净环境通过；未验证的平台不标记为支持。
 8. 冷启动、交互 P95、持续流内存和安装包体积已有对比报告，关键性能无未批准退化。
 9. Rust 测试、前端类型检查/测试、契约测试和桌面 smoke/E2E 全部通过。
@@ -367,7 +372,8 @@ OS filesystem, processes, credential store, network
 | Electron `safeStorage` 无法跨实现解密 | 极高 | 开工最早阶段做三平台探针；不可兼容时安全要求重新录入 |
 | Rust MCP SDK 能力不完整 | 极高 | 用现有 MCP 集成测试定义能力清单；SDK/自研方案通过 spike 决策 |
 | 流事件乱序、丢终止事件或内存无界 | 高 | 单流有序 channel、序号、有限队列、取消与终态测试 |
-| PTY/进程树跨平台差异 | 高 | Windows ConPTY 优先验证；平台集成测试和真实子进程回收测试 |
+| PTY/进程树跨平台差异 | 极高 | Windows ConPTY 优先验证；原生 `ping.exe -t` Ctrl+C 当前稳定失败，是 release blocker；平台集成测试和真实子进程回收测试不能替代该复验 |
+| 外部 Skill 导入遭同权限路径替换 | 高 | no-clobber reservation 与 identity 复核仅作过渡；在发布安全验收前使用 directory-handle-relative no-follow/no-replace、可恢复事务和对抗性测试 |
 | 权限解析重写降低安全性 | 极高 | 移植危险命令语料和性质测试；未知/解析失败默认安全 |
 | JSON 数据并发写和崩溃恢复差异 | 高 | 版本化 schema、原子写、单写者/事务、故障注入测试 |
 | 一次切换缺少应用内回退 | 高 | 发布级回退到旧安装包；数据迁移非破坏、可重试、保留备份 |

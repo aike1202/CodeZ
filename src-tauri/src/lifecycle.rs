@@ -9,7 +9,7 @@ use codez_runtime::{
 use tauri::{AppHandle, Manager, RunEvent};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
-use crate::{error::ErrorReporter, state::AppState};
+use crate::{error::ErrorReporter, mcp_runtime::McpRuntimeManager, state::AppState};
 
 pub(crate) fn register_shutdown_hooks(
     app_handle: &AppHandle,
@@ -17,6 +17,7 @@ pub(crate) fn register_shutdown_hooks(
     cancellation: &Arc<CancellationTree>,
     process_runner: &Arc<NativeProcessRunner>,
     pty_manager: &Arc<PtyManager>,
+    mcp_runtime: &Arc<McpRuntimeManager>,
 ) -> Result<(), AppError> {
     shutdown.register(Arc::clone(cancellation) as Arc<dyn ShutdownHook>)?;
     shutdown.register(Arc::new(ProcessShutdown {
@@ -25,6 +26,7 @@ pub(crate) fn register_shutdown_hooks(
     shutdown.register(Arc::new(PtyShutdown {
         manager: Arc::clone(pty_manager),
     }))?;
+    shutdown.register(Arc::clone(mcp_runtime) as Arc<dyn ShutdownHook>)?;
     shutdown.register(Arc::new(GlobalShortcutShutdown {
         app_handle: app_handle.clone(),
     }))

@@ -634,6 +634,7 @@ fn windows_process_tree_descendant_fixture() -> TestResult {
     let ready_path = directory.join("child.ready");
     let _lock = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .share_mode(0)

@@ -28,6 +28,6 @@ CodeZ 保留独立 adapters/policy：
 - legacy SSE 与严格 session recovery 是进入 Phase 7 的已知实现项，不得因 SDK 默认行为而删减。
 - logging/roots/sampling 已被 SDK 标记为 deprecated，升级 `rmcp` 前必须运行 Rust spike 与现有 Electron MCP 回归。
 - MCP 安全策略不依赖 SDK 注解或默认配置，仍由 `codez-core` port 和 `codez-mcp` adapter 组合实现。
-- Tauri composition 必须显式拥有 `McpGateway` 与配置 reconciliation service，按配置变化建立、停止和监督连接；在此之前，catalog、reconnect、OAuth authorize/logout、project trust 和所有 live 操作必须返回稳定的 `UNSUPPORTED`，不得返回空值或成功空操作。
+- Tauri composition 正在将 `McpRuntimeManager`、`McpGateway` 与配置 reconciliation 接入 `AppState`，按配置变化建立、停止和监督连接。该整合未通过真实 desktop/live-server 验收前，catalog/reconnect 只能走真实 manager 路径或返回稳定的 `UNSUPPORTED`；OAuth authorize/logout、project trust 和其他未接通的 live 操作必须继续返回 `UNSUPPORTED`，不得返回空值或成功空操作。
 
 验证证据见 `docs/migration/spikes/rust-mcp-sdk.md`。

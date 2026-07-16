@@ -223,6 +223,12 @@ pub fn chat_respond_ask_user(
     request_id: String,
     answers: Vec<ChatAskUserAnswer>,
 ) -> Result<(), CommandError> {
+    if request_id.trim().is_empty() {
+        return command_result(
+            &state.errors,
+            Err(AppError::validation("An ask-user request ID is required")),
+        );
+    }
     command_result(
         &state.errors,
         state.chat_runtime.respond_ask_user(&request_id, answers),

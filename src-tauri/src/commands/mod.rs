@@ -5,6 +5,7 @@ mod external_skills;
 pub mod git;
 pub mod host;
 pub mod mcp;
+pub mod migration;
 mod path_security;
 pub mod permission;
 pub mod provider;

@@ -19,8 +19,7 @@ pub use credentials::{
 pub use migration::{
     ActivatedFile, ActivationScope, BackupReport, CredentialMigrationEntry,
     CredentialMigrationReason, CredentialMigrationReport, CredentialMigrationStatus,
-    CredentialReentry,
-    DataSensitivity, DiscoveryLimits, DiscoveryRule, ElectronSafeStorageReader,
+    CredentialReentry, DataSensitivity, DiscoveryLimits, DiscoveryRule, ElectronSafeStorageReader,
     LEGACY_DATA_CATALOG, LegacyCredentialReadError, LegacyCredentialReader, LegacyDataSet,
     LegacyDataSpec, LegacyFormat, LegacyMigrationCoordinator, LegacyMigrationService, LegacyRoots,
     LegacyValidation, ManifestScope, MigrationActivationMarker, MigrationActivationService,

@@ -457,7 +457,10 @@ impl LegacyMigrationService {
     ) -> Result<Option<CredentialMigrationReport>, MigrationError> {
         validate_root("migration backup", backup_root)?;
         let report_path = credential_report_path(backup_root, &manifest.run_id);
-        let Some(report) = self.store.read_json::<CredentialMigrationReport>(&report_path).await?
+        let Some(report) = self
+            .store
+            .read_json::<CredentialMigrationReport>(&report_path)
+            .await?
         else {
             return Ok(None);
         };

@@ -1,6 +1,6 @@
 # Windows safeStorage compatibility spike
 
-> 状态：Windows sentinel 验证通过，migration-only reader 已落地；启动接线与凭据重录闭环未完成
+> 状态：Windows sentinel 验证通过，migration-only reader 与 fail-closed 凭据重录/重启链路已落地；真实旧安装升级/回退验收未完成
 >
 > 日期：2026-07-15
 
@@ -29,10 +29,12 @@ Windows 迁移实现因此采用专用只读 legacy reader：读取旧 CodeZ `Lo
 
 该 reader 现已实现在 `codez-storage` 的 migration 边界，并启用 AES 临时 key material 清零。Provider、MCP secret 与 MCP OAuth 只从 manifest 对应的已验证备份读取；迁移报告仅包含数据族、稳定凭据 ID、状态与原因码。Base64/明文 Provider 不进入新凭据库，OS 凭据库故障会中止并允许幂等重试。
 
-这不是可交付的首次启动迁移：composition 已在 repositories 构造前运行 migration coordinator，但当前 `AwaitingCredentials` 会 fail closed 阻止启动，尚无 Tauri 凭据重录 UI/command，以及恢复、重新验证和 activation 的用户链路。只有这些步骤和真实旧安装升级/回退演练完成后，才可以把 `requires_reentry` 视为用户可完成的安全迁移状态。
+这仍不是可交付的首次启动迁移。composition 在 repositories 构造前运行 migration coordinator；遇到 `AwaitingCredentials` 时只注册 fail-closed `MigrationRecoveryState`，不会注册正常 `AppState`。该状态现在通过 typed status/submit/restart command 与 React recovery screen 展示已映射的 credential ID 和脱敏原因：输入只会写入 OS credential store，coordinator 随后重新验证并 activation；只有结果为 `ReadyToRestart` 才能请求应用重启。无映射 ID、取消、校验失败或尚未完成的条目都不能打开正常应用功能。
+
+这条链路证明 `requires_reentry` 可以被安全恢复和显式重启，但不证明真实用户升级已完成。仍须在真实旧安装副本上验证升级、失败重试、回退、已有 `~/.codez` 内容与 staging 的不相交性，以及完整桌面 E2E；完成前不得把数据或密钥迁移称为端到端验收通过。
 
 ## 限制
 
 - Windows 成功不能推断 macOS Keychain 或 Linux Secret Service 的 Chromium safe storage 格式兼容。
 - `windows-dpapi`、`aes-gcm` 和 `base64` 已提升为 Windows production dependency，但只服务 migration-only reader；日常凭据仍由 `CredentialStore` 的平台 keyring adapter 负责。
-- 自动化测试已覆盖 Provider、MCP 和 OAuth 三种封装、损坏聚合 JSON、错误 AES key、缺失 Local State、备份篡改、报告脱敏和幂等重试；Phase 9 仍需用真实旧安装数据副本执行同用户升级演练。
+- 自动化测试已覆盖 Provider、MCP 和 OAuth 三种封装、损坏聚合 JSON、错误 AES key、缺失 Local State、备份篡改、报告脱敏、幂等重试，以及 recovery boundary 的凭据长度/状态约束；Phase 9 仍需用真实旧安装数据副本执行同用户升级演练和回退演练。

@@ -10,21 +10,25 @@ use codez_contracts::{
         ChatAskUserAnswer, ChatAskUserAnswerValue, ChatAskUserOption, ChatAskUserQuestion,
         ChatAskUserRequest, ChatAskUserRequestEvent,
     },
-    migration::{
-        MigrationCredentialDataSet, MigrationCredentialInput, MigrationCredentialReason,
-        MigrationCredentialRequirement, MigrationRecoveryPhase, MigrationRecoveryStatus,
-    },
     mcp::{
         McpApprovalPolicy, McpConfigScope, McpInstructionsPolicy, McpListPayload, McpLogEntry,
         McpLogLevel, McpOAuthConfig, McpPromptArgument, McpPromptSummary, McpReconnectPolicy,
         McpResourceSummary, McpServerCatalog, McpServerConfig, McpServerIdentity, McpServerState,
         McpServerStatus, McpStatusError, McpToolSummary, McpTransport, ScopedMcpServerConfig,
     },
+    migration::{
+        MigrationCredentialDataSet, MigrationCredentialInput, MigrationCredentialReason,
+        MigrationCredentialRequirement, MigrationRecoveryPhase, MigrationRecoveryStatus,
+    },
     permission::PermissionMode,
     provider::{
         ApiFormat, ChatProviderErrorCode, ConnectionTestResult, ModelConfig,
         ModelContextCapabilities, ProviderConfig, ProviderFormData, ProviderInfo,
         ProviderTokenUsage, ProvidersFile, ThinkingConfig, ThinkingEffort, ThinkingMode,
+    },
+    subagent::{
+        SubAgentDetailResult, SubAgentInfo, SubAgentModelSelection, SubAgentOutputField,
+        SubAgentOutputSpec, SubAgentSettingsDetail, SubAgentUnavailableDetail,
     },
 };
 use ts_rs::{Config, TS};
@@ -108,6 +112,13 @@ fn main() -> std::io::Result<()> {
         format!("export {}", McpPromptSummary::decl(&config)),
         format!("export {}", McpServerCatalog::decl(&config)),
         format!("export {}", McpListPayload::decl(&config)),
+        format!("export {}", SubAgentModelSelection::decl(&config)),
+        format!("export {}", SubAgentInfo::decl(&config)),
+        format!("export {}", SubAgentOutputField::decl(&config)),
+        format!("export {}", SubAgentOutputSpec::decl(&config)),
+        format!("export {}", SubAgentUnavailableDetail::decl(&config)),
+        format!("export {}", SubAgentSettingsDetail::decl(&config)),
+        format!("export {}", SubAgentDetailResult::decl(&config)),
         format!("export {}", DesktopEvent::<String>::decl(&config)),
     ]
     .join("\n\n");

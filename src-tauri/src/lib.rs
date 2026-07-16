@@ -11,8 +11,11 @@ mod git_boundary;
 mod lifecycle;
 mod logging;
 mod mcp_boundary;
+mod mcp_runtime;
+mod migration_boundary;
 mod provider_boundary;
 mod state;
+mod subagent_boundary;
 
 use codez_core::{AppError, RedactedText};
 use tauri::{Emitter, Manager, WebviewWindow};
@@ -92,6 +95,9 @@ pub fn run() -> Result<(), tauri::Error> {
         .invoke_handler(tauri::generate_handler![
             commands::system::system_health,
             commands::system::system_probe_channel,
+            commands::migration::migration_get_status,
+            commands::migration::migration_submit_credentials,
+            commands::migration::migration_restart,
             commands::host::window_control,
             commands::host::open_external,
             commands::workspace::workspace_open_directory,
@@ -196,66 +202,99 @@ pub fn run() -> Result<(), tauri::Error> {
                 codez_platform::pty::PTY_EVENT_QUEUE_CAPACITY,
             );
 
-            let state = composition::compose_app_state(app, pty_tx)?;
+            match composition::compose_app_state(app, pty_tx)? {
+                composition::CompositionOutcome::Active(state) => {
+                    let handle = app.handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        #[derive(serde::Serialize, Clone)]
+                        struct OutputPayload {
+                            id: String,
+                            sequence: u64,
+                            data: String,
+                        }
 
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                #[derive(serde::Serialize, Clone)]
-                struct OutputPayload {
-                    id: String,
-                    sequence: u64,
-                    data: String,
-                }
+                        #[derive(serde::Serialize, Clone)]
+                        struct ExitPayload {
+                            id: String,
+                            exit_code: Option<u32>,
+                        }
 
-                #[derive(serde::Serialize, Clone)]
-                struct ExitPayload {
-                    id: String,
-                    exit_code: Option<u32>,
-                }
-
-                while let Some(event) = pty_rx.recv().await {
-                    match event {
-                        codez_platform::pty::PtyEvent::Output { id, sequence, data } => {
-                            let text = String::from_utf8_lossy(&data).to_string();
-                            if let Err(source) = handle.emit(
-                                "terminal:output",
-                                OutputPayload { id, sequence, data: text },
-                            ) {
-                                tracing::warn!(diagnostic = %source, "terminal output event could not be emitted");
+                        while let Some(event) = pty_rx.recv().await {
+                            match event {
+                                codez_platform::pty::PtyEvent::Output { id, sequence, data } => {
+                                    let text = String::from_utf8_lossy(&data).to_string();
+                                    if let Err(source) = handle.emit(
+                                        "terminal:output",
+                                        OutputPayload { id, sequence, data: text },
+                                    ) {
+                                        tracing::warn!(diagnostic = %source, "terminal output event could not be emitted");
+                                    }
+                                }
+                                codez_platform::pty::PtyEvent::Exit { id, exit_code } => {
+                                    if let Err(source) = handle.emit(
+                                        "terminal:exit",
+                                        ExitPayload { id, exit_code },
+                                    ) {
+                                        tracing::warn!(diagnostic = %source, "terminal exit event could not be emitted");
+                                    }
+                                }
                             }
                         }
-                        codez_platform::pty::PtyEvent::Exit { id, exit_code } => {
-                            if let Err(source) = handle.emit(
-                                "terminal:exit",
-                                ExitPayload { id, exit_code },
-                            ) {
-                                tracing::warn!(diagnostic = %source, "terminal exit event could not be emitted");
+                    });
+
+                    lifecycle::register_shutdown_hooks(
+                        app.handle(),
+                        &state.shutdown,
+                        &state.cancellation,
+                        &state.process_runner,
+                        &state.pty_manager,
+                        &state.mcp_runtime,
+                    )?;
+                    tracing::debug!(
+                        data_path_ready = state.paths.data_directory().is_absolute(),
+                        max_document_bytes = state.storage.max_document_bytes(),
+                        credential_service = state.credentials.service_name(),
+                        "storage composition initialized"
+                    );
+                    if let Err(error) = state.resources.validate_required() {
+                        state.errors.log(&AppError::internal(format!(
+                            "bundled resource validation: {error}"
+                        )));
+                    }
+                    if !app.manage(state) {
+                        return Err("CodeZ application state was already initialized".into());
+                    }
+                    let app_handle = app.handle().clone();
+                    let state = app.state::<state::AppState>();
+                    let mcp_config = std::sync::Arc::clone(&state.mcp_config);
+                    let mcp_runtime = std::sync::Arc::clone(&state.mcp_runtime);
+                    let errors = std::sync::Arc::clone(&state.errors);
+                    tauri::async_runtime::spawn(async move {
+                        match mcp_config.list().await {
+                            Ok(servers) => {
+                                let statuses = mcp_runtime.reconcile(&servers).await;
+                                if let Err(source) =
+                                    app_handle.emit("mcp:status-changed", statuses)
+                                {
+                                    errors.log(&AppError::external(
+                                        "MCP status updates could not be delivered to the interface",
+                                        format!("emit initial MCP status update: {source}"),
+                                        false,
+                                    ));
+                                }
                             }
+                            Err(error) => errors.log(&AppError::from(error)),
                         }
+                    });
+                }
+                composition::CompositionOutcome::AwaitingCredentials(state) => {
+                    tracing::warn!(
+                        "legacy migration is awaiting explicit credential re-entry; normal application state is unavailable"
+                    );
+                    if !app.manage(state) {
+                        return Err("CodeZ migration recovery state was already initialized".into());
                     }
                 }
-            });
-
-            lifecycle::register_shutdown_hooks(
-                app.handle(),
-                &state.shutdown,
-                &state.cancellation,
-                &state.process_runner,
-                &state.pty_manager,
-            )?;
-            tracing::debug!(
-                data_path_ready = state.paths.data_directory().is_absolute(),
-                max_document_bytes = state.storage.max_document_bytes(),
-                credential_service = state.credentials.service_name(),
-                "storage composition initialized"
-            );
-            if let Err(error) = state.resources.validate_required() {
-                state.errors.log(&AppError::internal(format!(
-                    "bundled resource validation: {error}"
-                )));
-            }
-            if !app.manage(state) {
-                return Err("CodeZ application state was already initialized".into());
             }
             let shortcut_result = app.global_shortcut().on_shortcut(
                 "CommandOrControl+Shift+Space",
@@ -268,13 +307,18 @@ pub fn run() -> Result<(), tauri::Error> {
                 },
             );
             if let Err(error) = shortcut_result {
-                app.state::<state::AppState>()
-                    .errors
-                    .log(&AppError::external(
-                        "The global shortcut is unavailable",
-                        format!("register global shortcut: {error}"),
-                        false,
-                    ));
+                let shortcut_error = AppError::external(
+                    "The global shortcut is unavailable",
+                    format!("register global shortcut: {error}"),
+                    false,
+                );
+                if let Some(state) = app.try_state::<state::AppState>() {
+                    state.errors.log(&shortcut_error);
+                } else if let Some(state) = app.try_state::<state::MigrationRecoveryState>() {
+                    state.errors.log(&shortcut_error);
+                } else {
+                    tracing::error!("global shortcut initialization failed before state registration");
+                }
             }
             Ok(())
         });

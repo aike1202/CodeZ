@@ -73,7 +73,7 @@ pub struct MigrationRecoveryStatus {
 /// This type is deserialized from the command payload but deliberately is not
 /// serializable or `Debug`, so a supplied secret cannot be returned or logged.
 #[derive(Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(rename_all = "camelCase")]
 pub struct MigrationCredentialInput {
     pub credential_id: String,

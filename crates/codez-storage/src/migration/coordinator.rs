@@ -338,7 +338,10 @@ mod tests {
         sync::{Arc, Mutex},
     };
 
-    use crate::{AtomicFileStore, CredentialError, CredentialId, CredentialStore, SecretValue};
+    use crate::{
+        AtomicFileStore, CredentialError, CredentialId, CredentialKind, CredentialReentry,
+        CredentialStore, SecretValue,
+    };
 
     use super::{LegacyMigrationCoordinator, StartupMigrationOutcome};
     use crate::migration::{
@@ -428,6 +431,13 @@ mod tests {
         fn coordinator(
             &self,
         ) -> LegacyMigrationCoordinator<UnusedCredentialReader, MemoryCredentialStore> {
+            self.coordinator_with_credentials(Arc::new(MemoryCredentialStore::default()))
+        }
+
+        fn coordinator_with_credentials(
+            &self,
+            credentials: Arc<MemoryCredentialStore>,
+        ) -> LegacyMigrationCoordinator<UnusedCredentialReader, MemoryCredentialStore> {
             let files = AtomicFileStore::with_max_document_bytes(256 * 1024 * 1024)
                 .expect("fixture document limit must be valid");
             LegacyMigrationCoordinator::new(
@@ -442,7 +452,7 @@ mod tests {
                 self.data_root.join("migrations/staging"),
                 MigrationRunId::parse("startup-global-v1").expect("fixture run ID must be valid"),
                 Arc::new(UnusedCredentialReader),
-                Arc::new(MemoryCredentialStore::default()),
+                credentials,
             )
         }
     }
@@ -490,5 +500,64 @@ mod tests {
         .expect("active settings must remain JSON");
 
         assert_eq!(active["appTheme"], "system");
+    }
+
+    #[tokio::test]
+    async fn startup_coordinator_activates_only_after_explicit_credential_reentry() {
+        let fixture = Fixture::new();
+        fs::write(
+            fixture.legacy_user_data.join("providers.json"),
+            r#"{
+              "activeProviderId":"provider-reentry",
+              "providers":[{
+                "id":"provider-reentry",
+                "name":"Reentry Provider",
+                "baseUrl":"https://provider.invalid/v1",
+                "apiFormat":"openai",
+                "apiKeyRef":"unreadable-envelope",
+                "encryption":"safeStorage",
+                "models":[],
+                "thinking":{"enabled":true,"mode":"auto"},
+                "enabled":true,
+                "createdAt":"2026-01-01T00:00:00Z",
+                "updatedAt":"2026-01-01T00:00:00Z"
+              }]
+            }"#,
+        )
+        .expect("legacy Provider fixture must be written");
+        let credentials = Arc::new(MemoryCredentialStore::default());
+        let coordinator = fixture.coordinator_with_credentials(Arc::clone(&credentials));
+        let credential_id = CredentialId::new(CredentialKind::ProviderApiKey, "provider-reentry")
+            .expect("fixture credential ID must be valid");
+
+        let awaiting = coordinator
+            .run()
+            .await
+            .expect("migration must stop safely for unreadable credentials");
+        assert!(matches!(
+            awaiting,
+            StartupMigrationOutcome::AwaitingCredentials { .. }
+        ));
+        assert!(!fixture.data_root.join("providers.json").exists());
+
+        let activated = coordinator
+            .resume_with_credentials(vec![CredentialReentry::new(
+                credential_id.clone(),
+                SecretValue::new("explicit-fixture-secret").expect("fixture secret must be valid"),
+            )])
+            .await
+            .expect("explicit credential re-entry must allow activation");
+        let restarted = coordinator
+            .run()
+            .await
+            .expect("restart must reuse the activated authority");
+
+        assert!(matches!(
+            activated,
+            StartupMigrationOutcome::Activated { .. }
+        ));
+        assert_eq!(activated, restarted);
+        assert!(fixture.data_root.join("providers.json").is_file());
+        assert!(credentials.get(&credential_id).is_ok());
     }
 }

@@ -1,6 +1,6 @@
 # Rust MCP SDK capability spike
 
-> 状态：SDK capability spike 通过；Tauri live gateway、配置协调和用户流程未完成
+> 状态：SDK capability spike 通过；Tauri live gateway/reconciliation 正在整合，尚无 Phase 7 用户流程验收
 >
 > 日期：2026-07-15
 >
@@ -51,7 +51,7 @@ Phase 7 采用 `rmcp 2.2.0` 作为 MCP 协议核心，不自研完整 JSON-RPC/M
 
 该选择不表示 Phase 7 已完成；它只关闭“Rust SDK 是否可作为协议核心”的 Phase 0 风险。
 
-截至 2026-07-16，Tauri `AppState` 已注入可持久化的 `McpUserConfigService` 和 `McpSecretService`，因此 list/save/set-enabled 与密钥 metadata 操作可以走 Rust boundary。它尚未持有 `McpGateway` 或配置 reconciliation service；`mcp_get_catalog`、`mcp_reconnect`、`mcp_authorize`、`mcp_logout` 和 project trust 必须返回 typed `UNSUPPORTED`，不能以空 catalog 或 `Ok(())` 假装功能可用。live stdio/HTTP/SSE/OAuth、catalog、reverse request 和状态事件仍属于 Phase 7 未完成工作。
+截至 2026-07-16，Tauri `AppState` 已注入可持久化的 `McpUserConfigService` 和 `McpSecretService`，因此 list/save/set-enabled 与密钥 metadata 操作可以走 Rust boundary。当前工作树还在整合 `McpRuntimeManager`：它尝试将配置变更 reconciliation、redacted status、catalog 和 reconnect 接到 `McpGateway`，但尚未完成统一严格门禁和真实 desktop/live-server 集成验收。整合期间 command 必须走真实 manager 路径或返回 typed `UNSUPPORTED`，绝不能以空 catalog 或 `Ok(())` 假装功能可用。OAuth authorize/logout、project trust、legacy SSE、完整 live stdio/HTTP 用户流程、reverse request 和状态事件仍属于 Phase 7 未完成工作。
 
 ## 验证
 

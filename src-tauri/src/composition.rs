@@ -24,8 +24,9 @@ use crate::{
     error::ErrorReporter,
     logging::{self, LoggingError},
     mcp_boundary::StorageMcpSecretStore,
+    mcp_runtime::McpRuntimeManager,
     provider_boundary::{StorageProviderCredentials, StorageProviderRepository},
-    state::AppState,
+    state::{AppState, MigrationRecoveryState},
 };
 
 #[derive(Debug, Error)]
@@ -49,8 +50,6 @@ pub(crate) enum CompositionError {
     MigrationStorage(#[from] StorageError),
     #[error(transparent)]
     Migration(#[from] MigrationError),
-    #[error("legacy migration requires {count} credential value(s) to be entered again")]
-    MigrationCredentials { count: usize },
     #[error("failed to inspect legacy user-data path {path}: {source}")]
     InspectLegacyUserData {
         path: PathBuf,
@@ -75,10 +74,15 @@ pub(crate) enum CompositionError {
     },
 }
 
+pub(crate) enum CompositionOutcome {
+    Active(AppState),
+    AwaitingCredentials(MigrationRecoveryState),
+}
+
 pub(crate) fn compose_app_state(
     app: &App,
     pty_tx: tokio::sync::mpsc::Sender<codez_platform::pty::PtyEvent>,
-) -> Result<AppState, CompositionError> {
+) -> Result<CompositionOutcome, CompositionError> {
     let path_resolver = app.path();
     let home_directory = resolve_path("user home", path_resolver.home_dir())?;
     let legacy_config_directory = resolve_path("legacy config", path_resolver.config_dir())?;
@@ -97,17 +101,48 @@ pub(crate) fn compose_app_state(
     let credentials = Arc::new(OsCredentialStore::default());
     let cancellation = Arc::new(CancellationTree::new());
     let errors = Arc::new(ErrorReporter::default());
+    let migration_coordinator = Arc::new(create_migration_coordinator(
+        &paths,
+        legacy_user_data,
+        Arc::clone(&credentials),
+    )?);
+    match tauri::async_runtime::block_on(migration_coordinator.run())? {
+        StartupMigrationOutcome::Activated { commit, activation } => {
+            tracing::info!(
+                migration_run = commit.run_id.as_str(),
+                activated_files = activation.files.len(),
+                "legacy data repository is committed and active"
+            );
+        }
+        StartupMigrationOutcome::AwaitingCredentials { report } => {
+            return Ok(CompositionOutcome::AwaitingCredentials(
+                MigrationRecoveryState::new(errors, migration_coordinator, report, logging),
+            ));
+        }
+    }
     let chat_runtime = Arc::new(ChatRuntime::new(
         Arc::clone(&cancellation),
         Arc::clone(&errors),
     ));
-    run_startup_migration(&paths, legacy_user_data, Arc::clone(&credentials))?;
     let recent_projects = Arc::new(RecentProjectsStore::new(
         paths.data_directory().to_path_buf(),
         storage.as_ref().clone(),
     ));
+    let mcp_config = Arc::new(McpUserConfigService::new(
+        Arc::clone(&persistence),
+        paths.data_directory().join("mcp.json"),
+    ));
+    let mcp_credentials: Arc<dyn codez_storage::CredentialStore> = credentials.clone();
+    let mcp_secret_store: Arc<dyn codez_mcp::McpSecretStore> =
+        Arc::new(StorageMcpSecretStore::new(mcp_credentials));
+    let mcp_secrets = Arc::new(McpSecretService::new(
+        Arc::clone(&persistence),
+        paths.data_directory().join("mcp-secret-index.json"),
+        Arc::clone(&mcp_secret_store),
+    ));
+    let mcp_runtime = Arc::new(McpRuntimeManager::new(mcp_secret_store));
 
-    Ok(AppState {
+    Ok(CompositionOutcome::Active(AppState {
         system: Arc::new(SystemService::new()),
         host_preferences: Arc::new(HostPreferences::new()),
         resources: Arc::new(ResourceLocator::new(
@@ -152,21 +187,15 @@ pub(crate) fn compose_app_state(
             paths.data_directory(),
             Arc::clone(&persistence),
         )?),
-        mcp_config: Arc::new(McpUserConfigService::new(
-            Arc::clone(&persistence),
-            paths.data_directory().join("mcp.json"),
-        )),
-        mcp_secrets: Arc::new(McpSecretService::new(
-            Arc::clone(&persistence),
-            paths.data_directory().join("mcp-secret-index.json"),
-            Arc::new(StorageMcpSecretStore::new(credentials.clone())),
-        )),
+        mcp_config,
+        mcp_secrets,
+        mcp_runtime,
         model_ledger: Arc::new(codez_runtime::context::ledger::ModelLedgerStore::new(
             paths.data_directory().join("session-runtime"),
             persistence,
         )),
         chat_runtime,
-    })
+    }))
 }
 
 fn resolve_legacy_user_data(config_directory: &Path) -> Result<PathBuf, CompositionError> {
@@ -227,11 +256,14 @@ fn inspect_legacy_directory(path: &Path) -> Result<Option<bool>, CompositionErro
         })
 }
 
-fn run_startup_migration(
+fn create_migration_coordinator(
     paths: &AppPaths,
     legacy_user_data: PathBuf,
     credentials: Arc<OsCredentialStore>,
-) -> Result<(), CompositionError> {
+) -> Result<
+    LegacyMigrationCoordinator<ElectronSafeStorageReader, OsCredentialStore>,
+    CompositionError,
+> {
     const MIGRATION_MAX_DOCUMENT_BYTES: u64 = 256 * 1024 * 1024;
     const GLOBAL_MIGRATION_RUN_ID: &str = "legacy-global-v1";
 
@@ -243,7 +275,7 @@ fn run_startup_migration(
         workspaces,
     )?;
     let migration_directory = paths.migration_directory();
-    let coordinator = LegacyMigrationCoordinator::new(
+    Ok(LegacyMigrationCoordinator::new(
         LegacyMigrationService::new(migration_files.clone(), DiscoveryLimits::default()),
         MigrationActivationService::new(migration_files),
         roots,
@@ -253,23 +285,7 @@ fn run_startup_migration(
         MigrationRunId::parse(GLOBAL_MIGRATION_RUN_ID)?,
         Arc::new(ElectronSafeStorageReader::from_user_data(&legacy_user_data)),
         credentials,
-    );
-    let outcome = tauri::async_runtime::block_on(coordinator.run())?;
-    match outcome {
-        StartupMigrationOutcome::Activated { commit, activation } => {
-            tracing::info!(
-                migration_run = commit.run_id.as_str(),
-                activated_files = activation.files.len(),
-                "legacy data repository is committed and active"
-            );
-            Ok(())
-        }
-        StartupMigrationOutcome::AwaitingCredentials { report } => {
-            Err(CompositionError::MigrationCredentials {
-                count: report.requires_reentry,
-            })
-        }
-    }
+    ))
 }
 
 fn legacy_workspace_roots(legacy_user_data: &Path) -> Vec<PathBuf> {

@@ -2,12 +2,13 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 use codez_core::{AppError, RecentProjectRepository, WorkspaceRoot};
 use same_file::Handle;
 use serde::{Deserialize, Serialize};
+#[cfg(not(windows))]
 use tempfile::Builder;
 use tokio::sync::Mutex;
 
@@ -168,6 +169,67 @@ struct PlannedImport {
     snapshot: SkillSnapshot,
     destination: PathBuf,
     disposition: ImportDisposition,
+}
+
+/// Identities retained for a destination created by this import operation.
+///
+/// Holding both handles lets the commit and rollback paths detect a renamed or
+/// replaced parent/destination before performing further path-based I/O.
+struct ReservedImport {
+    destination: PathBuf,
+    destination_identity: Handle,
+    parent: PathBuf,
+    parent_identity: Handle,
+}
+
+/// A fully materialized import eligible for rollback if a later batch member
+/// fails. The open identities keep rollback scoped to the directory this
+/// operation created.
+struct CommittedImport {
+    name: String,
+    destination_identity: Handle,
+    parent: PathBuf,
+    parent_identity: Handle,
+}
+
+impl ReservedImport {
+    fn verify_identity(&self) -> Result<(), AppError> {
+        verify_directory_identity(
+            &self.parent,
+            &self.parent_identity,
+            "skill import parent directory",
+        )?;
+        verify_directory_identity(
+            &self.destination,
+            &self.destination_identity,
+            "skill import destination",
+        )
+    }
+
+    #[cfg(windows)]
+    fn into_committed(self, name: String) -> CommittedImport {
+        CommittedImport {
+            name,
+            destination_identity: self.destination_identity,
+            parent: self.parent,
+            parent_identity: self.parent_identity,
+        }
+    }
+}
+
+impl CommittedImport {
+    fn verify_identity(&self) -> Result<(), AppError> {
+        verify_directory_identity(
+            &self.parent,
+            &self.parent_identity,
+            "skill import parent directory",
+        )?;
+        verify_directory_identity(
+            &self.parent.join(&self.name),
+            &self.destination_identity,
+            "imported skill destination",
+        )
+    }
 }
 
 pub(super) async fn list_external(
@@ -338,7 +400,10 @@ async fn resolve_destination(
         return Ok(ImportDestination {
             authority_root: state.paths.data_directory().to_path_buf(),
             skills_root: state.paths.data_directory().join("skills"),
-            staging_root: state.paths.temporary_directory().join("skill-imports"),
+            staging_root: state
+                .paths
+                .data_directory()
+                .join(".codez-cache/skill-import-staging"),
         });
     };
 
@@ -960,6 +1025,72 @@ fn commit_imports_blocking(
         verify_reused_import(plan, limits)?;
     }
 
+    #[cfg(not(windows))]
+    let (_temporary, staged) = stage_imports(&plans, staging_root)?;
+    #[cfg(windows)]
+    let staged = BTreeMap::new();
+
+    let mut committed = Vec::new();
+    for plan in &plans {
+        if plan.disposition == ImportDisposition::Reuse {
+            continue;
+        }
+        let committed_import = match commit_planned_import(plan, &staged, limits) {
+            Ok(committed_import) => committed_import,
+            Err(error) => {
+                return Err(rollback_failure(error, &committed, &plans, limits));
+            }
+        };
+        committed.push(committed_import);
+        if let Err(error) = verify_committed_import(plan, committed.last(), limits) {
+            return Err(rollback_failure(error, &committed, &plans, limits));
+        }
+    }
+    Ok(())
+}
+
+fn rollback_failure(
+    error: AppError,
+    committed: &[CommittedImport],
+    plans: &[PlannedImport],
+    limits: TreeLimits,
+) -> AppError {
+    match rollback_committed(committed, plans, limits) {
+        Ok(()) => error,
+        Err(rollback) => AppError::storage(
+            "External skills could not be imported or rolled back safely",
+            format!(
+                "import failure: {}; rollback failure: {}",
+                error.diagnostic().unwrap_or_else(|| error.public_message()),
+                rollback
+                    .diagnostic()
+                    .unwrap_or_else(|| rollback.public_message())
+            ),
+            false,
+        ),
+    }
+}
+
+#[cfg(windows)]
+fn materialization_rollback_failure(error: AppError, rollback: AppError) -> AppError {
+    AppError::storage(
+        "External skills could not be imported or rolled back safely",
+        format!(
+            "import failure: {}; rollback failure: {}",
+            error.diagnostic().unwrap_or_else(|| error.public_message()),
+            rollback
+                .diagnostic()
+                .unwrap_or_else(|| rollback.public_message())
+        ),
+        false,
+    )
+}
+
+#[cfg(not(windows))]
+fn stage_imports(
+    plans: &[PlannedImport],
+    staging_root: &Path,
+) -> Result<(tempfile::TempDir, BTreeMap<String, PathBuf>), AppError> {
     let temporary = Builder::new()
         .prefix(".codez-skill-import-")
         .tempdir_in(staging_root)
@@ -971,54 +1102,14 @@ fn commit_imports_blocking(
             )
         })?;
     let mut staged = BTreeMap::new();
-    for plan in &plans {
+    for plan in plans {
         if plan.disposition == ImportDisposition::Commit {
             let staged_path = temporary.path().join(plan.snapshot.dir_name.as_str());
             write_snapshot(&staged_path, &plan.snapshot.tree)?;
             staged.insert(plan.snapshot.dir_name.as_str().to_string(), staged_path);
         }
     }
-
-    let mut committed = Vec::new();
-    for plan in &plans {
-        if plan.disposition == ImportDisposition::Reuse {
-            continue;
-        }
-        if let Err(error) = rename_staged_import(plan, &staged) {
-            return match rollback_committed(&committed, &plans, limits) {
-                Ok(()) => Err(error),
-                Err(rollback) => Err(AppError::storage(
-                    "External skills could not be imported or rolled back safely",
-                    format!(
-                        "import failure: {}; rollback failure: {}",
-                        error.diagnostic().unwrap_or_else(|| error.public_message()),
-                        rollback
-                            .diagnostic()
-                            .unwrap_or_else(|| rollback.public_message())
-                    ),
-                    false,
-                )),
-            };
-        }
-        committed.push(plan.snapshot.dir_name.as_str().to_string());
-        if let Err(error) = verify_committed_import(plan, limits) {
-            return match rollback_committed(&committed, &plans, limits) {
-                Ok(()) => Err(error),
-                Err(rollback) => Err(AppError::storage(
-                    "External skills could not be imported or rolled back safely",
-                    format!(
-                        "import failure: {}; rollback failure: {}",
-                        error.diagnostic().unwrap_or_else(|| error.public_message()),
-                        rollback
-                            .diagnostic()
-                            .unwrap_or_else(|| rollback.public_message())
-                    ),
-                    false,
-                )),
-            };
-        }
-    }
-    Ok(())
+    Ok((temporary, staged))
 }
 
 fn validate_commit_directory(path: &Path, kind: &str) -> Result<(), AppError> {
@@ -1043,26 +1134,37 @@ fn verify_reused_import(plan: &PlannedImport, limits: TreeLimits) -> Result<(), 
     }
 }
 
+#[cfg(not(windows))]
+fn commit_planned_import(
+    plan: &PlannedImport,
+    staged: &BTreeMap<String, PathBuf>,
+    _limits: TreeLimits,
+) -> Result<CommittedImport, AppError> {
+    rename_staged_import(plan, staged)?;
+    capture_committed_import(plan)
+}
+
+#[cfg(windows)]
+fn commit_planned_import(
+    plan: &PlannedImport,
+    _staged: &BTreeMap<String, PathBuf>,
+    limits: TreeLimits,
+) -> Result<CommittedImport, AppError> {
+    let reservation = reserve_destination(plan)?;
+    if let Err(error) = materialize_reserved_import(&reservation, &plan.snapshot.tree) {
+        return match rollback_reserved_import(&reservation, limits) {
+            Ok(()) => Err(error),
+            Err(rollback) => Err(materialization_rollback_failure(error, rollback)),
+        };
+    }
+    Ok(reservation.into_committed(plan.snapshot.dir_name.as_str().to_string()))
+}
+
+#[cfg(not(windows))]
 fn rename_staged_import(
     plan: &PlannedImport,
     staged: &BTreeMap<String, PathBuf>,
 ) -> Result<(), AppError> {
-    match fs::symlink_metadata(&plan.destination) {
-        Ok(_) => {
-            return Err(AppError::conflict(format!(
-                "Skill '{}' appeared while the import was being committed",
-                plan.snapshot.dir_name.as_str()
-            )));
-        }
-        Err(source) if source.kind() == io::ErrorKind::NotFound => {}
-        Err(source) => {
-            return Err(path_io_error(
-                "reinspect skill import destination",
-                &plan.destination,
-                source,
-            ));
-        }
-    }
     let staged_path = staged
         .get(plan.snapshot.dir_name.as_str())
         .ok_or_else(|| AppError::internal("staged skill directory was not found"))?;
@@ -1079,13 +1181,121 @@ fn rename_staged_import(
     })
 }
 
-fn verify_committed_import(plan: &PlannedImport, limits: TreeLimits) -> Result<(), AppError> {
+#[cfg(not(windows))]
+fn capture_committed_import(plan: &PlannedImport) -> Result<CommittedImport, AppError> {
     let parent = plan.destination.parent().ok_or_else(|| {
         AppError::validation("External skill destination does not have a parent directory")
     })?;
-    sync_directory(parent)?;
+    let parent_identity = capture_directory_identity(parent, "skill import parent directory")?;
+    let destination_identity =
+        capture_directory_identity(&plan.destination, "imported skill destination")?;
+    Ok(CommittedImport {
+        name: plan.snapshot.dir_name.as_str().to_string(),
+        destination_identity,
+        parent: parent.to_path_buf(),
+        parent_identity,
+    })
+}
+
+fn capture_directory_identity(path: &Path, kind: &str) -> Result<Handle, AppError> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|source| path_io_error("inspect skill commit directory", path, source))?;
+    if metadata_is_link_or_reparse(&metadata) || !metadata.is_dir() {
+        return Err(AppError::permission_denied(format!(
+            "The {kind} must be a real directory"
+        )));
+    }
+    Handle::from_path(path)
+        .map_err(|source| path_io_error("capture skill import directory identity", path, source))
+}
+
+fn verify_directory_identity(path: &Path, expected: &Handle, kind: &str) -> Result<(), AppError> {
+    let observed = capture_directory_identity(path, kind)?;
+    if !observed.eq(expected) {
+        return Err(AppError::conflict(format!(
+            "The {kind} changed while the skill import was in progress"
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn reserve_destination(plan: &PlannedImport) -> Result<ReservedImport, AppError> {
+    let parent = plan.destination.parent().ok_or_else(|| {
+        AppError::validation("External skill destination does not have a parent directory")
+    })?;
+    let parent = parent.to_path_buf();
+    let parent_identity = capture_directory_identity(&parent, "skill import parent directory")?;
+    fs::create_dir(&plan.destination).map_err(|source| {
+        if source.kind() == io::ErrorKind::AlreadyExists {
+            AppError::conflict(format!(
+                "Skill '{}' appeared while the import was being committed",
+                plan.snapshot.dir_name.as_str()
+            ))
+        } else {
+            path_io_error(
+                "reserve external skill destination",
+                &plan.destination,
+                source,
+            )
+        }
+    })?;
+    let destination_identity =
+        capture_directory_identity(&plan.destination, "skill import destination")?;
+    let reservation = ReservedImport {
+        destination: plan.destination.clone(),
+        destination_identity,
+        parent,
+        parent_identity,
+    };
+    reservation.verify_identity()?;
+    Ok(reservation)
+}
+
+#[cfg(windows)]
+fn materialize_reserved_import(
+    reservation: &ReservedImport,
+    snapshot: &TreeSnapshot,
+) -> Result<(), AppError> {
+    reservation.verify_identity()?;
+    write_snapshot_contents(&reservation.destination, snapshot, Some(reservation))?;
+    reservation.verify_identity()
+}
+
+#[cfg(windows)]
+fn rollback_reserved_import(
+    reservation: &ReservedImport,
+    limits: TreeLimits,
+) -> Result<(), AppError> {
+    reservation.verify_identity()?;
+    let mut budget = TreeBudget::default();
+    snapshot_tree(&reservation.destination, limits, &mut budget)?;
+    reservation.verify_identity()?;
+    fs::remove_dir_all(&reservation.destination).map_err(|source| {
+        path_io_error(
+            "roll back incomplete external skill import",
+            &reservation.destination,
+            source,
+        )
+    })?;
+    ensure_destination_absent(&reservation.destination)?;
+    sync_directory(&reservation.parent)
+}
+
+fn verify_committed_import(
+    plan: &PlannedImport,
+    committed: Option<&CommittedImport>,
+    limits: TreeLimits,
+) -> Result<(), AppError> {
+    let committed = committed.ok_or_else(|| {
+        AppError::internal("committed external skill was absent from import tracking")
+    })?;
+    committed.verify_identity()?;
+    sync_directory(&committed.parent)?;
+    committed.verify_identity()?;
     let mut budget = TreeBudget::default();
     let committed_tree = snapshot_tree(&plan.destination, limits, &mut budget)?;
+    committed.verify_identity()?;
     if !trees_equal(&plan.snapshot.tree, &committed_tree) {
         return Err(AppError::storage(
             "An external skill failed verification after import",
@@ -1114,25 +1324,6 @@ fn rename_directory_noreplace(source: &Path, destination: &Path) -> io::Result<(
     renameat_with(CWD, source, CWD, destination, RenameFlags::NOREPLACE).map_err(Into::into)
 }
 
-#[cfg(windows)]
-fn rename_directory_noreplace(source: &Path, destination: &Path) -> io::Result<()> {
-    // `std::fs::rename` replaces an existing file on Windows. The explicit
-    // metadata probe preserves the no-overwrite invariant for the normal
-    // commit path; directory-handle relative rename remains a separate
-    // platform hardening requirement.
-    match fs::symlink_metadata(destination) {
-        Ok(_) => {
-            return Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                "external skill destination already exists",
-            ));
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
-    }
-    fs::rename(source, destination)
-}
-
 #[cfg(not(any(
     target_os = "android",
     target_os = "linux",
@@ -1151,21 +1342,23 @@ fn rename_directory_noreplace(_source: &Path, _destination: &Path) -> io::Result
 }
 
 fn rollback_committed(
-    committed_names: &[String],
+    committed_imports: &[CommittedImport],
     plans: &[PlannedImport],
     limits: TreeLimits,
 ) -> Result<(), AppError> {
-    for name in committed_names.iter().rev() {
+    for committed in committed_imports.iter().rev() {
         let plan = plans
             .iter()
-            .find(|plan| plan.snapshot.dir_name.as_str() == name)
+            .find(|plan| plan.snapshot.dir_name.as_str() == committed.name.as_str())
             .ok_or_else(|| AppError::internal("committed skill was absent from import plan"))?;
+        committed.verify_identity()?;
         let mut budget = TreeBudget::default();
         let current = snapshot_tree(&plan.destination, limits, &mut budget)?;
+        committed.verify_identity()?;
         if !trees_equal(&plan.snapshot.tree, &current) {
             return Err(AppError::conflict(format!(
                 "Imported skill '{}' changed before rollback",
-                name
+                committed.name
             )));
         }
         fs::remove_dir_all(&plan.destination).map_err(|source| {
@@ -1175,40 +1368,205 @@ fn rollback_committed(
                 source,
             )
         })?;
-        if let Some(parent) = plan.destination.parent() {
-            sync_directory(parent)?;
-        }
+        ensure_destination_absent(&plan.destination)?;
+        sync_directory(&committed.parent)?;
     }
     Ok(())
 }
 
+fn ensure_destination_absent(path: &Path) -> Result<(), AppError> {
+    match fs::symlink_metadata(path) {
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
+        Ok(_) => Err(AppError::storage(
+            "External skill rollback did not remove its destination",
+            format!(
+                "skill destination still exists after rollback: {}",
+                path.display()
+            ),
+            false,
+        )),
+        Err(source) => Err(path_io_error(
+            "verify external skill rollback",
+            path,
+            source,
+        )),
+    }
+}
+
+#[cfg(not(windows))]
 fn write_snapshot(destination: &Path, snapshot: &TreeSnapshot) -> Result<(), AppError> {
     fs::create_dir(destination)
         .map_err(|source| path_io_error("create staged skill directory", destination, source))?;
+    write_snapshot_contents(destination, snapshot, None)
+}
+
+fn write_snapshot_contents(
+    destination: &Path,
+    snapshot: &TreeSnapshot,
+    reservation: Option<&ReservedImport>,
+) -> Result<(), AppError> {
     for relative in &snapshot.directories {
-        let path = destination.join(relative);
-        fs::create_dir(&path)
-            .map_err(|source| path_io_error("create staged skill subdirectory", &path, source))?;
+        create_snapshot_directory(destination, relative, reservation)?;
     }
-    for source_file in &snapshot.files {
-        let path = destination.join(&source_file.relative_path);
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .map_err(|source| path_io_error("create staged skill file", &path, source))?;
-        file.write_all(&source_file.bytes)
-            .map_err(|source| path_io_error("write staged skill file", &path, source))?;
-        file.sync_all()
-            .map_err(|source| path_io_error("sync staged skill file", &path, source))?;
-        fs::set_permissions(&path, source_file.permissions.clone())
-            .map_err(|source| path_io_error("preserve staged skill permissions", &path, source))?;
+    for source_file in snapshot
+        .files
+        .iter()
+        .filter(|source_file| !is_skill_document(source_file))
+    {
+        write_snapshot_file(destination, source_file, reservation)?;
+    }
+    // `SKILL.md` makes a directory discoverable, so publish descendants first.
+    for document in ordered_skill_documents(snapshot) {
+        write_snapshot_file(destination, document, reservation)?;
     }
     for relative in snapshot.directories.iter().rev() {
         sync_directory(&destination.join(relative))?;
     }
     sync_directory(destination)?;
     Ok(())
+}
+
+fn create_snapshot_directory(
+    destination: &Path,
+    relative: &Path,
+    reservation: Option<&ReservedImport>,
+) -> Result<(), AppError> {
+    let path = snapshot_destination_path(destination, relative)?;
+    if let Some(reservation) = reservation {
+        validate_reserved_parent(reservation, &path)?;
+    }
+    fs::create_dir(&path)
+        .map_err(|source| path_io_error("create staged skill subdirectory", &path, source))?;
+    let metadata = fs::symlink_metadata(&path)
+        .map_err(|source| path_io_error("inspect staged skill subdirectory", &path, source))?;
+    if metadata_is_link_or_reparse(&metadata) || !metadata.is_dir() {
+        return Err(AppError::permission_denied(
+            "Staged skill subdirectories must remain real directories",
+        ));
+    }
+    if let Some(reservation) = reservation {
+        reservation.verify_identity()?;
+    }
+    Ok(())
+}
+
+fn write_snapshot_file(
+    destination: &Path,
+    source_file: &TreeFile,
+    reservation: Option<&ReservedImport>,
+) -> Result<(), AppError> {
+    let path = snapshot_destination_path(destination, &source_file.relative_path)?;
+    if let Some(reservation) = reservation {
+        validate_reserved_parent(reservation, &path)?;
+    }
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|source| path_io_error("create staged skill file", &path, source))?;
+    let opened_identity = Handle::from_file(
+        file.try_clone()
+            .map_err(|source| path_io_error("clone staged skill file handle", &path, source))?,
+    )
+    .map_err(|source| path_io_error("inspect staged skill file", &path, source))?;
+    file.write_all(&source_file.bytes)
+        .map_err(|source| path_io_error("write staged skill file", &path, source))?;
+    file.sync_all()
+        .map_err(|source| path_io_error("sync staged skill file", &path, source))?;
+    fs::set_permissions(&path, source_file.permissions.clone())
+        .map_err(|source| path_io_error("preserve staged skill permissions", &path, source))?;
+    let metadata = fs::symlink_metadata(&path)
+        .map_err(|source| path_io_error("reinspect staged skill file", &path, source))?;
+    if metadata_is_link_or_reparse(&metadata) || !metadata.is_file() {
+        return Err(AppError::permission_denied(
+            "Staged skill files must remain regular files while being written",
+        ));
+    }
+    let final_identity = Handle::from_path(&path)
+        .map_err(|source| path_io_error("capture staged skill file identity", &path, source))?;
+    if final_identity != opened_identity {
+        return Err(AppError::conflict(
+            "A staged skill file changed identity while it was being written",
+        ));
+    }
+    if let Some(reservation) = reservation {
+        reservation.verify_identity()?;
+    }
+    Ok(())
+}
+
+fn snapshot_destination_path(destination: &Path, relative: &Path) -> Result<PathBuf, AppError> {
+    for component in relative.components() {
+        let Component::Normal(name) = component else {
+            return Err(AppError::validation(
+                "External skill snapshot contains an invalid relative path",
+            ));
+        };
+        let name = name
+            .to_str()
+            .ok_or_else(|| AppError::validation("External skill paths must be valid Unicode"))?;
+        SafeFileName::parse(name.to_string())
+            .map_err(|source| AppError::validation(source.to_string()))?;
+    }
+    if relative.as_os_str().is_empty() {
+        return Err(AppError::validation(
+            "External skill snapshot contains an empty relative path",
+        ));
+    }
+    Ok(destination.join(relative))
+}
+
+fn validate_reserved_parent(reservation: &ReservedImport, path: &Path) -> Result<(), AppError> {
+    reservation.verify_identity()?;
+    let parent = path.parent().ok_or_else(|| {
+        AppError::validation("External skill snapshot destination does not have a parent directory")
+    })?;
+    let relative_parent = parent.strip_prefix(&reservation.destination).map_err(|_| {
+        AppError::permission_denied("External skill snapshot path escaped its reserved destination")
+    })?;
+    let mut current = reservation.destination.clone();
+    for component in relative_parent.components() {
+        let Component::Normal(segment) = component else {
+            return Err(AppError::validation(
+                "External skill snapshot contains an invalid parent path",
+            ));
+        };
+        current.push(segment);
+        let metadata = fs::symlink_metadata(&current).map_err(|source| {
+            path_io_error("inspect reserved skill directory", &current, source)
+        })?;
+        if metadata_is_link_or_reparse(&metadata) || !metadata.is_dir() {
+            return Err(AppError::permission_denied(
+                "Reserved skill directories must remain real directories",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn is_skill_document(file: &TreeFile) -> bool {
+    file.relative_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == "SKILL.md")
+}
+
+fn ordered_skill_documents(snapshot: &TreeSnapshot) -> Vec<&TreeFile> {
+    let mut documents = snapshot
+        .files
+        .iter()
+        .filter(|source_file| is_skill_document(source_file))
+        .collect::<Vec<_>>();
+    documents.sort_by(|left, right| {
+        relative_path_depth(&right.relative_path)
+            .cmp(&relative_path_depth(&left.relative_path))
+            .then_with(|| left.relative_path.cmp(&right.relative_path))
+    });
+    documents
+}
+
+fn relative_path_depth(path: &Path) -> usize {
+    path.components().count()
 }
 
 #[cfg(unix)]
@@ -1225,14 +1583,19 @@ fn sync_directory(_path: &Path) -> Result<(), AppError> {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::Path};
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+    };
 
     use codez_core::AppErrorKind;
 
+    #[cfg(not(windows))]
+    use super::rename_directory_noreplace;
     use super::{
-        ImportDestination, SourceRoot, TreeLimits, commit_imports_blocking, list_external_blocking,
-        plan_imports_blocking, plan_single_import_blocking, plans_require_commit,
-        reject_destructive_overwrite, rename_directory_noreplace,
+        ImportDestination, SourceRoot, TreeFile, TreeLimits, TreeSnapshot, commit_imports_blocking,
+        list_external_blocking, ordered_skill_documents, plan_imports_blocking,
+        plan_single_import_blocking, plans_require_commit, reject_destructive_overwrite,
     };
     use crate::commands::path_security::SafeFileName;
 
@@ -1265,6 +1628,48 @@ mod tests {
         .expect("fixture SKILL.md must exist");
         fs::write(directory.join("references/example.txt"), "example")
             .expect("fixture reference must exist");
+    }
+
+    #[test]
+    fn skill_documents_are_written_from_descendants_to_ancestors() {
+        let root = tempfile::tempdir().expect("fixture root must exist");
+        let permissions = fs::metadata(root.path())
+            .expect("fixture root metadata must exist")
+            .permissions();
+        let snapshot = TreeSnapshot {
+            directories: Vec::new(),
+            files: vec![
+                TreeFile {
+                    relative_path: PathBuf::from("SKILL.md"),
+                    bytes: Vec::new(),
+                    permissions: permissions.clone(),
+                },
+                TreeFile {
+                    relative_path: PathBuf::from("child/SKILL.md"),
+                    bytes: Vec::new(),
+                    permissions: permissions.clone(),
+                },
+                TreeFile {
+                    relative_path: PathBuf::from("child/grandchild/SKILL.md"),
+                    bytes: Vec::new(),
+                    permissions,
+                },
+            ],
+        };
+
+        let documents = ordered_skill_documents(&snapshot)
+            .into_iter()
+            .map(|file| file.relative_path.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            documents,
+            vec![
+                PathBuf::from("child/grandchild/SKILL.md"),
+                PathBuf::from("child/SKILL.md"),
+                PathBuf::from("SKILL.md"),
+            ]
+        );
     }
 
     fn import_all(
@@ -1493,6 +1898,39 @@ mod tests {
     }
 
     #[test]
+    fn no_replace_commit_preserves_a_file_created_after_preflight() {
+        let source = tempfile::tempdir().expect("source root must exist");
+        let data = tempfile::tempdir().expect("data root must exist");
+        write_skill(source.path(), "review", "Review", "source body");
+        let source = fixture_source(source.path(), "Codex");
+        let destination = fixture_destination(data.path());
+        let plans = plan_imports_blocking(
+            std::slice::from_ref(&source),
+            &destination.skills_root,
+            TreeLimits::default(),
+        )
+        .expect("valid skill must pass preflight");
+        fs::create_dir_all(&destination.skills_root)
+            .expect("fixture destination directory must exist");
+        fs::create_dir_all(&destination.staging_root)
+            .expect("fixture staging directory must exist");
+        let late_destination = destination.skills_root.join("review");
+        fs::write(&late_destination, "existing file").expect("late destination file must exist");
+
+        let error =
+            commit_imports_blocking(plans, &destination.staging_root, TreeLimits::default())
+                .expect_err("no-replace commit must reject a late destination file");
+
+        assert_eq!(error.kind(), AppErrorKind::Conflict);
+        assert_eq!(
+            fs::read_to_string(late_destination)
+                .expect("late destination file must remain readable"),
+            "existing file"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
     fn atomic_rename_primitive_never_replaces_an_existing_directory() {
         let root = tempfile::tempdir().expect("fixture root must exist");
         let source = root.path().join("source");
@@ -1514,6 +1952,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn atomic_rename_primitive_never_replaces_an_existing_file() {
         let root = tempfile::tempdir().expect("fixture root must exist");

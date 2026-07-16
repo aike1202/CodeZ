@@ -1,8 +1,9 @@
-use futures::future::join_all;
 use std::sync::Arc;
+
+use futures::future::join_all;
 use tokio::sync::Mutex;
 
-use crate::agent::loop_impl::AgentLoop;
+use crate::agent::loop_impl::{AgentLoop, AgentLoopError};
 use crate::agent::state::AgentStatus;
 
 #[derive(Default)]
@@ -20,13 +21,12 @@ impl ParallelOrchestrator {
         list.push(agent);
     }
 
-    pub async fn run_wave(&self) -> Vec<Result<AgentStatus, String>> {
-        let list = self.agents.lock().await;
-        let futures: Vec<_> = list
-            .iter()
+    pub async fn run_wave(&self) -> Vec<Result<AgentStatus, AgentLoopError>> {
+        let agents = self.agents.lock().await.clone();
+        let futures: Vec<_> = agents
+            .into_iter()
             .map(|agent| {
-                let a = agent.clone();
-                async move { a.run_step().await }
+                async move { agent.run_step().await }
             })
             .collect();
 
@@ -34,9 +34,9 @@ impl ParallelOrchestrator {
     }
 
     pub async fn stop_all(&self) {
-        let list = self.agents.lock().await;
-        for agent in list.iter() {
-            agent.stop().await;
+        let agents = self.agents.lock().await.clone();
+        for agent in agents {
+            let _stopped = agent.stop().await;
         }
     }
 }

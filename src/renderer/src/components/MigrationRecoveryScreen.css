@@ -1,0 +1,105 @@
+.migration-recovery-screen {
+  align-items: center;
+  background: var(--bg-primary, #17191d);
+  color: var(--text-primary, #f2f4f8);
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 32px;
+}
+
+.migration-recovery-panel {
+  display: grid;
+  gap: 16px;
+  max-width: 560px;
+  width: min(100%, 560px);
+}
+
+.migration-recovery-panel h1 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0;
+  margin: 0;
+}
+
+.migration-recovery-panel > p {
+  color: var(--text-secondary, #a9b0bb);
+  line-height: 1.55;
+  margin: 0;
+}
+
+.migration-recovery-list {
+  display: grid;
+  gap: 10px;
+}
+
+.migration-recovery-field,
+.migration-recovery-blocked {
+  border: 1px solid var(--border-color, #363b45);
+  border-radius: 6px;
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+}
+
+.migration-recovery-field-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.migration-recovery-field-meta,
+.migration-recovery-field-reason,
+.migration-recovery-blocked > span:last-child {
+  color: var(--text-secondary, #a9b0bb);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.migration-recovery-field input {
+  background: var(--bg-secondary, #20242b);
+  border: 1px solid var(--border-color, #363b45);
+  border-radius: 4px;
+  color: inherit;
+  font: inherit;
+  height: 36px;
+  padding: 0 10px;
+}
+
+.migration-recovery-field input:focus {
+  border-color: var(--accent-color, #5ca4ff);
+  outline: none;
+}
+
+.migration-recovery-blocked {
+  border-color: var(--warning-border, #8d6941);
+}
+
+.migration-recovery-primary {
+  align-self: start;
+  background: var(--accent-color, #3478d4);
+  border: 0;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  min-height: 36px;
+  padding: 0 16px;
+}
+
+.migration-recovery-primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.migration-recovery-error {
+  color: var(--error-color, #f28b82) !important;
+}
+
+@media (max-width: 600px) {
+  .migration-recovery-screen {
+    align-items: start;
+    padding: 24px 16px;
+  }
+}

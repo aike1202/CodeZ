@@ -7,17 +7,17 @@
 下列状态按当前工作树的代码边界记录。某个 crate、command 或测试存在，不等于对应用户流程已经由 Rust/Tauri 完整承接；只有各 Phase 的出口和 Phase 9 删除门禁才构成迁移完成证据。
 
 - Phase 0-1：迁移清单、ADR、Cargo/Tauri 基座、契约和前端 adapter 已建立。当前仍有并行整合中的 workspace/Cargo 变更，历史绿灯必须在整合完成后重跑，不能据此宣布任一完整 Phase 已验收。
-- Phase 2：底层 primitives 已覆盖大部分清单，但阶段尚未闭环。ADR 0007 已把新运行时唯一应用数据根固定为 `~/.codez`，cache/logs/temp/migrations 均位于其下；Electron `userData` 和升级前已有的 `~/.codez` 用户内容只作为迁移源。`AtomicFileStore`、19 个 schema family、23 类只读 discovery、no-clobber backup、transform、凭据决策、引用验证和 commit marker 已存在，且 composition 已在构造 repositories 前运行 migration coordinator。它仍缺少真实旧安装升级/回退的端到端证据，以及 `AwaitingCredentials` 的凭据重录、恢复和 activation 链路；当前该状态会 fail closed 阻止启动。因此不得宣称端到端数据或密钥迁移完成。
+- Phase 2：底层 primitives 已覆盖大部分清单，但阶段尚未闭环。ADR 0007 已把新运行时唯一应用数据根固定为 `~/.codez`，cache/logs/temp/migrations 均位于其下；Electron `userData` 和升级前已有的 `~/.codez` 用户内容只作为迁移源。`AtomicFileStore`、19 个 schema family、23 类只读 discovery、no-clobber backup、transform、凭据决策、引用验证和 commit marker 已存在，且 composition 已在构造 repositories 前运行 migration coordinator。`AwaitingCredentials` 现有 fail-closed recovery state、typed status/submit/restart command 和 React 重录界面：仅能为已映射的 credential ID 写入 OS credential store，coordinator 重新验证并 activation 后才允许重启，正常 `AppState` 在重启前不可用。真实旧安装升级/回退、已有根与 migration staging 不相交安全性以及完整桌面 E2E 尚无证据，因此不得宣称端到端数据或密钥迁移完成。
 - Phase 3：进行中。`WorkspaceRoot`/`SafeWorkspacePath`、受限文件系统、recent projects 和部分 Workspace commands 已实现。平台 PTY 已有创建、读写、resize、树级 kill 和有界事件实现；2026-07-16 的真实生产 `PtyManager.kill` 树终止用例通过，但原生 `ping.exe -t` 的 Ctrl+C 用例未能恢复 prompt，是 Phase 3 和发布阻断项。编辑事务、附件、Git/worktree、完整终端命令与前端流程仍未验收。
-- Phase 4：Provider domain、存储边界、协议流解析、Context ledger 与 `AtomicPersistence` port 已有实现；它们尚未形成含凭据重录、compact、持久化恢复和 tool/Agent loop 的完整会话。当前 Rust chat commands 对 tool interrupt、compact、文件 accept/reject/diff、approval 和 ask-user 明确返回 `UNSUPPORTED`。
-- Phase 5-6：工具、权限、Agent 和并行执行存在部分 Rust domain 模块，但尚未接入 Rust chat/Agent 调用闭环，不能作为用户可用功能或 Electron 替代品计入完成。
-- Phase 7：`codez-mcp` 协议/配置基础和外部 Skills 的部分安全导入检查正在实现；Tauri `AppState` 尚未提供可用的 MCP live gateway/reconciliation，MCP live 操作不能视为已迁移。外部 Skills 也尚无目录句柄级 TOCTOU 防护、可恢复事务日志和可验证的更新/CAS 覆盖流程。
+- Phase 4：Provider domain、存储边界、协议流解析、Context ledger 与 `AtomicPersistence` port 已有实现；它们尚未形成含 compact、持久化恢复和 tool/Agent loop 的完整会话。AskUser 已有受限 response registry、typed command/event 和 renderer bridge；答案会针对 pending request 验证，超时、取消或 renderer 不可用时会取消等待。当前 provider-only Rust chat runtime 尚未调用该边界，不能当作 live AskUser 功能。tool interrupt、compact、文件 accept/reject/diff 和 approval 仍明确返回 `UNSUPPORTED`。
+- Phase 5-6：工具、权限、Agent 和并行执行存在部分 Rust domain 模块。`AgentLoop` 已提供有界 step、停止/恢复和取消状态机；`SubAgentManager` 已提供 validated ID/role、生命周期、邮箱和 model-profile foundations。它们尚未接入 Rust provider/chat、工具执行和 Tauri 用户流程，因而没有完整 Rust tool loop，不能作为用户可用功能或 Electron 替代品计入完成。
+- Phase 7：`codez-mcp` 协议/配置基础和外部 Skills 的部分安全导入检查正在实现；MCP live gateway/reconciliation 仍在整合中，live 操作不能视为已迁移。Windows external Skills import 现以 no-clobber destination reservation、文件/目录 identity 复核和回滚保护避免预检后的覆盖，但仍存在同权限攻击者替换路径的残余 TOCTOU 风险，也尚无可恢复事务日志和可验证的更新/CAS 覆盖流程。
 - Phase 8-10：尚未开始端到端验收、跨平台发布验证或 Electron 清理。React/Tauri adapter 的局部迁移不等于前端已脱离 Electron。
 - Electron 基线：源码、测试、配置和依赖必须完整保留。Phase 0-9 禁止删除；仅在 Phase 9 全部迁移、安全、升级/回退、跨平台和人工批准门禁通过后，才能在独立的 Phase 10 删除。
 
 ## 历史基线与当前验证
 
-以下是 2026-07-15 记录的历史基线，用于后续对比，不是当前工作树的统一验收结果。当前存在并行 Rust/Cargo 整合；Cargo.lock 稳定后必须重新执行严格 Rust、前端、契约和目标平台门禁。尤其不得用这些旧结果掩盖 Windows 原生 Ctrl+C、凭据重录、Tool/Agent loop、MCP live gateway 或外部 Skills 事务安全的未完成项。
+以下是 2026-07-15 记录的历史基线，用于后续对比，不是当前工作树的统一验收结果。当前存在并行 Rust/Cargo 整合；Cargo.lock 稳定后必须重新执行严格 Rust、前端、契约和目标平台门禁。尤其不得用这些旧结果掩盖 Windows 原生 Ctrl+C、真实升级/回退与迁移恢复 E2E、Tool/Agent loop、MCP live gateway 或外部 Skills 事务安全的未完成项。
 
 - `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings -D clippy::perf`：通过。
 - `cargo test --workspace --locked`：通过，共 101 项 Rust 单元/集成测试；其中 storage 37 项覆盖路径、原子替换、不可变创建、版本化 recent repository、备份、凭据适配、三类旧凭据迁移、transform、语义引用、重启阶段识别、完成标记、脱敏、幂等与篡改阻断；core/runtime/platform/desktop 覆盖进程边界、错误分类、UUID、取消树、路径值对象、Windows 大小写、symlink/TOCTOU、有界读取、原子写入、递归树、忽略规则、项目识别与预览，另有 1 项 `SecretValue` 不可序列化的 compile-fail rustdoc。

@@ -2,7 +2,11 @@ import { Channel, invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 
 import { desktopApi } from '../shared/desktop/api'
-import type { PermissionMode } from '../shared/desktop/generated/contracts'
+import type {
+  MigrationCredentialInput,
+  MigrationRecoveryStatus,
+  PermissionMode,
+} from '../shared/desktop/generated/contracts'
 import { defaultSettings, defaultWebSearchSettings } from '@shared/types/settings'
 import type {
   McpListPayload,
@@ -66,6 +70,12 @@ export const tauriBridge: any = {
       return invoke<PermissionMode>('permission_mode_set', { rootPath, mode })
     },
   },
+  migration: {
+    getStatus: () => invoke<MigrationRecoveryStatus>('migration_get_status'),
+    submitCredentials: (inputs: MigrationCredentialInput[]) =>
+      invoke<MigrationRecoveryStatus>('migration_submit_credentials', { inputs }),
+    restart: () => invoke<void>('migration_restart'),
+  },
   provider: {
     list: () => invoke('provider_get_all').catch(() => []),
     add: (form: any) => invoke('provider_create', { data: form }),
@@ -117,6 +127,10 @@ export const tauriBridge: any = {
     stream: (providerId: string, model: string, sessionId: string, input: any, callbacks: any) => {
       const requestedRunId = `stream_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
       const events = new Channel<any>()
+      let activeRunId: string | null = requestedRunId
+      let accumulatedContent = ''
+      let cleanedUp = false
+      let terminalReceived = false
       const askUserListener = listen<ChatAskUserRequestEvent>('chat:ask-user-request', (event) => {
         const payload = event.payload
         if (payload.runId !== activeRunId) return
@@ -133,10 +147,6 @@ export const tauriBridge: any = {
           answers: ignoredAskUserAnswers(payload.request),
         }).catch(() => undefined)
       })
-      let activeRunId: string | null = requestedRunId
-      let accumulatedContent = ''
-      let cleanedUp = false
-      let terminalReceived = false
 
       const acknowledge = (frame: any): void => {
         if (typeof frame?.runId !== 'string' || !Number.isSafeInteger(frame?.sequence)) return

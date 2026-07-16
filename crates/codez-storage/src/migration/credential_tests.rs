@@ -10,7 +10,9 @@ use super::{
     LegacyCredentialReader, LegacyMigrationService, LegacyRoots, MigrationError, MigrationPhase,
     MigrationRunId,
 };
-use crate::{CredentialError, CredentialId, CredentialKind, CredentialStore, SecretValue};
+use crate::{
+    CredentialError, CredentialId, CredentialKind, CredentialReentry, CredentialStore, SecretValue,
+};
 
 struct FakeLegacyReader {
     values: HashMap<String, String>,
@@ -406,4 +408,158 @@ async fn credential_migration_rejects_a_backup_changed_after_verification() {
 
     assert!(matches!(error, MigrationError::BackupConflict(_)));
     assert!(credential_store.snapshot().is_empty());
+}
+
+#[tokio::test]
+async fn credential_reentry_requires_exact_known_values_before_it_can_complete() {
+    const PROVIDERS: &str = r#"{
+      "providers": [
+        {"id":"provider-reentry","apiKeyRef":"unreadable-envelope","encryption":"safeStorage"}
+      ]
+    }"#;
+    let fixture = CredentialFixture::new([("providers.json", PROVIDERS)]);
+    let service = LegacyMigrationService::default();
+    let manifest = service
+        .discover(
+            &fixture.roots,
+            MigrationRunId::parse("credential-reentry")
+                .expect("fixture migration ID must be valid"),
+        )
+        .await
+        .expect("credential fixture discovery must succeed");
+    let backup = service
+        .backup(&fixture.roots, &manifest, &fixture.backup_root)
+        .await
+        .expect("credential fixture backup must succeed");
+    let credential_store = Arc::new(MemoryCredentialStore::default());
+    let awaiting = service
+        .migrate_credentials(
+            &manifest,
+            &backup,
+            &fixture.backup_root,
+            Arc::new(FakeLegacyReader::new([])),
+            Arc::clone(&credential_store),
+        )
+        .await
+        .expect("unreadable credential must produce a re-entry report");
+    let credential_id = CredentialId::new(CredentialKind::ProviderApiKey, "provider-reentry")
+        .expect("fixture credential ID must be valid");
+
+    let missing = service
+        .complete_credential_reentry(
+            &manifest,
+            &backup,
+            &fixture.backup_root,
+            Vec::new(),
+            Arc::clone(&credential_store),
+        )
+        .await
+        .expect_err("missing values must not authorize activation");
+    assert!(matches!(
+        missing,
+        MigrationError::CredentialReentryMissing { id } if id == credential_id
+    ));
+    assert!(credential_store.snapshot().is_empty());
+
+    let unexpected_id = CredentialId::new(CredentialKind::ProviderApiKey, "other-provider")
+        .expect("fixture credential ID must be valid");
+    let unexpected = service
+        .complete_credential_reentry(
+            &manifest,
+            &backup,
+            &fixture.backup_root,
+            vec![CredentialReentry::new(
+                unexpected_id.clone(),
+                SecretValue::new("unexpected-secret").expect("fixture secret must be valid"),
+            )],
+            Arc::clone(&credential_store),
+        )
+        .await
+        .expect_err("unexpected values must not reach secure storage");
+    assert!(matches!(
+        unexpected,
+        MigrationError::CredentialReentryUnexpected { id } if id == unexpected_id
+    ));
+    assert!(credential_store.snapshot().is_empty());
+
+    let completed = service
+        .complete_credential_reentry(
+            &manifest,
+            &backup,
+            &fixture.backup_root,
+            vec![CredentialReentry::new(
+                credential_id.clone(),
+                SecretValue::new("reentered-fixture-secret").expect("fixture secret must be valid"),
+            )],
+            Arc::clone(&credential_store),
+        )
+        .await
+        .expect("complete known values must safely resume the report");
+    let restored = service
+        .completed_credential_reentry(&manifest, &fixture.backup_root, &awaiting)
+        .await
+        .expect("receipt must validate")
+        .expect("receipt must be persisted");
+
+    assert_eq!(completed, restored);
+    assert_eq!(completed.phase, MigrationPhase::Verified);
+    assert!(completed.entries.iter().any(|entry| {
+        entry.credential_id.as_ref() == Some(&credential_id)
+            && entry.status == CredentialMigrationStatus::Reentered
+            && entry.reason.is_none()
+    }));
+    assert_eq!(
+        credential_store.snapshot().get(&credential_id),
+        Some(&"reentered-fixture-secret".to_string())
+    );
+}
+
+#[tokio::test]
+async fn credential_reentry_fails_closed_when_legacy_data_has_no_safe_identity() {
+    const PROVIDERS: &str = r#"{
+      "providers": [
+        {"apiKeyRef":"unreadable-envelope","encryption":"safeStorage"}
+      ]
+    }"#;
+    let fixture = CredentialFixture::new([("providers.json", PROVIDERS)]);
+    let service = LegacyMigrationService::default();
+    let manifest = service
+        .discover(
+            &fixture.roots,
+            MigrationRunId::parse("credential-reentry-invalid-id")
+                .expect("fixture migration ID must be valid"),
+        )
+        .await
+        .expect("credential fixture discovery must succeed");
+    let backup = service
+        .backup(&fixture.roots, &manifest, &fixture.backup_root)
+        .await
+        .expect("credential fixture backup must succeed");
+    let credential_store = Arc::new(MemoryCredentialStore::default());
+    service
+        .migrate_credentials(
+            &manifest,
+            &backup,
+            &fixture.backup_root,
+            Arc::new(FakeLegacyReader::new([])),
+            Arc::clone(&credential_store),
+        )
+        .await
+        .expect("invalid legacy identity must still produce a redacted report");
+
+    let error = service
+        .complete_credential_reentry(
+            &manifest,
+            &backup,
+            &fixture.backup_root,
+            Vec::new(),
+            credential_store,
+        )
+        .await
+        .expect_err("an unidentifiable credential must remain blocked");
+
+    assert!(matches!(
+        error,
+        MigrationError::CredentialReentryIdentifierMissing { .. }
+    ));
 }

@@ -241,9 +241,13 @@ impl ChatRuntime {
 
     /// Emits an ask-user request for an active Rust chat run and waits for its one-time answer.
     ///
-    /// The future Rust tool loop calls this boundary after it has validated an `AskUserQuestion`
-    /// tool call. A stopped run, a missing renderer response, or a closed receiver always aborts
-    /// the wait rather than synthesizing an answer.
+    /// The current provider-only chat runtime does not invoke this yet; the Rust tool loop will
+    /// call it after it owns `AskUserQuestion` execution. A stopped run, a missing renderer
+    /// response, or a closed receiver always aborts the wait rather than synthesizing an answer.
+    #[expect(
+        dead_code,
+        reason = "The provider-only chat runtime still rejects tool calls, while this boundary is kept ready for the Rust tool loop without making the response command falsely succeed."
+    )]
     pub(crate) async fn request_ask_user(
         &self,
         app: &AppHandle,

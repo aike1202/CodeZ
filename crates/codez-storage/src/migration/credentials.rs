@@ -231,7 +231,10 @@ where
     let mut supplied = HashMap::with_capacity(values.len());
     for value in values {
         let credential_id = value.credential_id.clone();
-        if supplied.insert(credential_id.clone(), value.secret).is_some() {
+        if supplied
+            .insert(credential_id.clone(), value.secret)
+            .is_some()
+        {
             return Err(MigrationError::CredentialReentryDuplicate { id: credential_id });
         }
     }
@@ -251,11 +254,11 @@ where
     }
 
     for credential_id in &required {
-        let secret = supplied
-            .get(credential_id)
-            .ok_or_else(|| MigrationError::CredentialReentryMissing {
+        let secret = supplied.get(credential_id).ok_or_else(|| {
+            MigrationError::CredentialReentryMissing {
                 id: credential_id.clone(),
-            })?;
+            }
+        })?;
         credential_store
             .set(credential_id, secret)
             .map_err(MigrationError::CredentialStore)?;
@@ -412,7 +415,11 @@ fn validate_reentry_completion(
         return Err(MigrationError::CredentialReportMismatch);
     }
 
-    for (awaiting, completed) in awaiting_report.entries.iter().zip(&completed_report.entries) {
+    for (awaiting, completed) in awaiting_report
+        .entries
+        .iter()
+        .zip(&completed_report.entries)
+    {
         if awaiting.data_set != completed.data_set
             || awaiting.source_index != completed.source_index
             || awaiting.credential_id != completed.credential_id
@@ -435,7 +442,8 @@ fn validate_reentry_completion(
 fn credential_report_fingerprint(
     report: &CredentialMigrationReport,
 ) -> Result<String, MigrationError> {
-    let bytes = serde_json::to_vec(report).map_err(MigrationError::CredentialReentrySerialization)?;
+    let bytes =
+        serde_json::to_vec(report).map_err(MigrationError::CredentialReentrySerialization)?;
     Ok(filesystem::sha256_bytes(&bytes))
 }
 

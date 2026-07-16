@@ -31,6 +31,13 @@ declare global {
           mode: import('@shared/types/permission').PermissionMode
         ) => Promise<import('@shared/types/permission').PermissionMode>
       }
+      migration?: {
+        getStatus: () => Promise<import('./shared/desktop').MigrationRecoveryStatus>
+        submitCredentials: (
+          inputs: import('./shared/desktop').MigrationCredentialInput[]
+        ) => Promise<import('./shared/desktop').MigrationRecoveryStatus>
+        restart: () => Promise<void>
+      }
       provider: {
         list: () => Promise<any[]>
         add: (form: any) => Promise<any>

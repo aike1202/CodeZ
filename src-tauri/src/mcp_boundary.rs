@@ -102,9 +102,16 @@ pub(crate) fn servers_from_wire(
         .collect()
 }
 
-pub(crate) fn list_payload(servers: Vec<domain::UserMcpServer>) -> wire::McpListPayload {
+pub(crate) fn list_payload(
+    servers: Vec<domain::UserMcpServer>,
+    runtime_statuses: Vec<wire::McpServerStatus>,
+) -> wire::McpListPayload {
     let updated_at = Utc::now().to_rfc3339();
     let mut configs = Vec::with_capacity(servers.len());
+    let mut statuses_by_name = runtime_statuses
+        .into_iter()
+        .map(|status| (status.name.clone(), status))
+        .collect::<BTreeMap<_, _>>();
     let mut statuses = Vec::with_capacity(servers.len());
 
     for server in servers {
@@ -127,22 +134,26 @@ pub(crate) fn list_payload(servers: Vec<domain::UserMcpServer>) -> wire::McpList
             shadowed_by: None,
             policy_disabled: None,
         });
-        statuses.push(wire::McpServerStatus {
-            name,
-            scope: wire::McpConfigScope::User,
-            state,
-            fingerprint,
-            transport,
-            capabilities: None,
-            server_info: None,
-            tool_count: 0,
-            resource_count: 0,
-            prompt_count: 0,
-            error: None,
-            next_retry_at: None,
-            updated_at: updated_at.clone(),
-            logs: Vec::new(),
-        });
+        statuses.push(
+            statuses_by_name
+                .remove(&name)
+                .unwrap_or(wire::McpServerStatus {
+                    name,
+                    scope: wire::McpConfigScope::User,
+                    state,
+                    fingerprint,
+                    transport,
+                    capabilities: None,
+                    server_info: None,
+                    tool_count: 0,
+                    resource_count: 0,
+                    prompt_count: 0,
+                    error: None,
+                    next_retry_at: None,
+                    updated_at: updated_at.clone(),
+                    logs: Vec::new(),
+                }),
+        );
     }
 
     wire::McpListPayload { configs, statuses }
@@ -222,7 +233,7 @@ fn transport_from_wire(value: wire::McpTransport) -> domain::McpTransport {
     }
 }
 
-fn transport_to_wire(value: domain::McpTransport) -> wire::McpTransport {
+pub(crate) fn transport_to_wire(value: domain::McpTransport) -> wire::McpTransport {
     match value {
         domain::McpTransport::Stdio => wire::McpTransport::Stdio,
         domain::McpTransport::Http => wire::McpTransport::Http,
@@ -346,6 +357,7 @@ mod tests {
                     config,
                 })
                 .collect(),
+            Vec::new(),
         );
 
         assert_eq!(

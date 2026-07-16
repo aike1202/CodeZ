@@ -129,6 +129,9 @@ impl PendingAskUserRequests {
 }
 
 pub(crate) fn validate_request(request: &ChatAskUserRequest) -> Result<(), AppError> {
+    if request.id.trim().is_empty() {
+        return Err(AppError::validation("An ask-user request ID is required"));
+    }
     ToolCallId::parse(request.id.clone())
         .map_err(|error| AppError::validation(format!("Invalid ask-user request ID: {error}")))?;
     if request.questions.is_empty() || request.questions.len() > MAX_ASK_USER_QUESTIONS {
@@ -352,7 +355,7 @@ mod tests {
     };
     use codez_core::{AppErrorKind, StreamId};
 
-    use super::{ASK_USER_REQUEST_TTL, AskUserResponseRegistry};
+    use super::{ASK_USER_REQUEST_TTL, AskUserResponseRegistry, validate_request};
 
     #[tokio::test]
     async fn response_registry_should_deliver_a_valid_response_once() {
@@ -448,6 +451,17 @@ mod tests {
             .expect_err("expired requests must not accept answers");
 
         assert_eq!(error.kind(), AppErrorKind::NotFound);
+    }
+
+    #[test]
+    fn request_validation_should_reject_blank_request_ids() {
+        let mut request = request(false);
+        request.id = "  ".to_string();
+
+        let error = validate_request(&request)
+            .expect_err("blank request IDs must fail before registration");
+
+        assert_eq!(error.kind(), AppErrorKind::Validation);
     }
 
     fn stream_id() -> StreamId {

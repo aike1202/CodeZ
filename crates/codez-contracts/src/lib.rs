@@ -2,10 +2,11 @@
 
 pub mod chat;
 pub mod context;
-pub mod migration;
 pub mod mcp;
+pub mod migration;
 pub mod permission;
 pub mod provider;
+pub mod subagent;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;

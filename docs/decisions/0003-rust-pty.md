@@ -1,6 +1,6 @@
 # ADR 0003: Rust PTY 与进程树责任边界
 
-> 状态：Accepted（Windows Ctrl+C 交付策略仍为未决后续 ADR）
+> 状态：Accepted（Windows Ctrl+C 交付策略仍为未决后续 ADR，且为 release blocker）
 >
 > 日期：2026-07-15
 
@@ -25,7 +25,7 @@ CodeZ 保留以下平台适配责任：
 
 ## 后果
 
-- Windows x64 已用真实 ConPTY 验证 UTF-8、中文工作目录、132x41 resize、隐藏后代进程树终止、clean exit 和 reader EOF。原生 `ping.exe -t` 前台命令的 Ctrl+C 验收失败：写入裸 `0x03` 后 shell 不能恢复，不得声称 Ctrl+C 已验证。
+- Windows x64 已用真实 ConPTY 验证 UTF-8、中文工作目录、132x41 resize、隐藏后代进程树终止、clean exit 和 reader EOF。2026-07-16 的聚焦复验稳定失败：原生 `ping.exe -t` 前台命令写入裸 `0x03` 后 shell 不能恢复，不能发布，也不得声称 Ctrl+C 已验证。
 - 现有 `TerminalInstance` 的 xterm.js output -> `term.write()` -> `onData` -> backend write 回路必须在 Tauri channel 迁移中保持，否则 ConPTY 可能停在首次光标查询。
 - `portable-pty` 是同步阻塞接口；Phase 3 不能在 Tokio async worker 上直接阻塞读取，也不能使用无界输出队列。
 - Windows 树级终止现在经生产 `PtyManager.kill` 验证：受测后代报告 PID、持有独占文件锁，kill 后锁释放且 registry 为零。这不免除 PID owner 校验、并发 kill 和退出竞态测试。
