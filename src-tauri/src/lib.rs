@@ -96,6 +96,12 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::workspace::workspace_add_recent_project,
             commands::workspace::workspace_remove_recent_project,
             commands::workspace::workspace_rename_recent_project,
+            commands::workspace::workspace_glob,
+            commands::workspace::workspace_grep,
+            commands::workspace::workspace_open_in_explorer,
+            commands::workspace::workspace_open_in_editor,
+            commands::workspace::workspace_detect_installed_editors,
+            commands::workspace::workspace_get_project_snapshot,
             commands::theme::theme_get,
             commands::theme::theme_set,
         ])

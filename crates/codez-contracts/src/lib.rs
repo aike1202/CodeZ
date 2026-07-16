@@ -181,6 +181,53 @@ pub struct DesktopEvent<T> {
     pub payload: T,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct GlobResult {
+    pub paths: Vec<String>,
+    pub truncated: bool,
+    #[ts(type = "number")]
+    pub total: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct GrepResult {
+    pub lines: Vec<String>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", optional_fields)]
+pub struct ProjectSnapshotResult {
+    pub root_name: String,
+    pub project_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub package_manager: Option<String>,
+    pub scripts: std::collections::BTreeMap<String, String>,
+    pub dependencies: std::collections::BTreeMap<String, String>,
+    pub dev_dependencies: std::collections::BTreeMap<String, String>,
+    pub config_files: Vec<String>,
+    pub entrypoints: Vec<String>,
+    pub tree: String,
+    pub docs_tree: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", optional_fields)]
+pub struct EditorInfo {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exe_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon_data: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
