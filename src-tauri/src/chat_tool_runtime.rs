@@ -1,6 +1,7 @@
 use std::{
     borrow::Cow,
     collections::HashMap,
+    fs,
     future::Future,
     path::Path,
     pin::Pin,
@@ -14,7 +15,9 @@ use codez_core::{
     context::ContextScopeId,
     provider::{ToolDefinition, ToolDefinitionFunction},
 };
-use codez_platform::{NativeFileSystem, NativeProcessRunner, ResourceLocator};
+use codez_platform::{
+    BashDiscoveryError, BashInstallation, NativeFileSystem, NativeProcessRunner, ResourceLocator,
+};
 use codez_runtime::{
     SearchService,
     edit_transaction::EditTransactionService,
@@ -28,7 +31,7 @@ use codez_runtime::{
     tools::{
         authorization::AuthorizationBinding,
         builtin::{
-            bash::BashTool, edit::EditTool, glob::GlobTool, grep::GrepTool,
+            bash::{BashHost, BashTool}, edit::EditTool, glob::GlobTool, grep::GrepTool,
             list_files::ListFilesTool, notebook_edit::NotebookEditTool, read::ReadTool,
             write::WriteTool,
         },
@@ -40,6 +43,7 @@ use codez_runtime::{
         },
         processor::ToolResultProcessor,
         registry::{ToolFileServices, ToolHandler},
+        spawn::{CommandTaskError, CommandTaskRegistry},
         scheduler::ToolScheduler,
         types::{
             AgentRole, NormalizedToolCall, PreparedToolCall, ToolEffect, ToolExecutionError,
@@ -73,7 +77,9 @@ pub(crate) enum ChatToolRuntimeError {
     #[error(transparent)]
     Catalog(#[from] ToolCatalogError),
     #[error(transparent)]
-    Search(#[from] AppError),
+    Host(#[from] AppError),
+    #[error(transparent)]
+    CommandTasks(#[from] CommandTaskError),
 }
 
 /// Invalid data rejected before it can become a per-run tool execution context.
@@ -229,6 +235,8 @@ pub(crate) struct ChatToolRuntime {
     fingerprint_store: Arc<ReadFingerprintStore>,
     mutation_coordinator: Arc<FileMutationCoordinator>,
     edit_transaction_service: Arc<EditTransactionService>,
+    command_tasks: Arc<CommandTaskRegistry>,
+    bash: Option<Arc<BashTool>>,
 }
 
 impl ChatToolRuntime {
@@ -248,6 +256,7 @@ impl ChatToolRuntime {
         fingerprint_store: Arc<ReadFingerprintStore>,
         mutation_coordinator: Arc<FileMutationCoordinator>,
         edit_transaction_service: Arc<EditTransactionService>,
+        process_runner: Arc<NativeProcessRunner>,
     ) -> Result<Self, ChatToolRuntimeError> {
         let data_root = paths.data_directory();
         let rules = Arc::new(PermissionRuleStore::new(
@@ -260,12 +269,26 @@ impl ChatToolRuntime {
         )?);
         let permission = Arc::new(PermissionService::new(workspace_permissions, rules, audit));
         let resources = ResourceLocator::new(paths.resource_directory().to_path_buf());
-        let process_runner: Arc<dyn ProcessRunner> = Arc::new(NativeProcessRunner::new());
+        let process_port: Arc<dyn ProcessRunner> = process_runner.clone();
         let search = Arc::new(SearchService::new(
             resources.ripgrep_executable(),
-            process_runner,
+            process_port,
         )?);
-        let catalog = builtin_catalog(search)?;
+        let command_artifact_root = paths.temporary_directory().join("command-tasks");
+        fs::create_dir_all(&command_artifact_root).map_err(|source| {
+            AppError::storage(
+                "The command task artifact directory could not be initialized",
+                format!("create {}: {source}", command_artifact_root.display()),
+                false,
+            )
+        })?;
+        let spawned_process_runner = process_runner;
+        let command_tasks = Arc::new(CommandTaskRegistry::new(
+            spawned_process_runner,
+            command_artifact_root,
+        )?);
+        let bash = compose_bash_tool(Arc::clone(&command_tasks))?;
+        let catalog = builtin_catalog(search, bash.clone())?;
         let result_store = Arc::new(LargeToolResultStore::new(data_root.join("tool-results")));
         let processor = Arc::new(ToolResultProcessor::new(result_store, None, true));
         let journal = Arc::new(ToolExecutionJournal::new(
@@ -287,6 +310,8 @@ impl ChatToolRuntime {
             fingerprint_store,
             mutation_coordinator,
             edit_transaction_service,
+            command_tasks,
+            bash,
         })
     }
 
@@ -310,9 +335,14 @@ impl ChatToolRuntime {
         definitions
     }
 
-    /// Clears ephemeral permission decisions owned by a deleted session.
-    pub(crate) async fn clear_session_permissions(&self, session_id: &str) {
+    /// Clears commands, shell workspace state, and permission decisions owned by a session.
+    pub(crate) async fn clear_session_state(&self, session_id: &str) -> Result<(), AppError> {
+        let command_result = self.command_tasks.clear_session(session_id).await;
+        if let Some(bash) = &self.bash {
+            bash.clear_session(session_id);
+        }
         self.permission.clear_session(session_id).await;
+        command_result.map_err(AppError::from)
     }
 
     /// Executes normalized provider calls in deterministic position order.
@@ -549,17 +579,40 @@ fn ask_user_error_result(
     }
 }
 
-fn builtin_catalog(search: Arc<SearchService>) -> Result<ToolCatalogSnapshot, ToolCatalogError> {
-    let handlers: Vec<Arc<dyn ToolHandler>> = vec![
+fn compose_bash_tool(
+    command_tasks: Arc<CommandTaskRegistry>,
+) -> Result<Option<Arc<BashTool>>, ChatToolRuntimeError> {
+    let installation = match BashInstallation::discover() {
+        Ok(installation) => installation,
+        Err(BashDiscoveryError::NotFound) => {
+            tracing::warn!("Bash is unavailable; omitting it from the Provider tool catalog");
+            return Ok(None);
+        }
+        Err(error) => return Err(AppError::from(error).into()),
+    };
+    let (executable, environment) = installation.into_parts();
+    let host = BashHost::new(command_tasks, executable, environment)?;
+    Ok(Some(Arc::new(BashTool::with_host(host))))
+}
+
+fn builtin_catalog(
+    search: Arc<SearchService>,
+    bash: Option<Arc<BashTool>>,
+) -> Result<ToolCatalogSnapshot, ToolCatalogError> {
+    let mut handlers: Vec<Arc<dyn ToolHandler>> = vec![
         Arc::new(ReadTool::new()),
         Arc::new(WriteTool::new()),
         Arc::new(EditTool::new()),
-        Arc::new(BashTool::new()),
-        Arc::new(GlobTool::new(Arc::clone(&search))),
+    ];
+    if let Some(bash) = bash {
+        handlers.push(bash);
+    }
+    handlers.extend([
+        Arc::new(GlobTool::new(Arc::clone(&search))) as Arc<dyn ToolHandler>,
         Arc::new(GrepTool::new(search)),
         Arc::new(ListFilesTool::new()),
         Arc::new(NotebookEditTool::new()),
-    ];
+    ]);
     ToolCatalogSnapshot::from_handlers(BUILTIN_CATALOG_ID, handlers)
 }
 
@@ -723,6 +776,7 @@ mod tests {
                 Arc::new(codez_runtime::fingerprint::ReadFingerprintStore::default()),
                 Arc::new(codez_runtime::mutation_coordinator::FileMutationCoordinator::default()),
                 Arc::clone(&edit_transaction),
+                Arc::new(NativeProcessRunner::new()),
             )
             .expect("fixture tool runtime must compose");
             Self {
@@ -831,20 +885,18 @@ mod tests {
             .map(|definition| definition.function.name.as_str())
             .collect::<Vec<_>>();
 
-        assert_eq!(
-            names,
-            vec![
-                "Read",
-                "Write",
-                "Edit",
-                "Bash",
-                "Glob",
-                "Grep",
-                "list_files",
-                "NotebookEdit",
-                "AskUserQuestion",
-            ]
-        );
+        let mut expected = vec!["Read", "Write", "Edit"];
+        if fixture.runtime.bash.is_some() {
+            expected.push("Bash");
+        }
+        expected.extend([
+            "Glob",
+            "Grep",
+            "list_files",
+            "NotebookEdit",
+            "AskUserQuestion",
+        ]);
+        assert_eq!(names, expected);
         assert!(definitions.iter().all(|definition| {
             definition.r#type == "function"
                 && definition.function.parameters.get("type") == Some(&serde_json::json!("object"))

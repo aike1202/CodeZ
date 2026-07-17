@@ -9,4 +9,5 @@ mod path;
 pub mod powershell;
 pub mod read;
 mod search_support;
+mod shell_workspace;
 pub mod write;

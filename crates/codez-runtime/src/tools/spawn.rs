@@ -117,6 +117,44 @@ impl From<AppError> for CommandTaskError {
     }
 }
 
+impl From<CommandTaskError> for AppError {
+    fn from(error: CommandTaskError) -> Self {
+        let public_message = error.to_string();
+        match error {
+            CommandTaskError::EmptyCommand | CommandTaskError::InvalidHost(_) => {
+                AppError::validation(public_message)
+            }
+            CommandTaskError::NotFound(_) => AppError::not_found(public_message),
+            CommandTaskError::WrongSession => AppError::permission_denied(public_message),
+            CommandTaskError::WrongShell => AppError::validation(public_message),
+            CommandTaskError::Cancelled => AppError::cancelled(public_message),
+            CommandTaskError::TerminationNotConfirmed => AppError::external(
+                "The command process could not be stopped safely",
+                public_message,
+                true,
+            ),
+            CommandTaskError::Supervision { kind, message } => match kind {
+                AppErrorKind::Validation => AppError::validation(message),
+                AppErrorKind::Unsupported => AppError::unsupported(message),
+                AppErrorKind::PermissionDenied => AppError::permission_denied(message),
+                AppErrorKind::NotFound => AppError::not_found(message),
+                AppErrorKind::Conflict => AppError::conflict(message),
+                AppErrorKind::RunActive => AppError::run_active(message),
+                AppErrorKind::External => {
+                    AppError::external(message.clone(), message, false)
+                }
+                AppErrorKind::ProcessFailed => {
+                    AppError::process_failed(message.clone(), message)
+                }
+                AppErrorKind::Cancelled => AppError::cancelled(message),
+                AppErrorKind::Timeout => AppError::timeout(message),
+                AppErrorKind::Storage => AppError::storage(message.clone(), message, false),
+                AppErrorKind::Internal => AppError::internal(message),
+            },
+        }
+    }
+}
+
 pub struct CommandRequest {
     pub command: String,
     pub session_id: String,
@@ -352,11 +390,22 @@ impl CommandTaskRegistry {
         cancellation: &CancellationToken,
     ) -> Result<CommandTaskResult, CommandTaskError> {
         tokio::select! {
-            result = self.wait(access, task_id, wait_window) => result,
+            biased;
             () = cancellation.cancelled() => {
                 match self.interrupt(access, task_id).await {
                     Ok(_) => Err(CommandTaskError::Cancelled),
                     Err(error) => Err(error),
+                }
+            }
+            result = self.wait(access, task_id, wait_window) => {
+                match result {
+                    Ok(result)
+                        if result.status == CommandTaskStatus::Interrupted
+                            && cancellation.is_cancelled() =>
+                    {
+                        Err(CommandTaskError::Cancelled)
+                    }
+                    other => other,
                 }
             }
         }
@@ -944,26 +993,31 @@ mod tests {
 
     #[tokio::test]
     async fn cancellation_should_interrupt_the_owned_process() {
-        let harness = Harness::pending();
-        let cancellation = CancellationToken::new();
-        let trigger = cancellation.clone();
-        tokio::spawn(async move {
-            tokio::task::yield_now().await;
-            trigger.cancel();
-        });
+        let mut outcomes = Vec::new();
+        for _ in 0..32 {
+            let harness = Harness::pending();
+            let cancellation = CancellationToken::new();
+            let trigger = cancellation.clone();
+            tokio::spawn(async move {
+                tokio::task::yield_now().await;
+                trigger.cancel();
+            });
 
-        let error = harness
-            .registry
-            .run(harness.request("session-a", false), &cancellation)
-            .await
-            .expect_err("cancellation must fail the active tool call");
-        let termination_count = harness
-            .runner
-            .last_process()
-            .terminations
-            .load(Ordering::Relaxed);
+            let result = harness
+                .registry
+                .run(harness.request("session-a", false), &cancellation)
+                .await;
+            let termination_count = harness
+                .runner
+                .last_process()
+                .terminations
+                .load(Ordering::Relaxed);
+            outcomes.push((result, termination_count));
+        }
 
-        assert!(matches!(error, CommandTaskError::Cancelled) && termination_count == 1);
+        assert!(outcomes.into_iter().all(|(result, termination_count)| {
+            matches!(result, Err(CommandTaskError::Cancelled)) && termination_count == 1
+        }));
     }
 
     #[tokio::test]
@@ -1022,6 +1076,40 @@ mod tests {
             .load(Ordering::Relaxed);
 
         assert_eq!(termination_count, 0);
+    }
+
+    #[tokio::test]
+    async fn cancellation_and_explicit_interrupt_should_terminate_only_once() {
+        let harness = Harness::pending();
+        let cancellation = CancellationToken::new();
+        let running = harness
+            .registry
+            .run(harness.request("session-a", false), &cancellation)
+            .await
+            .expect("the short wait must return a retained task");
+
+        cancellation.cancel();
+        let interrupted = harness
+            .registry
+            .interrupt(
+                CommandTaskAccess {
+                    session_id: "session-a",
+                    shell: ShellKind::Bash,
+                },
+                &running.task_id,
+            )
+            .await
+            .expect("explicit interruption must converge with cancellation");
+        let termination_count = harness
+            .runner
+            .last_process()
+            .terminations
+            .load(Ordering::Relaxed);
+
+        assert_eq!(
+            (interrupted.status, termination_count),
+            (CommandTaskStatus::Interrupted, 1)
+        );
     }
 
     #[tokio::test]

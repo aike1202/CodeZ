@@ -45,8 +45,8 @@ impl SessionDeletionOperations for DesktopSessionDeletionOperations {
                 SessionDeletionStep::Permissions => {
                     self.dependencies
                         .chat_runtime
-                        .clear_session_permissions(session_id)
-                        .await;
+                        .clear_session_tool_state(session_id)
+                        .await?;
                 }
                 SessionDeletionStep::EditTransactions => {
                     cleanup_history_and_edit_transactions(

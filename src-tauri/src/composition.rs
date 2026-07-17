@@ -133,6 +133,7 @@ pub(crate) fn compose_app_state(
         Arc::clone(&fingerprint),
         Arc::clone(&mutation_coordinator),
         Arc::clone(&edit_transaction),
+        Arc::clone(&process_runner),
     )?);
     let attachment = Arc::new(codez_runtime::attachment::AttachmentService::new(
         paths.clone(),

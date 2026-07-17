@@ -1540,11 +1540,14 @@ impl ChatRuntime {
         })
     }
 
-    /// Clears ephemeral tool permission decisions owned by a deleted session.
-    pub(crate) async fn clear_session_permissions(&self, session_id: &SessionId) {
+    /// Clears command processes, shell state, and tool permissions owned by a deleted session.
+    pub(crate) async fn clear_session_tool_state(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), AppError> {
         self.tools
-            .clear_session_permissions(session_id.as_str())
-            .await;
+            .clear_session_state(session_id.as_str())
+            .await
     }
 
     async fn drive_provider_run(
@@ -5047,8 +5050,9 @@ mod tests {
                     WorkspacePermissionStore::new(paths.data_directory(), Arc::clone(&persistence))
                         .expect("fixture permission store must compose"),
                 );
-                let process_runner: Arc<dyn ProcessRunner> =
+                let native_process_runner =
                     Arc::new(codez_platform::NativeProcessRunner::new());
+                let process_runner: Arc<dyn ProcessRunner> = native_process_runner.clone();
                 let prompt = Arc::new(ChatPromptAssembler::new(
                     paths.data_directory().to_path_buf(),
                     Arc::clone(&permissions),
@@ -5063,6 +5067,7 @@ mod tests {
                         Arc::new(ReadFingerprintStore::default()),
                         Arc::new(FileMutationCoordinator::default()),
                         Arc::clone(&edit_transaction),
+                        native_process_runner,
                     )
                     .expect("fixture chat tools must compose"),
                 );
