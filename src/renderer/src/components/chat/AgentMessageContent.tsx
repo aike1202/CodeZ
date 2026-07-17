@@ -39,7 +39,10 @@ export function AgentMessageContent({
 
   const chunks = useMemo(() => {
     if (!msg.executionTimeline || msg.executionTimeline.length === 0) {
-      if (msg.reasoningContent || (msg.agentStates && msg.agentStates.length > 0)) {
+      if (
+        msg.reasoningContent
+        || (msg.agentStates && msg.agentStates.length > 0)
+      ) {
         return [{ type: 'execution', items: [], streaming: isStreaming }] as TimelineChunk[]
       }
       return []
@@ -77,7 +80,11 @@ export function AgentMessageContent({
   }, [msg.executionTimeline, msg.reasoningContent, msg.agentStates, isStreaming])
 
   // Legacy fallback if no executionTimeline but has agentStates or reasoningContent
-  const legacyExecution = (!msg.executionTimeline || msg.executionTimeline.length === 0) && (msg.reasoningContent || (msg.agentStates && msg.agentStates.length > 0))
+  const legacyExecution = (!msg.executionTimeline || msg.executionTimeline.length === 0) && (
+    msg.reasoningContent
+    || (msg.agentStates && msg.agentStates.length > 0)
+    || (msg.subAgents && msg.subAgents.length > 0)
+  )
   const firstExecutionChunkIndex = chunks.findIndex((chunk) => chunk.type === 'execution')
 
   return (

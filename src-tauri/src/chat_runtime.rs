@@ -54,7 +54,9 @@ use codez_providers::{
 use codez_runtime::attachment::{AttachmentService, ResolvedSessionImage};
 use codez_runtime::{
     CancellationTree,
-    agent::collaboration::{AgentAttemptOutput, AgentAttemptRequest, AgentMessageType},
+    agent::collaboration::{
+        AgentAttemptOutput, AgentAttemptRequest, AgentMailboxMessage, AgentMessageType,
+    },
     cancellation::SessionCancellation,
     chat::{
         prompt::{
@@ -124,6 +126,8 @@ const MAX_CHAT_INPUT_BYTES: usize = 1024 * 1024;
 const MAX_STEER_INPUT_BYTES: usize = 3 * 1024;
 const MAX_PREDICTION_INPUT_BYTES: usize = 1024 * 1024;
 const MAX_PROVIDER_SELECTOR_BYTES: usize = 512;
+const MAX_PROVIDER_OPEN_ATTEMPTS: u32 = 5;
+const PROVIDER_OPEN_RETRY_BASE_DELAY: Duration = Duration::from_millis(250);
 const TERMINAL_ACK_TIMEOUT: Duration = Duration::from_secs(2);
 const CONTROL_RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
 const PENDING_STOP_TTL: Duration = Duration::from_secs(60);
@@ -136,6 +140,7 @@ const ASK_USER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const PERMISSION_RESPONSE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const MAX_PENDING_PERMISSION_REQUESTS: usize = 256;
 const MAX_INTERRUPTED_CONTENT_BYTES: usize = 16 * 1024;
+const MAX_ROOT_AGENT_RESULTS_BYTES: usize = 128 * 1024;
 const MAX_COMMAND_METADATA_BYTES: usize = 64 * 1024;
 const MAX_COMMAND_METADATA_FILES: usize = 128;
 const MAX_COMMAND_METADATA_FIELD_BYTES: usize = 4 * 1024;
@@ -1417,6 +1422,10 @@ fn agent_system_addendum(request: &AgentAttemptRequest) -> String {
         "You are the CodeZ {} Agent at {}. Work only on the delegated task and use only the tools exposed in this request. Do not claim actions not supported by tool results.",
         agent.role, agent.path
     )];
+    sections.push(
+        "For multi-step work, send concise user-visible progress updates as ordinary assistant content before substantial tool batches and when findings materially change. Do not expose private reasoning or narrate every trivial read."
+            .to_string(),
+    );
     if agent.role == "Reviewer" {
         sections.push(
             "Report findings first. Shell access is restricted to explicit verification commands and must not mutate source files."
@@ -3478,14 +3487,59 @@ async fn run_provider_conversation(
             provider_id: resolved.provider_id.clone(),
             model: resolved.model.id.clone(),
         };
-        let stream = match open_provider_stream(
-            resolved,
-            messages,
-            provider_tools.clone(),
-            cancellation.clone(),
-        )
-        .await
-        {
+        let mut retry_config = Some(resolved);
+        let mut open_attempt = 1_u32;
+        let stream_result = loop {
+            let attempt_config = match retry_config.take() {
+                Some(config) => config,
+                None => match providers
+                    .resolve_chat_config(Some(&provider_id), Some(&model_id))
+                    .await
+                {
+                    Ok(config) => config,
+                    Err(error) => {
+                        return TerminalOutcome::Failed {
+                            error,
+                            provider_code: None,
+                        };
+                    }
+                },
+            };
+            match open_provider_stream(
+                attempt_config,
+                messages.clone(),
+                provider_tools.clone(),
+                cancellation.clone(),
+            )
+            .await
+            {
+                Err(error)
+                    if is_retryable_provider_open_error(&error)
+                        && open_attempt < MAX_PROVIDER_OPEN_ATTEMPTS =>
+                {
+                    let delay = provider_open_retry_delay(open_attempt);
+                    tracing::warn!(
+                        provider_id = provider_id.as_str(),
+                        model = model_id.as_str(),
+                        attempt = open_attempt,
+                        max_attempts = MAX_PROVIDER_OPEN_ATTEMPTS,
+                        delay_ms = delay.as_millis(),
+                        diagnostic = %error,
+                        "transient Provider open failure; retrying"
+                    );
+                    tokio::select! {
+                        biased;
+                        () = cancellation.cancelled() => {
+                            break Err(ChatProviderError::Cancelled);
+                        }
+                        () = tokio::time::sleep(delay) => {}
+                    }
+                    open_attempt = open_attempt.saturating_add(1);
+                }
+                result => break result,
+            }
+        };
+        let stream = match stream_result {
             Ok(stream) => stream,
             Err(ChatProviderError::Cancelled) => {
                 return TerminalOutcome::Interrupted {
@@ -3652,43 +3706,95 @@ async fn run_provider_conversation(
         }
 
         sink.drain_controls();
-        let Some(steer) = sink.take_next_steer() else {
-            return TerminalOutcome::Completed {
-                full_content,
-                stop_reason,
-                usage,
-                request_fingerprint,
+        if let Some(steer) = sink.take_next_steer() {
+            if let Err(error) = conversation
+                .record_assistant(full_content, usage, request_fingerprint)
+                .await
+            {
+                return TerminalOutcome::Failed {
+                    error,
+                    provider_code: None,
+                };
+            }
+            if let Err(error) = conversation
+                .record_user(steer.text.clone(), None, false, None, Vec::new())
+                .await
+            {
+                return TerminalOutcome::Failed {
+                    error,
+                    provider_code: None,
+                };
+            }
+            if let Err(error) = sink
+                .send_event(ChatStreamFrameEvent::SteerConsumed {
+                    input: steer.clone(),
+                })
+                .await
+            {
+                return TerminalOutcome::Failed {
+                    error,
+                    provider_code: None,
+                };
+            }
+            continue;
+        }
+
+        if let Some(tool_run) = tool_run {
+            let agent_messages = match tools.wait_for_root_agent_results(tool_run).await {
+                Ok(messages) => messages,
+                Err(error) if cancellation.is_cancelled() => {
+                    return TerminalOutcome::Interrupted {
+                        reason: error.public_message().to_string(),
+                    };
+                }
+                Err(error) => {
+                    return TerminalOutcome::Failed {
+                        error,
+                        provider_code: None,
+                    };
+                }
             };
+            if !agent_messages.is_empty() {
+                if let Err(error) = conversation
+                    .record_assistant(full_content, usage, request_fingerprint)
+                    .await
+                {
+                    return TerminalOutcome::Failed {
+                        error,
+                        provider_code: None,
+                    };
+                }
+                if let Err(error) = conversation
+                    .record_user(
+                        root_agent_results_message(&agent_messages),
+                        None,
+                        true,
+                        Some(serde_json::json!({
+                            "internal": "root_agent_results",
+                            "messageIds": agent_messages
+                                .iter()
+                                .map(|message| message.message_id.as_str())
+                                .collect::<Vec<_>>()
+                        })),
+                        Vec::new(),
+                    )
+                    .await
+                {
+                    return TerminalOutcome::Failed {
+                        error,
+                        provider_code: None,
+                    };
+                }
+                continue;
+            }
+        }
+
+        return TerminalOutcome::Completed {
+            full_content,
+            stop_reason,
+            usage,
+            request_fingerprint,
         };
-        if let Err(error) = conversation
-            .record_assistant(full_content, usage, request_fingerprint)
-            .await
-        {
-            return TerminalOutcome::Failed {
-                error,
-                provider_code: None,
-            };
-        }
-        if let Err(error) = conversation
-            .record_user(steer.text.clone(), None, false, None, Vec::new())
-            .await
-        {
-            return TerminalOutcome::Failed {
-                error,
-                provider_code: None,
-            };
-        }
-        if let Err(error) = sink
-            .send_event(ChatStreamFrameEvent::SteerConsumed {
-                input: steer.clone(),
-            })
-            .await
-        {
-            return TerminalOutcome::Failed {
-                error,
-                provider_code: None,
-            };
-        }
     }
 }
 
@@ -4338,12 +4444,43 @@ fn bounded_text(value: &str, max_bytes: usize) -> String {
     value[..end].to_string()
 }
 
+fn root_agent_results_message(messages: &[AgentMailboxMessage]) -> String {
+    let mut rendered = String::from(
+        "<subagent_results>\nThe direct SubAgents have finished. Use their reports to produce the final response for the user.\n",
+    );
+    for message in messages {
+        let kind = match message.message_type {
+            AgentMessageType::NewTask => "new task",
+            AgentMessageType::Message => "message",
+            AgentMessageType::FinalAnswer => "final answer",
+        };
+        rendered.push_str(&format!(
+            "\n## {} ({kind})\n{}\n",
+            message.author, message.payload
+        ));
+    }
+    rendered.push_str("</subagent_results>");
+    bounded_text(&rendered, MAX_ROOT_AGENT_RESULTS_BYTES)
+}
+
 fn provider_failure(error: ChatProviderError) -> TerminalOutcome {
     let provider_code = Some(provider_error_code(&error));
     TerminalOutcome::Failed {
         error: provider_app_error(error),
         provider_code,
     }
+}
+
+const fn is_retryable_provider_open_error(error: &ChatProviderError) -> bool {
+    matches!(
+        error,
+        ChatProviderError::RateLimit(_) | ChatProviderError::Network(_)
+    )
+}
+
+fn provider_open_retry_delay(failed_attempt: u32) -> Duration {
+    let exponent = failed_attempt.saturating_sub(1).min(3);
+    PROVIDER_OPEN_RETRY_BASE_DELAY.saturating_mul(1_u32 << exponent)
 }
 
 fn provider_app_error(error: ChatProviderError) -> AppError {
@@ -5382,8 +5519,8 @@ mod tests {
         use tokio::sync::mpsc;
 
         use super::super::{
-            CONTROL_CAPACITY, ChatPromptAssembler, ChatPromptSources, ChatRuntime,
-            ConversationLedger, FrameSink, PermissionResponseRegistry,
+            AgentConversationSink, CONTROL_CAPACITY, ChatPromptAssembler, ChatPromptSources,
+            ChatRuntime, ConversationLedger, FrameSink, PermissionResponseRegistry,
             ProviderConversationServices, RunControl, RunEntry, TerminalOutcome,
             denied_permission_response, permission_request_to_wire, run_provider_conversation,
         };
@@ -5411,6 +5548,19 @@ mod tests {
                         report: "child-final-evidence".to_string(),
                         conclusion: None,
                     });
+                }
+                if request.agent.task_name == "auto-wait-child" {
+                    return tokio::select! {
+                        () = tokio::time::sleep(Duration::from_millis(150)) => {
+                            Ok(AgentAttemptOutput {
+                                report: "auto-wait-child-evidence".to_string(),
+                                conclusion: Some("The delegated analysis completed.".to_string()),
+                            })
+                        }
+                        () = cancellation.cancelled() => {
+                            Err(AppError::cancelled("fixture root Agent stopped"))
+                        }
+                    };
                 }
                 cancellation.cancelled().await;
                 Err(AppError::cancelled("fixture parent Agent stopped"))
@@ -5846,6 +5996,17 @@ mod tests {
             )
         }
 
+        fn service_unavailable_response() -> String {
+            let body = json!({
+                "error": { "message": "Service temporarily unavailable", "type": "api_error" }
+            })
+            .to_string();
+            format!(
+                "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+        }
+
         async fn seed_prior_context(
             ledger: &ModelLedgerStore,
             session_id: &SessionId,
@@ -6121,6 +6282,63 @@ mod tests {
             format!("data: {payload}\n\ndata: [DONE]\n\n")
         }
 
+        fn root_agent_spawn_tool_call_turn() -> String {
+            let arguments = json!({
+                "role": "Explore",
+                "taskName": "auto-wait-child",
+                "description": "Collect delegated evidence",
+                "message": "Return delegated evidence after a short delay"
+            })
+            .to_string();
+            let payload = json!({
+                "choices": [{
+                    "delta": {"tool_calls": [{
+                        "index": 0,
+                        "id": "call-root-agent-spawn",
+                        "type": "function",
+                        "function": {"name": "spawn_agent", "arguments": arguments}
+                    }]},
+                    "finish_reason": "tool_calls"
+                }],
+                "usage": {
+                    "prompt_tokens": 80,
+                    "completion_tokens": 5,
+                    "total_tokens": 85
+                }
+            });
+            format!("data: {payload}\n\ndata: [DONE]\n\n")
+        }
+
+        fn premature_parent_completed_turn() -> String {
+            let payload = json!({
+                "choices": [{
+                    "delta": {"content": "The delegated work is still running."},
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": 90,
+                    "completion_tokens": 8,
+                    "total_tokens": 98
+                }
+            });
+            format!("data: {payload}\n\ndata: [DONE]\n\n")
+        }
+
+        fn root_agent_synthesis_turn() -> String {
+            let payload = json!({
+                "choices": [{
+                    "delta": {"content": "The final response includes the delegated evidence."},
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": 110,
+                    "completion_tokens": 10,
+                    "total_tokens": 120
+                }
+            });
+            format!("data: {payload}\n\ndata: [DONE]\n\n")
+        }
+
         fn parent_completed_turn() -> String {
             let payload = json!({
                 "choices": [{
@@ -6332,6 +6550,65 @@ mod tests {
                     })
                 })
             }));
+        }
+
+        #[tokio::test]
+        async fn provider_service_unavailable_retries_before_streaming() {
+            let fixture = RuntimeFixture::new();
+            let server =
+                LocalProviderServer::start(vec![service_unavailable_response(), completed_turn()]);
+            let (providers, provider_id) = local_provider(&server.base_url).await;
+            let session_id =
+                SessionId::parse("session-service-retry").expect("fixture session ID must parse");
+            let cancellation_tree = Arc::new(CancellationTree::new());
+            let frames = Arc::new(Mutex::new(Vec::new()));
+            let (mut sink, entry, cancellation) = frame_sink(
+                cancellation_tree.as_ref(),
+                session_id,
+                StreamId::parse("run-service-retry").expect("fixture run ID must parse"),
+                frames,
+            );
+            let resolved = providers
+                .resolve_chat_config(Some(&provider_id), Some("local-model"))
+                .await
+                .expect("local Provider config must resolve");
+            let mut conversation = ConversationLedger::begin(
+                Arc::clone(&fixture.ledger),
+                &entry,
+                &ChatStreamInput {
+                    text: "Retry a transient Provider failure.".to_string(),
+                    attachments: None,
+                    is_system: None,
+                    command_metadata: None,
+                },
+                &[],
+                fixture.attachment.as_ref(),
+                &resolved,
+            )
+            .await
+            .expect("retry conversation must begin");
+
+            let outcome = run_provider_conversation(
+                ProviderConversationServices {
+                    providers: &providers,
+                    tools: &fixture.tools,
+                    attachment_service: &fixture.attachment,
+                    prompt: &fixture.prompt,
+                },
+                resolved,
+                cancellation,
+                &mut conversation,
+                None,
+                &mut sink,
+            )
+            .await;
+
+            assert!(matches!(
+                &outcome,
+                TerminalOutcome::Completed { full_content, .. }
+                    if full_content.contains("approved tool result")
+            ));
+            assert_eq!(server.finish().len(), 2);
         }
 
         #[tokio::test]
@@ -6831,6 +7108,120 @@ mod tests {
                 .cleanup_session(&session_id)
                 .await
                 .expect("mailbox fixture cleanup must stop the parent Agent");
+        }
+
+        #[tokio::test]
+        async fn main_completion_waits_for_root_agent_before_final_synthesis() {
+            let fixture = RuntimeFixture::new();
+            let server = LocalProviderServer::start(vec![
+                root_agent_spawn_tool_call_turn(),
+                premature_parent_completed_turn(),
+                root_agent_synthesis_turn(),
+            ]);
+            let (providers, provider_id) = local_provider(&server.base_url).await;
+            let cancellation_tree = Arc::new(CancellationTree::new());
+            let session_id =
+                SessionId::parse("session-root-agent-wait").expect("fixture session ID must parse");
+            let run_id = StreamId::parse("run-root-agent-wait").expect("fixture run ID must parse");
+            let (_frame_sink, entry, cancellation) = frame_sink(
+                cancellation_tree.as_ref(),
+                session_id.clone(),
+                run_id.clone(),
+                Arc::new(Mutex::new(Vec::new())),
+            );
+            let mut sink = AgentConversationSink;
+            let resolved = providers
+                .resolve_chat_config(Some(&provider_id), Some("local-model"))
+                .await
+                .expect("local Provider config must resolve");
+            let mut conversation = ConversationLedger::begin(
+                Arc::clone(&fixture.ledger),
+                &entry,
+                &ChatStreamInput {
+                    text: "Delegate the analysis and return its evidence.".to_string(),
+                    attachments: None,
+                    is_system: None,
+                    command_metadata: None,
+                },
+                &[],
+                fixture.attachment.as_ref(),
+                &resolved,
+            )
+            .await
+            .expect("root Agent conversation must begin");
+            let tool_context = ChatToolRunContext::new(
+                fixture.workspace_root(),
+                session_id.clone(),
+                run_id,
+                cancellation.clone(),
+                "main".to_string(),
+                PermissionAiContext::default(),
+                None,
+                None,
+            )
+            .expect("root Agent tool context must compose");
+
+            let outcome = tokio::time::timeout(
+                Duration::from_secs(5),
+                run_provider_conversation(
+                    ProviderConversationServices {
+                        providers: &providers,
+                        tools: &fixture.tools,
+                        attachment_service: &fixture.attachment,
+                        prompt: &fixture.prompt,
+                    },
+                    resolved,
+                    cancellation,
+                    &mut conversation,
+                    Some(&tool_context),
+                    &mut sink,
+                ),
+            )
+            .await;
+            let outcome = match outcome {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    let snapshot = fixture
+                        .agent_runtime
+                        .snapshot(&session_id)
+                        .await
+                        .expect("timed out root Agent snapshot must load");
+                    let request_count = server
+                        .requests
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .len();
+                    panic!(
+                        "root Agent wait and synthesis timed out after {request_count} requests: {error}; snapshot: {snapshot:?}"
+                    );
+                }
+            };
+            assert!(matches!(
+                &outcome,
+                TerminalOutcome::Completed { full_content, .. }
+                    if full_content.contains("final response")
+            ));
+            conversation
+                .persist_terminal(&outcome)
+                .await
+                .expect("root Agent synthesis must persist");
+
+            let snapshot = fixture
+                .agent_runtime
+                .snapshot(&session_id)
+                .await
+                .expect("root Agent snapshot must load");
+            assert!(snapshot.agents.iter().any(|agent| {
+                agent.task_name == "auto-wait-child"
+                    && agent.status == AgentRuntimeStatus::Completed
+            }));
+            let requests = server.finish();
+            assert_eq!(requests.len(), 3);
+            assert!(requests[2]["messages"].as_array().is_some_and(|messages| {
+                messages
+                    .iter()
+                    .any(|message| message.to_string().contains("auto-wait-child-evidence"))
+            }));
         }
 
         #[tokio::test]

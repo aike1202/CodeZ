@@ -60,8 +60,10 @@ export function buildUnifiedTimeline(
 
   timeline.forEach((item) => {
     if (item.type === 'reasoning') {
-      const durationStr = formatReasoningDuration(item)
       const isActuallyRunning = item.status === 'running' && isStreaming !== false
+      const durationMs = Math.max((item.completedAt ?? item.updatedAt) - item.startedAt, 0)
+      if (!isActuallyRunning && (!item.content.trim() || durationMs < 100)) return
+      const durationStr = formatReasoningDuration(item)
       list.push({
         id: item.id,
         type: 'reasoning',
@@ -319,7 +321,12 @@ export function buildUnifiedTimeline(
           verbDisplay = tc.status === 'running' ? 'Asking' : 'Asked'
         } else if (tc.name === 'submit_result' || tc.name === 'submit') {
           verbDisplay = tc.status === 'running' ? 'Submitting' : 'Submitted'
-        } else if (tc.name === 'SubAgentRunner' || tc.name === 'spawn' || tc.name === 'delegate') {
+        } else if (
+          tc.name === 'SubAgentRunner'
+          || tc.name === 'spawn'
+          || tc.name === 'spawn_agent'
+          || tc.name === 'delegate'
+        ) {
           verbDisplay = tc.status === 'running' ? 'Dispatching' : 'Dispatched'
         } else if (tc.name === 'DelegateTasks') {
           verbDisplay = tc.status === 'running' ? 'Executing' : 'Executed'
@@ -416,7 +423,12 @@ export function buildUnifiedTimeline(
         }
 
         // SubAgentRunner / spawn / DelegateTasks：展示委派目标
-        if (tc.name === 'SubAgentRunner' || tc.name === 'spawn' || tc.name === 'DelegateTasks') {
+        if (
+          tc.name === 'SubAgentRunner'
+          || tc.name === 'spawn'
+          || tc.name === 'spawn_agent'
+          || tc.name === 'DelegateTasks'
+        ) {
           try {
             const ta = JSON.parse(tc.args)
             targetDisplay = ta.description || ta.subagent_type || '子任务'

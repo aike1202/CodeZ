@@ -92,6 +92,9 @@ export type ExecutionTimelineItem =
 /** 子 Agent 调用记录 — 与主 Agent 时间线分离，由 SubAgentCard 消费 */
 export interface SubAgentRecord {
   id: string
+  sessionId?: string
+  contextScopeId?: string
+  attemptId?: string
   type: string
   description: string
   prompt: string

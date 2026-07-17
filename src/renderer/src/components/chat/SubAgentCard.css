@@ -133,6 +133,13 @@
   border-top: 1px solid var(--border-color);
 }
 
+.subagent-progress-message {
+  padding: 8px 6px;
+  color: var(--text-main);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 /* ── 统计行 ── */
 
 .subagent-card-stats-row {

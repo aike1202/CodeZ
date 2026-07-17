@@ -240,6 +240,7 @@ export default function RightWorkspacePanel({
             >
               <SubAgentLogPanel
                 subAgent={subAgent}
+                visible={resolvedActiveTabId === tab.id}
                 onFileClick={onFileClick}
                 onDiffClick={onDiffClick}
               />

@@ -620,12 +620,15 @@ impl AgentRuntime {
         timeout: Duration,
     ) -> Result<AgentWaitResult, AppError> {
         let state = self.session_state(session_id);
+        let notify = {
+            let state = state.lock().await;
+            Arc::clone(&state.notify)
+        };
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
-            let notified = {
-                let state = state.lock().await;
-                Arc::clone(&state.notify).notified_owned()
-            };
+            let notified = Arc::clone(&notify).notified_owned();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
             let mut guard = state.lock().await;
             self.ensure_loaded(session_id, &mut guard).await?;
             let mut next = loaded_snapshot(&guard)?;
@@ -672,7 +675,10 @@ impl AgentRuntime {
                     outcome: AgentWaitOutcome::Timeout,
                 });
             }
-            if tokio::time::timeout_at(deadline, notified).await.is_err() {
+            if tokio::time::timeout_at(deadline, &mut notified)
+                .await
+                .is_err()
+            {
                 return Ok(AgentWaitResult {
                     messages: Vec::new(),
                     outcome: AgentWaitOutcome::Timeout,

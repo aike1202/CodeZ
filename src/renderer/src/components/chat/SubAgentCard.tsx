@@ -4,6 +4,7 @@ import IconCheck from '../icons/IconCheck'
 import IconWarning from '../icons/IconWarning'
 import IconChevronDown from '../icons/IconChevronDown'
 import { PanelRightOpen } from 'lucide-react'
+import MessageBody from './MessageBody'
 import { LogItemRow } from './ExecutionLog/components/LogItemRow'
 import {
   buildFallbackTimeline,
@@ -240,16 +241,26 @@ export function SubAgentCard({
               {showTimeline && (
                 <div className="subagent-section-content subagent-section-content--timeline">
                   {innerTimeline.map((ti, i) => (
-                    <LogItemRow
-                      key={ti.id}
-                      item={ti}
-                      isLast={i === innerTimeline.length - 1}
-                      isItemExpanded={Boolean(itemExpandedMap[ti.id])}
-                      hasItemDetail={hasItemDetail(ti)}
-                      toggleItemExpand={toggleItemExpand}
-                      onFileClick={onFileClick}
-                      onDiffClick={onDiffClick}
-                    />
+                    ti.type === 'text' ? (
+                      <div key={ti.id} className="subagent-progress-message">
+                        <MessageBody
+                          content={ti.detail || ''}
+                          streaming={ti.status === 'running'}
+                          onFileClick={(filePath) => onFileClick?.(filePath)}
+                        />
+                      </div>
+                    ) : (
+                      <LogItemRow
+                        key={ti.id}
+                        item={ti}
+                        isLast={i === innerTimeline.length - 1}
+                        isItemExpanded={Boolean(itemExpandedMap[ti.id])}
+                        hasItemDetail={hasItemDetail(ti)}
+                        toggleItemExpand={toggleItemExpand}
+                        onFileClick={onFileClick}
+                        onDiffClick={onDiffClick}
+                      />
+                    )
                   ))}
                 </div>
               )}

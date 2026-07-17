@@ -6,6 +6,7 @@ use std::{
     path::Path,
     pin::Pin,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use codez_contracts::chat::{ChatAskUserAnswer, ChatAskUserQuestion, ChatAskUserRequest};
@@ -21,7 +22,9 @@ use codez_platform::{
 };
 use codez_runtime::{
     SearchService,
-    agent::collaboration::AgentRuntime,
+    agent::collaboration::{
+        AgentMailboxMessage, AgentMessageDeliveryState, AgentRuntime, AgentWaitOutcome,
+    },
     context::ledger::ModelLedgerStore,
     edit_transaction::EditTransactionService,
     fingerprint::ReadFingerprintStore,
@@ -84,6 +87,8 @@ use crate::{
 const BUILTIN_CATALOG_ID: &str = "chat-builtin-v1";
 const MAX_AGENT_ROLE_BYTES: usize = 160;
 const ASK_USER_TOOL_NAME: &str = "AskUserQuestion";
+const ROOT_AGENT_PATH: &str = "/root";
+const ROOT_AGENT_WAIT_SLICE: Duration = Duration::from_secs(30);
 
 #[async_trait::async_trait]
 pub(crate) trait AskUserHandler: Send + Sync {
@@ -318,6 +323,7 @@ pub(crate) struct ChatToolRuntime {
     command_tasks: Arc<CommandTaskRegistry>,
     exposure_state: Arc<ToolExposureState>,
     skills: Arc<SkillsService>,
+    agent_runtime: Arc<AgentRuntime>,
     bash: Option<Arc<BashTool>>,
     powershell: Option<Arc<PowerShellTool>>,
 }
@@ -418,7 +424,7 @@ impl ChatToolRuntime {
             powershell: powershell.clone(),
             result_store: Arc::clone(&result_store),
             task_store,
-            agent_runtime,
+            agent_runtime: Arc::clone(&agent_runtime),
             exposure_state: Arc::clone(&exposure_state),
             skills: Arc::clone(&skills),
             model_ledger,
@@ -449,6 +455,7 @@ impl ChatToolRuntime {
             command_tasks,
             exposure_state,
             skills,
+            agent_runtime,
             bash,
             powershell,
         })
@@ -470,6 +477,63 @@ impl ChatToolRuntime {
 
     pub(crate) fn skill_service(&self) -> Arc<SkillsService> {
         Arc::clone(&self.skills)
+    }
+
+    /// Waits for direct root Agents that still owe the main conversation mailbox updates.
+    ///
+    /// A normal Provider completion must not tear down children it just started. The wait remains
+    /// tied to the main run cancellation token so an explicit user stop still cancels promptly.
+    pub(crate) async fn wait_for_root_agent_results(
+        &self,
+        run: &ChatToolRunContext,
+    ) -> Result<Vec<AgentMailboxMessage>, AppError> {
+        if run.context_scope_id() != &ContextScopeId::Main {
+            return Ok(Vec::new());
+        }
+
+        let snapshot = self.agent_runtime.snapshot(run.session_id()).await?;
+        let unread_authors = snapshot
+            .messages
+            .iter()
+            .filter(|message| {
+                message.delivery_state == AgentMessageDeliveryState::Unread
+                    && message.recipient == ROOT_AGENT_PATH
+            })
+            .map(|message| message.author.as_str())
+            .collect::<HashSet<_>>();
+        let targets = snapshot
+            .agents
+            .iter()
+            .filter(|agent| {
+                agent.parent_agent_id == ROOT_AGENT_PATH
+                    && (agent.status.is_active() || unread_authors.contains(agent.path.as_str()))
+            })
+            .map(|agent| agent.agent_id.clone())
+            .collect::<Vec<_>>();
+        if targets.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut messages = Vec::new();
+        loop {
+            let wait = self.agent_runtime.wait_for_update(
+                run.session_id(),
+                "main",
+                &targets,
+                ROOT_AGENT_WAIT_SLICE,
+            );
+            let result = tokio::select! {
+                result = wait => result?,
+                () = run.cancellation.cancelled() => {
+                    return Err(AppError::cancelled("The root Agent wait was cancelled"));
+                }
+            };
+            messages.extend(result.messages);
+            match result.outcome {
+                AgentWaitOutcome::Updated | AgentWaitOutcome::Timeout => {}
+                AgentWaitOutcome::NoActiveAgents => return Ok(messages),
+            }
+        }
     }
 
     #[expect(

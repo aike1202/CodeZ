@@ -27,6 +27,8 @@ import {
   useAppPreview
 } from './hooks/useAppPreview'
 import { desktopApi } from '../shared/desktop'
+import { useDesktopLifecycleStore } from '../stores/desktopLifecycleStore'
+import { mergeRuntimeSubAgents } from '../utils/runtimeSubAgents'
 
 export default function App(): React.ReactElement {
   return (
@@ -50,6 +52,9 @@ function ActiveApp(): React.ReactElement {
   const setPlanListModalOpen = useChatStore((s) => s.setPlanListModalOpen)
   const createSession = useChatStore((s) => s.createSession)
   const setPendingPrompt = useChatStore((s) => s.setPendingPrompt)
+  const agentSnapshot = useDesktopLifecycleStore((state) =>
+    activeSessionId ? state.agentSnapshots[activeSessionId] : undefined
+  )
 
   const {
     workspace,
@@ -82,9 +87,13 @@ function ActiveApp(): React.ReactElement {
   const [activeRightTabId, setActiveRightTabId] = useState<string | null>(null)
   const [taskModalOpen, setTaskModalOpen] = useState(false)
 
+  const displayMessages = useMemo(
+    () => mergeRuntimeSubAgents(messages, agentSnapshot),
+    [agentSnapshot, messages]
+  )
   const subAgents = useMemo(
-    () => messages.flatMap((message) => message.subAgents ?? []),
-    [messages]
+    () => displayMessages.flatMap((message) => message.subAgents ?? []),
+    [displayMessages]
   )
   const hasRightTabs = previewTabs.length > 0 || terminalOpen || subagentTabs.length > 0
   const panelOpen = rightPanelVisible && hasRightTabs
@@ -299,7 +308,7 @@ function ActiveApp(): React.ReactElement {
               terminalOpen={terminalOpen}
               subagentTabs={subagentTabs}
               subAgents={subAgents}
-              messages={messages}
+              messages={displayMessages}
               workspace={workspace}
               panelWidth={previewPanelWidth}
               onSelectTab={handleSelectRightTab}
@@ -313,7 +322,7 @@ function ActiveApp(): React.ReactElement {
         }
         chatArea={
           <ChatArea
-            messages={messages}
+            messages={displayMessages}
             activeSessionId={activeSessionId}
             workspace={workspace}
             panelOpen={panelOpen}

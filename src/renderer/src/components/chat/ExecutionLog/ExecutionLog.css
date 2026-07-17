@@ -106,6 +106,14 @@
   padding-top: 6px;
 }
 
+.subagent-launcher-list--inline {
+  margin: 0 0 8px 26px;
+}
+
+.subagent-launcher-list--fallback {
+  margin-top: 8px;
+}
+
 .subagent-launcher-list .subagent-card {
   margin: 0;
   border-radius: 6px;

@@ -20,6 +20,7 @@ import { LogItemRow } from './components/LogItemRow'
 import { ParallelToolBatchCard } from './components/ParallelToolBatchCard'
 import SubAgentCard from '../SubAgentCard'
 import { ParallelWaveGroup } from '../ParallelWaveGroup'
+import { isRuntimeFallbackParent } from '../../../utils/runtimeSubAgents'
 
 export default function ExecutionLog({
   timeline,
@@ -49,14 +50,46 @@ export default function ExecutionLog({
   const visibleSubAgents = useMemo(() => {
     if (!subAgents?.length) return []
     const parentToolIds = new Set(unifiedItems.map((item) => item.id))
-    return subAgents.filter((subAgent) => parentToolIds.has(subAgent.parentToolCallId))
-  }, [subAgents, unifiedItems])
+    return subAgents.filter((subAgent) =>
+      parentToolIds.has(subAgent.parentToolCallId)
+      || (showParallelExecution && (
+        unifiedItems.length === 0 || isRuntimeFallbackParent(subAgent.parentToolCallId)
+      ))
+    )
+  }, [showParallelExecution, subAgents, unifiedItems])
+  const subAgentsByParent = useMemo(() => {
+    const grouped = new Map<string, typeof visibleSubAgents>()
+    for (const subAgent of visibleSubAgents) {
+      const siblings = grouped.get(subAgent.parentToolCallId) ?? []
+      grouped.set(subAgent.parentToolCallId, [...siblings, subAgent])
+    }
+    return grouped
+  }, [visibleSubAgents])
+  const matchedSubAgentIds = useMemo(() => {
+    const matched = new Set<string>()
+    for (const item of displayItems) {
+      const timelineIds = item.type === 'parallel-batch'
+        ? item.items.map((child) => child.id)
+        : [item.id]
+      for (const timelineId of timelineIds) {
+        for (const subAgent of subAgentsByParent.get(timelineId) ?? []) {
+          matched.add(subAgent.id)
+        }
+      }
+    }
+    return matched
+  }, [displayItems, subAgentsByParent])
+  const unmatchedSubAgents = useMemo(
+    () => visibleSubAgents.filter((subAgent) => !matchedSubAgentIds.has(subAgent.id)),
+    [matchedSubAgentIds, visibleSubAgents]
+  )
 
   const running = useMemo(() => {
     return !interrupted && (
       Boolean(streaming) || unifiedItems.some((item) => item.status === 'running')
+      || visibleSubAgents.some((subAgent) => subAgent.status === 'running')
     )
-  }, [unifiedItems, streaming, interrupted])
+  }, [unifiedItems, visibleSubAgents, streaming, interrupted])
 
   useEffect(() => {
     if (running) {
@@ -101,11 +134,12 @@ export default function ExecutionLog({
     })
   }, [lastReasoningId, lastReasoningStatus, itemsCount])
 
-  if (unifiedItems.length === 0) return null
-
-  const summary = buildSummaryText(unifiedItems, running, interrupted)
   const askSummary = useMemo(() => extractAskSummary(unifiedItems), [unifiedItems])
+  if (unifiedItems.length === 0 && visibleSubAgents.length === 0) return null
 
+  const summary = unifiedItems.length > 0
+    ? buildSummaryText(unifiedItems, running, interrupted)
+    : running ? '子智能体运行中' : '子智能体已结束'
   const hasDetail = (item: UnifiedTimelineItem) => {
     const isFileItem = item.type === 'edit' || (item.type === 'tool' && item.verb === 'Analyzed' && item.fileName)
     if (isFileItem) return false
@@ -128,6 +162,26 @@ export default function ExecutionLog({
       ...prev,
       [id]: !prev[id]
     }))
+  }
+
+  const subAgentCardsFor = (parentIds: string[], placement: 'inline' | 'fallback') => {
+    const records = [...new Map(
+      parentIds
+        .flatMap((parentId) => subAgentsByParent.get(parentId) ?? [])
+        .map((subAgent) => [subAgent.id, subAgent])
+    ).values()]
+    if (records.length === 0) return null
+    return (
+      <div className={`subagent-launcher-list subagent-launcher-list--${placement}`}>
+        {records.map((subAgent) => (
+          <SubAgentCard
+            key={subAgent.id}
+            subAgent={subAgent}
+            onOpenDetails={onSubAgentClick}
+          />
+        ))}
+      </div>
+    )
   }
 
   return (
@@ -176,44 +230,40 @@ export default function ExecutionLog({
           {displayItems.map((item, idx) => {
             if (item.type === 'parallel-batch') {
               return (
-                <ParallelToolBatchCard
-                  key={item.id}
-                  batch={item}
-                  expandedMap={expandedMap}
-                  hasItemDetail={hasDetail}
-                  toggleItemExpand={toggleItemExpand}
-                  onFileClick={onFileClick}
-                  onDiffClick={onDiffClick}
-                />
+                <React.Fragment key={item.id}>
+                  <ParallelToolBatchCard
+                    batch={item}
+                    expandedMap={expandedMap}
+                    hasItemDetail={hasDetail}
+                    toggleItemExpand={toggleItemExpand}
+                    onFileClick={onFileClick}
+                    onDiffClick={onDiffClick}
+                  />
+                  {subAgentCardsFor(item.items.map((child) => child.id), 'inline')}
+                </React.Fragment>
               )
             }
 
             return (
-              <LogItemRow
-                key={item.id}
-                item={item}
-                isLast={idx === displayItems.length - 1}
-                isItemExpanded={Boolean(expandedMap[item.id])}
-                hasItemDetail={hasDetail(item)}
-                toggleItemExpand={toggleItemExpand}
-                onFileClick={onFileClick}
-                onDiffClick={onDiffClick}
-              />
+              <React.Fragment key={item.id}>
+                <LogItemRow
+                  item={item}
+                  isLast={idx === displayItems.length - 1}
+                  isItemExpanded={Boolean(expandedMap[item.id])}
+                  hasItemDetail={hasDetail(item)}
+                  toggleItemExpand={toggleItemExpand}
+                  onFileClick={onFileClick}
+                  onDiffClick={onDiffClick}
+                />
+                {subAgentCardsFor([item.id], 'inline')}
+              </React.Fragment>
             )
           })}
         </Stack>
       </div>
-      {visibleSubAgents.length > 0 && (
-        <div className="subagent-launcher-list">
-          {visibleSubAgents.map((subAgent) => (
-            <SubAgentCard
-              key={subAgent.id}
-              subAgent={subAgent}
-              onOpenDetails={onSubAgentClick}
-            />
-          ))}
-        </div>
-      )}
+      {unmatchedSubAgents.length > 0
+        ? subAgentCardsFor(unmatchedSubAgents.map((subAgent) => subAgent.parentToolCallId), 'fallback')
+        : null}
     </div>
   )
 }

@@ -76,6 +76,8 @@ fn classify_http_error(status: StatusCode, body: &str) -> ChatProviderError {
         ChatProviderError::RateLimit(message)
     } else if status == StatusCode::NOT_FOUND {
         ChatProviderError::NotFound(message)
+    } else if status.is_server_error() {
+        ChatProviderError::Network(message)
     } else if matches!(
         status,
         StatusCode::BAD_REQUEST | StatusCode::PAYLOAD_TOO_LARGE
@@ -147,5 +149,16 @@ mod tests {
 
         assert!(!rendered.contains("secret-value"));
         assert!(rendered.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn provider_server_errors_are_retryable_network_failures() {
+        let error = classify_http_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            r#"{"error":{"message":"Service temporarily unavailable"}}"#,
+        );
+
+        assert!(matches!(error, super::ChatProviderError::Network(_)));
+        assert!(error.to_string().contains("503 Service Unavailable"));
     }
 }
