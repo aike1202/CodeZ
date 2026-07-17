@@ -233,6 +233,7 @@ mod tests {
                     SessionDeletionStep::Permissions
                     | SessionDeletionStep::EditTransactions
                     | SessionDeletionStep::SubAgentRuns
+                    | SessionDeletionStep::Tasks
                     | SessionDeletionStep::Fingerprints => {}
                 }
                 Ok(())
@@ -432,6 +433,7 @@ mod tests {
                     SessionDeletionStep::Permissions,
                     SessionDeletionStep::EditTransactions,
                     SessionDeletionStep::SubAgentRuns,
+                    SessionDeletionStep::Tasks,
                     SessionDeletionStep::Attachments,
                     SessionDeletionStep::Ledger,
                     SessionDeletionStep::Fingerprints,

@@ -15,6 +15,7 @@ mod search;
 pub mod session_deletion;
 pub mod session_maintenance;
 mod system;
+pub mod task;
 pub mod tools;
 pub mod workspace;
 

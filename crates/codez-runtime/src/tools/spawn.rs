@@ -140,12 +140,8 @@ impl From<CommandTaskError> for AppError {
                 AppErrorKind::NotFound => AppError::not_found(message),
                 AppErrorKind::Conflict => AppError::conflict(message),
                 AppErrorKind::RunActive => AppError::run_active(message),
-                AppErrorKind::External => {
-                    AppError::external(message.clone(), message, false)
-                }
-                AppErrorKind::ProcessFailed => {
-                    AppError::process_failed(message.clone(), message)
-                }
+                AppErrorKind::External => AppError::external(message.clone(), message, false),
+                AppErrorKind::ProcessFailed => AppError::process_failed(message.clone(), message),
                 AppErrorKind::Cancelled => AppError::cancelled(message),
                 AppErrorKind::Timeout => AppError::timeout(message),
                 AppErrorKind::Storage => AppError::storage(message.clone(), message, false),

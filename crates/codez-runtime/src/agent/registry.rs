@@ -103,59 +103,20 @@ pub fn get_builtin_subagents() -> Vec<SubAgentDefinition> {
                 ]
             }),
         },
-        SubAgentDefinition {
-            r#type: "ExecutionPlanner".to_string(),
-            name: "ExecutionPlanner".to_string(),
-            description: "Analyzes an approved plan and groups its steps into parallel execution waves based on file and logical dependencies. Read-only.".to_string(),
-            when_to_use: [
-                "A plan is approved and the user wants to execute its steps in parallel.",
-                "You need to determine which plan steps can safely run concurrently."
-            ].join("\n"),
-            when_not_to_use: Some([
-                "The plan has only 1-2 steps (parallel overhead not worth it).",
-                "Steps are strictly sequential (each depends on the previous)."
-            ].join("\n")),
-            cost_hint: Some("Up to 8 read-only tool calls. Reads the plan and spot-checks files to confirm independence.".to_string()),
-            max_loops: 8,
-            can_run_in_background: None,
-            isolation: None,
-            output_spec: Some(SubAgentOutputSpec {
-                description: "Submit a Markdown execution-plan handoff plus the machine-readable grouping.".to_string(),
-                fields: vec![
-                    SubAgentOutputField { name: "report".to_string(), r#type: "string".to_string(), description: "Markdown handoff summarizing wave order, dependencies, file collision risks, and isolation reasoning.".to_string(), required: true },
-                    SubAgentOutputField { name: "conclusion".to_string(), r#type: "string".to_string(), description: "One concise sentence stating the recommended grouping and isolation mode.".to_string(), required: true },
-                    SubAgentOutputField { name: "confidence".to_string(), r#type: "string".to_string(), description: "Exactly \"high\", \"medium\", or \"low\".".to_string(), required: true },
-                    SubAgentOutputField { name: "waves".to_string(), r#type: "string[]".to_string(), description: "Ordered waves. Each entry is a JSON string like {\"index\":0,\"stepIds\":[\"p1\",\"p2\"]}. Steps in the same wave run in parallel; waves run in order.".to_string(), required: true },
-                    SubAgentOutputField { name: "isolation".to_string(), r#type: "string".to_string(), description: "\"shared\" if steps in every wave touch disjoint files, \"worktree\" if any risk of write collision".to_string(), required: true },
-                    SubAgentOutputField { name: "rationale".to_string(), r#type: "string".to_string(), description: "One sentence explaining the grouping decision".to_string(), required: true },
-                ]
-            }),
-        },
-        SubAgentDefinition {
-            r#type: "Executor".to_string(),
-            name: "Executor".to_string(),
-            description: "Executes a single plan step end-to-end: reads context, writes/edits code, and reports what changed. Runs in parallel with sibling executors in the same wave.".to_string(),
-            when_to_use: "Executing one independent step of an approved plan.".to_string(),
-            when_not_to_use: Some([
-                "The step depends on another step not yet completed.",
-                "The step touches files a sibling executor is editing in the same wave."
-            ].join("\n")),
-            cost_hint: Some("Up to 20 tool calls including file edits. One executor per plan step.".to_string()),
-            max_loops: 20,
-            can_run_in_background: Some(true),
-            isolation: Some("none".to_string()),
-            output_spec: Some(SubAgentOutputSpec {
-                description: "Submit a Markdown implementation handoff plus the machine-readable execution outcome.".to_string(),
-                fields: vec![
-                    SubAgentOutputField { name: "report".to_string(), r#type: "string".to_string(), description: "Markdown handoff describing changes, verification performed, blockers, and relevant file paths.".to_string(), required: true },
-                    SubAgentOutputField { name: "conclusion".to_string(), r#type: "string".to_string(), description: "One concise sentence stating whether the assigned step is complete.".to_string(), required: true },
-                    SubAgentOutputField { name: "confidence".to_string(), r#type: "string".to_string(), description: "Exactly \"high\", \"medium\", or \"low\".".to_string(), required: true },
-                    SubAgentOutputField { name: "status".to_string(), r#type: "string".to_string(), description: "\"completed\" if the step is fully done, \"failed\" if blocked".to_string(), required: true },
-                    SubAgentOutputField { name: "summary".to_string(), r#type: "string".to_string(), description: "One-paragraph summary of what you changed and why".to_string(), required: true },
-                    SubAgentOutputField { name: "filesModified".to_string(), r#type: "string[]".to_string(), description: "Paths of files you created or edited".to_string(), required: true },
-                    SubAgentOutputField { name: "blockers".to_string(), r#type: "string[]".to_string(), description: "If failed: what blocked you (e.g. needed to touch a file outside your set)".to_string(), required: false },
-                ]
-            }),
-        },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::get_builtin_subagents;
+
+    #[test]
+    fn builtin_registry_should_exclude_plan_only_subagents() {
+        let kinds = get_builtin_subagents()
+            .into_iter()
+            .map(|agent| agent.r#type)
+            .collect::<Vec<_>>();
+
+        assert_eq!(kinds, ["Explore", "Reviewer"]);
+    }
 }

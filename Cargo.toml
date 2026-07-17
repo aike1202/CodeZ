@@ -9,7 +9,11 @@ members = [
   "crates/codez-storage",
   "src-tauri",
 ]
+exclude = ["vendor/portable-pty-0.9.0"]
 resolver = "2"
+
+[patch.crates-io]
+portable-pty = { path = "vendor/portable-pty-0.9.0" }
 
 [workspace.package]
 version = "0.1.0"
@@ -56,3 +60,6 @@ windows-dpapi = "0.2.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+[profile.test]
+debug = 1

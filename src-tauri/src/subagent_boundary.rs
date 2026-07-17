@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
 
 use codez_contracts::subagent::{
     SubAgentDetailResult, SubAgentInfo, SubAgentModelSelection, SubAgentOutputField,
@@ -11,6 +14,8 @@ use codez_runtime::agent::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+
+use codez_storage::AtomicFileStore;
 
 use crate::state::AppState;
 
@@ -240,9 +245,16 @@ impl SubAgentSettingsDocument {
 
 /// Reads settings through the storage port while preserving unrelated fields.
 pub(crate) async fn read_settings(state: &AppState) -> Result<SubAgentSettingsDocument, AppError> {
-    let path = state.paths.data_directory().join(SETTINGS_FILE);
-    let document = state
-        .storage
+    read_settings_from_store(state.storage.as_ref(), state.paths.data_directory()).await
+}
+
+/// Reads sub-agent settings for runtimes that cannot borrow the application state.
+pub(crate) async fn read_settings_from_store(
+    storage: &AtomicFileStore,
+    data_directory: &Path,
+) -> Result<SubAgentSettingsDocument, AppError> {
+    let path = data_directory.join(SETTINGS_FILE);
+    let document = storage
         .read_json::<Value>(&path)
         .await
         .map_err(AppError::from)?
@@ -496,12 +508,30 @@ mod tests {
 
         assert_eq!(
             (
+                agents
+                    .iter()
+                    .map(|agent| agent.kind.as_str())
+                    .collect::<Vec<_>>(),
                 explore.enabled,
                 explore.configured_models.as_ref().map(Vec::len),
                 reviewer.enabled
             ),
-            (true, Some(1), false)
+            (vec!["Explore", "Reviewer"], true, Some(1), false)
         );
+    }
+
+    #[test]
+    fn plan_only_subagents_should_not_resolve_through_the_tauri_boundary() {
+        for kind in ["ExecutionPlanner", "Executor"] {
+            let error = find_known_subagent(kind)
+                .expect_err("Plan-only sub-agents must stay outside the Tauri runtime");
+
+            assert_eq!(
+                error.public_message(),
+                "Sub-agent type is not available",
+                "unexpected result for {kind}"
+            );
+        }
     }
 
     #[test]

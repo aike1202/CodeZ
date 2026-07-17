@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod agent_runtime;
 mod attachment_boundary;
 mod chat_compaction;
 mod chat_interaction;
@@ -151,9 +152,11 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::settings::session_delete,
             commands::task::task_list,
             commands::task::task_get,
-            commands::task::task_get_by_project,
-            commands::task::task_save,
+            commands::task::task_create,
+            commands::task::task_update,
             commands::task::task_delete,
+            commands::agent::agent_snapshot,
+            commands::agent::agent_active_ids,
             commands::rules::rules_get_list,
             commands::rules::rules_save,
             commands::rules::rules_delete,
@@ -256,6 +259,7 @@ pub fn run() -> Result<(), tauri::Error> {
                 app.handle(),
                 &state.shutdown,
                 &state.cancellation,
+                &state.agent_runtime,
                 &state.process_runner,
                 &state.pty_manager,
                 &state.mcp_runtime,

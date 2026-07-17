@@ -10,9 +10,11 @@ use std::{
 
 #[cfg(windows)]
 use std::{
+    ffi::OsString,
     fs::{self, OpenOptions},
     os::windows::fs::OpenOptionsExt,
     path::PathBuf,
+    sync::{Mutex, MutexGuard, PoisonError},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -39,10 +41,14 @@ const MAX_CAPTURED_OUTPUT_BYTES: usize = 256 * 1024;
 #[cfg(windows)]
 const PROCESS_TREE_FIXTURE_REQUEST: &str = "process-tree-fixture.request";
 #[cfg(windows)]
-const WINDOWS_CTRL_C_KEY_EVENTS: &[u8] = b"\x1b[17;29;0;1;8;1_\
-\x1b[67;46;3;1;8;1_\
-\x1b[67;46;3;0;8;1_\
-\x1b[17;29;0;0;0;1_";
+static WINDOWS_PTY_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(windows)]
+fn windows_pty_test_guard() -> MutexGuard<'static, ()> {
+    WINDOWS_PTY_TEST_LOCK
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
 
 struct PtyProbe {
     master: Option<Box<dyn MasterPty + Send>>,
@@ -97,7 +103,7 @@ impl PtyProbe {
             let _ = reader_done_tx.send(result);
         });
 
-        let mut probe = Self {
+        let probe = Self {
             master: Some(pair.master),
             child: Some(child),
             writer: Some(writer),
@@ -108,12 +114,6 @@ impl PtyProbe {
             #[cfg(windows)]
             _shell_environment: shell_environment,
         };
-
-        #[cfg(windows)]
-        {
-            probe.wait_for_output("\u{1b}[6n")?;
-            probe.write_bytes(b"\x1b[1;1R")?;
-        }
 
         Ok(probe)
     }
@@ -139,7 +139,7 @@ impl PtyProbe {
 
     #[cfg(windows)]
     fn write_ctrl_c(&mut self) -> TestResult {
-        self.write_bytes(WINDOWS_CTRL_C_KEY_EVENTS)
+        self.write_bytes(b"\x03")
     }
 
     fn resize(&self, size: PtySize) -> TestResult {
@@ -260,6 +260,16 @@ impl Drop for PtyProbe {
                     let _ = kill_process_tree(pid);
                 }
                 let _ = child.kill();
+                let deadline = Instant::now() + Duration::from_secs(2);
+                loop {
+                    match child.try_wait() {
+                        Ok(Some(_)) | Err(_) => break,
+                        Ok(None) if Instant::now() < deadline => {
+                            thread::sleep(Duration::from_millis(20));
+                        }
+                        Ok(None) => break,
+                    }
+                }
             }
         }
 
@@ -283,13 +293,7 @@ fn shell_command(cwd: Option<&Path>) -> CommandBuilder {
     #[cfg(windows)]
     let mut command = {
         let mut command = CommandBuilder::new("powershell.exe");
-        command.args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NoExit",
-            "-Command",
-            "$u = [System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding = $u; [Console]::OutputEncoding = $u; $OutputEncoding = $u; if (Get-Module PSReadLine) { Remove-Module PSReadLine }",
-        ]);
+        command.args(windows_powershell_arguments());
         command
     };
 
@@ -323,15 +327,25 @@ fn command_prompt(cwd: Option<&Path>) -> CommandBuilder {
 #[cfg(windows)]
 fn production_powershell(cwd: Option<&Path>) -> CommandBuilder {
     let mut command = CommandBuilder::new("powershell.exe");
-    command.args([
-        "-NoExit",
-        "-Command",
-        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
-    ]);
+    command.args(windows_powershell_arguments());
     if let Some(cwd) = cwd {
         command.cwd(cwd);
     }
     command
+}
+
+#[cfg(windows)]
+fn windows_powershell_arguments() -> Vec<OsString> {
+    [
+        "-NoLogo",
+        "-NoProfile",
+        "-NoExit",
+        "-Command",
+        "$u = [System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding = $u; [Console]::OutputEncoding = $u; $OutputEncoding = $u; if (Get-Module PSReadLine) { Remove-Module PSReadLine }",
+    ]
+    .into_iter()
+    .map(Into::into)
+    .collect()
 }
 
 #[cfg(not(windows))]
@@ -446,78 +460,95 @@ fn wait_for_exclusive_lock_release(path: &Path) -> TestResult<bool> {
 }
 
 #[cfg(windows)]
-async fn wait_for_terminal_marker(
-    manager: &PtyManager,
-    events: &mut tokio::sync::mpsc::Receiver<PtyEvent>,
-    terminal_id: &str,
-    marker: &str,
-) -> TestResult {
-    let mut output = Vec::new();
-    let result = tokio::time::timeout(WAIT_TIMEOUT, async {
+struct ManagerProbe {
+    terminal_id: String,
+    events: tokio::sync::mpsc::Receiver<PtyEvent>,
+    output: Vec<u8>,
+    search_from: usize,
+}
+
+#[cfg(windows)]
+impl ManagerProbe {
+    fn new(terminal_id: &str, events: tokio::sync::mpsc::Receiver<PtyEvent>) -> Self {
+        Self {
+            terminal_id: terminal_id.to_owned(),
+            events,
+            output: Vec::new(),
+            search_from: 0,
+        }
+    }
+
+    async fn wait_for_marker(&mut self, manager: &PtyManager, marker: &str) -> TestResult {
+        if marker.is_empty() {
+            return Err("PTY manager marker must not be empty".into());
+        }
+        let wait = async {
+            loop {
+                if let Some(offset) =
+                    find_bytes(&self.output[self.search_from..], marker.as_bytes())
+                {
+                    self.search_from += offset + marker.len();
+                    return Ok(());
+                }
+                self.receive_output(manager).await?;
+            }
+        };
+
+        match tokio::time::timeout(WAIT_TIMEOUT, wait).await {
+            Ok(result) => result,
+            Err(_) => Err(format!(
+                "timed out waiting for {marker:?}; captured output: {:?}",
+                String::from_utf8_lossy(&self.output)
+            )
+            .into()),
+        }
+    }
+
+    async fn wait_for_pid(&mut self, manager: &PtyManager, marker: &str) -> TestResult<u32> {
+        let wait = async {
+            loop {
+                if let Some(pid) = pid_after_marker(
+                    &String::from_utf8_lossy(&self.output[self.search_from..]),
+                    marker,
+                ) {
+                    self.search_from = self.output.len();
+                    return Ok(pid);
+                }
+                self.receive_output(manager).await?;
+            }
+        };
+
+        tokio::time::timeout(WAIT_TIMEOUT, wait)
+            .await
+            .map_err(|_| "timed out waiting for the descendant process ID")?
+    }
+
+    async fn receive_output(&mut self, manager: &PtyManager) -> TestResult {
         loop {
-            match events.recv().await {
-                Some(PtyEvent::Output { id, sequence, data }) if id == terminal_id => {
-                    manager.acknowledge(terminal_id, sequence)?;
-                    if output.len() + data.len() > MAX_CAPTURED_OUTPUT_BYTES {
+            match self.events.recv().await {
+                Some(PtyEvent::Output { id, sequence, data }) if id == self.terminal_id => {
+                    manager.acknowledge(&self.terminal_id, sequence)?;
+                    if self.output.len() + data.len() > MAX_CAPTURED_OUTPUT_BYTES {
                         return Err("PTY manager output exceeded the probe limit".into());
                     }
-                    output.extend_from_slice(&data);
-                    if String::from_utf8_lossy(&output).contains(marker) {
-                        return Ok(());
-                    }
+                    self.output.extend_from_slice(&data);
+                    return Ok(());
                 }
-                Some(PtyEvent::Exit { id, .. }) if id == terminal_id => {
-                    return Err("PTY manager exited before the expected marker".into());
+                Some(PtyEvent::Exit { id, .. }) if id == self.terminal_id => {
+                    return Err("PTY manager exited before the expected output".into());
                 }
                 Some(_) => {}
                 None => return Err("PTY manager event channel closed unexpectedly".into()),
             }
         }
-    })
-    .await;
-
-    match result {
-        Ok(result) => result,
-        Err(_) => Err(format!(
-            "timed out waiting for {marker:?}; captured output: {:?}",
-            String::from_utf8_lossy(&output)
-        )
-        .into()),
     }
 }
 
 #[cfg(windows)]
-async fn wait_for_terminal_pid(
-    manager: &PtyManager,
-    events: &mut tokio::sync::mpsc::Receiver<PtyEvent>,
-    terminal_id: &str,
-) -> TestResult<u32> {
-    let mut output = Vec::new();
-    tokio::time::timeout(WAIT_TIMEOUT, async {
-        loop {
-            match events.recv().await {
-                Some(PtyEvent::Output { id, sequence, data }) if id == terminal_id => {
-                    manager.acknowledge(terminal_id, sequence)?;
-                    if output.len() + data.len() > MAX_CAPTURED_OUTPUT_BYTES {
-                        return Err("PTY manager output exceeded the probe limit".into());
-                    }
-                    output.extend_from_slice(&data);
-                    if let Some(pid) =
-                        pid_after_marker(&String::from_utf8_lossy(&output), "CODEZ_CHILD_PID:")
-                    {
-                        return Ok(pid);
-                    }
-                }
-                Some(PtyEvent::Exit { id, .. }) if id == terminal_id => {
-                    return Err("PTY manager exited before the descendant reported its PID".into());
-                }
-                Some(_) => {}
-                None => return Err("PTY manager event channel closed unexpectedly".into()),
-            }
-        }
-    })
-    .await
-    .map_err(|_| "timed out waiting for the descendant process ID")?
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }
 
 #[cfg(windows)]
@@ -554,11 +585,12 @@ fn powershell_path_literal(path: &Path) -> TestResult<String> {
 
 fn pid_after_marker(output: &str, marker: &str) -> Option<u32> {
     output.match_indices(marker).find_map(|(index, _)| {
-        let digits = output[index + marker.len()..]
-            .chars()
-            .take_while(char::is_ascii_digit)
-            .collect::<String>();
-        (!digits.is_empty()).then(|| digits.parse().ok()).flatten()
+        let remainder = &output[index + marker.len()..];
+        let digit_count = remainder.chars().take_while(char::is_ascii_digit).count();
+        if digit_count == 0 || digit_count == remainder.len() {
+            return None;
+        }
+        remainder[..digit_count].parse().ok()
     })
 }
 
@@ -590,6 +622,7 @@ impl Drop for TestDirectory {
 #[cfg(windows)]
 #[test]
 fn windows_conpty_should_preserve_utf8_output() -> TestResult {
+    let _guard = windows_pty_test_guard();
     let mut probe = spawn_shell(None)?;
     probe.write_line(
         "[Console]::WriteLine([string]::Concat('CODEZ_UTF8:', [char]0x4F60, [char]0x597D, [char]0xFF0C, 'CodeZ'))",
@@ -608,6 +641,7 @@ fn windows_conpty_should_preserve_utf8_output() -> TestResult {
 #[cfg(windows)]
 #[test]
 fn windows_conpty_should_open_a_chinese_working_directory() -> TestResult {
+    let _guard = windows_pty_test_guard();
     let directory = TestDirectory::create()?;
     let expected = format!("CODEZ_CWD:{}", directory.path().display());
     let mut probe = spawn_shell(Some(directory.path()))?;
@@ -628,6 +662,7 @@ fn windows_conpty_should_open_a_chinese_working_directory() -> TestResult {
 #[cfg(windows)]
 #[test]
 fn windows_conpty_should_report_resized_dimensions() -> TestResult {
+    let _guard = windows_pty_test_guard();
     let mut probe = spawn_shell(None)?;
     probe.resize(RESIZED)?;
     probe.write_line(
@@ -654,6 +689,7 @@ fn windows_conpty_should_report_resized_dimensions() -> TestResult {
 #[test]
 #[ignore = "spawned as a descendant by the ConPTY process-tree test"]
 fn windows_process_tree_descendant_fixture() -> TestResult {
+    let _guard = windows_pty_test_guard();
     let directory = std::env::current_dir()?;
     if !directory.join(PROCESS_TREE_FIXTURE_REQUEST).is_file() {
         return Ok(());
@@ -681,12 +717,11 @@ fn windows_process_tree_descendant_fixture() -> TestResult {
 #[cfg(windows)]
 #[test]
 fn windows_conpty_should_deliver_ctrl_c_to_the_foreground_command() -> TestResult {
+    let _guard = windows_pty_test_guard();
     let mut probe = PtyProbe::spawn(command_prompt(None))?;
     probe.write_line("echo CODEZ_CTRL_C_FIXTURE_READY & ping.exe -t 127.0.0.1")?;
     probe.wait_for_output("CODEZ_CTRL_C_FIXTURE_READY")?;
-    probe.wait_for_value("ping output", |output| {
-        (output.matches("127.0.0.1").count() >= 2).then_some(())
-    })?;
+    probe.wait_for_output("TTL=")?;
     let prompt_count = String::from_utf8_lossy(&probe.output).matches('>').count();
     probe.write_ctrl_c()?;
     probe.wait_for_value("command prompt after Ctrl+C", |output| {
@@ -707,18 +742,19 @@ fn windows_conpty_should_deliver_ctrl_c_to_the_foreground_command() -> TestResul
 #[cfg(windows)]
 #[test]
 fn windows_conpty_should_interrupt_two_powershell_foreground_commands() -> TestResult {
+    let _guard = windows_pty_test_guard();
     let mut probe = PtyProbe::spawn(production_powershell(None))?;
 
     for attempt in 1..=2 {
         let ready = format!("CODEZ_POWERSHELL_CTRL_C_{attempt}_READY");
         let resumed = format!("CODEZ_POWERSHELL_CTRL_C_{attempt}_RESUMED");
         let prior_ping_output = String::from_utf8_lossy(&probe.output)
-            .matches("127.0.0.1")
+            .matches("TTL=")
             .count();
         probe.write_line(&format!("Write-Output '{ready}'; ping.exe -t 127.0.0.1"))?;
         probe.wait_for_output(&ready)?;
         probe.wait_for_value("ping output", |output| {
-            (output.matches("127.0.0.1").count() >= prior_ping_output + 3).then_some(())
+            (output.matches("TTL=").count() > prior_ping_output).then_some(())
         })?;
         let prompt_count = String::from_utf8_lossy(&probe.output)
             .matches("PS ")
@@ -744,18 +780,10 @@ fn windows_conpty_should_interrupt_two_powershell_foreground_commands() -> TestR
 #[cfg(windows)]
 #[tokio::test]
 async fn windows_manager_should_interrupt_ping_and_keep_the_shell_alive() -> TestResult {
-    let arguments = [
-        "-NoExit",
-        "-Command",
-        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
-    ]
-    .into_iter()
-    .map(Into::into)
-    .collect();
     assert_manager_repeated_ctrl_c(
         "ctrl-c-powershell-test",
         powershell_executable()?,
-        arguments,
+        windows_powershell_arguments(),
         "function prompt { 'CODEZ_PS_PROMPT> ' }",
         "CODEZ_PS_PROMPT>",
         ";",
@@ -778,6 +806,10 @@ async fn windows_manager_should_interrupt_command_prompt_ping_twice() -> TestRes
 }
 
 #[cfg(windows)]
+#[expect(
+    clippy::await_holding_lock,
+    reason = "Windows ConPTY integration tests deliberately serialize process-wide"
+)]
 async fn assert_manager_repeated_ctrl_c(
     terminal_id: &str,
     executable: PathBuf,
@@ -786,9 +818,11 @@ async fn assert_manager_repeated_ctrl_c(
     prompt_marker: &str,
     command_separator: &str,
 ) -> TestResult {
+    let _guard = windows_pty_test_guard();
     let current_directory = std::env::current_dir()?;
-    let (event_tx, mut events) = tokio::sync::mpsc::channel(PTY_EVENT_QUEUE_CAPACITY);
+    let (event_tx, events) = tokio::sync::mpsc::channel(PTY_EVENT_QUEUE_CAPACITY);
     let manager = PtyManager::new(event_tx);
+    let mut probe = ManagerProbe::new(terminal_id, events);
     manager
         .start(
             terminal_id.to_owned(),
@@ -797,30 +831,33 @@ async fn assert_manager_repeated_ctrl_c(
             current_directory,
         )
         .await?;
-    wait_for_terminal_marker(&manager, &mut events, terminal_id, "\u{1b}[6n").await?;
-    manager.write(terminal_id, b"\x1b[1;1R").await?;
-    let prompt_setup = format!("{prompt_setup}\r");
-    manager.write(terminal_id, prompt_setup.as_bytes()).await?;
-    wait_for_terminal_marker(&manager, &mut events, terminal_id, prompt_marker).await?;
+    let exercise: TestResult = async {
+        let prompt_setup = format!("{prompt_setup}\r");
+        manager.write(terminal_id, prompt_setup.as_bytes()).await?;
+        probe.wait_for_marker(&manager, prompt_marker).await?;
 
-    for attempt in 1..=2 {
-        let ready = format!("CODEZ_MANAGER_CTRL_C_{attempt}_READY");
-        let resumed = format!("CODEZ_MANAGER_CTRL_C_{attempt}_RESUMED");
-        let launch = format!("echo {ready} {command_separator} ping.exe -t 127.0.0.1\r");
-        manager.write(terminal_id, launch.as_bytes()).await?;
-        wait_for_terminal_marker(&manager, &mut events, terminal_id, &ready).await?;
-        wait_for_terminal_marker(&manager, &mut events, terminal_id, "127.0.0.1").await?;
-        manager.write(terminal_id, b"\x03").await?;
+        for attempt in 1..=2 {
+            let ready = format!("CODEZ_MANAGER_CTRL_C_{attempt}_READY");
+            let resumed = format!("CODEZ_MANAGER_CTRL_C_{attempt}_RESUMED");
+            let launch = format!("echo {ready} {command_separator} ping.exe -t 127.0.0.1\r");
+            manager.write(terminal_id, launch.as_bytes()).await?;
+            probe.wait_for_marker(&manager, &ready).await?;
+            probe.wait_for_marker(&manager, "TTL=").await?;
+            manager.write(terminal_id, b"\x03").await?;
 
-        // Console programs may flush pending input while handling Ctrl+C. The returned
-        // prompt is the synchronization point before the next user command is entered.
-        wait_for_terminal_marker(&manager, &mut events, terminal_id, prompt_marker).await?;
-        let resume = format!("echo {resumed}\r");
-        manager.write(terminal_id, resume.as_bytes()).await?;
-        wait_for_terminal_marker(&manager, &mut events, terminal_id, &resumed).await?;
+            // The prompt proves that the foreground process handled ETX before the
+            // next command is sent; terminal kill remains a separate cleanup path.
+            probe.wait_for_marker(&manager, prompt_marker).await?;
+            let resume = format!("echo {resumed}\r");
+            manager.write(terminal_id, resume.as_bytes()).await?;
+            probe.wait_for_marker(&manager, &resumed).await?;
+        }
+        Ok(())
     }
-
-    manager.kill(terminal_id).await?;
+    .await;
+    let cleanup = manager.kill(terminal_id).await;
+    exercise?;
+    cleanup?;
 
     assert_eq!(manager.active_count(), 0, "terminal was not fully reaped");
     Ok(())
@@ -828,20 +865,19 @@ async fn assert_manager_repeated_ctrl_c(
 
 #[cfg(windows)]
 #[tokio::test]
+#[expect(
+    clippy::await_holding_lock,
+    reason = "Windows ConPTY integration tests deliberately serialize process-wide"
+)]
 async fn windows_ctrl_c_and_terminal_kill_should_not_deadlock() -> TestResult {
     const TERMINAL_ID: &str = "ctrl-c-kill-race-test";
 
+    let _guard = windows_pty_test_guard();
     let current_directory = std::env::current_dir()?;
-    let arguments = [
-        "-NoExit",
-        "-Command",
-        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
-    ]
-    .into_iter()
-    .map(Into::into)
-    .collect();
-    let (event_tx, mut events) = tokio::sync::mpsc::channel(PTY_EVENT_QUEUE_CAPACITY);
+    let arguments = windows_powershell_arguments();
+    let (event_tx, events) = tokio::sync::mpsc::channel(PTY_EVENT_QUEUE_CAPACITY);
     let manager = PtyManager::new(event_tx);
+    let mut probe = ManagerProbe::new(TERMINAL_ID, events);
     manager
         .start(
             TERMINAL_ID.to_owned(),
@@ -850,27 +886,32 @@ async fn windows_ctrl_c_and_terminal_kill_should_not_deadlock() -> TestResult {
             current_directory,
         )
         .await?;
-    wait_for_terminal_marker(&manager, &mut events, TERMINAL_ID, "\u{1b}[6n").await?;
-    manager.write(TERMINAL_ID, b"\x1b[1;1R").await?;
-    manager
-        .write(
-            TERMINAL_ID,
-            b"Write-Output 'CODEZ_RACE_READY'; ping.exe -t 127.0.0.1\r",
-        )
-        .await?;
-    wait_for_terminal_marker(&manager, &mut events, TERMINAL_ID, "CODEZ_RACE_READY").await?;
-    wait_for_terminal_marker(&manager, &mut events, TERMINAL_ID, "127.0.0.1").await?;
+    let exercise: TestResult = async {
+        manager
+            .write(
+                TERMINAL_ID,
+                b"Write-Output 'CODEZ_RACE_READY'; ping.exe -t 127.0.0.1\r",
+            )
+            .await?;
+        probe.wait_for_marker(&manager, "CODEZ_RACE_READY").await?;
+        probe.wait_for_marker(&manager, "TTL=").await?;
 
-    let (write_result, kill_result) = tokio::join!(
-        manager.write(TERMINAL_ID, b"\x03"),
-        manager.kill(TERMINAL_ID)
-    );
-    if let Err(error) = write_result
-        && error.kind() != codez_core::AppErrorKind::Conflict
-    {
-        return Err(format!("unexpected Ctrl+C race error: {error}").into());
+        let (write_result, kill_result) = tokio::join!(
+            manager.write(TERMINAL_ID, b"\x03"),
+            manager.kill(TERMINAL_ID)
+        );
+        if let Err(error) = write_result
+            && error.kind() != codez_core::AppErrorKind::Conflict
+        {
+            return Err(format!("unexpected Ctrl+C race error: {error}").into());
+        }
+        kill_result?;
+        Ok(())
     }
-    kill_result?;
+    .await;
+    let cleanup = manager.kill(TERMINAL_ID).await;
+    exercise?;
+    cleanup?;
 
     assert_eq!(
         manager.active_count(),
@@ -882,9 +923,14 @@ async fn windows_ctrl_c_and_terminal_kill_should_not_deadlock() -> TestResult {
 
 #[cfg(windows)]
 #[tokio::test]
+#[expect(
+    clippy::await_holding_lock,
+    reason = "Windows ConPTY integration tests deliberately serialize process-wide"
+)]
 async fn windows_supervisor_should_kill_the_shell_process_tree() -> TestResult {
     const TERMINAL_ID: &str = "process-tree-test";
 
+    let _guard = windows_pty_test_guard();
     let directory = TestDirectory::create()?;
     let ready_path = directory.path().join("child.ready");
     let lock_path = directory.path().join("child.lock");
@@ -898,18 +944,10 @@ async fn windows_supervisor_should_kill_the_shell_process_tree() -> TestResult {
         "& {} --ignored --exact windows_process_tree_descendant_fixture --nocapture\r\n",
         powershell_path_literal(&fixture_executable)?
     );
-    let arguments = [
-        "-NoLogo",
-        "-NoProfile",
-        "-NoExit",
-        "-Command",
-        "$u = [System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding = $u; [Console]::OutputEncoding = $u; $OutputEncoding = $u; if (Get-Module PSReadLine) { Remove-Module PSReadLine }",
-    ]
-    .into_iter()
-    .map(Into::into)
-    .collect();
-    let (event_tx, mut events) = tokio::sync::mpsc::channel(PTY_EVENT_QUEUE_CAPACITY);
+    let arguments = windows_powershell_arguments();
+    let (event_tx, events) = tokio::sync::mpsc::channel(PTY_EVENT_QUEUE_CAPACITY);
     let manager = PtyManager::new(event_tx);
+    let mut probe = ManagerProbe::new(TERMINAL_ID, events);
     manager
         .start(
             TERMINAL_ID.to_owned(),
@@ -918,28 +956,19 @@ async fn windows_supervisor_should_kill_the_shell_process_tree() -> TestResult {
             directory.path().to_path_buf(),
         )
         .await?;
-    if let Err(error) =
-        wait_for_terminal_marker(&manager, &mut events, TERMINAL_ID, "\u{1b}[6n").await
-    {
-        let _ = manager.kill(TERMINAL_ID).await;
-        return Err(error);
+    let exercise: TestResult<(u32, u32, bool)> = async {
+        manager
+            .write(TERMINAL_ID, launch_command.as_bytes())
+            .await?;
+        let child_pid = probe.wait_for_pid(&manager, "CODEZ_CHILD_PID:").await?;
+        let ready_pid = wait_for_child_ready(&ready_path)?;
+        let lock_was_held = exclusive_lock_is_held(&lock_path)?;
+        Ok((child_pid, ready_pid, lock_was_held))
     }
-    manager.write(TERMINAL_ID, b"\x1b[1;1R").await?;
-    manager
-        .write(TERMINAL_ID, launch_command.as_bytes())
-        .await?;
-
-    let child_pid = match wait_for_terminal_pid(&manager, &mut events, TERMINAL_ID).await {
-        Ok(pid) => pid,
-        Err(error) => {
-            let _ = manager.kill(TERMINAL_ID).await;
-            return Err(error);
-        }
-    };
-    let ready_pid = wait_for_child_ready(&ready_path)?;
-    let lock_was_held = exclusive_lock_is_held(&lock_path)?;
-
-    manager.kill(TERMINAL_ID).await?;
+    .await;
+    let cleanup = manager.kill(TERMINAL_ID).await;
+    let (child_pid, ready_pid, lock_was_held) = exercise?;
+    cleanup?;
     let lock_was_released = wait_for_exclusive_lock_release(&lock_path)?;
 
     assert_eq!(
@@ -958,6 +987,7 @@ async fn windows_supervisor_should_kill_the_shell_process_tree() -> TestResult {
 #[cfg(windows)]
 #[test]
 fn windows_conpty_should_close_the_reader_after_clean_exit() -> TestResult {
+    let _guard = windows_pty_test_guard();
     let mut probe = spawn_shell(None)?;
     let status = probe.exit_cleanly()?;
     let reader_closed = probe.finish()?;

@@ -652,7 +652,8 @@ impl SubAgentRuntime {
                 Ok(AgentStatus::Paused) => SubAgentStatus::Interrupted,
                 Ok(AgentStatus::Idle | AgentStatus::Running | AgentStatus::Failed)
                 | Err(AgentLoopError::Execution(_))
-                | Err(AgentLoopError::StepLimitExceeded { .. }) => SubAgentStatus::Failed,
+                | Err(AgentLoopError::StepLimitExceeded { .. })
+                | Err(AgentLoopError::AttemptGenerationExhausted) => SubAgentStatus::Failed,
                 Err(
                     AgentLoopError::InvalidIdentifier { .. }
                     | AgentLoopError::InvalidStepLimit

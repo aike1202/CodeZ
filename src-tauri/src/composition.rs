@@ -9,18 +9,22 @@ use codez_mcp::{McpProjectConfigService, McpSecretService, McpUserConfigService}
 use codez_platform::ResourceLocator;
 use codez_runtime::{
     CancellationTree, HostPreferences, ShutdownCoordinator, SystemService,
+    agent::collaboration::{AgentAttemptExecutor, AgentRuntime, AgentRuntimeEventSink},
     history_revert::{HistoryRevertError, HistoryRevertService, HistoryRevertWorkspace},
     permission::store::{PermissionStoreError, WorkspacePermissionStore},
     session_deletion::SessionDeletionService,
     session_maintenance::{SessionMaintenanceCoordinator, SessionMaintenanceError},
+    task::{TaskEventSink, TaskStore},
 };
 use codez_storage::{AtomicFileStore, OsCredentialStore, RecentProjectsStore, SessionStore};
 use tauri::{App, Manager};
 use thiserror::Error;
 
 use crate::{
+    agent_runtime::DesktopAgentAttemptExecutor,
     chat_runtime::{ChatPromptSources, ChatRuntime},
-    chat_tool_runtime::ChatToolRuntime,
+    chat_tool_runtime::{ChatToolRuntime, ChatToolRuntimeDependencies},
+    commands::{agent::DesktopAgentEventSink, task::DesktopTaskEventSink},
     error::ErrorReporter,
     logging::{self, LoggingError},
     mcp_boundary::StorageMcpSecretStore,
@@ -55,6 +59,16 @@ pub(crate) enum CompositionError {
     },
     #[error("failed to initialize sub-agent runtime: {source}")]
     SubAgentRuntime {
+        #[source]
+        source: AppError,
+    },
+    #[error("failed to recover Agent runtime snapshots: {source}")]
+    AgentRuntimeRecovery {
+        #[source]
+        source: AppError,
+    },
+    #[error("failed to bind Agent runtime composition: {source}")]
+    AgentRuntimeComposition {
         #[source]
         source: AppError,
     },
@@ -108,6 +122,13 @@ pub(crate) fn compose_app_state(
     let fingerprint = Arc::new(codez_runtime::fingerprint::ReadFingerprintStore::default());
     let mutation_coordinator =
         Arc::new(codez_runtime::mutation_coordinator::FileMutationCoordinator::default());
+    let task_events: Arc<dyn TaskEventSink> =
+        Arc::new(DesktopTaskEventSink::new(app.handle().clone()));
+    let task_store = Arc::new(TaskStore::with_event_sink(
+        paths.data_directory(),
+        Arc::clone(&persistence),
+        task_events,
+    ));
     let process_runner = Arc::new(codez_platform::NativeProcessRunner::new());
     let edit_transaction =
         Arc::new(codez_runtime::edit_transaction::EditTransactionService::new(paths.clone()));
@@ -126,31 +147,6 @@ pub(crate) fn compose_app_state(
     .map_err(|source| CompositionError::HistoryRevertRecovery {
         source: Box::new(source),
     })?;
-    let chat_tools = Arc::new(ChatToolRuntime::new(
-        paths.as_ref(),
-        Arc::clone(&persistence),
-        Arc::clone(&workspace_permissions),
-        Arc::clone(&fingerprint),
-        Arc::clone(&mutation_coordinator),
-        Arc::clone(&edit_transaction),
-        Arc::clone(&process_runner),
-    )?);
-    let attachment = Arc::new(codez_runtime::attachment::AttachmentService::new(
-        paths.clone(),
-    ));
-    let chat_runtime = Arc::new(ChatRuntime::new(
-        Arc::clone(&cancellation),
-        Arc::clone(&errors),
-        Arc::clone(&model_ledger),
-        Arc::clone(&attachment),
-        chat_tools,
-        Arc::clone(&edit_transaction),
-        ChatPromptSources::new(
-            paths.data_directory().to_path_buf(),
-            Arc::clone(&workspace_permissions),
-            process_runner.clone(),
-        ),
-    ));
     let provider_service = {
         let providers_path = paths.data_directory().join("providers.json");
         let repository = Arc::new(StorageProviderRepository::new(
@@ -172,6 +168,54 @@ pub(crate) fn compose_app_state(
         )
         .map_err(|source| CompositionError::SubAgentRuntime { source })?,
     );
+    let agent_executor = Arc::new(DesktopAgentAttemptExecutor::new(
+        paths.data_directory().to_path_buf(),
+        Arc::clone(&storage),
+        Arc::clone(&provider_service),
+    ));
+    let agent_executor_port: Arc<dyn AgentAttemptExecutor> = agent_executor.clone();
+    let agent_events: Arc<dyn AgentRuntimeEventSink> =
+        Arc::new(DesktopAgentEventSink::new(app.handle().clone()));
+    let agent_runtime = Arc::new(AgentRuntime::with_event_sink(
+        paths.data_directory(),
+        Arc::clone(&persistence),
+        agent_executor_port,
+        agent_events,
+    ));
+    tauri::async_runtime::block_on(agent_runtime.recover_all())
+        .map_err(|source| CompositionError::AgentRuntimeRecovery { source })?;
+    let chat_tools = Arc::new(ChatToolRuntime::new(
+        paths.as_ref(),
+        ChatToolRuntimeDependencies {
+            persistence: Arc::clone(&persistence),
+            workspace_permissions: Arc::clone(&workspace_permissions),
+            fingerprint_store: Arc::clone(&fingerprint),
+            mutation_coordinator: Arc::clone(&mutation_coordinator),
+            edit_transaction_service: Arc::clone(&edit_transaction),
+            task_store: Arc::clone(&task_store),
+            agent_runtime: Arc::clone(&agent_runtime),
+            process_runner: Arc::clone(&process_runner),
+        },
+    )?);
+    let attachment = Arc::new(codez_runtime::attachment::AttachmentService::new(
+        paths.clone(),
+    ));
+    let chat_runtime = Arc::new(ChatRuntime::new(
+        Arc::clone(&cancellation),
+        Arc::clone(&errors),
+        Arc::clone(&model_ledger),
+        Arc::clone(&attachment),
+        chat_tools,
+        Arc::clone(&edit_transaction),
+        ChatPromptSources::new(
+            paths.data_directory().to_path_buf(),
+            Arc::clone(&workspace_permissions),
+            process_runner.clone(),
+        ),
+    ));
+    agent_executor
+        .bind_chat_runtime(&chat_runtime)
+        .map_err(|source| CompositionError::AgentRuntimeComposition { source })?;
     let session_deletion = Arc::new(SessionDeletionService::new(
         paths.data_directory(),
         Arc::clone(&persistence),
@@ -180,6 +224,8 @@ pub(crate) fn compose_app_state(
             history_revert: Arc::clone(&history_revert),
             edit_transaction: Arc::clone(&edit_transaction),
             subagent_runtime: Arc::clone(&subagent_runtime),
+            agent_runtime: Arc::clone(&agent_runtime),
+            task_store: Arc::clone(&task_store),
             attachment: Arc::clone(&attachment),
             model_ledger: Arc::clone(&model_ledger),
             fingerprint: Arc::clone(&fingerprint),
@@ -245,6 +291,8 @@ pub(crate) fn compose_app_state(
         provider_service,
         subagent_settings: tokio::sync::Mutex::new(()),
         subagent_runtime,
+        agent_runtime,
+        task_store,
         workspace_permissions,
         mcp_config,
         mcp_project_config,

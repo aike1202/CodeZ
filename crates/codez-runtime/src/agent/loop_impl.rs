@@ -46,6 +46,7 @@ pub struct AgentStepContext {
     pub session_id: String,
     pub task_id: String,
     pub step_number: usize,
+    pub attempt_generation: u64,
     pub cancellation: CancellationToken,
 }
 
@@ -78,13 +79,21 @@ pub enum AgentLoopError {
     InvalidState { status: AgentStatus },
     #[error("agent run exceeded its configured {max_steps}-step limit")]
     StepLimitExceeded { max_steps: usize },
+    #[error("agent attempt generation was exhausted")]
+    AttemptGenerationExhausted,
     #[error("agent step execution failed")]
     Execution(#[source] AppError),
 }
 
+struct ActiveStep {
+    generation: u64,
+    cancellation: CancellationToken,
+}
+
 struct LoopState {
     agent: AgentState,
-    active_step_cancellation: Option<CancellationToken>,
+    next_attempt_generation: u64,
+    active_step: Option<ActiveStep>,
 }
 
 /// Serializes one agent run around a concrete model/tool executor.
@@ -125,7 +134,8 @@ impl AgentLoop {
         Ok(Self {
             state: Arc::new(Mutex::new(LoopState {
                 agent: AgentState::new(session_id, task_id),
-                active_step_cancellation: None,
+                next_attempt_generation: 0,
+                active_step: None,
             })),
             executor,
             limits,
@@ -168,24 +178,45 @@ impl AgentLoop {
                     max_steps: self.limits.max_steps(),
                 });
             }
+            let Some(attempt_generation) = state.next_attempt_generation.checked_add(1) else {
+                state.agent.status = AgentStatus::Failed;
+                state.agent.current_error =
+                    Some("Agent attempt generation was exhausted".to_string());
+                return Err(AgentLoopError::AttemptGenerationExhausted);
+            };
 
             let cancellation = CancellationToken::new();
             state.agent.status = AgentStatus::Running;
             state.agent.steps_completed = step_number;
             state.agent.current_error = None;
-            state.active_step_cancellation = Some(cancellation.clone());
+            state.next_attempt_generation = attempt_generation;
+            state.active_step = Some(ActiveStep {
+                generation: attempt_generation,
+                cancellation: cancellation.clone(),
+            });
             AgentStepContext {
                 session_id: state.agent.session_id.clone(),
                 task_id: state.agent.task_id.clone(),
                 step_number,
+                attempt_generation,
                 cancellation,
             }
         };
 
+        let attempt_generation = context.attempt_generation;
         let result = self.executor.execute_step(context).await;
         let mut state = self.state.lock().await;
-        state.active_step_cancellation = None;
-        if state.agent.status == AgentStatus::Paused {
+        let Some(active_step) = state
+            .active_step
+            .as_ref()
+            .filter(|active| active.generation == attempt_generation)
+        else {
+            return Ok(state.agent.status.clone());
+        };
+        let was_cancelled = active_step.cancellation.is_cancelled();
+        state.active_step = None;
+        if was_cancelled {
+            state.agent.status = AgentStatus::Paused;
             return Ok(AgentStatus::Paused);
         }
 
@@ -215,16 +246,18 @@ impl AgentLoop {
         self.state.lock().await.agent.status.clone()
     }
 
-    /// Cancels the active step and transitions it to a resumable paused state.
+    /// Requests cancellation of the active step.
+    ///
+    /// The run remains [`AgentStatus::Running`] until the executor exits, so a
+    /// caller cannot resume and overlap the cancelled step with a new one.
     pub async fn stop(&self) -> bool {
-        let mut state = self.state.lock().await;
+        let state = self.state.lock().await;
         if state.agent.status != AgentStatus::Running {
             return false;
         }
-        if let Some(cancellation) = state.active_step_cancellation.as_ref() {
-            cancellation.cancel();
+        if let Some(active_step) = state.active_step.as_ref() {
+            active_step.cancellation.cancel();
         }
-        state.agent.status = AgentStatus::Paused;
         true
     }
 
@@ -253,15 +286,21 @@ fn validate_identifier(value: &str, field: &'static str) -> Result<(), AgentLoop
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::VecDeque, sync::Arc};
+    use std::{
+        collections::VecDeque,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+    };
 
     use async_trait::async_trait;
     use codez_core::{AppError, CancellationToken};
     use tokio::sync::{Mutex, Notify};
 
     use super::{
-        AgentLoop, AgentLoopError, AgentLoopLimits, AgentStepContext, AgentStepExecutor,
-        AgentStepOutcome,
+        ActiveStep, AgentLoop, AgentLoopError, AgentLoopLimits, AgentStepContext,
+        AgentStepExecutor, AgentStepOutcome,
     };
     use crate::agent::state::AgentStatus;
 
@@ -320,6 +359,40 @@ mod tests {
         ) -> Result<AgentStepOutcome, AppError> {
             self.started.notify_one();
             context.cancellation.cancelled().await;
+            Ok(AgentStepOutcome::Continue)
+        }
+    }
+
+    struct ControlledExecutor {
+        started: Notify,
+        release: Notify,
+        active_steps: AtomicUsize,
+        max_active_steps: AtomicUsize,
+    }
+
+    impl ControlledExecutor {
+        fn new() -> Self {
+            Self {
+                started: Notify::new(),
+                release: Notify::new(),
+                active_steps: AtomicUsize::new(0),
+                max_active_steps: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl AgentStepExecutor for ControlledExecutor {
+        async fn execute_step(
+            &self,
+            _context: AgentStepContext,
+        ) -> Result<AgentStepOutcome, AppError> {
+            let active_steps = self.active_steps.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_active_steps
+                .fetch_max(active_steps, Ordering::SeqCst);
+            self.started.notify_one();
+            self.release.notified().await;
+            self.active_steps.fetch_sub(1, Ordering::SeqCst);
             Ok(AgentStepOutcome::Continue)
         }
     }
@@ -401,6 +474,98 @@ mod tests {
         let result = running.await.expect("agent task must join");
 
         assert!(matches!(result, Ok(AgentStatus::Paused)));
+    }
+
+    #[tokio::test]
+    async fn resume_waits_for_the_cancelled_executor_to_exit_without_step_overlap() {
+        let executor = Arc::new(ControlledExecutor::new());
+        let agent = Arc::new(
+            AgentLoop::new(
+                "session-1".to_string(),
+                "task-1".to_string(),
+                executor.clone(),
+            )
+            .expect("valid fixture identifiers must construct an agent loop"),
+        );
+        let first_started = executor.started.notified();
+        let first = {
+            let agent = agent.clone();
+            tokio::spawn(async move { agent.run_step().await })
+        };
+
+        first_started.await;
+        assert!(agent.stop().await);
+        assert!(matches!(
+            agent.resume().await,
+            Err(AgentLoopError::InvalidState {
+                status: AgentStatus::Running
+            })
+        ));
+
+        executor.release.notify_one();
+        assert!(matches!(
+            first.await.expect("first agent task must join"),
+            Ok(AgentStatus::Paused)
+        ));
+        assert!(matches!(agent.resume().await, Ok(AgentStatus::Idle)));
+
+        let second_started = executor.started.notified();
+        let second = {
+            let agent = agent.clone();
+            tokio::spawn(async move { agent.run_step().await })
+        };
+        second_started.await;
+        assert_eq!(executor.max_active_steps.load(Ordering::SeqCst), 1);
+        executor.release.notify_one();
+        assert!(matches!(
+            second.await.expect("second agent task must join"),
+            Ok(AgentStatus::Idle)
+        ));
+    }
+
+    #[tokio::test]
+    async fn stale_attempt_completion_does_not_overwrite_a_new_generation() {
+        let executor = Arc::new(ControlledExecutor::new());
+        let agent = Arc::new(
+            AgentLoop::new(
+                "session-1".to_string(),
+                "task-1".to_string(),
+                executor.clone(),
+            )
+            .expect("valid fixture identifiers must construct an agent loop"),
+        );
+        let first_started = executor.started.notified();
+        let first = {
+            let agent = agent.clone();
+            tokio::spawn(async move { agent.run_step().await })
+        };
+
+        first_started.await;
+        {
+            let mut state = agent.state.lock().await;
+            state.next_attempt_generation = 2;
+            state.active_step = Some(ActiveStep {
+                generation: 2,
+                cancellation: CancellationToken::new(),
+            });
+            state.agent.status = AgentStatus::Running;
+        }
+        executor.release.notify_one();
+        let returned = first
+            .await
+            .expect("stale agent task must join")
+            .expect("stale completion must return the current state");
+        let state = agent.state.lock().await;
+        let actual = (
+            returned,
+            state.agent.status.clone(),
+            state.active_step.as_ref().map(|step| step.generation),
+        );
+
+        assert_eq!(
+            actual,
+            (AgentStatus::Running, AgentStatus::Running, Some(2))
+        );
     }
 
     #[test]

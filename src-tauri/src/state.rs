@@ -5,6 +5,7 @@ use codez_mcp::{McpProjectConfigService, McpSecretService, McpUserConfigService}
 use codez_platform::ResourceLocator;
 use codez_platform::{NativeProcessRunner, PtyManager};
 use codez_providers::service::ProviderService;
+use codez_runtime::agent::collaboration::AgentRuntime;
 use codez_runtime::attachment::AttachmentService;
 use codez_runtime::context::ledger::ModelLedgerStore;
 use codez_runtime::edit_transaction::EditTransactionService;
@@ -14,6 +15,7 @@ use codez_runtime::mutation_coordinator::FileMutationCoordinator;
 use codez_runtime::permission::store::WorkspacePermissionStore;
 use codez_runtime::session_deletion::SessionDeletionService;
 use codez_runtime::session_maintenance::SessionMaintenanceCoordinator;
+use codez_runtime::task::TaskStore;
 use codez_runtime::{CancellationTree, HostPreferences, ShutdownCoordinator, SystemService};
 use codez_storage::{AtomicFileStore, OsCredentialStore, RecentProjectsStore};
 use tokio::sync::Mutex;
@@ -49,6 +51,8 @@ pub(crate) struct AppState {
     pub(crate) provider_service: Arc<ProviderService>,
     pub(crate) subagent_settings: Mutex<()>,
     pub(crate) subagent_runtime: Arc<SubAgentRuntime>,
+    pub(crate) agent_runtime: Arc<AgentRuntime>,
+    pub(crate) task_store: Arc<TaskStore>,
     pub(crate) workspace_permissions: Arc<WorkspacePermissionStore>,
     pub(crate) mcp_config: Arc<McpUserConfigService>,
     pub(crate) mcp_project_config: Arc<McpProjectConfigService>,

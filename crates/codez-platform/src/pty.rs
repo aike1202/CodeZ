@@ -25,14 +25,6 @@ use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot, watch};
 #[cfg(windows)]
 use win32job::{ExtendedLimitInfo, Job};
 
-// portable-pty enables ConPTY Win32 input mode. Encode the physical Ctrl+C key
-// transitions so native foreground processes receive console control semantics.
-#[cfg(windows)]
-const WINDOWS_CTRL_C_KEY_EVENTS: &[u8] = b"\x1b[17;29;0;1;8;1_\
-\x1b[67;46;3;1;8;1_\
-\x1b[67;46;3;0;8;1_\
-\x1b[17;29;0;0;0;1_";
-
 /// Maximum payload size of one terminal output frame.
 pub const PTY_MAX_FRAME_BYTES: usize = 4 * 1024;
 /// Bounded host queue capacity used by the desktop composition root.
@@ -901,22 +893,6 @@ fn apply_terminal_command(
     }
 }
 
-#[cfg(windows)]
-fn write_terminal_input(writer: &mut dyn Write, data: &[u8]) -> std::io::Result<()> {
-    let mut pending_start = 0;
-    for (index, byte) in data.iter().enumerate() {
-        if *byte != 0x03 {
-            continue;
-        }
-        writer.write_all(&data[pending_start..index])?;
-        writer.write_all(WINDOWS_CTRL_C_KEY_EVENTS)?;
-        pending_start = index + 1;
-    }
-    writer.write_all(&data[pending_start..])?;
-    writer.flush()
-}
-
-#[cfg(not(windows))]
 fn write_terminal_input(writer: &mut dyn Write, data: &[u8]) -> std::io::Result<()> {
     writer.write_all(data)?;
     writer.flush()
@@ -1167,11 +1143,10 @@ mod tests {
     use codez_core::AppErrorKind;
     use tokio::sync::mpsc as tokio_mpsc;
 
+    use super::write_terminal_input;
     use super::{
         OutputFlowControl, PTY_ACK_WINDOW, PTY_EVENT_QUEUE_CAPACITY, PtyManager, TerminalHandle,
     };
-    #[cfg(windows)]
-    use super::{WINDOWS_CTRL_C_KEY_EVENTS, write_terminal_input};
 
     fn completed_terminal(id: &str) -> Arc<TerminalHandle> {
         let (commands, _receiver) = mpsc::sync_channel(1);
@@ -1211,22 +1186,13 @@ mod tests {
         producer.join().expect("flow-control producer must join");
     }
 
-    #[cfg(windows)]
     #[test]
-    fn terminal_input_should_encode_each_windows_ctrl_c_and_preserve_adjacent_bytes() {
+    fn terminal_input_should_preserve_control_characters_and_adjacent_bytes() {
         let mut written = Vec::new();
         write_terminal_input(&mut written, b"before\x03middle\x03after")
             .expect("test writer must accept terminal input");
-        let expected = [
-            b"before".as_slice(),
-            WINDOWS_CTRL_C_KEY_EVENTS,
-            b"middle".as_slice(),
-            WINDOWS_CTRL_C_KEY_EVENTS,
-            b"after".as_slice(),
-        ]
-        .concat();
 
-        assert_eq!(written, expected);
+        assert_eq!(written, b"before\x03middle\x03after");
     }
 
     #[test]

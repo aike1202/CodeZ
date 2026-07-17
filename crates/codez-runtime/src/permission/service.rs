@@ -338,11 +338,17 @@ fn classify_effect(
     workspace_root: &Path,
 ) -> (PermissionCapability, String, String, bool) {
     match effect {
-        ToolEffect::ReadFile { path, .. } | ToolEffect::ReadMemory { path } => classify_path(
+        ToolEffect::ReadFile { path, .. } => classify_path(
             path,
             workspace_root,
             PermissionCapability::Read,
             "Read a file",
+        ),
+        ToolEffect::ReadMemory { path } => (
+            PermissionCapability::Read,
+            path.clone(),
+            "Read session-scoped application memory".to_string(),
+            false,
         ),
         ToolEffect::WriteFile { path, .. } => classify_path(
             path,
@@ -369,13 +375,18 @@ fn classify_effect(
             "Roll back a previous mutation".to_string(),
             false,
         ),
+        ToolEffect::Internal { target } => (
+            PermissionCapability::Read,
+            target.clone(),
+            "Use session-scoped internal runtime state".to_string(),
+            false,
+        ),
         ToolEffect::ExternalEffect { target }
         | ToolEffect::NotifyUser { channel: target }
         | ToolEffect::ControlExecution {
             execution_id: target,
             ..
         }
-        | ToolEffect::Internal { target }
         | ToolEffect::Unknown { target } => (
             if matches!(effect, ToolEffect::Unknown { .. }) {
                 PermissionCapability::Unknown
@@ -527,5 +538,48 @@ fn mode_name(mode: &crate::permission::decision::PermissionMode) -> &'static str
     match mode {
         crate::permission::decision::PermissionMode::Auto => "auto",
         crate::permission::decision::PermissionMode::FullAccess => "full-access",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::classify_effect;
+    use crate::permission::contract::PermissionCapability;
+    use crate::tools::types::ToolEffect;
+
+    #[test]
+    fn read_memory_is_not_classified_as_an_external_filesystem_path() {
+        let workspace = std::path::Path::new("C:\\workspace");
+
+        let classified = classify_effect(
+            &ToolEffect::ReadMemory {
+                path: "session:session-a:tool-results".to_string(),
+            },
+            workspace,
+        );
+
+        assert_eq!(
+            classified,
+            (
+                PermissionCapability::Read,
+                "session:session-a:tool-results".to_string(),
+                "Read session-scoped application memory".to_string(),
+                false,
+            )
+        );
+    }
+
+    #[test]
+    fn internal_runtime_state_uses_the_read_only_permission_capability() {
+        let workspace = std::path::Path::new("C:\\workspace");
+
+        let classified = classify_effect(
+            &ToolEffect::Internal {
+                target: "session:session-a:tool-exposure".to_string(),
+            },
+            workspace,
+        );
+
+        assert_eq!(classified.0, PermissionCapability::Read);
     }
 }

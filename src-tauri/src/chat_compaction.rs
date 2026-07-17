@@ -30,6 +30,7 @@ const COMPACTION_SYSTEM_PROMPT: &str = "Summarize the supplied prior conversatio
 
 pub(crate) struct AutoCompactionRequest<'a> {
     pub(crate) session_id: &'a SessionId,
+    pub(crate) context_scope_id: &'a ContextScopeId,
     pub(crate) trigger: &'static str,
     pub(crate) capabilities: ModelContextCapabilities,
     pub(crate) reasoning_budget_tokens: Option<u32>,
@@ -91,7 +92,7 @@ pub(crate) async fn compact_active_chat_context(
         cancellation,
         CompactionRequest {
             session_id: request.session_id.as_str().to_string(),
-            context_scope_id: ContextScopeId::Main,
+            context_scope_id: request.context_scope_id.clone(),
             trigger: request.trigger.to_string(),
             capabilities: request.capabilities,
             system_prompt: COMPACTION_SYSTEM_PROMPT.to_string(),

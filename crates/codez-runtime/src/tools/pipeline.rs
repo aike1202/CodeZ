@@ -598,6 +598,10 @@ impl ToolExecutionPipeline {
             cancellation: cancellation.clone(),
             authorized_effects: item.effects.clone(),
             file_services: context.file_services(),
+            deferred_tools: context
+                .exposure()
+                .map(|exposure| exposure.deferred_tools.clone())
+                .unwrap_or_default(),
         };
         let behavior = item.handler.descriptor().behavior();
         let execution = item.handler.execute(&item.input, &tool_context);

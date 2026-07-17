@@ -29,5 +29,8 @@ tracing.workspace = true
 tempfile.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 
+[dev-dependencies]
+codez-storage.workspace = true
+
 [lints]
 workspace = true

@@ -7,8 +7,9 @@ use codez_core::{CancellationToken, FileSystem};
 use serde_json::Value;
 
 use crate::tools::types::{
-    AgentRole, ToolApprovalMetadata, ToolAvailabilityContext, ToolConcurrency, ToolEffectPlan,
-    ToolExecutionResult, ToolExposure, ToolInterruptBehavior, ToolPlanningContext, ToolSource,
+    AgentRole, DeferredToolSummary, ToolApprovalMetadata, ToolAvailabilityContext, ToolConcurrency,
+    ToolEffectPlan, ToolExecutionResult, ToolExposure, ToolInterruptBehavior, ToolPlanningContext,
+    ToolSource,
 };
 use crate::{
     edit_transaction::EditTransactionService, fingerprint::ReadFingerprintStore,
@@ -165,6 +166,7 @@ pub struct ToolContext {
     pub cancellation: CancellationToken,
     pub authorized_effects: ToolEffectPlan,
     pub file_services: Option<ToolFileServices>,
+    pub deferred_tools: Vec<DeferredToolSummary>,
 }
 
 pub trait ToolHandler: Send + Sync {

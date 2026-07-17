@@ -47,6 +47,36 @@ export type ComposerImageAttachment = SessionImageAttachment | DraftImageAttachm
 
 export type AttachmentPreviewBytes = { mimeType: string, bytes: Array<number>, };
 
+export type AgentRuntimeStatus = "queued" | "running" | "completed" | "failed" | "interrupted";
+
+export type AgentMessageType = "NEW_TASK" | "MESSAGE" | "FINAL_ANSWER";
+
+export type AgentMessageDeliveryState = "unread" | "read";
+
+export type AgentDepth = "quick" | "normal" | "exhaustive";
+
+export type AgentExpectations = { questions: Array<string>, outOfScope: Array<string>, };
+
+export type AgentScope = { directories: Array<string>, excludeGlobs: Array<string>, };
+
+export type AgentLaunchPolicy = { context?: string, expectations?: AgentExpectations, scope?: AgentScope, depth?: AgentDepth, allowedWriteFiles: Array<string>, allowShell: boolean, };
+
+export type AgentTerminalResult = { status: AgentRuntimeStatus, report: string, conclusion?: string, };
+
+export type AgentRecord = { agentId: string, sessionId: string, parentAgentId: string, parentPath: string, path: string, role: string, taskName: string, description: string, contextScopeId: string, status: AgentRuntimeStatus, attemptId: string, runCount: number, createdAt: string, updatedAt: string, startedAt?: string, completedAt?: string, launch: AgentLaunchPolicy, result?: AgentTerminalResult, };
+
+export type AgentMailboxMessage = { messageId: string, messageType: AgentMessageType, attemptId: string, author: string, recipient: string, payload: string, deliveryState: AgentMessageDeliveryState, createdAt: string, readAt?: string, };
+
+export type AgentRuntimeSnapshot = { version: number, sessionId: string, revision: number, agents: Array<AgentRecord>, messages: Array<AgentMailboxMessage>, };
+
+export type AgentSnapshotRequest = { sessionId: string, };
+
+export type AgentActiveIdsRequest = { sessionId: string, };
+
+export type AgentActiveIdsResult = { agentIds: Array<string>, revision: number, };
+
+export type AgentUpdatedEvent = { version: number, sessionId: string, revision: number, snapshot: AgentRuntimeSnapshot, };
+
 export type PermissionMode = "auto" | "full-access";
 
 export type ThinkingMode = "auto" | "none" | "openai" | "deepseek" | "qwen" | "anthropic" | "gemini" | "grok" | "openrouter";
@@ -219,5 +249,33 @@ export type SubAgentUnavailableDetail = "systemPrompt" | "toolCatalog";
 export type SubAgentSettingsDetail = { type: string, description: string, whenToUse: string, whenNotToUse?: string, costHint?: string, maxLoops: number, canRunInBackground?: boolean, isolation?: string, outputSpec?: SubAgentOutputSpec, enabled: boolean, configuredModels?: Array<SubAgentModelSelection>, };
 
 export type SubAgentDetailResult = { "kind": "available", detail: SubAgentSettingsDetail, } | { "kind": "partial", detail: SubAgentSettingsDetail, unavailable: Array<SubAgentUnavailableDetail>, } | { "kind": "notFound", subagentType: string, };
+
+export type TaskStatus = "pending" | "in_progress" | "completed" | "cancelled";
+
+export type TaskRiskLevel = "low" | "medium" | "high";
+
+export type TaskApprovalStatus = "not_required" | "pending" | "approved" | "changes_requested" | "rejected";
+
+export type TaskContextBundle = { knownFacts?: Array<string>, decisions?: Array<string>, constraints?: Array<string>, excludedDirections?: Array<string>, sourceReferences?: Array<string>, };
+
+export type TaskItem = { id: string, subject: string, description: string, status: TaskStatus, files?: Array<string>, activeForm?: string, groupId?: string, groupTitle?: string, groupSubtitle?: string, riskLevel?: TaskRiskLevel, requiresApproval: boolean, approvalStatus: TaskApprovalStatus, acceptanceCriteria?: Array<string>, verificationCommand?: string, contextBundle?: TaskContextBundle, };
+
+export type TaskSnapshot = { version: number, sessionId: string, revision: number, nextSequence: number, tasks: Array<TaskItem>, };
+
+export type TaskCreateInput = { subject: string, description?: string, files?: Array<string>, activeForm?: string, groupId?: string, groupTitle?: string, groupSubtitle?: string, riskLevel?: TaskRiskLevel, requiresApproval?: boolean, approvalStatus?: TaskApprovalStatus, acceptanceCriteria?: Array<string>, verificationCommand?: string, contextBundle?: TaskContextBundle, };
+
+export type TaskUpdateInput = { subject?: string, description?: string, status?: TaskStatus, files?: Array<string>, activeForm?: string, groupId?: string, groupTitle?: string, groupSubtitle?: string, riskLevel?: TaskRiskLevel, requiresApproval?: boolean, approvalStatus?: TaskApprovalStatus, acceptanceCriteria?: Array<string>, verificationCommand?: string, contextBundle?: TaskContextBundle, };
+
+export type TaskCreateRequest = { sessionId: string, tasks: Array<TaskCreateInput>, };
+
+export type TaskUpdateRequest = { sessionId: string, taskId: string, patch: TaskUpdateInput, };
+
+export type TaskGetRequest = { sessionId: string, taskId: string, };
+
+export type TaskListRequest = { sessionId: string, };
+
+export type TaskMutationResult = { task?: TaskItem, snapshot: TaskSnapshot, };
+
+export type TaskUpdatedEvent = { version: number, sessionId: string, revision: number, snapshot: TaskSnapshot, };
 
 export type DesktopEvent<T> = { version: number, streamId: string | null, sequence: number | null, kind: string, payload: T, };

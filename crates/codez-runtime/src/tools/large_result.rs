@@ -37,9 +37,12 @@ pub struct LargeToolResultStore {
     root: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ReadResult {
     pub content: String,
     pub offset: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub next_offset: Option<usize>,
     pub total_chars: usize,
 }
@@ -129,13 +132,22 @@ impl LargeToolResultStore {
         limit: Option<usize>,
     ) -> std::io::Result<ReadResult> {
         let prefix = "tool-result://";
-        if !handle.starts_with(prefix) {
+        let Some(id) = handle.strip_prefix(prefix) else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Invalid tool-result handle.",
+            ));
+        };
+        if id.is_empty()
+            || !id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "Invalid tool-result handle.",
             ));
         }
-        let id = &handle[prefix.len()..];
         let dir = self.session_dir(workspace_root, session_id);
 
         let metadata_path = dir.join(format!("{}.json", id));
@@ -143,6 +155,7 @@ impl LargeToolResultStore {
         let metadata: ToolResultMetadata = serde_json::from_str(&metadata_content)?;
 
         if metadata.persisted.handle != handle
+            || metadata.workspace_hash != sha256_hex(workspace_root.to_string_lossy().as_bytes())
             || metadata.session_hash != sha256_hex(session_id.as_bytes())
         {
             return Err(std::io::Error::new(
@@ -153,6 +166,15 @@ impl LargeToolResultStore {
 
         let content_path = dir.join(format!("{}.txt", id));
         let full_content = fs::read_to_string(&content_path).await?;
+        if metadata.persisted.original_chars != full_content.chars().count()
+            || metadata.persisted.original_bytes != full_content.len()
+            || metadata.persisted.sha256 != sha256_hex(full_content.as_bytes())
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Persisted tool-result content failed its integrity check.",
+            ));
+        }
 
         // This offset is roughly assumed to be in chars like TS does `full.slice(offset, end)`
         // In Rust, String slicing is by byte, so we collect to chars first to match TS behavior for safe truncation
@@ -182,5 +204,56 @@ impl LargeToolResultStore {
     ) -> std::io::Result<()> {
         let dir = self.session_dir(workspace_root, session_id);
         fs::remove_dir_all(dir).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn read_rejects_a_path_like_handle() {
+        let root = tempfile::tempdir().expect("temporary result root must be available");
+        let store = LargeToolResultStore::new(root.path().to_path_buf());
+
+        let error = store
+            .read(
+                root.path(),
+                "session-a",
+                "tool-result://../outside",
+                None,
+                None,
+            )
+            .await
+            .expect_err("path-like handles must be rejected");
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[tokio::test]
+    async fn read_rejects_content_that_no_longer_matches_metadata() {
+        let root = tempfile::tempdir().expect("temporary result root must be available");
+        let store = LargeToolResultStore::new(root.path().join("results"));
+        let persisted = store
+            .persist(root.path(), "session-a", "call-a", "Read", "original")
+            .await
+            .expect("fixture result must persist");
+        let id = persisted
+            .handle
+            .strip_prefix("tool-result://")
+            .expect("persisted handles must use the opaque prefix");
+        let content_path = store
+            .session_dir(root.path(), "session-a")
+            .join(format!("{id}.txt"));
+        tokio::fs::write(content_path, "tampered")
+            .await
+            .expect("fixture content must be modified");
+
+        let error = store
+            .read(root.path(), "session-a", &persisted.handle, None, None)
+            .await
+            .expect_err("tampered content must not be returned");
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
     }
 }

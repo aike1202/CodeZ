@@ -650,6 +650,7 @@ mod tests {
                 analysis_status: "test".to_string(),
             },
             file_services: None,
+            deferred_tools: Vec::new(),
         }
     }
 

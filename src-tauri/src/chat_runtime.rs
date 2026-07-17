@@ -54,6 +54,7 @@ use codez_providers::{
 use codez_runtime::attachment::{AttachmentService, ResolvedSessionImage};
 use codez_runtime::{
     CancellationTree,
+    agent::collaboration::{AgentAttemptOutput, AgentAttemptRequest, AgentMessageType},
     cancellation::SessionCancellation,
     chat::{
         prompt::{
@@ -196,6 +197,7 @@ struct ChatPromptBuildInput<'a> {
     scope: &'a SessionRuntimeScopeSnapshot,
     now: &'a DateTime<Utc>,
     cancellation: &'a CancellationToken,
+    system_addendum: Option<&'a str>,
 }
 
 #[derive(Debug, Error)]
@@ -310,9 +312,13 @@ impl ChatPromptAssembler {
             git_status,
             now: Some(input.now.to_owned()),
         };
-        let prompt = self.pipeline.run(&context).await;
+        let mut prompt = self.pipeline.run(&context).await;
         if prompt.trim().is_empty() {
             return Err(ChatPromptError::EmptyPrompt);
+        }
+        if let Some(addendum) = input.system_addendum {
+            prompt.push_str("\n\n");
+            prompt.push_str(addendum);
         }
         Ok(prompt)
     }
@@ -874,6 +880,47 @@ struct FrameSink {
     accepting_steers: bool,
 }
 
+#[async_trait::async_trait]
+trait ProviderConversationSink: Send {
+    async fn send_delta(
+        &mut self,
+        delta: String,
+        reasoning_delta: Option<String>,
+    ) -> Result<(), AppError>;
+    async fn send_event(&mut self, event: ChatStreamFrameEvent) -> Result<(), AppError>;
+    async fn receive_control(&mut self) -> Result<(), AppError>;
+    fn drain_controls(&mut self);
+    fn take_next_steer(&mut self) -> Option<ChatSteerInput>;
+}
+
+struct AgentConversationSink;
+
+#[async_trait::async_trait]
+impl ProviderConversationSink for AgentConversationSink {
+    async fn send_delta(
+        &mut self,
+        _delta: String,
+        _reasoning_delta: Option<String>,
+    ) -> Result<(), AppError> {
+        Ok(())
+    }
+
+    async fn send_event(&mut self, _event: ChatStreamFrameEvent) -> Result<(), AppError> {
+        Ok(())
+    }
+
+    async fn receive_control(&mut self) -> Result<(), AppError> {
+        std::future::pending().await
+    }
+
+    fn drain_controls(&mut self) {}
+
+    fn take_next_steer(&mut self) -> Option<ChatSteerInput> {
+        None
+    }
+}
+
+#[derive(Debug)]
 enum TerminalOutcome {
     Completed {
         full_content: String,
@@ -896,6 +943,8 @@ struct ConversationLedger {
     run_id: StreamId,
     provider_id: String,
     model_id: String,
+    context_scope_id: ContextScopeId,
+    system_prompt_addendum: Option<String>,
     current_input_message_id: String,
     next_record: u32,
     interrupted_content: Option<String>,
@@ -917,6 +966,8 @@ impl ConversationLedger {
             run_id: entry.run_id.clone(),
             provider_id: resolved.provider_id.clone(),
             model_id: resolved.model.id.clone(),
+            context_scope_id: codez_core::context::ContextScopeId::Main,
+            system_prompt_addendum: None,
             current_input_message_id: String::new(),
             next_record: 0,
             interrupted_content: None,
@@ -958,6 +1009,89 @@ impl ConversationLedger {
                 persisted_attachments,
             )
             .await?;
+        Ok(ledger)
+    }
+
+    async fn begin_agent(
+        store: Arc<ModelLedgerStore>,
+        request: &AgentAttemptRequest,
+        resolved: &ResolvedProviderChatConfig,
+    ) -> Result<Self, AppError> {
+        if request.mailbox_messages.is_empty() {
+            return Err(AppError::validation(
+                "An Agent attempt requires at least one durable mailbox message",
+            ));
+        }
+        let context_scope_id = ContextScopeId::parse(&request.agent.context_scope_id)
+            .map_err(|source| AppError::validation(source.to_string()))?;
+        let run_id = StreamId::parse(request.agent.attempt_id.clone())
+            .map_err(|source| AppError::validation(source.to_string()))?;
+        let mut ledger = Self {
+            store,
+            session_id: request.session_id.clone(),
+            run_id,
+            provider_id: resolved.provider_id.clone(),
+            model_id: resolved.model.id.clone(),
+            context_scope_id,
+            system_prompt_addendum: Some(agent_system_addendum(request)),
+            current_input_message_id: String::new(),
+            next_record: 0,
+            interrupted_content: None,
+        };
+        for mailbox in &request.mailbox_messages {
+            let event_id = format!("agent-mailbox:{}", mailbox.message_id);
+            let message_id = format!("agent-mailbox-message:{}", mailbox.message_id);
+            let message_type = match mailbox.message_type {
+                AgentMessageType::NewTask => "new_task",
+                AgentMessageType::Message => "message",
+                AgentMessageType::FinalAnswer => "final_answer",
+            };
+            let content = match mailbox.message_type {
+                AgentMessageType::NewTask => mailbox.payload.clone(),
+                AgentMessageType::Message => {
+                    format!("Message from {}:\n\n{}", mailbox.author, mailbox.payload)
+                }
+                AgentMessageType::FinalAnswer => format!(
+                    "Final answer from {}:\n\n{}",
+                    mailbox.author, mailbox.payload
+                ),
+            };
+            let message = NormalizedModelMessage {
+                id: message_id.clone(),
+                client_message_id: None,
+                turn_id: request.agent.attempt_id.clone(),
+                role: "user".to_string(),
+                content,
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
+                status: "complete".to_string(),
+                created_at: mailbox.created_at.to_rfc3339(),
+                source_sequence: None,
+                attachments: None,
+                file_references: None,
+            };
+            ledger
+                .append_payload(
+                    event_id,
+                    mailbox.created_at.to_rfc3339(),
+                    LedgerEventType::UserMessage,
+                    UserMessagePayload {
+                        message: message.clone(),
+                        provider_id: Some(ledger.provider_id.clone()),
+                        model: Some(ledger.model_id.clone()),
+                        command_metadata: Some(serde_json::json!({
+                            "agentMailboxMessageId": mailbox.message_id,
+                            "agentAttemptId": mailbox.attempt_id,
+                            "agentMessageType": message_type,
+                            "author": mailbox.author,
+                            "recipient": mailbox.recipient,
+                        })),
+                    },
+                )
+                .await?;
+            ledger.current_input_message_id = message_id;
+        }
         Ok(ledger)
     }
 
@@ -1232,7 +1366,7 @@ impl ConversationLedger {
                 LedgerAppendRequest {
                     event_id,
                     session_id: self.session_id.as_str().to_string(),
-                    context_scope_id: ContextScopeId::Main,
+                    context_scope_id: self.context_scope_id.clone(),
                     turn_id: Some(self.run_id.as_str().to_string()),
                     created_at,
                     r#type: event_type,
@@ -1243,6 +1377,62 @@ impl ConversationLedger {
             .map(|_| ())
             .map_err(|error| ledger_error("append chat history", error))
     }
+}
+
+fn agent_system_addendum(request: &AgentAttemptRequest) -> String {
+    let agent = &request.agent;
+    let mut sections = vec![format!(
+        "You are the CodeZ {} Agent at {}. Work only on the delegated task and use only the tools exposed in this request. Do not claim actions not supported by tool results.",
+        agent.role, agent.path
+    )];
+    if agent.role == "Reviewer" {
+        sections.push(
+            "Report findings first. Shell access is restricted to explicit verification commands and must not mutate source files."
+                .to_string(),
+        );
+    } else {
+        sections.push("Explore read-only evidence and return a concise handoff.".to_string());
+    }
+    if let Some(context) = agent.launch.context.as_deref() {
+        sections.push(format!("Durable context:\n{context}"));
+    }
+    if let Some(expectations) = &agent.launch.expectations {
+        if !expectations.questions.is_empty() {
+            sections.push(format!(
+                "Questions to answer:\n{}",
+                prompt_bullets(&expectations.questions)
+            ));
+        }
+        if !expectations.out_of_scope.is_empty() {
+            sections.push(format!(
+                "Out of scope:\n{}",
+                prompt_bullets(&expectations.out_of_scope)
+            ));
+        }
+    }
+    if let Some(scope) = &agent.launch.scope {
+        if !scope.directories.is_empty() {
+            sections.push(format!(
+                "Workspace directories in scope:\n{}",
+                prompt_bullets(&scope.directories)
+            ));
+        }
+        if !scope.exclude_globs.is_empty() {
+            sections.push(format!(
+                "Excluded globs:\n{}",
+                prompt_bullets(&scope.exclude_globs)
+            ));
+        }
+    }
+    sections.join("\n\n")
+}
+
+fn prompt_bullets(values: &[String]) -> String {
+    values
+        .iter()
+        .map(|value| format!("- {value}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 impl ChatRuntime {
@@ -1276,6 +1466,53 @@ impl ChatRuntime {
             registry: Mutex::new(RegistryState::default()),
             ask_user_responses: Arc::new(AskUserResponseRegistry::new()),
             permission_responses: Arc::new(PermissionResponseRegistry::default()),
+        }
+    }
+
+    pub(crate) async fn execute_agent_attempt(
+        &self,
+        providers: Arc<ProviderService>,
+        request: AgentAttemptRequest,
+        resolved: ResolvedProviderChatConfig,
+        cancellation: CancellationToken,
+    ) -> Result<AgentAttemptOutput, AppError> {
+        let run_id = StreamId::parse(request.agent.attempt_id.clone())
+            .map_err(|source| AppError::validation(source.to_string()))?;
+        let context_scope_id = ContextScopeId::parse(&request.agent.context_scope_id)
+            .map_err(|source| AppError::validation(source.to_string()))?;
+        let tool_run = self.tools.agent_run_context(
+            request.workspace_root.clone(),
+            request.session_id.clone(),
+            run_id,
+            cancellation.clone(),
+            &request.agent.role,
+            context_scope_id,
+        )?;
+        let mut conversation =
+            ConversationLedger::begin_agent(Arc::clone(&self.ledger), &request, &resolved).await?;
+        let mut sink = AgentConversationSink;
+        let outcome = run_provider_conversation(
+            ProviderConversationServices {
+                providers: &providers,
+                tools: self.tools.as_ref(),
+                attachment_service: self.attachment.as_ref(),
+                prompt: self.prompt.as_ref(),
+            },
+            resolved,
+            cancellation,
+            &mut conversation,
+            Some(&tool_run),
+            &mut sink,
+        )
+        .await;
+        conversation.persist_terminal(&outcome).await?;
+        match outcome {
+            TerminalOutcome::Completed { full_content, .. } => Ok(AgentAttemptOutput {
+                report: full_content,
+                conclusion: None,
+            }),
+            TerminalOutcome::Failed { error, .. } => Err(error),
+            TerminalOutcome::Interrupted { reason } => Err(AppError::cancelled(reason)),
         }
     }
 
@@ -1545,9 +1782,7 @@ impl ChatRuntime {
         &self,
         session_id: &SessionId,
     ) -> Result<(), AppError> {
-        self.tools
-            .clear_session_state(session_id.as_str())
-            .await
+        self.tools.clear_session_state(session_id.as_str()).await
     }
 
     async fn drive_provider_run(
@@ -2236,6 +2471,33 @@ impl FrameSink {
     }
 }
 
+#[async_trait::async_trait]
+impl ProviderConversationSink for FrameSink {
+    async fn send_delta(
+        &mut self,
+        delta: String,
+        reasoning_delta: Option<String>,
+    ) -> Result<(), AppError> {
+        FrameSink::send_delta(self, delta, reasoning_delta).await
+    }
+
+    async fn send_event(&mut self, event: ChatStreamFrameEvent) -> Result<(), AppError> {
+        FrameSink::send_event(self, event).await
+    }
+
+    async fn receive_control(&mut self) -> Result<(), AppError> {
+        FrameSink::receive_control(self).await
+    }
+
+    fn drain_controls(&mut self) {
+        FrameSink::drain_controls(self);
+    }
+
+    fn take_next_steer(&mut self) -> Option<ChatSteerInput> {
+        FrameSink::take_next_steer(self)
+    }
+}
+
 #[derive(Clone, Copy)]
 struct ProviderImagePolicy {
     max_images: usize,
@@ -2429,7 +2691,7 @@ enum ChatContextError {
 
 async fn prepare_provider_request(
     input: PrepareProviderRequestInput<'_>,
-    sink: &mut FrameSink,
+    sink: &mut dyn ProviderConversationSink,
 ) -> Result<PreparedProviderRequest, AppError> {
     let PrepareProviderRequestInput {
         providers,
@@ -2451,10 +2713,11 @@ async fn prepare_provider_request(
             .map_err(context_app_error)?
             .ok_or(ChatContextError::ScopeMissing)
             .map_err(context_app_error)?;
+        let scope_key = conversation.context_scope_id.as_key();
         let scope = loaded
             .snapshot
             .scopes
-            .get("main")
+            .get(scope_key.as_ref())
             .cloned()
             .ok_or(ChatContextError::ScopeMissing)
             .map_err(context_app_error)?;
@@ -2491,6 +2754,7 @@ async fn prepare_provider_request(
                 scope: &scope,
                 now: prompt_now,
                 cancellation,
+                system_addendum: conversation.system_prompt_addendum.as_deref(),
             })
             .await
             .map_err(ChatContextError::from)
@@ -2596,6 +2860,7 @@ async fn prepare_provider_request(
                 cancellation.child_token(),
                 AutoCompactionRequest {
                     session_id: &conversation.session_id,
+                    context_scope_id: &conversation.context_scope_id,
                     trigger: "auto_threshold",
                     capabilities,
                     reasoning_budget_tokens: resolved.thinking.budget_tokens,
@@ -2947,7 +3212,7 @@ async fn compact_after_provider_overflow(
     cancellation: &CancellationToken,
     overflow: &ProviderOverflowCompaction,
     budget: &ContextBudgetSnapshot,
-    sink: &mut FrameSink,
+    sink: &mut dyn ProviderConversationSink,
 ) -> Result<bool, AppError> {
     compact_context_with_frames(
         Arc::clone(providers),
@@ -2955,6 +3220,7 @@ async fn compact_after_provider_overflow(
         cancellation.child_token(),
         AutoCompactionRequest {
             session_id: &conversation.session_id,
+            context_scope_id: &conversation.context_scope_id,
             trigger: "provider_overflow",
             capabilities: overflow.capabilities.clone(),
             reasoning_budget_tokens: overflow.reasoning_budget_tokens,
@@ -2975,7 +3241,7 @@ async fn compact_context_with_frames(
     cancellation: CancellationToken,
     request: AutoCompactionRequest<'_>,
     budget: &ContextBudgetSnapshot,
-    sink: &mut FrameSink,
+    sink: &mut dyn ProviderConversationSink,
 ) -> Result<CompactionResult, AppError> {
     let trigger = request.trigger.to_string();
     sink.send_event(ChatStreamFrameEvent::ContextCompactionStarted(
@@ -3081,7 +3347,7 @@ async fn run_provider_conversation(
     cancellation: CancellationToken,
     conversation: &mut ConversationLedger,
     tool_run: Option<&ChatToolRunContext>,
-    sink: &mut FrameSink,
+    sink: &mut dyn ProviderConversationSink,
 ) -> TerminalOutcome {
     let ProviderConversationServices {
         providers,
@@ -3091,7 +3357,7 @@ async fn run_provider_conversation(
     } = services;
     let provider_id = first_config.provider_id.clone();
     let model_id = first_config.model.id.clone();
-    let provider_tools = tool_run.map(|_| tools.provider_tool_definitions());
+    let provider_tools = tool_run.map(|run| tools.provider_tool_definitions_for_run(run));
     let mut next_config = Some(first_config);
     let mut tool_rounds = 0;
     let mut overflow_retried = false;
@@ -3400,7 +3666,7 @@ enum ProviderTurn {
 async fn consume_provider_turn(
     mut stream: BoxStream<'static, Result<ProviderChatStreamEvent, ChatProviderError>>,
     cancellation: CancellationToken,
-    sink: &mut FrameSink,
+    sink: &mut dyn ProviderConversationSink,
 ) -> ProviderTurn {
     let mut completed_tool_calls = Vec::new();
     let mut partial_content = String::new();
@@ -4822,6 +5088,8 @@ mod tests {
             run_id: StreamId::parse("stream-1").expect("fixture stream must be valid"),
             provider_id: "provider-1".to_string(),
             model_id: "model-1".to_string(),
+            context_scope_id: codez_core::context::ContextScopeId::Main,
+            system_prompt_addendum: None,
             current_input_message_id: String::new(),
             next_record: 0,
             interrupted_content: None,
@@ -4960,7 +5228,7 @@ mod tests {
 
     mod local_provider_e2e {
         use std::{
-            collections::HashMap,
+            collections::{HashMap, HashSet},
             io::{self, Cursor, Read, Write},
             net::{TcpListener, TcpStream},
             path::PathBuf,
@@ -4990,6 +5258,11 @@ mod tests {
         use codez_providers::service::ProviderService;
         use codez_runtime::{
             CancellationTree,
+            agent::collaboration::{
+                AgentAttemptExecutor, AgentAttemptOutput, AgentAttemptRequest, AgentLaunchPolicy,
+                AgentMailboxMessage, AgentMessageDeliveryState, AgentMessageType, AgentRecord,
+                AgentRuntime, AgentRuntimeStatus, SpawnAgentInput,
+            },
             attachment::AttachmentService,
             chat::stream_state::ChatStreamStateMachine,
             context::ledger::ModelLedgerStore,
@@ -5018,11 +5291,34 @@ mod tests {
             denied_permission_response, permission_request_to_wire, run_provider_conversation,
         };
         use crate::{
+            agent_runtime::DesktopAgentAttemptExecutor,
             attachment_boundary::session_to_wire,
             chat_interaction::AskUserResponseRegistry,
-            chat_tool_runtime::{AskUserHandler, ChatToolRunContext, ChatToolRuntime},
+            chat_tool_runtime::{
+                AskUserHandler, ChatToolRunContext, ChatToolRuntime, ChatToolRuntimeDependencies,
+            },
             error::ErrorReporter,
         };
+
+        struct FixtureAgentExecutor;
+
+        #[async_trait::async_trait]
+        impl AgentAttemptExecutor for FixtureAgentExecutor {
+            async fn execute(
+                &self,
+                request: AgentAttemptRequest,
+                cancellation: CancellationToken,
+            ) -> Result<AgentAttemptOutput, AppError> {
+                if request.agent.task_name == "mailbox-child" {
+                    return Ok(AgentAttemptOutput {
+                        report: "child-final-evidence".to_string(),
+                        conclusion: None,
+                    });
+                }
+                cancellation.cancelled().await;
+                Err(AppError::cancelled("fixture parent Agent stopped"))
+            }
+        }
 
         struct RuntimeFixture {
             _data: tempfile::TempDir,
@@ -5030,6 +5326,7 @@ mod tests {
             data_root: PathBuf,
             attachment: Arc<AttachmentService>,
             tools: Arc<ChatToolRuntime>,
+            agent_runtime: Arc<AgentRuntime>,
             ledger: Arc<ModelLedgerStore>,
             edit_transaction: Arc<EditTransactionService>,
             permissions: Arc<WorkspacePermissionStore>,
@@ -5050,8 +5347,7 @@ mod tests {
                     WorkspacePermissionStore::new(paths.data_directory(), Arc::clone(&persistence))
                         .expect("fixture permission store must compose"),
                 );
-                let native_process_runner =
-                    Arc::new(codez_platform::NativeProcessRunner::new());
+                let native_process_runner = Arc::new(codez_platform::NativeProcessRunner::new());
                 let process_runner: Arc<dyn ProcessRunner> = native_process_runner.clone();
                 let prompt = Arc::new(ChatPromptAssembler::new(
                     paths.data_directory().to_path_buf(),
@@ -5059,15 +5355,28 @@ mod tests {
                     Arc::clone(&process_runner),
                 ));
                 let edit_transaction = Arc::new(EditTransactionService::new(Arc::clone(&paths)));
+                let task_store = Arc::new(codez_runtime::task::TaskStore::new(
+                    paths.data_directory(),
+                    Arc::clone(&persistence),
+                ));
+                let agent_runtime = Arc::new(AgentRuntime::new(
+                    paths.data_directory(),
+                    Arc::clone(&persistence),
+                    Arc::new(FixtureAgentExecutor),
+                ));
                 let tools = Arc::new(
                     ChatToolRuntime::new(
                         paths.as_ref(),
-                        Arc::clone(&persistence),
-                        Arc::clone(&permissions),
-                        Arc::new(ReadFingerprintStore::default()),
-                        Arc::new(FileMutationCoordinator::default()),
-                        Arc::clone(&edit_transaction),
-                        native_process_runner,
+                        ChatToolRuntimeDependencies {
+                            persistence: Arc::clone(&persistence),
+                            workspace_permissions: Arc::clone(&permissions),
+                            fingerprint_store: Arc::new(ReadFingerprintStore::default()),
+                            mutation_coordinator: Arc::new(FileMutationCoordinator::default()),
+                            edit_transaction_service: Arc::clone(&edit_transaction),
+                            task_store,
+                            agent_runtime: Arc::clone(&agent_runtime),
+                            process_runner: native_process_runner,
+                        },
                     )
                     .expect("fixture chat tools must compose"),
                 );
@@ -5082,6 +5391,7 @@ mod tests {
                     data_root: paths.data_directory().to_path_buf(),
                     attachment,
                     tools,
+                    agent_runtime,
                     ledger,
                     edit_transaction,
                     permissions,
@@ -5096,6 +5406,53 @@ mod tests {
                         .expect("fixture workspace must canonicalize"),
                 )
                 .expect("fixture workspace must be a valid authority")
+            }
+        }
+
+        fn explore_attempt_request(
+            fixture: &RuntimeFixture,
+            session_id: SessionId,
+            agent_id: &str,
+            attempt_id: &str,
+            mailbox_id: &str,
+            payload: &str,
+        ) -> AgentAttemptRequest {
+            let now = chrono::Utc::now();
+            AgentAttemptRequest {
+                session_id: session_id.clone(),
+                workspace_root: fixture.workspace_root(),
+                agent: AgentRecord {
+                    agent_id: agent_id.to_string(),
+                    session_id,
+                    parent_agent_id: "/root".to_string(),
+                    parent_path: "/root".to_string(),
+                    path: "/root/cancel-e2e".to_string(),
+                    role: "Explore".to_string(),
+                    task_name: "cancel-e2e".to_string(),
+                    description: payload.to_string(),
+                    context_scope_id: format!("subagent:{agent_id}"),
+                    status: AgentRuntimeStatus::Running,
+                    attempt_id: attempt_id.to_string(),
+                    run_count: 1,
+                    created_at: now,
+                    updated_at: now,
+                    started_at: Some(now),
+                    completed_at: None,
+                    launch: AgentLaunchPolicy::default(),
+                    result: None,
+                },
+                task: payload.to_string(),
+                mailbox_messages: vec![AgentMailboxMessage {
+                    message_id: mailbox_id.to_string(),
+                    message_type: AgentMessageType::NewTask,
+                    attempt_id: attempt_id.to_string(),
+                    author: "/root".to_string(),
+                    recipient: "/root/cancel-e2e".to_string(),
+                    payload: payload.to_string(),
+                    delivery_state: AgentMessageDeliveryState::Read,
+                    created_at: now,
+                    read_at: Some(now),
+                }],
             }
         }
 
@@ -5171,6 +5528,13 @@ mod tests {
         }
 
         async fn local_provider(base_url: &str) -> (Arc<ProviderService>, String) {
+            local_provider_with_context_window(base_url, 8_192).await
+        }
+
+        async fn local_provider_with_context_window(
+            base_url: &str,
+            max_context_tokens: u32,
+        ) -> (Arc<ProviderService>, String) {
             let repository = Arc::new(MemoryProviderRepository::default());
             let credentials = Arc::new(MemoryCredentialStore::default());
             let service = Arc::new(
@@ -5190,7 +5554,7 @@ mod tests {
                     models: vec![ModelConfig {
                         id: "local-model".to_string(),
                         name: "local-model".to_string(),
-                        max_context_tokens: 8_192,
+                        max_context_tokens,
                         max_input_tokens: None,
                         max_output_tokens: Some(512),
                         reasoning_counts_against_context: Some(false),
@@ -5352,7 +5716,7 @@ mod tests {
             session_id: &SessionId,
             provider_id: &str,
         ) {
-            for index in 0..8 {
+            for index in 0..24 {
                 let role = if index % 2 == 0 { "user" } else { "assistant" };
                 let message = NormalizedModelMessage {
                     id: format!("prior-message-{index}"),
@@ -5556,6 +5920,81 @@ mod tests {
                 "usage": {
                     "prompt_tokens": 100,
                     "completion_tokens": 5,
+                    "total_tokens": 105
+                }
+            });
+            format!("data: {payload}\n\ndata: [DONE]\n\n")
+        }
+
+        fn agent_read_tool_call_turn() -> String {
+            let arguments = json!({
+                "files": [{ "file_path": "evidence.txt" }]
+            })
+            .to_string();
+            let payload = json!({
+                "choices": [{
+                    "delta": {"tool_calls": [{
+                        "index": 0,
+                        "id": "call-agent-read",
+                        "type": "function",
+                        "function": {"name": "Read", "arguments": arguments}
+                    }]},
+                    "finish_reason": "tool_calls"
+                }],
+                "usage": {
+                    "prompt_tokens": 80,
+                    "completion_tokens": 5,
+                    "total_tokens": 85
+                }
+            });
+            format!("data: {payload}\n\ndata: [DONE]\n\n")
+        }
+
+        fn agent_completed_turn() -> String {
+            let payload = json!({
+                "choices": [{
+                    "delta": {"content": "The evidence file contains durable-agent-evidence."},
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": 95,
+                    "completion_tokens": 12,
+                    "total_tokens": 107
+                }
+            });
+            format!("data: {payload}\n\ndata: [DONE]\n\n")
+        }
+
+        fn agent_wait_tool_call_turn(target: &str) -> String {
+            let arguments = json!({ "targets": [target], "timeoutMs": 2_000 }).to_string();
+            let payload = json!({
+                "choices": [{
+                    "delta": {"tool_calls": [{
+                        "index": 0,
+                        "id": "call-agent-wait",
+                        "type": "function",
+                        "function": {"name": "wait_agent", "arguments": arguments}
+                    }]},
+                    "finish_reason": "tool_calls"
+                }],
+                "usage": {
+                    "prompt_tokens": 80,
+                    "completion_tokens": 5,
+                    "total_tokens": 85
+                }
+            });
+            format!("data: {payload}\n\ndata: [DONE]\n\n")
+        }
+
+        fn parent_completed_turn() -> String {
+            let payload = json!({
+                "choices": [{
+                    "delta": {"content": "The child final answer was received."},
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": 95,
+                    "completion_tokens": 10,
                     "total_tokens": 105
                 }
             });
@@ -5773,7 +6212,8 @@ mod tests {
                 completed_turn(),
                 completed_turn(),
             ]);
-            let (providers, provider_id) = local_provider(&server.base_url).await;
+            let (providers, provider_id) =
+                local_provider_with_context_window(&server.base_url, 18_000).await;
             let session_id =
                 SessionId::parse("session-overflow").expect("fixture session ID must parse");
             seed_prior_context(&fixture.ledger, &session_id, &provider_id).await;
@@ -5835,11 +6275,14 @@ mod tests {
             )
             .await;
 
-            assert!(matches!(outcome, TerminalOutcome::Completed { .. }));
             let frames = frames
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clone();
+            assert!(
+                matches!(outcome, TerminalOutcome::Completed { .. }),
+                "overflow retry should complete, got {outcome:?}; frames: {frames:?}"
+            );
             assert_eq!(
                 frames
                     .iter()
@@ -5887,6 +6330,364 @@ mod tests {
             assert!(retried_prompt.contains("You are CodeZ"));
             assert!(retried_prompt.contains("overflow-retry-workspace-rule"));
             assert!(retried_prompt.contains("<compaction_summary"));
+        }
+
+        #[tokio::test]
+        async fn explore_agent_reuses_the_main_multi_turn_loop_and_durable_subagent_scope() {
+            let fixture = RuntimeFixture::new();
+            std::fs::write(
+                fixture.workspace.path().join("evidence.txt"),
+                "durable-agent-evidence\n",
+            )
+            .expect("Agent evidence fixture must be written");
+            let server = LocalProviderServer::start(vec![
+                agent_read_tool_call_turn(),
+                agent_completed_turn(),
+            ]);
+            let (providers, provider_id) = local_provider(&server.base_url).await;
+            let cancellation_tree = Arc::new(CancellationTree::new());
+            let runtime = Arc::new(ChatRuntime::new(
+                cancellation_tree,
+                Arc::new(ErrorReporter::default()),
+                Arc::clone(&fixture.ledger),
+                Arc::clone(&fixture.attachment),
+                Arc::clone(&fixture.tools),
+                Arc::clone(&fixture.edit_transaction),
+                ChatPromptSources::new(
+                    fixture.data_root.clone(),
+                    Arc::clone(&fixture.permissions),
+                    Arc::clone(&fixture.process_runner),
+                ),
+            ));
+            let session_id =
+                SessionId::parse("session-agent-e2e").expect("Agent session ID must parse");
+            let agent_id = "agent_00000000-0000-4000-8000-000000000101".to_string();
+            let attempt_id = "attempt_00000000-0000-4000-8000-000000000102".to_string();
+            let mailbox_id = "amsg_00000000-0000-4000-8000-000000000103".to_string();
+            let now = chrono::Utc::now();
+            let request = AgentAttemptRequest {
+                session_id: session_id.clone(),
+                workspace_root: fixture.workspace_root(),
+                agent: AgentRecord {
+                    agent_id: agent_id.clone(),
+                    session_id: session_id.clone(),
+                    parent_agent_id: "/root".to_string(),
+                    parent_path: "/root".to_string(),
+                    path: "/root/explore-e2e".to_string(),
+                    role: "Explore".to_string(),
+                    task_name: "explore-e2e".to_string(),
+                    description: "Read durable evidence".to_string(),
+                    context_scope_id: format!("subagent:{agent_id}"),
+                    status: AgentRuntimeStatus::Running,
+                    attempt_id: attempt_id.clone(),
+                    run_count: 1,
+                    created_at: now,
+                    updated_at: now,
+                    started_at: Some(now),
+                    completed_at: None,
+                    launch: AgentLaunchPolicy::default(),
+                    result: None,
+                },
+                task: "Read evidence.txt and report its content".to_string(),
+                mailbox_messages: vec![AgentMailboxMessage {
+                    message_id: mailbox_id.clone(),
+                    message_type: AgentMessageType::NewTask,
+                    attempt_id,
+                    author: "/root".to_string(),
+                    recipient: "/root/explore-e2e".to_string(),
+                    payload: "Read evidence.txt and report its content".to_string(),
+                    delivery_state: AgentMessageDeliveryState::Read,
+                    created_at: now,
+                    read_at: Some(now),
+                }],
+            };
+            let settings_storage = Arc::new(AtomicFileStore::default());
+            settings_storage
+                .write_json(
+                    &fixture.data_root.join("settings.json"),
+                    &json!({
+                        "subAgentModels": {
+                            "Explore": [{
+                                "providerId": provider_id,
+                                "model": "local-model"
+                            }]
+                        }
+                    }),
+                )
+                .await
+                .expect("Agent model settings must persist");
+            let executor = DesktopAgentAttemptExecutor::new(
+                fixture.data_root.clone(),
+                settings_storage,
+                Arc::clone(&providers),
+            );
+            executor
+                .bind_chat_runtime(&runtime)
+                .expect("Agent executor must bind the Chat runtime once");
+
+            let output = executor
+                .execute(request.clone(), CancellationToken::new())
+                .await
+                .expect("Explore Agent multi-turn loop must complete");
+            let before_retry = fixture
+                .ledger
+                .load(&session_id)
+                .await
+                .expect("Agent ledger must load")
+                .expect("Agent ledger must exist");
+            let scope_key = format!("subagent:{agent_id}");
+            let history_version = before_retry.snapshot.scopes[&scope_key].history_version;
+            let retry_resolved = providers
+                .resolve_chat_config(Some(&provider_id), Some("local-model"))
+                .await
+                .expect("Agent retry Provider config must resolve");
+            ConversationLedger::begin_agent(Arc::clone(&fixture.ledger), &request, &retry_resolved)
+                .await
+                .expect("stable mailbox replay must be idempotent");
+            let after_retry = fixture
+                .ledger
+                .load(&session_id)
+                .await
+                .expect("Agent ledger retry must load")
+                .expect("Agent ledger retry must exist");
+            let requests = server.finish();
+            let tool_names = requests[0]["tools"]
+                .as_array()
+                .expect("Agent Provider request must expose tools")
+                .iter()
+                .filter_map(|tool| tool["function"]["name"].as_str())
+                .collect::<HashSet<_>>();
+            let system_prompt = provider_system_prompt(&requests[0]);
+            let second_messages = requests[1]["messages"]
+                .as_array()
+                .expect("second Agent request must contain messages");
+
+            assert_eq!(
+                (
+                    output.report.contains("durable-agent-evidence"),
+                    system_prompt.contains("CodeZ Explore Agent at /root/explore-e2e"),
+                    tool_names.contains("Read"),
+                    tool_names.contains("send_message"),
+                    !tool_names.contains("Write"),
+                    second_messages.iter().any(|message| {
+                        message["role"] == "tool"
+                            && message.to_string().contains("durable-agent-evidence")
+                    }),
+                    !before_retry.snapshot.scopes.contains_key("main"),
+                    after_retry.snapshot.scopes[&scope_key].history_version == history_version,
+                    after_retry.snapshot.scopes[&scope_key]
+                        .active_messages
+                        .iter()
+                        .any(|message| message.id == format!("agent-mailbox-message:{mailbox_id}")),
+                ),
+                (true, true, true, true, true, true, true, true, true),
+                "second Agent Provider request: {}",
+                requests[1]
+            );
+        }
+
+        #[tokio::test]
+        async fn agent_multi_turn_loop_forwards_cancellation_and_persists_interruption() {
+            let fixture = RuntimeFixture::new();
+            let cancellation = CancellationToken::new();
+            let cancellation_from_server = cancellation.clone();
+            let server = LocalProviderServer::start_with_after_first_request(
+                vec![agent_completed_turn()],
+                move || cancellation_from_server.cancel(),
+            );
+            let (providers, provider_id) = local_provider(&server.base_url).await;
+            let runtime = ChatRuntime::new(
+                Arc::new(CancellationTree::new()),
+                Arc::new(ErrorReporter::default()),
+                Arc::clone(&fixture.ledger),
+                Arc::clone(&fixture.attachment),
+                Arc::clone(&fixture.tools),
+                Arc::clone(&fixture.edit_transaction),
+                ChatPromptSources::new(
+                    fixture.data_root.clone(),
+                    Arc::clone(&fixture.permissions),
+                    Arc::clone(&fixture.process_runner),
+                ),
+            );
+            let session_id =
+                SessionId::parse("session-agent-cancel").expect("Agent session ID must parse");
+            let agent_id = "agent_00000000-0000-4000-8000-000000000301";
+            let request = explore_attempt_request(
+                &fixture,
+                session_id.clone(),
+                agent_id,
+                "attempt_00000000-0000-4000-8000-000000000302",
+                "amsg_00000000-0000-4000-8000-000000000303",
+                "Wait for cancellation",
+            );
+            let resolved = providers
+                .resolve_chat_config(Some(&provider_id), Some("local-model"))
+                .await
+                .expect("cancelled Agent Provider config must resolve");
+
+            let error = runtime
+                .execute_agent_attempt(providers, request, resolved, cancellation)
+                .await
+                .expect_err("cancelled Agent Provider loop must fail");
+            let durable = fixture
+                .ledger
+                .load(&session_id)
+                .await
+                .expect("cancelled Agent ledger must load")
+                .expect("cancelled Agent ledger must exist");
+            let requests = server.finish();
+
+            assert!(
+                error.kind() == codez_core::AppErrorKind::Cancelled
+                    && requests.len() == 1
+                    && durable
+                        .snapshot
+                        .scopes
+                        .contains_key(&format!("subagent:{agent_id}"))
+                    && !durable.snapshot.scopes.contains_key("main")
+            );
+        }
+
+        #[tokio::test]
+        async fn parent_agent_wait_delivers_a_late_durable_final_answer_to_the_next_turn() {
+            let fixture = RuntimeFixture::new();
+            let session_id =
+                SessionId::parse("session-agent-mailbox").expect("Agent session ID must parse");
+            let root_cancellation = CancellationToken::new();
+            let parent = fixture
+                .agent_runtime
+                .spawn(
+                    &session_id,
+                    SpawnAgentInput {
+                        workspace_root: fixture.workspace_root(),
+                        parent_context_scope_id: "main".to_string(),
+                        role: "Explore".to_string(),
+                        task_name: "mailbox-parent".to_string(),
+                        description: "Wait for child evidence".to_string(),
+                        message: "Wait for the child final answer".to_string(),
+                        launch: AgentLaunchPolicy::default(),
+                    },
+                    root_cancellation.clone(),
+                )
+                .await
+                .expect("mailbox parent Agent must start");
+            tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    let snapshot = fixture
+                        .agent_runtime
+                        .snapshot(&session_id)
+                        .await
+                        .expect("mailbox parent snapshot must load");
+                    if snapshot.agents[0].status == AgentRuntimeStatus::Running {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("mailbox parent must become running");
+            let child = fixture
+                .agent_runtime
+                .spawn(
+                    &session_id,
+                    SpawnAgentInput {
+                        workspace_root: fixture.workspace_root(),
+                        parent_context_scope_id: parent.context_scope_id.clone(),
+                        role: "Explore".to_string(),
+                        task_name: "mailbox-child".to_string(),
+                        description: "Return child evidence".to_string(),
+                        message: "Return the child evidence".to_string(),
+                        launch: AgentLaunchPolicy::default(),
+                    },
+                    root_cancellation,
+                )
+                .await
+                .expect("mailbox child Agent must start");
+            let running_parent = tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    let snapshot = fixture
+                        .agent_runtime
+                        .snapshot(&session_id)
+                        .await
+                        .expect("mailbox child snapshot must load");
+                    let child_completed = snapshot.agents.iter().any(|agent| {
+                        agent.agent_id == child.agent_id
+                            && agent.status == AgentRuntimeStatus::Completed
+                    });
+                    if child_completed {
+                        break snapshot
+                            .agents
+                            .iter()
+                            .find(|agent| agent.agent_id == parent.agent_id)
+                            .expect("mailbox parent record must remain present")
+                            .clone();
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("mailbox child must complete");
+            let server = LocalProviderServer::start(vec![
+                agent_wait_tool_call_turn(&child.agent_id),
+                parent_completed_turn(),
+            ]);
+            let (providers, provider_id) = local_provider(&server.base_url).await;
+            let runtime = ChatRuntime::new(
+                Arc::new(CancellationTree::new()),
+                Arc::new(ErrorReporter::default()),
+                Arc::clone(&fixture.ledger),
+                Arc::clone(&fixture.attachment),
+                Arc::clone(&fixture.tools),
+                Arc::clone(&fixture.edit_transaction),
+                ChatPromptSources::new(
+                    fixture.data_root.clone(),
+                    Arc::clone(&fixture.permissions),
+                    Arc::clone(&fixture.process_runner),
+                ),
+            );
+            let now = chrono::Utc::now();
+            let request = AgentAttemptRequest {
+                session_id: session_id.clone(),
+                workspace_root: fixture.workspace_root(),
+                agent: running_parent,
+                task: "Wait for the child final answer".to_string(),
+                mailbox_messages: vec![AgentMailboxMessage {
+                    message_id: "amsg_00000000-0000-4000-8000-000000000203".to_string(),
+                    message_type: AgentMessageType::NewTask,
+                    attempt_id: parent.attempt_id.clone(),
+                    author: "/root".to_string(),
+                    recipient: parent.path.clone(),
+                    payload: "Wait for the child final answer".to_string(),
+                    delivery_state: AgentMessageDeliveryState::Read,
+                    created_at: now,
+                    read_at: Some(now),
+                }],
+            };
+            let resolved = providers
+                .resolve_chat_config(Some(&provider_id), Some("local-model"))
+                .await
+                .expect("mailbox parent Provider config must resolve");
+
+            let output = runtime
+                .execute_agent_attempt(providers, request, resolved, CancellationToken::new())
+                .await
+                .expect("mailbox parent Agent loop must complete");
+            let requests = server.finish();
+
+            assert!(
+                output.report.contains("child final answer")
+                    && requests[1]["messages"]
+                        .as_array()
+                        .is_some_and(|messages| messages.iter().any(|message| {
+                            message["role"] == "tool"
+                                && message.to_string().contains("child-final-evidence")
+                        }))
+            );
+            fixture
+                .agent_runtime
+                .cleanup_session(&session_id)
+                .await
+                .expect("mailbox fixture cleanup must stop the parent Agent");
         }
 
         #[tokio::test]

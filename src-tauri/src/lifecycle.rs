@@ -4,7 +4,7 @@ use codez_core::AppError;
 use codez_platform::{NativeProcessRunner, PtyManager};
 use codez_runtime::{
     CancellationTree, ShutdownCoordinator, ShutdownFuture, ShutdownHook, ShutdownPhase,
-    ShutdownReport,
+    ShutdownReport, agent::collaboration::AgentRuntime,
 };
 use tauri::{AppHandle, Manager, RunEvent};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
@@ -15,11 +15,13 @@ pub(crate) fn register_shutdown_hooks(
     app_handle: &AppHandle,
     shutdown: &ShutdownCoordinator,
     cancellation: &Arc<CancellationTree>,
+    agent_runtime: &Arc<AgentRuntime>,
     process_runner: &Arc<NativeProcessRunner>,
     pty_manager: &Arc<PtyManager>,
     mcp_runtime: &Arc<McpRuntimeManager>,
 ) -> Result<(), AppError> {
     shutdown.register(Arc::clone(cancellation) as Arc<dyn ShutdownHook>)?;
+    shutdown.register(Arc::clone(agent_runtime) as Arc<dyn ShutdownHook>)?;
     shutdown.register(Arc::new(ProcessShutdown {
         runner: Arc::clone(process_runner),
     }))?;
