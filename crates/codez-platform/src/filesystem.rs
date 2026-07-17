@@ -539,10 +539,10 @@ fn write_atomic_blocking(
         .suffix(".tmp")
         .tempfile_in(parent)
         .map_err(|source| io_error("create workspace temporary file", &absolute, source))?;
-    if let Some(permissions) = before_permissions {
+    if let Some(permissions) = before_permissions.as_ref() {
         temporary
             .as_file()
-            .set_permissions(permissions)
+            .set_permissions(permissions.clone())
             .map_err(|source| io_error("preserve workspace file permissions", &absolute, source))?;
     }
     temporary
@@ -568,9 +568,38 @@ fn write_atomic_blocking(
     }
     drop(before);
 
-    let persisted = temporary
-        .persist(&absolute)
-        .map_err(|error| io_error("atomically replace workspace file", &absolute, error.error))?;
+    let target_permissions_relaxed =
+        relax_readonly_target_for_replace(&absolute, before_permissions.as_ref())?;
+    let persisted = match temporary.persist(&absolute) {
+        Ok(persisted) => persisted,
+        Err(error) => {
+            if target_permissions_relaxed {
+                if let Some(permissions) = before_permissions.as_ref() {
+                    if let Err(restore_error) = fs::set_permissions(&absolute, permissions.clone())
+                    {
+                        return Err(io_error(
+                            "restore workspace permissions after failed atomic replace",
+                            &absolute,
+                            io::Error::other(format!(
+                                "replace error: {}; permission error: {restore_error}",
+                                error.error
+                            )),
+                        ));
+                    }
+                }
+            }
+            return Err(io_error(
+                "atomically replace workspace file",
+                &absolute,
+                error.error,
+            ));
+        }
+    };
+    if let Some(permissions) = before_permissions {
+        persisted
+            .set_permissions(permissions)
+            .map_err(|source| io_error("restore workspace file permissions", &absolute, source))?;
+    }
     persisted
         .sync_all()
         .map_err(|source| io_error("sync workspace target", &absolute, source))?;
@@ -581,6 +610,38 @@ fn write_atomic_blocking(
     }
     revalidate_path(authority, path)?;
     sync_parent_directory(parent, &absolute)
+}
+
+#[cfg(windows)]
+#[expect(
+    clippy::permissions_set_readonly_false,
+    reason = "Windows readonly is a single file attribute, not Unix write-mode bits"
+)]
+fn relax_readonly_target_for_replace(
+    target: &Path,
+    permissions: Option<&std::fs::Permissions>,
+) -> Result<bool, NativeFileSystemError> {
+    let Some(permissions) = permissions.filter(|permissions| permissions.readonly()) else {
+        return Ok(false);
+    };
+    let mut writable = permissions.clone();
+    writable.set_readonly(false);
+    fs::set_permissions(target, writable).map_err(|source| {
+        io_error(
+            "prepare read-only workspace file for replacement",
+            target,
+            source,
+        )
+    })?;
+    Ok(true)
+}
+
+#[cfg(not(windows))]
+fn relax_readonly_target_for_replace(
+    _target: &Path,
+    _permissions: Option<&std::fs::Permissions>,
+) -> Result<bool, NativeFileSystemError> {
+    Ok(false)
 }
 
 fn ensure_parent_directories(
@@ -753,6 +814,38 @@ mod tests {
                 .await
                 .expect("generated file must be readable"),
             b"second"
+        );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn atomic_replace_preserves_the_windows_readonly_attribute() {
+        let workspace = tempfile::tempdir().expect("temporary workspace must be available");
+        let target = workspace.path().join("readonly.txt");
+        fs::write(&target, "before").expect("fixture file must be written");
+        let mut permissions = fs::metadata(&target)
+            .expect("fixture metadata must be readable")
+            .permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&target, permissions).expect("fixture file must become read-only");
+        let filesystem = NativeFileSystem::open(workspace.path().to_path_buf())
+            .await
+            .expect("workspace must open");
+        let safe_path = filesystem
+            .resolve("readonly.txt".into())
+            .await
+            .expect("fixture file must resolve");
+
+        filesystem
+            .write_atomic(&safe_path, b"after")
+            .await
+            .expect("read-only file must be atomically replaced");
+
+        assert!(
+            fs::metadata(&target)
+                .expect("replaced metadata must be readable")
+                .permissions()
+                .readonly()
         );
     }
 

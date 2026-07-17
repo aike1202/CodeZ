@@ -25,6 +25,14 @@ use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot, watch};
 #[cfg(windows)]
 use win32job::{ExtendedLimitInfo, Job};
 
+// portable-pty enables ConPTY Win32 input mode. Encode the physical Ctrl+C key
+// transitions so native foreground processes receive console control semantics.
+#[cfg(windows)]
+const WINDOWS_CTRL_C_KEY_EVENTS: &[u8] = b"\x1b[17;29;0;1;8;1_\
+\x1b[67;46;3;1;8;1_\
+\x1b[67;46;3;0;8;1_\
+\x1b[17;29;0;0;0;1_";
+
 /// Maximum payload size of one terminal output frame.
 pub const PTY_MAX_FRAME_BYTES: usize = 4 * 1024;
 /// Bounded host queue capacity used by the desktop composition root.
@@ -168,6 +176,8 @@ impl PtyManager {
         if !self.accepting.load(Ordering::Acquire) {
             return Err(AppError::conflict("The terminal registry is shutting down"));
         }
+
+        self.reap_completed().await?;
 
         if let Some(existing) = self.instances.get(&id).map(|entry| Arc::clone(&entry)) {
             if existing.completion_value().is_none() {
@@ -377,6 +387,29 @@ impl PtyManager {
         handle.join_finished_supervisor()?;
         self.instances
             .remove_if(&id, |_, current| Arc::ptr_eq(current, &handle));
+        Ok(())
+    }
+
+    /// Reclaims terminals which have emitted their terminal completion state.
+    ///
+    /// A terminal can exit on its own before the renderer explicitly closes its
+    /// tab. Reaping completed entries before a later start prevents those dead
+    /// registrations from consuming the bounded terminal capacity indefinitely.
+    async fn reap_completed(&self) -> Result<(), AppError> {
+        let completed = self
+            .instances
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .completion_value()
+                    .is_some()
+                    .then(|| Arc::clone(entry.value()))
+            })
+            .collect::<Vec<_>>();
+
+        for handle in completed {
+            self.reap_handle(handle).await?;
+        }
         Ok(())
     }
 
@@ -850,10 +883,7 @@ fn apply_terminal_command(
 ) -> Result<(), Arc<str>> {
     match command {
         TerminalCommand::Write { data, response } => {
-            let result = terminal
-                .writer
-                .write_all(&data)
-                .and_then(|()| terminal.writer.flush())
+            let result = write_terminal_input(&mut *terminal.writer, &data)
                 .map_err(|source| Arc::<str>::from(format!("write PTY input: {source}")));
             let failure = result.as_ref().err().cloned();
             let _ = response.send(result);
@@ -869,6 +899,27 @@ fn apply_terminal_command(
             failure.map_or(Ok(()), Err)
         }
     }
+}
+
+#[cfg(windows)]
+fn write_terminal_input(writer: &mut dyn Write, data: &[u8]) -> std::io::Result<()> {
+    let mut pending_start = 0;
+    for (index, byte) in data.iter().enumerate() {
+        if *byte != 0x03 {
+            continue;
+        }
+        writer.write_all(&data[pending_start..index])?;
+        writer.write_all(WINDOWS_CTRL_C_KEY_EVENTS)?;
+        pending_start = index + 1;
+    }
+    writer.write_all(&data[pending_start..])?;
+    writer.flush()
+}
+
+#[cfg(not(windows))]
+fn write_terminal_input(writer: &mut dyn Write, data: &[u8]) -> std::io::Result<()> {
+    writer.write_all(data)?;
+    writer.flush()
 }
 
 fn read_terminal_output(
@@ -1119,6 +1170,8 @@ mod tests {
     use super::{
         OutputFlowControl, PTY_ACK_WINDOW, PTY_EVENT_QUEUE_CAPACITY, PtyManager, TerminalHandle,
     };
+    #[cfg(windows)]
+    use super::{WINDOWS_CTRL_C_KEY_EVENTS, write_terminal_input};
 
     fn completed_terminal(id: &str) -> Arc<TerminalHandle> {
         let (commands, _receiver) = mpsc::sync_channel(1);
@@ -1156,6 +1209,24 @@ mod tests {
             Some(PTY_ACK_WINDOW + 1)
         );
         producer.join().expect("flow-control producer must join");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn terminal_input_should_encode_each_windows_ctrl_c_and_preserve_adjacent_bytes() {
+        let mut written = Vec::new();
+        write_terminal_input(&mut written, b"before\x03middle\x03after")
+            .expect("test writer must accept terminal input");
+        let expected = [
+            b"before".as_slice(),
+            WINDOWS_CTRL_C_KEY_EVENTS,
+            b"middle".as_slice(),
+            WINDOWS_CTRL_C_KEY_EVENTS,
+            b"after".as_slice(),
+        ]
+        .concat();
+
+        assert_eq!(written, expected);
     }
 
     #[test]
@@ -1217,6 +1288,33 @@ mod tests {
             (manager.active_count(), error.kind()),
             (0, AppErrorKind::Conflict)
         );
+    }
+
+    #[tokio::test]
+    async fn terminal_start_should_reap_completed_entries_before_admitting_a_new_terminal() {
+        let (events, _receiver) = tokio_mpsc::channel(PTY_EVENT_QUEUE_CAPACITY);
+        let manager = PtyManager::new(events);
+        manager.instances.insert(
+            "completed-terminal".to_owned(),
+            completed_terminal("completed-terminal"),
+        );
+
+        let current_directory =
+            std::env::current_dir().expect("test working directory must be available");
+        let nonexistent_program =
+            std::env::temp_dir().join("codez-terminal-program-does-not-exist");
+        let error = manager
+            .start(
+                "replacement-terminal".to_owned(),
+                nonexistent_program,
+                Vec::new(),
+                current_directory,
+            )
+            .await
+            .expect_err("the intentionally missing terminal executable must fail to start");
+
+        assert_eq!(manager.active_count(), 0);
+        assert_eq!(error.kind(), AppErrorKind::External);
     }
 
     #[tokio::test]

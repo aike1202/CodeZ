@@ -90,6 +90,15 @@ impl StreamableHttpServerConfig {
         }
         (config, self.redaction_values)
     }
+
+    pub(crate) fn into_legacy_sse_parts(self) -> super::sse::LegacySseTransportConfig {
+        super::sse::LegacySseTransportConfig {
+            endpoint: self.endpoint,
+            headers: self.headers,
+            bearer_token: self.bearer_token,
+            redaction_values: self.redaction_values,
+        }
+    }
 }
 
 #[cfg(test)]

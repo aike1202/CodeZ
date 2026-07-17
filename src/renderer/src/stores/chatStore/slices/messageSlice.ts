@@ -14,9 +14,9 @@ import type {
   PendingInternalContinuation
 } from '../types'
 import type { TaskItem } from '../../../../../shared/types/task'
-import { IPC_CHANNELS } from '../../../../../shared/ipc/channels'
 import type { ImageAttachment, PendingPromptDraft } from '../../../../../shared/types/attachment'
 import type { SubAgentHandoff } from '../../../../../shared/types/subagent'
+import { desktopApi } from '../../../shared/desktop'
 import { setSessionComposerDraft } from '../composerDrafts'
 
 function genId(): string {
@@ -901,6 +901,8 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
   setSubAgentStatus: (status) => set({ subAgentStatus: status }),
 
   initPlanStateListener: () => {
+    if (!desktopApi.capabilities.plan) return () => undefined
+
     let released = false
     const release = () => {
       if (released) return
@@ -1035,11 +1037,8 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       }
     }
 
-    const ipc = (window as any)?.electron?.ipcRenderer
-    if (!ipc) return false
     try {
-      await ipc.invoke(
-        IPC_CHANNELS.CHAT_REVERT_MESSAGES,
+      await desktopApi.chat.revertHistory(
         originalSessionId,
         msgId,
         txIds
@@ -1099,29 +1098,23 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       }
     }
 
-    const win = window as any
-    const ipc = win?.electron?.ipcRenderer
-    if (ipc) {
-      try {
-        const originalMessages = activeSession.messages
-        const preview = await ipc.invoke(
-          IPC_CHANNELS.CHAT_PREVIEW_REVERT_MESSAGES,
-          activeSession.id,
-          msgId,
-          txIds
-        )
-        const latest = get()
-        const latestSession = latest.sessions.find((session) => session.id === activeSession.id)
-        if (
-          latest.activeSessionId !== activeSession.id ||
-          latestSession?.messages !== originalMessages
-        ) return null
-        return preview
-      } catch (err) {
-        console.error('Failed to preview revert:', err)
-        return null
-      }
+    try {
+      const originalMessages = activeSession.messages
+      const preview = await desktopApi.chat.previewHistoryRevert(
+        activeSession.id,
+        msgId,
+        txIds
+      )
+      const latest = get()
+      const latestSession = latest.sessions.find((session) => session.id === activeSession.id)
+      if (
+        latest.activeSessionId !== activeSession.id ||
+        latestSession?.messages !== originalMessages
+      ) return null
+      return preview
+    } catch (err) {
+      console.error('Failed to preview revert:', err)
+      return null
     }
-    return null
   }
 })

@@ -12,6 +12,8 @@ import {
 } from 'lucide-react'
 import Button from '../ui/Button'
 import Switch from '../ui/Switch'
+import { useWorkspaceStore } from '../../stores/workspaceStore'
+import { desktopApi } from '../../shared/desktop'
 import McpJsonEditor from './McpJsonEditor'
 import McpServerDetailModal from './McpServerDetailModal'
 import type { McpListPayload, McpServerStatus, ScopedMcpConfig } from './types'
@@ -24,11 +26,14 @@ import {
 } from './utils'
 import './SettingsMcpTab.css'
 
+type ServerAction = 'reconnect' | 'trust' | 'authorize' | 'logout'
+
 function effectiveServerKey(config: ScopedMcpConfig): string {
   return `${config.scope}:${config.name}`
 }
 
 export default function SettingsMcpTab(): React.ReactElement {
+  const workspaceRoot = useWorkspaceStore((state) => state.workspace?.rootPath ?? null)
   const [configs, setConfigs] = useState<ScopedMcpConfig[]>([])
   const [statuses, setStatuses] = useState<McpServerStatus[]>([])
   const [jsonText, setJsonText] = useState('{\n  "mcpServers": {}\n}')
@@ -37,6 +42,7 @@ export default function SettingsMcpTab(): React.ReactElement {
   const [query, setQuery] = useState('')
   const [selectedKey, setSelectedKey] = useState<string>()
   const [busyServer, setBusyServer] = useState<string>()
+  const [busyAction, setBusyAction] = useState<ServerAction>()
   const [editorBusy, setEditorBusy] = useState(false)
   const [actionError, setActionError] = useState('')
   const deferredQuery = useDeferredValue(query)
@@ -53,21 +59,21 @@ export default function SettingsMcpTab(): React.ReactElement {
 
   useEffect(() => {
     let active = true
-    window.api.mcp.list().then((payload: McpListPayload) => {
+    desktopApi.mcp.list(workspaceRoot).then((payload: McpListPayload) => {
       if (!active) return
       applyPayload(payload, true)
       if (!payload.configs.some((config) => config.effective)) setJsonOpen(true)
     }).catch((cause: unknown) => {
       if (active) setActionError(cause instanceof Error ? cause.message : String(cause))
     })
-    const dispose = window.api.mcp.onChanged((next: McpServerStatus[]) => {
+    const dispose = desktopApi.mcp.onChanged((next: McpServerStatus[]) => {
       if (active) setStatuses(next)
     })
     return () => {
       active = false
       dispose()
     }
-  }, [applyPayload])
+  }, [applyPayload, workspaceRoot])
 
   const parsedJson = useMemo(() => {
     try {
@@ -144,7 +150,7 @@ export default function SettingsMcpTab(): React.ReactElement {
     }
     setEditorBusy(true)
     try {
-      const payload = await window.api.mcp.saveUser(servers) as McpListPayload
+      const payload = await desktopApi.mcp.saveUser(servers, workspaceRoot) as McpListPayload
       applyPayload(payload, true)
       setJsonOpen(false)
     } catch (cause) {
@@ -159,7 +165,7 @@ export default function SettingsMcpTab(): React.ReactElement {
     setBusyServer(config.name)
     setActionError('')
     try {
-      const payload = await window.api.mcp.setEnabled(config.name, enabled) as McpListPayload
+      const payload = await desktopApi.mcp.setEnabled(config.name, enabled, workspaceRoot) as McpListPayload
       applyPayload(payload, true)
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : String(cause))
@@ -168,16 +174,22 @@ export default function SettingsMcpTab(): React.ReactElement {
     }
   }
 
-  const runServerAction = async (config: ScopedMcpConfig, action: () => Promise<void>) => {
+  const runServerAction = async (
+    config: ScopedMcpConfig,
+    actionName: ServerAction,
+    action: () => Promise<void>
+  ) => {
     setBusyServer(config.name)
+    setBusyAction(actionName)
     setActionError('')
     try {
       await action()
-      applyPayload(await window.api.mcp.list(), false)
+      applyPayload(await desktopApi.mcp.list(workspaceRoot), false)
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setBusyServer(undefined)
+      setBusyAction(undefined)
     }
   }
 
@@ -283,11 +295,15 @@ export default function SettingsMcpTab(): React.ReactElement {
           config={selectedConfig}
           status={selectedStatus}
           busy={busyServer === selectedConfig.name}
+          busyAction={busyServer === selectedConfig.name ? busyAction : undefined}
+          actionError={actionError}
           onClose={handleCloseDetail}
           onToggle={(enabled) => void handleToggle(selectedConfig, enabled)}
-          onReconnect={() => void runServerAction(selectedConfig, () => window.api.mcp.reconnect(selectedConfig.name))}
-          onAuthorize={() => void runServerAction(selectedConfig, () => window.api.mcp.authorize(selectedConfig.name))}
-          onLogout={() => void runServerAction(selectedConfig, () => window.api.mcp.logout(selectedConfig.name))}
+          workspaceRoot={workspaceRoot}
+          onReconnect={() => void runServerAction(selectedConfig, 'reconnect', () => desktopApi.mcp.reconnect(selectedConfig.name, workspaceRoot))}
+          onTrust={() => void runServerAction(selectedConfig, 'trust', () => desktopApi.mcp.trustProject(selectedConfig.fingerprint, workspaceRoot))}
+          onAuthorize={() => void runServerAction(selectedConfig, 'authorize', () => desktopApi.mcp.authorize(selectedConfig.name, workspaceRoot))}
+          onLogout={() => void runServerAction(selectedConfig, 'logout', () => desktopApi.mcp.logout(selectedConfig.name, workspaceRoot))}
         />
       ) : null}
     </div>

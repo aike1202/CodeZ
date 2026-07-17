@@ -38,6 +38,11 @@ const WAIT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_CAPTURED_OUTPUT_BYTES: usize = 256 * 1024;
 #[cfg(windows)]
 const PROCESS_TREE_FIXTURE_REQUEST: &str = "process-tree-fixture.request";
+#[cfg(windows)]
+const WINDOWS_CTRL_C_KEY_EVENTS: &[u8] = b"\x1b[17;29;0;1;8;1_\
+\x1b[67;46;3;1;8;1_\
+\x1b[67;46;3;0;8;1_\
+\x1b[17;29;0;0;0;1_";
 
 struct PtyProbe {
     master: Option<Box<dyn MasterPty + Send>>,
@@ -126,7 +131,7 @@ impl PtyProbe {
     fn write_line(&mut self, input: &str) -> TestResult {
         self.write_bytes(input.as_bytes())?;
         #[cfg(windows)]
-        self.write_bytes(b"\r\n")?;
+        self.write_bytes(b"\r")?;
         #[cfg(not(windows))]
         self.write_bytes(b"\n")?;
         Ok(())
@@ -134,7 +139,7 @@ impl PtyProbe {
 
     #[cfg(windows)]
     fn write_ctrl_c(&mut self) -> TestResult {
-        self.write_bytes(&[0x03])
+        self.write_bytes(WINDOWS_CTRL_C_KEY_EVENTS)
     }
 
     fn resize(&self, size: PtySize) -> TestResult {
@@ -309,6 +314,20 @@ fn spawn_shell(cwd: Option<&Path>) -> TestResult<PtyProbe> {
 fn command_prompt(cwd: Option<&Path>) -> CommandBuilder {
     let mut command = CommandBuilder::new("cmd.exe");
     command.args(["/D", "/Q"]);
+    if let Some(cwd) = cwd {
+        command.cwd(cwd);
+    }
+    command
+}
+
+#[cfg(windows)]
+fn production_powershell(cwd: Option<&Path>) -> CommandBuilder {
+    let mut command = CommandBuilder::new("powershell.exe");
+    command.args([
+        "-NoExit",
+        "-Command",
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+    ]);
     if let Some(cwd) = cwd {
         command.cwd(cwd);
     }
@@ -516,6 +535,16 @@ fn powershell_executable() -> TestResult<PathBuf> {
 }
 
 #[cfg(windows)]
+fn command_prompt_executable() -> TestResult<PathBuf> {
+    let system_root = std::env::var_os("SystemRoot").ok_or("SystemRoot is not configured")?;
+    let executable = PathBuf::from(system_root).join("System32").join("cmd.exe");
+    if !executable.is_file() {
+        return Err(format!("command prompt is missing at {}", executable.display()).into());
+    }
+    Ok(executable)
+}
+
+#[cfg(windows)]
 fn powershell_path_literal(path: &Path) -> TestResult<String> {
     let value = path
         .to_str()
@@ -658,7 +687,11 @@ fn windows_conpty_should_deliver_ctrl_c_to_the_foreground_command() -> TestResul
     probe.wait_for_value("ping output", |output| {
         (output.matches("127.0.0.1").count() >= 2).then_some(())
     })?;
+    let prompt_count = String::from_utf8_lossy(&probe.output).matches('>').count();
     probe.write_ctrl_c()?;
+    probe.wait_for_value("command prompt after Ctrl+C", |output| {
+        (output.matches('>').count() > prompt_count).then_some(())
+    })?;
     probe.write_line("echo CODEZ_AFTER_CTRL_C")?;
     let output = probe.wait_for_output("CODEZ_AFTER_CTRL_C")?;
     let status = probe.exit_cleanly()?;
@@ -667,6 +700,182 @@ fn windows_conpty_should_deliver_ctrl_c_to_the_foreground_command() -> TestResul
     assert!(
         output.contains("CODEZ_AFTER_CTRL_C") && status.success(),
         "command shell did not resume after Ctrl+C"
+    );
+    Ok(())
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_conpty_should_interrupt_two_powershell_foreground_commands() -> TestResult {
+    let mut probe = PtyProbe::spawn(production_powershell(None))?;
+
+    for attempt in 1..=2 {
+        let ready = format!("CODEZ_POWERSHELL_CTRL_C_{attempt}_READY");
+        let resumed = format!("CODEZ_POWERSHELL_CTRL_C_{attempt}_RESUMED");
+        let prior_ping_output = String::from_utf8_lossy(&probe.output)
+            .matches("127.0.0.1")
+            .count();
+        probe.write_line(&format!("Write-Output '{ready}'; ping.exe -t 127.0.0.1"))?;
+        probe.wait_for_output(&ready)?;
+        probe.wait_for_value("ping output", |output| {
+            (output.matches("127.0.0.1").count() >= prior_ping_output + 3).then_some(())
+        })?;
+        let prompt_count = String::from_utf8_lossy(&probe.output)
+            .matches("PS ")
+            .count();
+        probe.write_ctrl_c()?;
+        probe.wait_for_value("PowerShell prompt after Ctrl+C", |output| {
+            (output.matches("PS ").count() > prompt_count).then_some(())
+        })?;
+        probe.write_line(&format!("Write-Output '{resumed}'"))?;
+        probe.wait_for_output(&resumed)?;
+    }
+
+    let status = probe.exit_cleanly()?;
+    let reader_closed = probe.finish()?;
+
+    assert!(
+        status.success() && reader_closed,
+        "PowerShell did not remain usable after repeated Ctrl+C interrupts"
+    );
+    Ok(())
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_manager_should_interrupt_ping_and_keep_the_shell_alive() -> TestResult {
+    let arguments = [
+        "-NoExit",
+        "-Command",
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+    ]
+    .into_iter()
+    .map(Into::into)
+    .collect();
+    assert_manager_repeated_ctrl_c(
+        "ctrl-c-powershell-test",
+        powershell_executable()?,
+        arguments,
+        "function prompt { 'CODEZ_PS_PROMPT> ' }",
+        "CODEZ_PS_PROMPT>",
+        ";",
+    )
+    .await
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_manager_should_interrupt_command_prompt_ping_twice() -> TestResult {
+    assert_manager_repeated_ctrl_c(
+        "ctrl-c-command-prompt-test",
+        command_prompt_executable()?,
+        ["/D", "/Q"].into_iter().map(Into::into).collect(),
+        "prompt CODEZ_CMD_PROMPT$G",
+        "CODEZ_CMD_PROMPT>",
+        "&",
+    )
+    .await
+}
+
+#[cfg(windows)]
+async fn assert_manager_repeated_ctrl_c(
+    terminal_id: &str,
+    executable: PathBuf,
+    arguments: Vec<std::ffi::OsString>,
+    prompt_setup: &str,
+    prompt_marker: &str,
+    command_separator: &str,
+) -> TestResult {
+    let current_directory = std::env::current_dir()?;
+    let (event_tx, mut events) = tokio::sync::mpsc::channel(PTY_EVENT_QUEUE_CAPACITY);
+    let manager = PtyManager::new(event_tx);
+    manager
+        .start(
+            terminal_id.to_owned(),
+            executable,
+            arguments,
+            current_directory,
+        )
+        .await?;
+    wait_for_terminal_marker(&manager, &mut events, terminal_id, "\u{1b}[6n").await?;
+    manager.write(terminal_id, b"\x1b[1;1R").await?;
+    let prompt_setup = format!("{prompt_setup}\r");
+    manager.write(terminal_id, prompt_setup.as_bytes()).await?;
+    wait_for_terminal_marker(&manager, &mut events, terminal_id, prompt_marker).await?;
+
+    for attempt in 1..=2 {
+        let ready = format!("CODEZ_MANAGER_CTRL_C_{attempt}_READY");
+        let resumed = format!("CODEZ_MANAGER_CTRL_C_{attempt}_RESUMED");
+        let launch = format!("echo {ready} {command_separator} ping.exe -t 127.0.0.1\r");
+        manager.write(terminal_id, launch.as_bytes()).await?;
+        wait_for_terminal_marker(&manager, &mut events, terminal_id, &ready).await?;
+        wait_for_terminal_marker(&manager, &mut events, terminal_id, "127.0.0.1").await?;
+        manager.write(terminal_id, b"\x03").await?;
+
+        // Console programs may flush pending input while handling Ctrl+C. The returned
+        // prompt is the synchronization point before the next user command is entered.
+        wait_for_terminal_marker(&manager, &mut events, terminal_id, prompt_marker).await?;
+        let resume = format!("echo {resumed}\r");
+        manager.write(terminal_id, resume.as_bytes()).await?;
+        wait_for_terminal_marker(&manager, &mut events, terminal_id, &resumed).await?;
+    }
+
+    manager.kill(terminal_id).await?;
+
+    assert_eq!(manager.active_count(), 0, "terminal was not fully reaped");
+    Ok(())
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_ctrl_c_and_terminal_kill_should_not_deadlock() -> TestResult {
+    const TERMINAL_ID: &str = "ctrl-c-kill-race-test";
+
+    let current_directory = std::env::current_dir()?;
+    let arguments = [
+        "-NoExit",
+        "-Command",
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+    ]
+    .into_iter()
+    .map(Into::into)
+    .collect();
+    let (event_tx, mut events) = tokio::sync::mpsc::channel(PTY_EVENT_QUEUE_CAPACITY);
+    let manager = PtyManager::new(event_tx);
+    manager
+        .start(
+            TERMINAL_ID.to_owned(),
+            powershell_executable()?,
+            arguments,
+            current_directory,
+        )
+        .await?;
+    wait_for_terminal_marker(&manager, &mut events, TERMINAL_ID, "\u{1b}[6n").await?;
+    manager.write(TERMINAL_ID, b"\x1b[1;1R").await?;
+    manager
+        .write(
+            TERMINAL_ID,
+            b"Write-Output 'CODEZ_RACE_READY'; ping.exe -t 127.0.0.1\r",
+        )
+        .await?;
+    wait_for_terminal_marker(&manager, &mut events, TERMINAL_ID, "CODEZ_RACE_READY").await?;
+    wait_for_terminal_marker(&manager, &mut events, TERMINAL_ID, "127.0.0.1").await?;
+
+    let (write_result, kill_result) = tokio::join!(
+        manager.write(TERMINAL_ID, b"\x03"),
+        manager.kill(TERMINAL_ID)
+    );
+    if let Err(error) = write_result
+        && error.kind() != codez_core::AppErrorKind::Conflict
+    {
+        return Err(format!("unexpected Ctrl+C race error: {error}").into());
+    }
+    kill_result?;
+
+    assert_eq!(
+        manager.active_count(),
+        0,
+        "terminal kill did not win the race"
     );
     Ok(())
 }

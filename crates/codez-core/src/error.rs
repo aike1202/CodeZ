@@ -10,6 +10,7 @@ pub enum AppErrorKind {
     PermissionDenied,
     NotFound,
     Conflict,
+    RunActive,
     External,
     ProcessFailed,
     Cancelled,
@@ -28,6 +29,7 @@ impl AppErrorKind {
             Self::PermissionDenied => "PERMISSION_DENIED",
             Self::NotFound => "NOT_FOUND",
             Self::Conflict => "CONFLICT",
+            Self::RunActive => "RUN_ACTIVE",
             Self::External => "EXTERNAL",
             Self::ProcessFailed => "PROCESS_FAILED",
             Self::Cancelled => "CANCELLED",
@@ -77,6 +79,12 @@ impl AppError {
     #[must_use]
     pub fn conflict(message: impl Into<String>) -> Self {
         Self::without_diagnostic(AppErrorKind::Conflict, message, false)
+    }
+
+    /// Creates a retryable conflict caused by active work owning the session.
+    #[must_use]
+    pub fn run_active(message: impl Into<String>) -> Self {
+        Self::without_diagnostic(AppErrorKind::RunActive, message, true)
     }
 
     /// Creates an external dependency error with private diagnostic context.

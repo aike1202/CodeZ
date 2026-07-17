@@ -3,6 +3,7 @@ import type {
   SessionRuntimeStatus,
   SessionRuntimeStatusChanged
 } from '../../../../../shared/types/subagent'
+import { desktopApi } from '../../../shared/desktop'
 import type { ChatState } from '../types'
 
 export interface RuntimeStatusSlice {
@@ -35,7 +36,7 @@ export const createRuntimeStatusSlice: StateCreator<ChatState, [], [], RuntimeSt
     const uniqueIds = [...new Set(sessionIds)]
     const results = await Promise.allSettled(
       uniqueIds.map(async (sessionId): Promise<SessionRuntimeStatus> =>
-        window.api.chat.getRuntimeStatus(sessionId))
+        desktopApi.chat.getRuntimeStatus(sessionId))
     )
 
     results.forEach((result, index) => {

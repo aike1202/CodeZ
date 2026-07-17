@@ -21,6 +21,7 @@ aes-gcm.workspace = true
 base64.workspace = true
 keyring = { workspace = true, features = ["windows-native"] }
 windows-dpapi.workspace = true
+winsafe = { version = "0.0.24", features = ["kernel"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { workspace = true, features = ["apple-native"] }

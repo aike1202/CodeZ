@@ -38,6 +38,7 @@ regex = "1.12.2"
 reqwest = { version = "0.12.12", features = ["json", "stream", "rustls-tls"], default-features = false }
 rustix = { version = "1.1.4", features = ["fs"] }
 eventsource-stream = "0.2.3"
+file-id = { version = "0.2.3", features = ["serde"] }
 futures-util = "0.3.30"
 same-file = "1.0.6"
 sha2 = "0.10.9"

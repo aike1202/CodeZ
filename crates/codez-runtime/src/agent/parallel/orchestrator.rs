@@ -25,9 +25,7 @@ impl ParallelOrchestrator {
         let agents = self.agents.lock().await.clone();
         let futures: Vec<_> = agents
             .into_iter()
-            .map(|agent| {
-                async move { agent.run_step().await }
-            })
+            .map(|agent| async move { agent.run_step().await })
             .collect();
 
         join_all(futures).await

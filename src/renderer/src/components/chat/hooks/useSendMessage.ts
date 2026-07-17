@@ -8,6 +8,7 @@ import type { ToolBatchMeta } from '../../../../../shared/types/toolExecution'
 import type { ComposerImageAttachment, ImageAttachment } from '../../../../../shared/types/attachment'
 import { supportsImageInput } from '../../../../../shared/utils/imageCapabilities'
 import { createStreamUpdateBatcher } from './streamUpdateBatcher'
+import { desktopApi } from '../../../shared/desktop'
 
 export function buildChatStreamInput(
   message: string,
@@ -16,7 +17,9 @@ export function buildChatStreamInput(
   isSystem = false,
   attachments: ImageAttachment[] = []
 ) {
-  const parsed = isSystem ? { isCommand: false, processedMessage: message } : parseSlashCommand(message, dynamicSkills)
+  const parsed = isSystem
+    ? { isCommand: false, processedMessage: message }
+    : parseSlashCommand(message, dynamicSkills, { plan: desktopApi.capabilities.plan })
   let text = parsed.isCommand ? parsed.processedMessage : message
   const referencedFiles: string[] = []
   const fileRegex = /\[([^$\]][^\]]*)\]\(([^)]+)\)/g
@@ -85,14 +88,16 @@ export function useSendMessage() {
 
       let allSkills: any[] = []
       try {
-        allSkills = await (window as any).api.skill.getAll(ws.rootPath)
+        allSkills = await desktopApi.skill.getAll(ws.rootPath)
       } catch (e) {}
 
       // Parse slash commands to check for client-side actions before anything else
       let clientAction = null
       let parseResult: any = {}
       if (!isSystem) {
-        parseResult = parseSlashCommand(message, allSkills)
+        parseResult = parseSlashCommand(message, allSkills, {
+          plan: desktopApi.capabilities.plan
+        })
         clientAction = parseResult.clientAction
       }
 
@@ -102,13 +107,23 @@ export function useSendMessage() {
           if (!sessionId) return false
           useChatStore.getState().setCompactionState(sessionId, { status: 'running', trigger: 'manual' })
           try {
-            const response = await (window as any).api.chat.compact(
+            const response = await desktopApi.chat.compact(
               sessionId,
               clientAction.payload?.instructions || undefined
             )
-            useChatStore.getState().setCompactionState(sessionId, response?.accepted
-              ? { status: 'completed', trigger: 'manual', ...response.result }
-              : { status: 'failed', trigger: 'manual', error: response?.reason || response?.result?.message || 'Compaction failed' })
+            const result = response.result
+            useChatStore.getState().setCompactionState(sessionId, response.accepted
+              ? {
+                  status: 'completed',
+                  trigger: 'manual',
+                  tokensBefore: result.tokensBefore,
+                  tokensAfter: result.tokensAfter
+                }
+              : {
+                  status: 'failed',
+                  trigger: 'manual',
+                  error: response.reason || result.message || 'Compaction failed'
+                })
           } catch (error) {
             useChatStore.getState().setCompactionState(sessionId, {
               status: 'failed', trigger: 'manual', error: error instanceof Error ? error.message : String(error)
@@ -194,7 +209,9 @@ export function useSendMessage() {
       if (!sid) {
         sid = createSession(ws.id)
         
-        const currentPlan = useChatStore.getState().activePlan
+        const currentPlan = desktopApi.capabilities.plan
+          ? useChatStore.getState().activePlan
+          : null
         if (currentPlan) {
           useChatStore.getState().linkPlanToSession(sid, currentPlan.slug)
         }
@@ -203,7 +220,7 @@ export function useSendMessage() {
       let promotedAttachments: ImageAttachment[] = []
       try {
         promotedAttachments = attachments.length > 0
-          ? await window.api.attachment.promoteDrafts(sid, attachments)
+          ? await desktopApi.attachment.promoteDrafts(sid, attachments)
           : []
       } catch (error) {
         alert(`照片导入失败：${error instanceof Error ? error.message : String(error)}`)
@@ -251,7 +268,7 @@ export function useSendMessage() {
         setResponseWaitWarning(activeAgentId, false)
       }
 
-      const streamHandle = (window as any).api.chat.stream(
+      const streamHandle = desktopApi.chat.stream(
         activeProv.id,
         model,
         sid,
@@ -291,7 +308,7 @@ export function useSendMessage() {
             if (txId) {
               useChatStore.getState().setTransactionId(activeAgentId, txId)
               try {
-                const diffs = await window.api.chat.getDiff(txId)
+                const diffs = await desktopApi.chat.getDiff(txId)
                 if (Array.isArray(diffs) && diffs.length > 0) {
                   setDiffEntries(activeAgentId, diffs)
                 }
@@ -302,14 +319,25 @@ export function useSendMessage() {
             useChatStore.getState().persistSession(sid)
             setStreamCleanup(sid, null)
           },
-          onError: (error: string) => {
+          onError: async (error: string, txId?: string) => {
             if (firstByteTimer) { clearTimeout(firstByteTimer); firstByteTimer = null }
             setResponseWaitWarning(activeAgentId, false)
             streamUpdates.flush()
             appendStreamChunk(activeAgentId, `\n\n⚠️ 错误：${error}`)
-            finishStreaming(activeAgentId)
+            finishStreaming(activeAgentId, txId)
             setMessageExecutionStatus(activeAgentId, 'error')
-            useChatStore.getState().persistSession(sid)
+            if (txId) {
+              useChatStore.getState().setTransactionId(activeAgentId, txId)
+              try {
+                const diffs = await desktopApi.chat.getDiff(txId)
+                if (Array.isArray(diffs) && diffs.length > 0) {
+                  setDiffEntries(activeAgentId, diffs)
+                }
+              } catch (err) {
+                console.warn('Failed to load retained transaction diff:', err)
+              }
+            }
+            await useChatStore.getState().persistSession(sid)
             setStreamCleanup(sid, null)
           },
           onToolStart: (
@@ -448,7 +476,7 @@ export function useSendMessage() {
         const rollbackIds = promotedAttachments
           .filter((_item, index) => attachments[index]?.scope === 'draft')
           .map((item) => item.id)
-        await window.api.attachment.rollbackPromotion(sid, rollbackIds).catch(() => undefined)
+        await desktopApi.attachment.rollbackPromotion(sid, rollbackIds).catch(() => undefined)
         await useChatStore.getState().persistSession(sid)
         setStreamCleanup(sid, null)
         alert(`消息发送失败：${error instanceof Error ? error.message : String(error)}`)
@@ -459,7 +487,7 @@ export function useSendMessage() {
         .filter((item): item is Extract<ComposerImageAttachment, { scope: 'draft' }> => item.scope === 'draft')
         .map((item) => item.draftId)
       if (draftIds.length > 0) {
-        await window.api.attachment.discardDrafts(draftIds).catch(() => undefined)
+        await desktopApi.attachment.discardDrafts(draftIds).catch(() => undefined)
       }
       return true
     },

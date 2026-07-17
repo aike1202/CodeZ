@@ -7,6 +7,7 @@ import Card from '../ui/Card'
 import Button from '../ui/Button'
 import IconClose from '../icons/IconClose'
 import IconCheck from '../icons/IconCheck'
+import { desktopApi } from '../../shared/desktop'
 import './EditApprovalWidget.css'
 
 interface EditItem {
@@ -74,7 +75,7 @@ export default function EditApprovalWidget({ msgId, txId, edits, editStatuses = 
     if (!edit?.transactionPath) return
     setLoadingFile(filePath)
     try {
-      const rejected = await window.api.chat.rejectFile(txId, edit.transactionPath)
+      const rejected = await desktopApi.chat.rejectFile(txId, edit.transactionPath)
       if (!rejected) {
         console.error('Reject refused because the file no longer matches the CodeZ mutation.')
         return

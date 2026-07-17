@@ -1,0 +1,103 @@
+# CodeZ 当前 Tauri/Rust 执行范围
+
+> 更新：2026-07-17
+>
+> 本文覆盖较早计划中与当前产品决定冲突的数据迁移和 Electron 删除要求。
+
+## 目标模式任务
+
+持续完成 CodeZ 的 Tauri/Rust 重构，直到 Electron `main`/`preload` 承担的桌面后端行为均有经过测试的 Rust 等价实现，React/TypeScript renderer 只通过统一 desktop facade 使用 Tauri，且 Tauri 可独立构建、安装和运行。Tauri 只在全新的 `~/.codez` 中生成后续数据，不发现、不读取、不迁移 Electron 旧数据；Electron 工程和数据永久保留，不执行删除。MCP 暂停到 M1-M7 全部完成。按本文依赖顺序持续实施和验证；文件边界独立时合理使用子智能体，存在共享 runtime 文件或前置依赖时串行处理。不得覆盖现有用户/Gemini/MCP 脏改动，不得以编译通过代替行为等价与失败路径测试。
+
+## 固定边界
+
+- 目标仍是将 Electron `main`、`preload` 和桌面后端行为逐步迁移为 Rust/Tauri；React/TypeScript UI 保留。
+- Tauri 运行时的全局数据根是 `~/.codez`。首次启动在此根创建新状态和日志；Provider/MCP 等新凭据只写入系统 credential store。
+- 不读取、复制、转换、备份或删除 Electron `userData`、其密钥或已有的旧实验数据。旧 Electron 安装与数据保持不变。
+- Electron 源码、测试、构建配置、依赖、安装包和行为基线无限期保留。没有 Phase 10，也不得以“迁移完成”为由删除它们。
+- MCP 迁移暂停。除保持已有代码可编译外，不进行 MCP 功能、安全策略或 UI 改动，直到其他领域完成并明确恢复。
+- Plan 功能不纳入 Tauri/Rust 迁移。Electron 中现有 Plan 源码继续冻结保留；Tauri renderer 不新增 Plan command/event，而是在 bridge 收口阶段移除或隔离 Plan UI、状态恢复和事件监听。
+
+## 执行顺序
+
+1. 启动与数据根：Tauri 只构造 `~/.codez` 的 `AppState`，不注册旧迁移命令或恢复 UI。
+2. 本地工作流：Workspace、文件、Git/worktree、编辑器、Terminal/PTY、附件和 Skills 逐项迁入 Tauri contract；每项关闭 renderer 的直接 Electron 调用。
+3. 桌面宿主：窗口、主题、外链、通知、系统信息和全局快捷键转为 Tauri API。
+4. 模型与会话：Provider、Keyring、Chat/Context、会话清理/撤回、流式 ACK 与 renderer bridge 完成功能等价。
+5. 自动化能力：Tool、Permission、Agent、SubAgent、并行协作和 AskUserQuestion 与 Chat runtime 接通。
+6. 验收：按功能域运行 Rust 单元/集成测试、TypeScript 类型检查、契约/adapter 测试、Tauri renderer 构建和桌面 smoke；Windows 原生命令 Ctrl+C 恢复 shell prompt 是发布阻断项。
+7. MCP：仅在步骤 1-6 完成后，以独立计划恢复。
+
+## 2026-07-17 当前完成状态
+
+- 按发布门禁计算，M1、M2 已完成，M3、M4 正在并行实施；M5-M7 尚未达到完成门禁。按代码功能面计算，大量桌面 API 已有 Rust 实现，但可恢复历史回退、真实 Context 管线、完整 Chat/Agent 生命周期和发布验收仍在后半程，因此不得用单一百分比宣称接近完成。
+- Tauri 启动与 session 数据只使用新的 `~/.codez`；不读取或迁移 Electron 数据，Electron 源码与构建链仍完整保留。
+- Workspace/Git、Terminal、Skills、Host/Settings、附件、Rules/Permission、Chat commands、Task/SubAgent settings 和 renderer logging 已通过统一 desktop facade 接入 Tauri。
+- Plan 已在统一 `desktopApi.capabilities.plan` 边界隔离：Tauri 不显示 Plan modal/绑定入口、不解析 Plan client action、不恢复 Plan 状态，也不注册 Plan Electron listener；没有新增任何 Rust Plan command/event。旧 `window.api.plan` 和 Plan listener 仅在 capability 为 true 的 Electron renderer 可达，Electron 行为原样保留。Task update subscription 和 Parallel execution subscription 仍依赖兼容 `window.api` 语义，需要真实的 Tauri typed events；因此不能用直接调用的文本计数推断 renderer bridge 已接近完成。
+- M1 Read/Write/Edit 已完成：Read 统一经过受信 `FileSystem`；Write/Edit 具备 fingerprint、授权后二次路径 identity 校验、per-path mutation lock、durable `prepare -> commit -> verified`、重启后 Reject、真实目录 identity、同步落盘、readonly 恢复、深层新文件和可发现 `txId`。
+- M2 已完整接入 `SessionMaintenanceCoordinator`：Chat/Context/Attachment/EditTransaction/SubAgent 持 shared activity，Compaction 持 exclusive activity，History 与删除持 maintenance lease；冲突统一返回 retryable `RUN_ACTIVE`，持久 recovery marker 会阻断全部普通入口。
+- session 删除使用 durable tombstone 和 detached owned worker，command future 取消不会中断清理；同一 session 删除串行化，七个清理步骤包括 SubAgent terminal state。启动恢复、损坏 tombstone 分类、reparse/path 边界、list-generation ABA 和 Windows `\\?\C:\...`/`C:\...` identity 均有回归覆盖。
+- SubAgent 终态使用 `~/.codez/subagent-runs/<session_id>/<run_id>.json`，get/cancel 显式校验 session 所有权并持 activity；session 删除会清理对应终态。renderer 已通过 `shared/desktopApi` 暴露 run/get/cancel/onState，Electron fallback 保留旧签名。
+- Chat 历史回退已具备 typed contract、Tauri command、durable ledger 规划、history-version CAS、edit transaction 预览/恢复、maintenance lease 和 renderer facade；但当前 `plan -> workspace revert -> ledger CAS` 尚无跨资源提交协议。Ledger 冲突或写入失败仍可能留下“文件已回退、历史未回退”的部分状态，这是 M3 的发布阻断 P1，不能把该流程视为完成。
+- EditTransaction 已支持重启后安全加载、4 MiB 元数据上限、session/transaction 身份校验、重复 ID 拒绝、路径/symlink/reparse 防护、稳定预览顺序和部分失败后的可重试回滚。
+- Context 已具备 typed budget snapshot、Provider usage baseline、current-input 校验、context item builder 和 Provider message adapter；这些是基础 API，尚未接入 ChatRuntime 的实际 Provider 请求路径。
+- 当前 Chat 工具循环只接入 Read、Write、Edit、Bash 和 AskUserQuestion。Glob、Grep、NotebookEdit、PowerShell、Web、Skills、Task、通知、ToolSearch/ResultRead、Agent mailbox/lifecycle 和并行执行等 Electron 工具行为仍待 Rust 等价实现；SubAgent 当前仍是无工具的单步 Provider run。
+- Rust Task command 仍使用 raw JSON、裸 `String` error 和直接文件写入，也没有 update broadcast；它只能算占位实现，不能算 typed/atomic 行为等价。
+- 删除 session 时会清理 EditTransaction、附件、ledger、fingerprint、SubAgent terminal state、session JSON 和 session 级 permission rules。
+
+M2 最近一次稳定门禁结果为绿色：
+
+- `cargo fmt --all -- --check`
+- `cargo test -p codez-runtime --locked`：217/217（172 单元、25 edit transaction、1 fingerprint、2 mutation coordinator、17 tools）
+- `cargo test -p codez-contracts --locked`：25/25
+- `cargo check -p codez-desktop --locked`
+- workspace all-target/all-feature 严格 Clippy（`-D warnings -D clippy::perf`）
+- TypeScript 类型检查与 Vitest 全量：195 个文件、1,240 项
+- Rust 依赖方向检查与 Tauri renderer 生产构建
+- `git diff --check`
+
+`codez-desktop` 164 项测试在 Windows 上全部通过。Cargo 生成的单元测试 executable 缺少 Common Controls v6 manifest，直接启动会以 `0xc0000139` 失败；将该 manifest 仅嵌入测试 executable 副本后 164/164 通过，证明失败来自测试载体而非测试逻辑。正式应用 manifest 不受此问题影响。
+
+最新 Windows 路径 identity 修复后又复验了 `cargo fmt`、runtime 217/217、contracts 25/25、TypeScript 类型检查和 `git diff --check`。M3/M4 当前正在并行修改工作区，合入后仍需重新执行 workspace strict Clippy、desktop no-run/实际测试、Vitest、架构检查和 Tauri renderer 构建，不能把 M2 稳定点当作后续修改的验证结果。
+
+Plan 隔离后，renderer 聚焦测试 16/16、Vitest 全量 195 个文件/1,243 项、TypeScript 类型检查和 Tauri renderer production build 均通过。
+
+## 剩余目标与依赖顺序
+
+| 顺序 | 状态 | 目标 | 关键交付物 | 完成门禁 |
+| --- | --- | --- | --- | --- |
+| M1 | 已完成 | 完成 Rust Read/Write/Edit 调用链 | delivery fingerprint、授权后路径 identity 复核、atomic write、mutation record、共享 `txId`、失败后可恢复事务 | stale-read、CRLF、连续 edit、并发备份、只读属性、部分失败和重启恢复测试通过；只有真实 mutation 的完成帧才携带 `txId` |
+| M2 | 已完成 | 接入 session maintenance | coordinator、durable recovery block、detached session deletion、SubAgent session ownership/cleanup、Windows path identity | 运行中冲突返回 typed `RUN_ACTIVE`；lease 自动释放、poison/recovery、取消、重启和并发冲突测试通过 |
+| M3 | 进行中 | 实现可恢复 HistoryRevertService | stable `operation_id`；durable `Prepared -> WorkspaceApplied -> LedgerCommitted -> Finalized` journal；Ledger 成功前保留 workspace 备份 | 支持崩溃恢复与幂等重试；返回 typed `HISTORY_REVERT_STALE`/`RECOVERY_REQUIRED`；任何失败都不留下不可恢复的文件/历史分裂状态 |
+| M4 | 进行中 | Context 接入真实 Chat 请求 | `require_current_input_message -> measure_request -> prune/compact -> build items -> provider adapter -> hydrate images` | token budget、自动 prune/compact、usage fingerprint、overflow retry 和 typed context/compaction frames 有聚焦测试 |
+| M5 | 部分基础已有，闭环未完成 | 完整 Tool/Permission/Agent/SubAgent loop | 补齐非 MCP builtin tools；typed/atomic Task；多轮模型工具循环、AskUserQuestion、父子取消、并行协作、运行状态持久化、权限恢复和 typed stream events | Chat/Agent/SubAgent 的成功、拒绝、取消、重启恢复、并发上限和错误传播测试通过 |
+| M6 | 部分完成，等待 M5 | 清除 renderer 剩余 Electron/兼容 bridge 语义依赖 | Plan Tauri 隔离已完成；补齐 Task/Parallel typed events 和 desktop facade listener，subscription hooks 改接统一 bridge | facade 外 Electron/兼容 API 语义依赖为 0，renderer adapter/store 测试和类型检查通过 |
+| M7 | 未开始 | 完成发布级验证 | 安装包、全新 `~/.codez` 启动、credential store、Windows Ctrl+C/process-tree、跨平台 smoke、性能与资源打包检查 | Tauri 可独立发布；不读取 Electron 数据；Electron 源码、依赖、配置、测试和安装包仍全部保留 |
+| M8 | 冻结 | 恢复 MCP 独立计划 | 在 M1-M7 全部完成后重新审计现有 MCP Rust 代码，再决定补齐顺序 | 当前阶段禁止实施；恢复前不得把已有 MCP 脏改动误算为已验收功能 |
+
+关键依赖链为 `M1 -> M2 -> M3`、`M2 -> M4 -> M5 -> M6` 和 `M1-M6 -> M7`。M3 与 M4 可在 M2 稳定后并行；M6 必须等 M5 的 typed events 稳定。MCP 不占用当前迁移资源。
+
+## 子智能体安排
+
+最多同时运行 3 个子智能体，主智能体保留一个并发槽负责审查、集成和全量门禁。只把文件边界清晰、可独立验证的工作交给子智能体；共享 `chat_runtime.rs`、`state.rs`、`composition.rs` 的跨域接线由主智能体串行合并。
+
+| 批次 | 负责人 | 状态与文件边界 | 前置条件与禁止触碰 |
+| --- | --- | --- | --- |
+| M2 公共接线 | 主智能体 | 已完成 coordinator、error conversion、state/composition、Chat/Compaction/History 接线与最终门禁 | 后续不得弱化 recovery block 或绕过统一删除 tombstone |
+| M2 Session/Attachment/Context | 子智能体 A | 已完成 command activity/maintenance 门禁和聚焦测试 | 不再重复开发；回归由主智能体统一执行 |
+| M2 删除与恢复 | 子智能体 B | 已完成 detached deletion、durable recovery、ABA/path/reparse 防护和测试 | 不再重复开发；M3 不得复用删除 journal 语义冒充 history transaction |
+| M2 SubAgent | 主智能体/子智能体 | 已完成 session-scoped terminal persistence、get/cancel ownership、删除清理和 renderer facade | 后续 M5 只扩展 Agent loop，不改变该存储身份边界 |
+| M3/M4 并行 | 子智能体 A/B | 正在实施：A 独占 HistoryRevert core/journal；B 独占 Context domain 与 `chat_runtime.rs`；共享 Tauri command/composition 接线交回主智能体串行完成 | 两任务不得互改对方 domain；不改 MCP、Plan、Electron 源码 |
+| M5 分批 | 子智能体 A/B/C | Context 稳定后按 builtin Tool/typed Task、Agent/SubAgent lifecycle、Task/Parallel typed events 三个文件域拆分；主智能体负责最终 Chat loop 集成 | 每批必须先冻结 contract；不实现 Plan；不得同时改共享 registry/chat runtime |
+| M6/M7 | Renderer/验证子智能体 | typed events 冻结后，一名子智能体只改 facade/store/tests；其余子智能体只读执行构建、安装、Windows process-tree 与跨平台 smoke | 不删除 Electron，不新增或恢复数据迁移，不修改 MCP |
+
+槽位释放后的补位优先级固定为：M2 公共接线 -> M2 Session/SubAgent 并行 -> M2 Compaction/History -> M3 HistoryRevert 与 M4 Context 并行 -> M5 Agent/SubAgent -> M6 renderer listener -> M7 发布验证。任何阶段出现 P0/P1 时暂停其依赖任务，先由主智能体确认根因、文件所有权和回归门禁。
+
+每个子任务必须报告：修改文件、行为变化、未修改范围、剩余 Electron 调用、测试命令与结果、未解决阻断项。Rust 生产代码使用 typed `Result` 错误，禁止 `unwrap`/`expect`；验收至少包含 `cargo fmt --all -- --check`、相关 crate 测试以及 all-target/all-feature 严格 Clippy。不得用大范围搜索替换掩盖缺失的 Rust command，也不得把“可以编译”等同于行为迁移完成。
+
+## 完成定义
+
+- Tauri 正常启动不接触 Electron 用户数据，并在 `~/.codez` 正确创建新状态。
+- 每个已迁移领域拥有 Rust command/domain 实现、typed renderer adapter 与针对关键失败路径的测试。
+- renderer 不再直接依赖该领域的 Electron API；尚未迁移的调用按领域记录，而不是静默兼容。
+- Electron 仍可作为冻结的源码和测试基线存在；其保留不等于 Tauri 双运行时支持。
+- MCP、Windows 原生 Ctrl+C、完整 Chat/Tool/Agent loop 和跨平台安装验收未完成前，不得宣称全量迁移完成。

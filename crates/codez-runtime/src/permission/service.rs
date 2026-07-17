@@ -92,6 +92,11 @@ impl PermissionService {
         }
     }
 
+    /// Removes all in-memory permission rules owned by one session.
+    pub async fn clear_session(&self, session_id: &str) {
+        self.rules.clear_session(session_id).await;
+    }
+
     pub async fn authorize(
         &self,
         prepared: &PreparedToolCall,

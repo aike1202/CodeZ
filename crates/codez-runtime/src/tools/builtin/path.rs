@@ -19,6 +19,8 @@ pub enum ToolPathError {
     InvalidPath,
     #[error("the tool path changed after authorization")]
     AuthorizationMismatch,
+    #[error("the tool path is outside the workspace")]
+    OutsideWorkspace,
 }
 
 pub async fn resolve_tool_path(

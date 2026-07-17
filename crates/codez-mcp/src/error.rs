@@ -20,6 +20,7 @@ pub enum McpOperation {
     ListResources,
     ListResourceTemplates,
     ListPrompts,
+    GetPrompt,
     CallTool,
     ReadResource,
     Subscribe,

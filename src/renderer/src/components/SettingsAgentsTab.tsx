@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import type { SubAgentInfo } from '../shared/desktop/generated/contracts'
+import { desktopApi } from '../shared/desktop/api'
 import Flex from './ui/Flex'
 import Button from './ui/Button'
 import { IconRefreshCw, IconZap, IconPackage } from './Icons'
@@ -14,7 +15,7 @@ export default function SettingsAgentsTab(): React.ReactElement {
   const loadAgents = async () => {
     setLoading(true)
     try {
-      const data = await window.api.subAgent.list()
+      const data = await desktopApi.subAgent.list()
       setAgents(data)
     } catch (e) {
       console.error('Failed to load subagents', e)
@@ -30,7 +31,7 @@ export default function SettingsAgentsTab(): React.ReactElement {
   const handleToggle = async (type: string, enabled: boolean) => {
     setAgents((prev) => prev.map((a) => (a.type === type ? { ...a, enabled } : a)))
     try {
-      await window.api.subAgent.toggle(type, enabled)
+      await desktopApi.subAgent.toggle(type, enabled)
     } catch (e) {
       console.error('Failed to toggle subagent', e)
       setAgents((prev) => prev.map((a) => (a.type === type ? { ...a, enabled: !enabled } : a)))

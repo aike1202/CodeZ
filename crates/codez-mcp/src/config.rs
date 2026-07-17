@@ -1,11 +1,11 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     net::IpAddr,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
-use codez_core::{AppError, AtomicPersistence};
+use codez_core::{AppError, AtomicPersistence, SafeWorkspacePath, WorkspaceRoot};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -28,6 +28,8 @@ const MAX_MAP_KEY_CHARS: usize = 512;
 const MAX_MAP_VALUE_CHARS: usize = 64 * 1024;
 const MAX_TOOL_FILTERS: usize = 4096;
 const MAX_TOOL_NAME_CHARS: usize = 512;
+const PROJECT_TRUST_SCHEMA_VERSION: u16 = 1;
+const MAX_TRUSTED_PROJECT_FINGERPRINTS: usize = 4096;
 
 /// Transport selected for one configured MCP server.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -129,12 +131,22 @@ pub struct McpServerConfig {
     pub extensions: BTreeMap<String, Value>,
 }
 
-/// One persisted user server with its stable configuration fingerprint.
+/// Origin of one configured MCP server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpConfigScope {
+    User,
+    Project,
+}
+
+/// One validated MCP server after its configuration scopes have been resolved.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UserMcpServer {
+pub struct ScopedMcpServer {
     pub name: String,
+    pub scope: McpConfigScope,
     pub config: McpServerConfig,
     pub fingerprint: String,
+    pub trusted: bool,
+    pub effective: bool,
 }
 
 /// Typed failures from MCP user configuration validation and persistence.
@@ -153,6 +165,12 @@ pub enum McpConfigError {
     UnsupportedVersion { version: u16 },
     #[error("MCP server is not configured in the user scope")]
     ServerNotFound,
+    #[error("MCP project configuration fingerprint is not currently available for approval")]
+    ProjectFingerprintNotFound,
+    #[error("MCP project trust contains too many fingerprints")]
+    ProjectTrustTooLarge,
+    #[error("MCP project trust schema version {version} is unsupported")]
+    UnsupportedProjectTrustVersion { version: u16 },
     #[error("MCP configuration could not be encoded")]
     Serialize {
         #[source]
@@ -172,10 +190,15 @@ impl From<McpConfigError> for AppError {
             McpConfigError::ServerNotFound => {
                 AppError::not_found("The MCP server is not configured in the user scope")
             }
+            McpConfigError::ProjectFingerprintNotFound => AppError::validation(
+                "The MCP project configuration changed or is not available for approval",
+            ),
             McpConfigError::Persistence { source } => source,
             McpConfigError::DocumentTooLarge
             | McpConfigError::InvalidDocument { .. }
             | McpConfigError::UnsupportedVersion { .. }
+            | McpConfigError::ProjectTrustTooLarge
+            | McpConfigError::UnsupportedProjectTrustVersion { .. }
             | McpConfigError::Serialize { .. } => AppError::storage(
                 "The MCP configuration could not be loaded or saved",
                 error.to_string(),
@@ -192,6 +215,15 @@ struct McpConfigDocument {
     schema_version: u16,
     #[serde(default, alias = "servers")]
     mcp_servers: BTreeMap<String, McpServerConfig>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectTrustDocument {
+    #[serde(default)]
+    schema_version: u16,
+    #[serde(default)]
+    trusted_fingerprints: BTreeSet<String>,
 }
 
 /// Concurrent, bounded service for the user-scoped `mcp.json` document.
@@ -227,7 +259,7 @@ impl McpUserConfigService {
     ///
     /// Returns [`McpConfigError`] for corrupt, oversized, unsupported, invalid,
     /// or inaccessible configuration data.
-    pub async fn list(&self) -> Result<Vec<UserMcpServer>, McpConfigError> {
+    pub async fn list(&self) -> Result<Vec<ScopedMcpServer>, McpConfigError> {
         let _guard = self.mutation_lock.lock().await;
         let document = self.load_document().await?;
         validate_servers(&document.mcp_servers)?;
@@ -236,11 +268,7 @@ impl McpUserConfigService {
             .into_iter()
             .map(|(name, config)| {
                 let fingerprint = fingerprint(&name, &config)?;
-                Ok(UserMcpServer {
-                    name,
-                    config,
-                    fingerprint,
-                })
+                Ok(scoped_user_server(name, config, fingerprint))
             })
             .collect()
     }
@@ -254,7 +282,7 @@ impl McpUserConfigService {
     pub async fn save_servers(
         &self,
         servers: BTreeMap<String, McpServerConfig>,
-    ) -> Result<Vec<UserMcpServer>, McpConfigError> {
+    ) -> Result<Vec<ScopedMcpServer>, McpConfigError> {
         let _guard = self.mutation_lock.lock().await;
         validate_servers(&servers)?;
         self.persist_servers(&servers).await?;
@@ -262,11 +290,7 @@ impl McpUserConfigService {
             .into_iter()
             .map(|(name, config)| {
                 let fingerprint = fingerprint(&name, &config)?;
-                Ok(UserMcpServer {
-                    name,
-                    config,
-                    fingerprint,
-                })
+                Ok(scoped_user_server(name, config, fingerprint))
             })
             .collect()
     }
@@ -281,7 +305,7 @@ impl McpUserConfigService {
         &self,
         name: &str,
         enabled: bool,
-    ) -> Result<Vec<UserMcpServer>, McpConfigError> {
+    ) -> Result<Vec<ScopedMcpServer>, McpConfigError> {
         validate_server_name(name)?;
         let _guard = self.mutation_lock.lock().await;
         let mut document = self.load_document().await?;
@@ -297,11 +321,7 @@ impl McpUserConfigService {
             .into_iter()
             .map(|(name, config)| {
                 let fingerprint = fingerprint(&name, &config)?;
-                Ok(UserMcpServer {
-                    name,
-                    config,
-                    fingerprint,
-                })
+                Ok(scoped_user_server(name, config, fingerprint))
             })
             .collect()
     }
@@ -315,25 +335,7 @@ impl McpUserConfigService {
         let _guard = self.mutation_lock.lock().await;
         let document = self.load_document().await?;
         validate_servers(&document.mcp_servers)?;
-        let mut keys = BTreeSet::new();
-        for config in document.mcp_servers.values() {
-            for value in config
-                .env
-                .iter()
-                .flat_map(|values| values.values())
-                .chain(config.headers.iter().flat_map(|values| values.values()))
-                .chain(config.args.iter().flatten())
-            {
-                for key in secret_references(value).map_err(|()| {
-                    validation("MCP configuration contains an invalid secure-secret expression")
-                })? {
-                    keys.insert(McpSecretKey::parse(key).map_err(|_| {
-                        validation("MCP configuration contains an invalid secure-secret key")
-                    })?);
-                }
-            }
-        }
-        Ok(keys)
+        referenced_secret_keys_from_configs(document.mcp_servers.values())
     }
 
     async fn load_document(&self) -> Result<McpConfigDocument, McpConfigError> {
@@ -376,6 +378,276 @@ impl McpUserConfigService {
             .await
             .map_err(|source| McpConfigError::Persistence { source })
     }
+}
+
+/// Concurrent, bounded loader for workspace-owned `.mcp.json` documents and
+/// fingerprint-bound user approval records.
+///
+/// The service never writes into a workspace. Project configuration is read
+/// through the atomic persistence boundary, which rejects non-regular files,
+/// while approvals are stored only under the application data root.
+pub struct McpProjectConfigService {
+    persistence: Arc<dyn AtomicPersistence>,
+    trust_path: PathBuf,
+    mutation_lock: Mutex<()>,
+}
+
+impl std::fmt::Debug for McpProjectConfigService {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("McpProjectConfigService")
+            .field("trust_path", &self.trust_path)
+            .finish_non_exhaustive()
+    }
+}
+
+impl McpProjectConfigService {
+    /// Creates a project configuration loader with a private trust store.
+    #[must_use]
+    pub fn new(persistence: Arc<dyn AtomicPersistence>, trust_path: PathBuf) -> Self {
+        Self {
+            persistence,
+            trust_path,
+            mutation_lock: Mutex::new(()),
+        }
+    }
+
+    /// Loads the current project MCP configuration without resolving secrets or
+    /// starting transports. Each returned configuration is trusted only when an
+    /// exact content-and-workspace fingerprint appears in the trust store.
+    ///
+    /// # Errors
+    ///
+    /// Returns bounded read, validation, or trust-store persistence failures.
+    pub async fn list(
+        &self,
+        workspace: &WorkspaceRoot,
+    ) -> Result<Vec<ScopedMcpServer>, McpConfigError> {
+        let _guard = self.mutation_lock.lock().await;
+        let trust = self.load_trust_document().await?;
+        self.load_servers_with_trust(workspace, &trust.trusted_fingerprints)
+            .await
+    }
+
+    /// Finds secure-secret keys referenced by trusted project configuration.
+    ///
+    /// Untrusted project files must not trigger credential-store existence
+    /// probes: a repository could otherwise infer whether a named local
+    /// credential exists. The returned keys are names only, never values.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same bounded read, validation, and trust-store failures as
+    /// [`Self::list`].
+    pub async fn referenced_secret_keys(
+        &self,
+        workspace: &WorkspaceRoot,
+    ) -> Result<BTreeSet<McpSecretKey>, McpConfigError> {
+        let servers = self.list(workspace).await?;
+        referenced_secret_keys_from_configs(
+            servers
+                .iter()
+                .filter(|server| server.trusted)
+                .map(|server| &server.config),
+        )
+    }
+
+    /// Persists approval for one fingerprint only after it is found in the
+    /// current workspace configuration. A changed project document therefore
+    /// cannot inherit approval from a previous configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`McpConfigError::ProjectFingerprintNotFound`] when the caller
+    /// attempts to approve an absent, malformed, or stale fingerprint.
+    pub async fn trust_current_fingerprint(
+        &self,
+        workspace: &WorkspaceRoot,
+        fingerprint: &str,
+    ) -> Result<Vec<ScopedMcpServer>, McpConfigError> {
+        if !is_fingerprint(fingerprint) {
+            return Err(McpConfigError::ProjectFingerprintNotFound);
+        }
+        let _guard = self.mutation_lock.lock().await;
+        let mut trust = self.load_trust_document().await?;
+        let current = self
+            .load_servers_with_trust(workspace, &BTreeSet::new())
+            .await?;
+        if !current
+            .iter()
+            .any(|server| server.fingerprint == fingerprint)
+        {
+            return Err(McpConfigError::ProjectFingerprintNotFound);
+        }
+        if !trust.trusted_fingerprints.contains(fingerprint)
+            && trust.trusted_fingerprints.len() == MAX_TRUSTED_PROJECT_FINGERPRINTS
+        {
+            return Err(McpConfigError::ProjectTrustTooLarge);
+        }
+        trust.trusted_fingerprints.insert(fingerprint.to_string());
+        trust.schema_version = PROJECT_TRUST_SCHEMA_VERSION;
+        self.persist_trust_document(&trust).await?;
+        self.load_servers_with_trust(workspace, &trust.trusted_fingerprints)
+            .await
+    }
+
+    async fn load_servers_with_trust(
+        &self,
+        workspace: &WorkspaceRoot,
+        trusted_fingerprints: &BTreeSet<String>,
+    ) -> Result<Vec<ScopedMcpServer>, McpConfigError> {
+        let document = self.load_project_document(workspace).await?;
+        validate_servers(&document.mcp_servers)?;
+        document
+            .mcp_servers
+            .into_iter()
+            .map(|(name, config)| {
+                let fingerprint = project_fingerprint(workspace, &name, &config)?;
+                Ok(ScopedMcpServer {
+                    name,
+                    scope: McpConfigScope::Project,
+                    config,
+                    trusted: trusted_fingerprints.contains(&fingerprint),
+                    fingerprint,
+                    effective: true,
+                })
+            })
+            .collect()
+    }
+
+    async fn load_project_document(
+        &self,
+        workspace: &WorkspaceRoot,
+    ) -> Result<McpConfigDocument, McpConfigError> {
+        let path = project_config_path(workspace)?;
+        load_document_from_path(self.persistence.as_ref(), &path).await
+    }
+
+    async fn load_trust_document(&self) -> Result<ProjectTrustDocument, McpConfigError> {
+        let Some(bytes) = self
+            .persistence
+            .read(&self.trust_path)
+            .await
+            .map_err(|source| McpConfigError::Persistence { source })?
+        else {
+            return Ok(ProjectTrustDocument::default());
+        };
+        if bytes.len() > MAX_CONFIG_BYTES {
+            return Err(McpConfigError::ProjectTrustTooLarge);
+        }
+        let document = serde_json::from_slice::<ProjectTrustDocument>(&bytes)
+            .map_err(|source| McpConfigError::InvalidDocument { source })?;
+        if document.schema_version > PROJECT_TRUST_SCHEMA_VERSION {
+            return Err(McpConfigError::UnsupportedProjectTrustVersion {
+                version: document.schema_version,
+            });
+        }
+        if document.trusted_fingerprints.len() > MAX_TRUSTED_PROJECT_FINGERPRINTS
+            || document
+                .trusted_fingerprints
+                .iter()
+                .any(|fingerprint| !is_fingerprint(fingerprint))
+        {
+            return Err(McpConfigError::ProjectTrustTooLarge);
+        }
+        Ok(document)
+    }
+
+    async fn persist_trust_document(
+        &self,
+        document: &ProjectTrustDocument,
+    ) -> Result<(), McpConfigError> {
+        let bytes = serde_json::to_vec_pretty(document)
+            .map_err(|source| McpConfigError::Serialize { source })?;
+        if bytes.len() > MAX_CONFIG_BYTES {
+            return Err(McpConfigError::ProjectTrustTooLarge);
+        }
+        self.persistence
+            .replace(&self.trust_path, &bytes)
+            .await
+            .map_err(|source| McpConfigError::Persistence { source })
+    }
+}
+
+/// Resolves user and project configurations with project entries taking the
+/// same precedence as the legacy desktop host. Shadowed entries remain visible
+/// to the UI but are never eligible for runtime reconciliation.
+///
+/// # Errors
+///
+/// Returns validation failures when effective server names collapse to the
+/// same normalized runtime identity.
+pub fn merge_scoped_servers(
+    user: Vec<ScopedMcpServer>,
+    project: Vec<ScopedMcpServer>,
+) -> Result<Vec<ScopedMcpServer>, McpConfigError> {
+    let mut servers = user;
+    servers.extend(project);
+    let mut effective_by_name = BTreeMap::<String, usize>::new();
+    for index in 0..servers.len() {
+        let name = servers[index].name.clone();
+        if let Some(previous) = effective_by_name.insert(name, index) {
+            servers[previous].effective = false;
+        }
+    }
+    let mut normalized_names = BTreeMap::<String, &str>::new();
+    for server in servers.iter().filter(|server| server.effective) {
+        let normalized = normalize_server_name(&server.name);
+        if let Some(previous) = normalized_names.insert(normalized, &server.name)
+            && previous != server.name
+        {
+            return Err(validation(format!(
+                "MCP server names '{previous}' and '{}' normalize to the same identity",
+                server.name
+            )));
+        }
+    }
+    Ok(servers)
+}
+
+fn scoped_user_server(
+    name: String,
+    config: McpServerConfig,
+    fingerprint: String,
+) -> ScopedMcpServer {
+    ScopedMcpServer {
+        name,
+        scope: McpConfigScope::User,
+        config,
+        fingerprint,
+        trusted: true,
+        effective: true,
+    }
+}
+
+async fn load_document_from_path(
+    persistence: &dyn AtomicPersistence,
+    path: &Path,
+) -> Result<McpConfigDocument, McpConfigError> {
+    let Some(bytes) = persistence
+        .read(path)
+        .await
+        .map_err(|source| McpConfigError::Persistence { source })?
+    else {
+        return Ok(McpConfigDocument::default());
+    };
+    if bytes.len() > MAX_CONFIG_BYTES {
+        return Err(McpConfigError::DocumentTooLarge);
+    }
+    let document = serde_json::from_slice::<McpConfigDocument>(&bytes)
+        .map_err(|source| McpConfigError::InvalidDocument { source })?;
+    if document.schema_version > CONFIG_SCHEMA_VERSION {
+        return Err(McpConfigError::UnsupportedVersion {
+            version: document.schema_version,
+        });
+    }
+    Ok(document)
+}
+
+fn project_config_path(workspace: &WorkspaceRoot) -> Result<PathBuf, McpConfigError> {
+    SafeWorkspacePath::from_relative(workspace, Path::new(".mcp.json"))
+        .map(|path| path.absolute_path())
+        .map_err(|error| validation(error.to_string()))
 }
 
 fn validate_servers(servers: &BTreeMap<String, McpServerConfig>) -> Result<(), McpConfigError> {
@@ -576,14 +848,26 @@ fn validate_remote(name: &str, config: &McpServerConfig) -> Result<(), McpConfig
     if url.scheme() != "https" && !loopback {
         return Err(server_validation(name, "remote MCP URLs must use HTTPS"));
     }
-    if url.scheme() != "https" && config.oauth.is_some() {
+    if url.scheme() != "https" && !loopback && config.oauth.is_some() {
         return Err(server_validation(
             name,
-            "OAuth is not allowed over insecure HTTP",
+            "OAuth is only allowed over HTTPS or loopback HTTP",
         ));
     }
     validate_string_map(name, "headers", config.headers.as_ref())?;
     validate_sensitive_map(name, "headers", config.headers.as_ref())?;
+    if config.oauth.is_some()
+        && config.headers.as_ref().is_some_and(|headers| {
+            headers
+                .keys()
+                .any(|header| header.eq_ignore_ascii_case("authorization"))
+        })
+    {
+        return Err(server_validation(
+            name,
+            "OAuth MCP servers must not configure an Authorization header",
+        ));
+    }
     validate_oauth(name, config.oauth.as_ref())
 }
 
@@ -755,6 +1039,30 @@ fn secret_references(value: &str) -> Result<Vec<&str>, ()> {
     })
 }
 
+fn referenced_secret_keys_from_configs<'a>(
+    configs: impl IntoIterator<Item = &'a McpServerConfig>,
+) -> Result<BTreeSet<McpSecretKey>, McpConfigError> {
+    let mut keys = BTreeSet::new();
+    for config in configs {
+        for value in config
+            .env
+            .iter()
+            .flat_map(|values| values.values())
+            .chain(config.headers.iter().flat_map(|values| values.values()))
+            .chain(config.args.iter().flatten())
+        {
+            for key in secret_references(value).map_err(|()| {
+                validation("MCP configuration contains an invalid secure-secret expression")
+            })? {
+                keys.insert(McpSecretKey::parse(key).map_err(|_| {
+                    validation("MCP configuration contains an invalid secure-secret key")
+                })?);
+            }
+        }
+    }
+    Ok(keys)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExpressionSource {
     Environment,
@@ -850,6 +1158,72 @@ fn normalize_server_name(value: &str) -> String {
 fn fingerprint(name: &str, config: &McpServerConfig) -> Result<String, McpConfigError> {
     let bytes = serde_json::to_vec(&(name, config))
         .map_err(|source| McpConfigError::Serialize { source })?;
+    Ok(sha256_hex(&bytes))
+}
+
+fn project_fingerprint(
+    workspace: &WorkspaceRoot,
+    name: &str,
+    config: &McpServerConfig,
+) -> Result<String, McpConfigError> {
+    let configuration =
+        serde_json::to_value(config).map_err(|source| McpConfigError::Serialize { source })?;
+    let identity = serde_json::json!({
+        "workspaceRoot": workspace.as_path().to_string_lossy(),
+        "name": name,
+        "scope": "project",
+        "config": configuration,
+    });
+    let canonical = canonical_json(&identity)?;
+    Ok(sha256_hex(canonical.as_bytes()))
+}
+
+fn canonical_json(value: &Value) -> Result<String, McpConfigError> {
+    let mut output = String::new();
+    append_canonical_json(value, &mut output)?;
+    Ok(output)
+}
+
+fn append_canonical_json(value: &Value, output: &mut String) -> Result<(), McpConfigError> {
+    match value {
+        Value::Null | Value::Bool(_) | Value::Number(_) => {
+            output.push_str(&value.to_string());
+        }
+        Value::String(text) => output.push_str(
+            &serde_json::to_string(text).map_err(|source| McpConfigError::Serialize { source })?,
+        ),
+        Value::Array(values) => {
+            output.push('[');
+            for (index, item) in values.iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                append_canonical_json(item, output)?;
+            }
+            output.push(']');
+        }
+        Value::Object(values) => {
+            output.push('{');
+            let mut entries = values.iter().collect::<Vec<_>>();
+            entries.sort_unstable_by_key(|(key, _)| *key);
+            for (index, (key, item)) in entries.into_iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                output.push_str(
+                    &serde_json::to_string(key)
+                        .map_err(|source| McpConfigError::Serialize { source })?,
+                );
+                output.push(':');
+                append_canonical_json(item, output)?;
+            }
+            output.push('}');
+        }
+    }
+    Ok(())
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut encoded = String::with_capacity(digest.len() * 2);
@@ -857,7 +1231,14 @@ fn fingerprint(name: &str, config: &McpServerConfig) -> Result<String, McpConfig
         encoded.push(char::from(HEX[usize::from(byte >> 4)]));
         encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
     }
-    Ok(encoded)
+    encoded
+}
+
+fn is_fingerprint(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn is_disallowed_description_control(character: char) -> bool {
@@ -884,12 +1265,13 @@ mod tests {
         sync::Arc,
     };
 
-    use codez_core::{AppError, AtomicCreateOutcome, AtomicPersistence, PortFuture};
+    use codez_core::{AppError, AtomicCreateOutcome, AtomicPersistence, PortFuture, WorkspaceRoot};
     use tokio::sync::Mutex;
 
     use super::{
-        CONFIG_SCHEMA_VERSION, MAX_CONFIG_BYTES, McpConfigError, McpServerConfig, McpTransport,
-        McpUserConfigService,
+        CONFIG_SCHEMA_VERSION, MAX_CONFIG_BYTES, McpConfigError, McpConfigScope, McpOAuthConfig,
+        McpProjectConfigService, McpServerConfig, McpTransport, McpUserConfigService,
+        ScopedMcpServer, merge_scoped_servers,
     };
 
     #[derive(Default)]
@@ -986,6 +1368,203 @@ mod tests {
         McpUserConfigService::new(persistence, path)
     }
 
+    fn workspace_root() -> WorkspaceRoot {
+        WorkspaceRoot::from_canonical(std::env::temp_dir().join("codez-mcp-project-config"))
+            .expect("fixture workspace root must be absolute")
+    }
+
+    fn project_config_path(workspace: &WorkspaceRoot) -> PathBuf {
+        workspace.as_path().join(".mcp.json")
+    }
+
+    fn project_service(
+        persistence: Arc<MemoryPersistence>,
+        trust_path: PathBuf,
+    ) -> McpProjectConfigService {
+        McpProjectConfigService::new(persistence, trust_path)
+    }
+
+    #[tokio::test]
+    async fn project_config_requires_exact_fingerprint_approval_and_persists_it() {
+        let persistence = Arc::new(MemoryPersistence::default());
+        let workspace = workspace_root();
+        let trust_path = PathBuf::from("mcp-project-trust.json");
+        persistence
+            .insert(
+                project_config_path(&workspace),
+                br#"{"servers":{"project":{"type":"stdio","command":"node","args":["server.js"],"env":{"TOKEN":"${secret:project.token}"}}}}"#.to_vec(),
+            )
+            .await;
+        let service = project_service(Arc::clone(&persistence), trust_path.clone());
+
+        let before = service
+            .list(&workspace)
+            .await
+            .expect("project configuration should load without granting trust");
+        let fingerprint = before[0].fingerprint.clone();
+        service
+            .trust_current_fingerprint(&workspace, &fingerprint)
+            .await
+            .expect("current project fingerprint should be approvable");
+        let restarted = project_service(Arc::clone(&persistence), trust_path)
+            .list(&workspace)
+            .await
+            .expect("persisted project approval should survive a service restart");
+
+        assert!(restarted[0].trusted);
+    }
+
+    #[tokio::test]
+    async fn trusted_project_config_exposes_only_its_secret_key_references() {
+        let persistence = Arc::new(MemoryPersistence::default());
+        let workspace = workspace_root();
+        let trust_path = PathBuf::from("mcp-project-trust.json");
+        persistence
+            .insert(
+                project_config_path(&workspace),
+                br#"{"servers":{"project":{"type":"stdio","command":"node","args":["server.js"],"env":{"TOKEN":"${secret:project.token}"}}}}"#.to_vec(),
+            )
+            .await;
+        let service = project_service(Arc::clone(&persistence), trust_path);
+
+        let untrusted = service
+            .referenced_secret_keys(&workspace)
+            .await
+            .expect("untrusted project configuration should load");
+        let fingerprint = service
+            .list(&workspace)
+            .await
+            .expect("project configuration should load")[0]
+            .fingerprint
+            .clone();
+        service
+            .trust_current_fingerprint(&workspace, &fingerprint)
+            .await
+            .expect("current project fingerprint should be approvable");
+        let trusted = service
+            .referenced_secret_keys(&workspace)
+            .await
+            .expect("trusted project configuration should expose references");
+
+        assert!(untrusted.is_empty());
+        assert_eq!(
+            trusted
+                .into_iter()
+                .map(|key| key.as_str().to_string())
+                .collect::<Vec<_>>(),
+            vec!["project.token".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn project_config_change_invalidates_previous_fingerprint_approval() {
+        let persistence = Arc::new(MemoryPersistence::default());
+        let workspace = workspace_root();
+        let trust_path = PathBuf::from("mcp-project-trust.json");
+        persistence
+            .insert(
+                project_config_path(&workspace),
+                br#"{"servers":{"project":{"type":"stdio","command":"node","args":["server.js"]}}}"#.to_vec(),
+            )
+            .await;
+        let service = project_service(Arc::clone(&persistence), trust_path);
+        let original = service
+            .list(&workspace)
+            .await
+            .expect("initial project configuration should load");
+        service
+            .trust_current_fingerprint(&workspace, &original[0].fingerprint)
+            .await
+            .expect("initial fingerprint should be approvable");
+        persistence
+            .insert(
+                project_config_path(&workspace),
+                br#"{"servers":{"project":{"type":"stdio","command":"node","args":["changed.js"]}}}"#.to_vec(),
+            )
+            .await;
+        let changed = service
+            .list(&workspace)
+            .await
+            .expect("changed project configuration should load");
+
+        assert!(!changed[0].trusted);
+    }
+
+    #[tokio::test]
+    async fn project_trust_rejects_a_stale_or_unknown_fingerprint() {
+        let persistence = Arc::new(MemoryPersistence::default());
+        let workspace = workspace_root();
+        persistence
+            .insert(
+                project_config_path(&workspace),
+                br#"{"servers":{"project":{"type":"stdio","command":"node"}}}"#.to_vec(),
+            )
+            .await;
+        let service = project_service(persistence, PathBuf::from("mcp-project-trust.json"));
+
+        let result = service
+            .trust_current_fingerprint(&workspace, &"a".repeat(64))
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(McpConfigError::ProjectFingerprintNotFound)
+        ));
+    }
+
+    #[tokio::test]
+    async fn project_config_is_reported_with_project_scope() {
+        let persistence = Arc::new(MemoryPersistence::default());
+        let workspace = workspace_root();
+        persistence
+            .insert(
+                project_config_path(&workspace),
+                br#"{"servers":{"project":{"type":"stdio","command":"node"}}}"#.to_vec(),
+            )
+            .await;
+        let service = project_service(persistence, PathBuf::from("mcp-project-trust.json"));
+        let servers = service
+            .list(&workspace)
+            .await
+            .expect("project configuration should load");
+
+        assert_eq!(servers[0].scope, McpConfigScope::Project);
+    }
+
+    #[test]
+    fn project_config_shadows_same_named_user_config_before_runtime_selection() {
+        let config = blank_config(McpTransport::Stdio);
+        let user = ScopedMcpServer {
+            name: "shared".to_string(),
+            scope: McpConfigScope::User,
+            config: config.clone(),
+            fingerprint: "user-fingerprint".to_string(),
+            trusted: true,
+            effective: true,
+        };
+        let project = ScopedMcpServer {
+            name: "shared".to_string(),
+            scope: McpConfigScope::Project,
+            config,
+            fingerprint: "project-fingerprint".to_string(),
+            trusted: false,
+            effective: true,
+        };
+        let servers = merge_scoped_servers(vec![user], vec![project])
+            .expect("same raw name should resolve by scope precedence");
+
+        assert_eq!(
+            servers
+                .iter()
+                .map(|server| (server.scope, server.effective, server.trusted))
+                .collect::<Vec<_>>(),
+            vec![
+                (McpConfigScope::User, false, true),
+                (McpConfigScope::Project, true, false),
+            ]
+        );
+    }
+
     #[tokio::test]
     async fn save_servers_accepts_direct_stdio_and_https_secret_expressions() {
         let persistence = Arc::new(MemoryPersistence::default());
@@ -1073,6 +1652,48 @@ mod tests {
 
         let result = service
             .save_servers(BTreeMap::from([("remote".to_string(), config)]))
+            .await;
+
+        assert!(matches!(result, Err(McpConfigError::Validation { .. })));
+    }
+
+    #[tokio::test]
+    async fn save_servers_accepts_loopback_http_oauth() {
+        let persistence = Arc::new(MemoryPersistence::default());
+        let service = service(persistence, PathBuf::from("mcp.json"));
+        let mut config = blank_config(McpTransport::Http);
+        config.url = Some("http://127.0.0.1:43119/mcp".to_string());
+        config.oauth = Some(McpOAuthConfig {
+            client_id: None,
+            callback_port: None,
+            scope: Some("mcp".to_string()),
+        });
+
+        let saved = service
+            .save_servers(BTreeMap::from([("loopback".to_string(), config)]))
+            .await;
+
+        assert!(saved.is_ok());
+    }
+
+    #[tokio::test]
+    async fn save_servers_rejects_manual_authorization_header_with_oauth() {
+        let persistence = Arc::new(MemoryPersistence::default());
+        let service = service(persistence, PathBuf::from("mcp.json"));
+        let mut config = blank_config(McpTransport::Http);
+        config.url = Some("https://mcp.example.test/v1".to_string());
+        config.headers = Some(BTreeMap::from([(
+            "Authorization".to_string(),
+            "Bearer ${secret:token}".to_string(),
+        )]));
+        config.oauth = Some(McpOAuthConfig {
+            client_id: None,
+            callback_port: None,
+            scope: None,
+        });
+
+        let result = service
+            .save_servers(BTreeMap::from([("oauth".to_string(), config)]))
             .await;
 
         assert!(matches!(result, Err(McpConfigError::Validation { .. })));

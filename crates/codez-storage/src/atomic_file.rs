@@ -757,6 +757,16 @@ fn atomic_create_bytes_blocking(
         .map_err(|source| io_error("sync immutable temporary file", path, source))?;
     check_fault(fault_injector, AtomicWriteStage::BeforeCommit, path)?;
 
+    persist_immutable_temporary(temporary, path, parent, bytes)
+}
+
+#[cfg(not(windows))]
+fn persist_immutable_temporary(
+    temporary: tempfile::NamedTempFile,
+    path: &Path,
+    parent: &Path,
+    expected: &[u8],
+) -> Result<AtomicCreateOutcome, StorageError> {
     match temporary.persist_noclobber(path) {
         Ok(persisted) => {
             persisted
@@ -766,14 +776,7 @@ fn atomic_create_bytes_blocking(
             Ok(AtomicCreateOutcome::Created)
         }
         Err(error) if error.error.kind() == io::ErrorKind::AlreadyExists => {
-            immutable_existing_outcome(path, bytes)?.ok_or_else(|| StorageError::Io {
-                operation: "inspect raced immutable target",
-                path: path.to_path_buf(),
-                source: io::Error::new(
-                    io::ErrorKind::NotFound,
-                    "immutable target disappeared after creation conflict",
-                ),
-            })
+            immutable_race_outcome(path, expected)
         }
         Err(error) => Err(io_error(
             "persist immutable target without clobbering",
@@ -781,6 +784,106 @@ fn atomic_create_bytes_blocking(
             error.error,
         )),
     }
+}
+
+#[cfg(windows)]
+enum WindowsNoClobberCommitError {
+    AlreadyExists,
+    Storage(StorageError),
+}
+
+#[cfg(windows)]
+fn persist_immutable_temporary(
+    mut temporary: tempfile::NamedTempFile,
+    path: &Path,
+    _parent: &Path,
+    expected: &[u8],
+) -> Result<AtomicCreateOutcome, StorageError> {
+    match move_immutable_file_write_through(&temporary, path) {
+        Ok(()) => {
+            // The source name can be reused after the move; never let TempPath remove that name.
+            temporary.disable_cleanup(true);
+            drop(temporary);
+            Ok(AtomicCreateOutcome::Created)
+        }
+        Err(commit_error) => {
+            temporary.close().map_err(|source| {
+                io_error(
+                    "clean immutable temporary file after failed commit",
+                    path,
+                    source,
+                )
+            })?;
+            match commit_error {
+                WindowsNoClobberCommitError::AlreadyExists => {
+                    immutable_race_outcome(path, expected)
+                }
+                WindowsNoClobberCommitError::Storage(error) => Err(error),
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+fn move_immutable_file_write_through(
+    temporary: &tempfile::NamedTempFile,
+    target: &Path,
+) -> Result<(), WindowsNoClobberCommitError> {
+    use winsafe::co::{ERROR, FILE_ATTRIBUTE, MOVEFILE};
+
+    let temporary_path = temporary.path().to_str().ok_or_else(|| {
+        WindowsNoClobberCommitError::Storage(StorageError::InvalidPath(
+            temporary.path().to_path_buf(),
+        ))
+    })?;
+    let target_path = target.to_str().ok_or_else(|| {
+        WindowsNoClobberCommitError::Storage(StorageError::InvalidPath(target.to_path_buf()))
+    })?;
+
+    winsafe::SetFileAttributes(temporary_path, FILE_ATTRIBUTE::NORMAL).map_err(|source| {
+        WindowsNoClobberCommitError::Storage(io_error(
+            "clear immutable temporary-file attribute",
+            target,
+            windows_io_error(source),
+        ))
+    })?;
+
+    // Windows cannot sync a directory through `std`; WRITE_THROUGH is the create commit boundary.
+    match winsafe::MoveFileEx(temporary_path, Some(target_path), MOVEFILE::WRITE_THROUGH) {
+        Ok(()) => Ok(()),
+        Err(source) => {
+            let _ = winsafe::SetFileAttributes(temporary_path, FILE_ATTRIBUTE::TEMPORARY);
+            if source == ERROR::ALREADY_EXISTS || source == ERROR::FILE_EXISTS {
+                Err(WindowsNoClobberCommitError::AlreadyExists)
+            } else {
+                Err(WindowsNoClobberCommitError::Storage(io_error(
+                    "persist immutable target with write-through",
+                    target,
+                    windows_io_error(source),
+                )))
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+fn windows_io_error(source: winsafe::co::ERROR) -> io::Error {
+    let raw_code = i32::from_ne_bytes(source.raw().to_ne_bytes());
+    io::Error::from_raw_os_error(raw_code)
+}
+
+fn immutable_race_outcome(
+    path: &Path,
+    expected: &[u8],
+) -> Result<AtomicCreateOutcome, StorageError> {
+    immutable_existing_outcome(path, expected)?.ok_or_else(|| StorageError::Io {
+        operation: "inspect raced immutable target",
+        path: path.to_path_buf(),
+        source: io::Error::new(
+            io::ErrorKind::NotFound,
+            "immutable target disappeared after creation conflict",
+        ),
+    })
 }
 
 fn remove_file_blocking(path: &Path) -> Result<bool, StorageError> {
@@ -1087,6 +1190,19 @@ mod tests {
         }
     }
 
+    #[cfg(windows)]
+    struct RaceImmutableTarget;
+
+    #[cfg(windows)]
+    impl AtomicWriteFaultInjector for RaceImmutableTarget {
+        fn check(&self, stage: AtomicWriteStage, target: &Path) -> Result<(), InjectedWriteFault> {
+            if stage == AtomicWriteStage::BeforeCommit {
+                fs::write(target, b"raced").expect("raced immutable target must be created");
+            }
+            Ok(())
+        }
+    }
+
     struct ConcurrencyProbe {
         active: AtomicUsize,
         maximum: AtomicUsize,
@@ -1172,6 +1288,66 @@ mod tests {
                 AtomicCreateOutcome::Reused,
                 AppErrorKind::Conflict,
             )
+        );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_no_clobber_create_clears_the_temporary_attribute() {
+        use std::os::windows::fs::MetadataExt;
+
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let path = directory.path().join("immutable.bin");
+        let store = AtomicFileStore::default();
+
+        let outcome = store
+            .create_bytes_no_clobber(&path, b"content")
+            .await
+            .expect("write-through immutable create must succeed");
+        let attributes = fs::metadata(path)
+            .expect("immutable target metadata must be available")
+            .file_attributes();
+
+        assert_eq!(
+            (
+                outcome,
+                attributes & winsafe::co::FILE_ATTRIBUTE::TEMPORARY.raw(),
+            ),
+            (AtomicCreateOutcome::Created, 0)
+        );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_no_clobber_race_preserves_target_and_cleans_temporary_file() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let path = directory.path().join("immutable.bin");
+        let store = AtomicFileStore::with_fault_injector(1024, Arc::new(RaceImmutableTarget))
+            .expect("fixture limit is valid");
+
+        let error = store
+            .create_bytes_no_clobber(&path, b"expected")
+            .await
+            .expect_err("raced immutable target must not be replaced");
+        let mut entries = fs::read_dir(directory.path())
+            .expect("fixture directory must remain readable")
+            .map(|entry| {
+                entry
+                    .expect("fixture entry must remain readable")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+        entries.sort_unstable();
+
+        assert_eq!(
+            (
+                matches!(error, StorageError::ImmutableConflict(_)),
+                fs::read(path).expect("raced target must remain readable"),
+                entries,
+            ),
+            (true, b"raced".to_vec(), vec!["immutable.bin".to_owned()],)
         );
     }
 

@@ -294,7 +294,12 @@ mod tests {
         let binding = AuthorizationBinding::for_call(&call, "C:/workspace", None, "main");
         let now = std::time::SystemTime::now();
         let mut receipt = issuer.issue(&binding, Duration::from_secs(30), now);
-        receipt.signature.replace_range(..1, "0");
+        let replacement = if receipt.signature.starts_with('0') {
+            "1"
+        } else {
+            "0"
+        };
+        receipt.signature.replace_range(..1, replacement);
 
         let error = issuer
             .validate(&receipt, &binding, now)

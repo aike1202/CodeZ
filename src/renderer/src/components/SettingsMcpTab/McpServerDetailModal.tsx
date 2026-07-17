@@ -1,21 +1,29 @@
 import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Braces,
+  Bell,
+  BellOff,
   Database,
+  Eye,
   FileText,
   KeyRound,
   MessageSquareText,
+  Play,
   RefreshCw,
   Search,
   Server,
+  ShieldCheck,
   Terminal,
   Wrench,
   X
 } from 'lucide-react'
 import Button from '../ui/Button'
 import Switch from '../ui/Switch'
+import { desktopApi } from '../../shared/desktop'
 import type {
   McpPromptCatalogItem,
+  McpPromptGetResult,
+  McpResourceReadResult,
   McpServerCatalog,
   McpServerStatus,
   McpToolCatalogItem,
@@ -24,14 +32,19 @@ import type {
 import { configEndpoint, MCP_SCOPE_LABELS, serverDescription, stateLabel } from './utils'
 
 type DetailTab = 'tools' | 'resources' | 'prompts' | 'connection' | 'logs'
+type ServerAction = 'reconnect' | 'trust' | 'authorize' | 'logout'
 
 interface Props {
   config: ScopedMcpConfig
   status?: McpServerStatus
   busy: boolean
+  busyAction?: ServerAction
+  actionError: string
+  workspaceRoot: string | null
   onClose: () => void
   onToggle: (enabled: boolean) => void
   onReconnect: () => void
+  onTrust: () => void
   onAuthorize: () => void
   onLogout: () => void
 }
@@ -87,7 +100,21 @@ function focusableElements(container: HTMLElement): HTMLElement[] {
   )].filter((element) => !element.hasAttribute('hidden'))
 }
 
-function PromptDetail({ prompt }: { prompt: McpPromptCatalogItem }): React.ReactElement {
+interface PromptDetailProps {
+  prompt: McpPromptCatalogItem
+  arguments_: Record<string, string>
+  busy: boolean
+  onArgumentChange: (name: string, value: string) => void
+  onResolve: () => void
+}
+
+function PromptDetail({
+  prompt,
+  arguments_,
+  busy,
+  onArgumentChange,
+  onResolve
+}: PromptDetailProps): React.ReactElement {
   return (
     <div className="mcp-catalog-detail">
       <h3>{prompt.name}</h3>
@@ -100,10 +127,18 @@ function PromptDetail({ prompt }: { prompt: McpPromptCatalogItem }): React.React
               <code>{argument.name}</code>
               <span>{argument.required ? '必填' : '可选'}</span>
               <p>{argument.description || '未提供描述'}</p>
+              <input
+                value={arguments_[argument.name] || ''}
+                onChange={(event) => onArgumentChange(argument.name, event.target.value)}
+                aria-label={`${prompt.name} ${argument.name}`}
+              />
             </div>
           ))}
         </div>
       ) : <div className="mcp-detail-empty">此 Prompt 不需要参数。</div>}
+      <Button type="primary" icon={<Play size={15} />} onClick={onResolve} disabled={busy}>
+        获取 Prompt
+      </Button>
     </div>
   )
 }
@@ -112,9 +147,13 @@ export default function McpServerDetailModal({
   config,
   status,
   busy,
+  busyAction,
+  actionError,
+  workspaceRoot,
   onClose,
   onToggle,
   onReconnect,
+  onTrust,
   onAuthorize,
   onLogout
 }: Props): React.ReactElement {
@@ -124,14 +163,32 @@ export default function McpServerDetailModal({
   const [query, setQuery] = useState('')
   const [selectedTool, setSelectedTool] = useState('')
   const [selectedPrompt, setSelectedPrompt] = useState('')
+  const [promptArguments, setPromptArguments] = useState<Record<string, string>>({})
+  const [templateUris, setTemplateUris] = useState<Record<string, string>>({})
+  const [resourceResult, setResourceResult] = useState<McpResourceReadResult | null>(null)
+  const [promptResult, setPromptResult] = useState<McpPromptGetResult | null>(null)
+  const [interactionError, setInteractionError] = useState('')
+  const [subscriptionError, setSubscriptionError] = useState('')
+  const [readingResource, setReadingResource] = useState(false)
+  const [resolvingPrompt, setResolvingPrompt] = useState(false)
+  const [subscribedUris, setSubscribedUris] = useState<string[]>([])
+  const [subscriptionBusyUri, setSubscriptionBusyUri] = useState<string | null>(null)
   const deferredQuery = useDeferredValue(query)
   const dialogRef = useRef<HTMLDivElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
+  const subscriptionsRef = useRef(new Set<string>())
+  const subscriptionScopeRef = useRef('')
 
   useEffect(() => {
     let active = true
     setCatalogError('')
-    window.api.mcp.getCatalog(config.name).then((next: McpServerCatalog) => {
+    setInteractionError('')
+    setSubscriptionError('')
+    setResourceResult(null)
+    setPromptResult(null)
+    setPromptArguments({})
+    setTemplateUris({})
+    desktopApi.mcp.getCatalog(config.name, workspaceRoot).then((next: McpServerCatalog) => {
       if (!active) return
       setCatalog(next)
       setSelectedTool((current) => current || next.tools[0]?.name || '')
@@ -140,7 +197,23 @@ export default function McpServerDetailModal({
       if (active) setCatalogError(cause instanceof Error ? cause.message : String(cause))
     })
     return () => { active = false }
-  }, [config.name, status?.updatedAt])
+  }, [config.name, status?.updatedAt, workspaceRoot])
+
+  useEffect(() => {
+    const scope = `${config.name}\u0000${workspaceRoot || ''}`
+    subscriptionScopeRef.current = scope
+    setSubscribedUris([])
+    subscriptionsRef.current.clear()
+    return () => {
+      if (subscriptionScopeRef.current === scope) subscriptionScopeRef.current = ''
+      const uris = [...subscriptionsRef.current]
+      subscriptionsRef.current.clear()
+      if (!uris.length) return
+      void Promise.allSettled(
+        uris.map((uri) => desktopApi.mcp.unsubscribeResource(config.name, uri, workspaceRoot))
+      )
+    }
+  }, [config.name, workspaceRoot])
 
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null
@@ -183,6 +256,73 @@ export default function McpServerDetailModal({
   const enabled = config.config.enabled !== false && !config.policyDisabled
   const canToggle = config.scope === 'user' && config.effective && !config.policyDisabled
   const description = serverDescription(config, status)
+  const canReadResources = status?.state === 'connected'
+  const supportsOAuth = config.config.type !== 'stdio' && Boolean(config.config.oauth)
+  const missingProjectWorkspace = config.scope === 'project' && !workspaceRoot
+  const authorizing = busyAction === 'authorize'
+  const loggingOut = busyAction === 'logout'
+  const canManageSubscriptions = config.config.resourceSubscriptions === true
+    && canReadResources
+    && !missingProjectWorkspace
+
+  const readResource = async (uri: string) => {
+    setReadingResource(true)
+    setInteractionError('')
+    try {
+      setResourceResult(await desktopApi.mcp.readResource(config.name, uri, workspaceRoot))
+    } catch (cause) {
+      setInteractionError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setReadingResource(false)
+    }
+  }
+
+  const resolvePrompt = async () => {
+    if (!currentPrompt) return
+    const arguments_ = Object.fromEntries(
+      Object.entries(promptArguments).filter(([, value]) => value.trim().length > 0)
+    )
+    setResolvingPrompt(true)
+    setInteractionError('')
+    try {
+      setPromptResult(await desktopApi.mcp.getPrompt(config.name, currentPrompt.name, arguments_, workspaceRoot))
+    } catch (cause) {
+      setInteractionError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setResolvingPrompt(false)
+    }
+  }
+
+  const toggleResourceSubscription = async (uri: string) => {
+    if (!canManageSubscriptions || subscriptionBusyUri || !uri) return
+    const subscribed = subscriptionsRef.current.has(uri)
+    const scope = subscriptionScopeRef.current
+    const serverName = config.name
+    const root = workspaceRoot
+    setSubscriptionBusyUri(uri)
+    setSubscriptionError('')
+    try {
+      if (subscribed) {
+        await desktopApi.mcp.unsubscribeResource(serverName, uri, root)
+        if (subscriptionScopeRef.current !== scope) return
+        subscriptionsRef.current.delete(uri)
+      } else {
+        await desktopApi.mcp.subscribeResource(serverName, uri, root)
+        if (subscriptionScopeRef.current !== scope) {
+          void desktopApi.mcp.unsubscribeResource(serverName, uri, root).catch(() => undefined)
+          return
+        }
+        subscriptionsRef.current.add(uri)
+      }
+      setSubscribedUris([...subscriptionsRef.current])
+    } catch (cause) {
+      if (subscriptionScopeRef.current === scope) {
+        setSubscriptionError(cause instanceof Error ? cause.message : String(cause))
+      }
+    } finally {
+      if (subscriptionScopeRef.current === scope) setSubscriptionBusyUri(null)
+    }
+  }
 
   return (
     <div className="mcp-modal-overlay" onMouseDown={(event) => {
@@ -214,13 +354,29 @@ export default function McpServerDetailModal({
             <span title={canToggle ? undefined : '仅用户作用域的有效配置可在此启停'}>
               <Switch checked={enabled} onChange={onToggle} disabled={!canToggle || busy} />
             </span>
-            {status?.state === 'needs-auth' ? (
-              <Button type="primary" icon={<KeyRound size={15} />} onClick={onAuthorize} disabled={busy}>认证</Button>
+            {status?.state === 'trust-required' ? (
+              <Button type="primary" icon={<ShieldCheck size={15} />} onClick={onTrust} disabled={busy || !workspaceRoot}>信任项目配置</Button>
+            ) : status?.state === 'needs-auth' ? (
+              <span title={!supportsOAuth ? '此 MCP 配置未启用 OAuth。' : missingProjectWorkspace ? '项目 MCP 认证需要打开对应工作区。' : undefined}>
+                <Button
+                  type="primary"
+                  icon={<KeyRound size={15} />}
+                  loading={authorizing}
+                  onClick={onAuthorize}
+                  disabled={busy || !supportsOAuth || missingProjectWorkspace}
+                >
+                  {authorizing ? '正在认证' : '认证'}
+                </Button>
+              </span>
             ) : (
               <Button icon={<RefreshCw size={15} />} onClick={onReconnect} disabled={busy || !enabled}>重连</Button>
             )}
-            {status?.state === 'connected' && config.config.type !== 'stdio' ? (
-              <Button onClick={onLogout} disabled={busy}>退出认证</Button>
+            {status?.state === 'connected' && supportsOAuth ? (
+              <span title={missingProjectWorkspace ? '项目 MCP 退出认证需要打开对应工作区。' : undefined}>
+                <Button loading={loggingOut} onClick={onLogout} disabled={busy || missingProjectWorkspace}>
+                  {loggingOut ? '正在退出认证' : '退出认证'}
+                </Button>
+              </span>
             ) : null}
             <button ref={closeRef} className="mcp-modal-close" onClick={onClose} aria-label="关闭 MCP 详情">
               <X size={19} />
@@ -246,6 +402,9 @@ export default function McpServerDetailModal({
           <div className="mcp-catalog-notice">显示上次发现的能力 · {new Date(catalog.updatedAt).toLocaleString()}</div>
         ) : null}
         {catalogError ? <div className="mcp-dialog-error" role="alert">{catalogError}</div> : null}
+        {actionError ? <div className="mcp-dialog-error" role="alert">{actionError}</div> : null}
+        {interactionError ? <div className="mcp-dialog-error" role="alert">{interactionError}</div> : null}
+        {subscriptionError ? <div className="mcp-dialog-error" role="alert">{subscriptionError}</div> : null}
 
         <div className="mcp-detail-body">
           {tab === 'tools' ? (
@@ -296,13 +455,60 @@ export default function McpServerDetailModal({
           {tab === 'resources' ? (
             catalog.resources.length ? (
               <div className="mcp-resource-list">
-                {catalog.resources.map((resource) => (
-                  <div key={`${resource.template ? 'template' : 'resource'}:${resource.uri}`}>
-                    <Database size={16} />
-                    <div><strong>{resource.name}</strong><code>{resource.uri}</code><p>{resource.description || '未提供描述'}</p></div>
-                    <span>{resource.template ? '模板' : resource.mimeType || '资源'}</span>
-                  </div>
-                ))}
+                {catalog.resources.map((resource) => {
+                  const uri = resource.template ? templateUris[resource.uri]?.trim() || '' : resource.uri
+                  const subscribed = subscribedUris.includes(uri)
+                  const subscriptionLoading = subscriptionBusyUri === uri
+                  const missingTemplateUri = resource.template && !uri
+                  const subscriptionDisabled = !canManageSubscriptions || subscriptionBusyUri !== null || missingTemplateUri
+                  const subscriptionTitle = !config.config.resourceSubscriptions
+                    ? '此 MCP 配置未启用资源订阅。'
+                    : missingProjectWorkspace
+                      ? '项目 MCP 资源订阅需要打开对应工作区。'
+                      : missingTemplateUri
+                        ? '请输入资源模板的完整 URI。'
+                        : undefined
+                  return (
+                    <div key={`${resource.template ? 'template' : 'resource'}:${resource.uri}`}>
+                      <Database size={16} />
+                      <div><strong>{resource.name}</strong><code>{resource.uri}</code><p>{resource.description || '未提供描述'}</p></div>
+                      {resource.template ? (
+                        <input
+                          className="mcp-resource-template-input"
+                          value={templateUris[resource.uri] || ''}
+                          onChange={(event) => setTemplateUris((current) => ({ ...current, [resource.uri]: event.target.value }))}
+                          placeholder={resource.uri}
+                          aria-label={`资源模板 ${resource.name}`}
+                        />
+                      ) : <span>{resource.mimeType || '资源'}</span>}
+                      <div className="mcp-resource-actions">
+                        {config.config.resourceSubscriptions ? (
+                          <span title={subscriptionTitle}>
+                            <Button
+                              size="small"
+                              icon={subscribed ? <BellOff size={14} /> : <Bell size={14} />}
+                              loading={subscriptionLoading}
+                              onClick={() => void toggleResourceSubscription(uri)}
+                              disabled={subscriptionDisabled}
+                            >
+                              {subscribed ? '取消订阅' : '订阅'}
+                            </Button>
+                          </span>
+                        ) : null}
+                        <button
+                          className="mcp-resource-read-button"
+                          title="读取资源"
+                          aria-label={`读取资源 ${resource.name}`}
+                          onClick={() => void readResource(uri)}
+                          disabled={!canReadResources || readingResource || missingTemplateUri}
+                        >
+                          <Eye size={15} />
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+                {resourceResult ? <pre className="mcp-content-result">{JSON.stringify(resourceResult.contents, null, 2)}</pre> : null}
               </div>
             ) : <div className="mcp-detail-empty large">此 MCP 没有公开资源。</div>
           ) : null}
@@ -319,9 +525,21 @@ export default function McpServerDetailModal({
                     ))}
                   </div>
                 </aside>
-                {currentPrompt ? <PromptDetail prompt={currentPrompt} /> : null}
+                {currentPrompt ? (
+                  <PromptDetail
+                    prompt={currentPrompt}
+                    arguments_={promptArguments}
+                    busy={resolvingPrompt || !canReadResources}
+                    onArgumentChange={(name, value) => setPromptArguments((current) => ({ ...current, [name]: value }))}
+                    onResolve={() => void resolvePrompt()}
+                  />
+                ) : null}
               </div>
             ) : <div className="mcp-detail-empty large">此 MCP 没有公开 Prompts。</div>
+          ) : null}
+
+          {tab === 'prompts' && promptResult ? (
+            <pre className="mcp-content-result">{JSON.stringify(promptResult, null, 2)}</pre>
           ) : null}
 
           {tab === 'connection' ? (

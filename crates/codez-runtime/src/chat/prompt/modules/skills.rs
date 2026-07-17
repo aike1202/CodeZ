@@ -58,7 +58,12 @@ impl PromptModule for SkillsModule {
             lines.push("If /<skill-name> has expanded into the current request, follow it directly; it is an explicit user activation and must not trigger another ActivateSkill call.\n".to_string());
 
             for skill in active {
-                lines.push(format!("- {}: {}", skill.name, skill.description));
+                match skill.description.as_deref() {
+                    Some(description) if !description.trim().is_empty() => {
+                        lines.push(format!("- {}: {}", skill.name, description));
+                    }
+                    _ => lines.push(format!("- {}", skill.name)),
+                }
             }
 
             lines.push("</skills_instructions>".to_string());

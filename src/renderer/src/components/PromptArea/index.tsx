@@ -3,6 +3,7 @@ import { ImagePlus } from 'lucide-react'
 import { useChatStore } from '../../stores/chatStore'
 import { useProviderStore } from '../../stores/providerStore'
 import type { ModelConfig, ThinkingEffort } from '../../shared/desktop'
+import { desktopApi } from '../../shared/desktop'
 import {
   getReasoningCapabilities,
   mergeModelThinkingConfig,
@@ -153,9 +154,9 @@ export default function PromptArea({
       .filter((attachment) => attachment.scope === 'session')
       .map((attachment) => attachment.id)
     await Promise.all([
-      draftIds.length > 0 ? window.api.attachment.discardDrafts(draftIds) : Promise.resolve(),
+      draftIds.length > 0 ? desktopApi.attachment.discardDrafts(draftIds) : Promise.resolve(),
       sessionIds.length > 0
-        ? window.api.attachment.rollbackPromotion(activeSessionId, sessionIds)
+        ? desktopApi.attachment.rollbackPromotion(activeSessionId, sessionIds)
         : Promise.resolve()
     ])
   }
@@ -186,12 +187,12 @@ export default function PromptArea({
     updateQueuedPrompt(activeSessionId, prompt.id, { status: 'steering' })
     try {
       const promoted = prompt.attachments.length > 0
-        ? await window.api.attachment.promoteDrafts(activeSessionId, prompt.attachments)
+        ? await desktopApi.attachment.promoteDrafts(activeSessionId, prompt.attachments)
         : []
       const accepted = await onSteer({ ...prompt, attachments: promoted, status: 'steering' })
       if (!accepted) {
         if (promoted.length > 0) {
-          await window.api.attachment.rollbackPromotion(activeSessionId, promoted.map((item) => item.id))
+          await desktopApi.attachment.rollbackPromotion(activeSessionId, promoted.map((item) => item.id))
         }
         updateQueuedPrompt(activeSessionId, prompt.id, { status: 'queued' })
         return
@@ -203,7 +204,7 @@ export default function PromptArea({
         attachments: promoted,
         status: 'steering'
       })
-      if (draftIds.length > 0) await window.api.attachment.discardDrafts(draftIds)
+      if (draftIds.length > 0) await desktopApi.attachment.discardDrafts(draftIds)
     } catch (error) {
       console.warn('[PromptArea] Failed to steer queued prompt:', error)
       updateQueuedPrompt(activeSessionId, prompt.id, { status: 'failed' })

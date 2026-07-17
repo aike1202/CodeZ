@@ -40,6 +40,93 @@ pub enum McpApprovalPolicy {
     Allow,
 }
 
+/// User decision returned for a pending MCP elicitation request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub enum McpElicitationAction {
+    Accept,
+    Decline,
+    Cancel,
+}
+
+/// Sanitized details of one MCP request that requires desktop mediation.
+///
+/// Sampling deliberately exposes only request metadata. The untrusted message
+/// bodies stay in the Rust host and are sent to a Provider only after the
+/// configured policy allows it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[ts(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum McpReverseRequest {
+    Sampling {
+        max_tokens: u32,
+        #[ts(type = "number")]
+        message_count: usize,
+        has_system_prompt: bool,
+    },
+    ElicitationUrl {
+        message: String,
+        origin: String,
+    },
+    ElicitationForm {
+        message: String,
+        #[ts(type = "unknown")]
+        requested_schema: Value,
+    },
+}
+
+/// One bounded reverse request emitted to the desktop interface.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct McpReverseRequestEvent {
+    pub request_id: String,
+    pub server_name: String,
+    pub fingerprint: String,
+    pub policy: McpApprovalPolicy,
+    pub request: McpReverseRequest,
+}
+
+/// Response supplied by the desktop interface for a pending MCP request.
+///
+/// The Rust mediator verifies that the discriminant matches the pending
+/// request and validates form content against the original MCP schema before
+/// forwarding anything to the server.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[ts(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum McpReverseRequestResponse {
+    Sampling {
+        approved: bool,
+    },
+    ElicitationUrl {
+        action: McpElicitationAction,
+    },
+    ElicitationForm {
+        action: McpElicitationAction,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional, type = "unknown")]
+        content: Option<Value>,
+    },
+}
+
 /// Policy for incorporating untrusted server instructions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "kebab-case")]
@@ -312,6 +399,34 @@ pub struct McpServerCatalog {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
     pub stale: bool,
+}
+
+/// Bounded content returned after an explicit MCP resource read.
+///
+/// The `contents` value preserves the MCP `text` or `blob` variants without
+/// exposing protocol metadata across the desktop boundary.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct McpResourceReadResult {
+    pub server: String,
+    #[ts(type = "unknown")]
+    pub contents: Value,
+}
+
+/// Bounded messages returned after an explicit MCP prompt request.
+///
+/// The `messages` value preserves all protocol content block variants while
+/// protocol metadata is removed at the desktop boundary.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", optional_fields)]
+pub struct McpPromptGetResult {
+    pub server: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[ts(type = "unknown")]
+    pub messages: Value,
 }
 
 /// MCP settings payload returned by list and configuration mutations.

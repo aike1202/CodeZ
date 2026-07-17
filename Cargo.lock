@@ -822,7 +822,9 @@ dependencies = [
  "codez-storage",
  "dunce",
  "futures-util",
+ "image",
  "opener",
+ "rmcp",
  "rustix",
  "same-file",
  "serde",
@@ -842,6 +844,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -850,7 +853,9 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "codez-core",
+ "futures-util",
  "http",
+ "oauth2",
  "process-wrap",
  "regex",
  "reqwest 0.13.4",
@@ -858,6 +863,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "sse-stream",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
@@ -897,6 +903,7 @@ version = "0.1.0"
 dependencies = [
  "async-stream",
  "async-trait",
+ "base64 0.22.1",
  "chrono",
  "codez-core",
  "eventsource-stream",
@@ -920,6 +927,7 @@ dependencies = [
  "codez-core",
  "dashmap",
  "dunce",
+ "file-id",
  "futures",
  "globset",
  "hex",
@@ -954,6 +962,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "windows-dpapi",
+ "winsafe",
  "zeroize",
 ]
 
@@ -1629,6 +1638,16 @@ checksum = "38e2275cc4e4fc009b0669731a1e5ab7ebf11f469eaede2bab9309a5b4d6057f"
 dependencies = [
  "memoffset",
  "rustc_version",
+]
+
+[[package]]
+name = "file-id"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1fc6a637b6dc58414714eddd9170ff187ecb0933d4c7024d1abbd23a3cc26e9"
+dependencies = [
+ "serde",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3370,6 +3389,7 @@ dependencies = [
  "getrandom 0.2.17",
  "http",
  "rand 0.8.7",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -4463,6 +4483,7 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
@@ -7296,6 +7317,12 @@ dependencies = [
  "cfg-if",
  "windows-sys 0.59.0",
 ]
+
+[[package]]
+name = "winsafe"
+version = "0.0.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4271ae8f63c109d73bc6fcf352b117166757fabcce6a769649ef18303dbf2491"
 
 [[package]]
 name = "wit-bindgen"

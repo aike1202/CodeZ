@@ -5,29 +5,30 @@ use std::{
 };
 
 use codez_core::{AppError, AppPathError, AppPaths, AtomicPersistence};
-use codez_mcp::{McpSecretService, McpUserConfigService};
+use codez_mcp::{McpProjectConfigService, McpSecretService, McpUserConfigService};
 use codez_platform::ResourceLocator;
 use codez_runtime::{
     CancellationTree, HostPreferences, ShutdownCoordinator, SystemService,
+    history_revert::{HistoryRevertError, HistoryRevertService, HistoryRevertWorkspace},
     permission::store::{PermissionStoreError, WorkspacePermissionStore},
+    session_deletion::SessionDeletionService,
+    session_maintenance::{SessionMaintenanceCoordinator, SessionMaintenanceError},
 };
-use codez_storage::{
-    AtomicFileStore, DiscoveryLimits, ElectronSafeStorageReader, LegacyMigrationCoordinator,
-    LegacyMigrationService, LegacyRoots, MigrationActivationService, MigrationError,
-    MigrationRunId, OsCredentialStore, RecentProjectsStore, StartupMigrationOutcome, StorageError,
-};
+use codez_storage::{AtomicFileStore, OsCredentialStore, RecentProjectsStore, SessionStore};
 use tauri::{App, Manager};
 use thiserror::Error;
 
 use crate::{
-    chat_runtime::ChatRuntime,
+    chat_runtime::{ChatPromptSources, ChatRuntime},
     chat_tool_runtime::ChatToolRuntime,
     error::ErrorReporter,
     logging::{self, LoggingError},
     mcp_boundary::StorageMcpSecretStore,
     mcp_runtime::McpRuntimeManager,
     provider_boundary::{StorageProviderCredentials, StorageProviderRepository},
-    state::{AppState, MigrationRecoveryState},
+    session_deletion::{SessionDeletionDependencies, desktop_session_deletion_operations},
+    state::AppState,
+    subagent_runtime::SubAgentRuntime,
 };
 
 #[derive(Debug, Error)]
@@ -47,26 +48,25 @@ pub(crate) enum CompositionError {
     InvalidPaths(#[from] AppPathError),
     #[error(transparent)]
     Logging(#[from] LoggingError),
-    #[error(transparent)]
-    MigrationStorage(#[from] StorageError),
-    #[error(transparent)]
-    Migration(#[from] MigrationError),
-    #[error("failed to inspect legacy user-data path {path}: {source}")]
-    InspectLegacyUserData {
-        path: PathBuf,
-        source: std::io::Error,
-    },
-    #[error(
-        "both legacy user-data directories contain data and cannot be merged automatically: {primary}, {alternate}"
-    )]
-    AmbiguousLegacyUserData {
-        primary: PathBuf,
-        alternate: PathBuf,
-    },
     #[error("failed to initialize provider storage: {source}")]
     Provider {
         #[source]
         source: AppError,
+    },
+    #[error("failed to initialize sub-agent runtime: {source}")]
+    SubAgentRuntime {
+        #[source]
+        source: AppError,
+    },
+    #[error("failed to recover pending session deletion: {source}")]
+    SessionDeletionRecovery {
+        #[source]
+        source: AppError,
+    },
+    #[error("failed to recover pending history revert: {source}")]
+    HistoryRevertRecovery {
+        #[source]
+        source: Box<HistoryRevertStartupError>,
     },
     #[error("failed to initialize permission storage: {source}")]
     Permission {
@@ -77,52 +77,26 @@ pub(crate) enum CompositionError {
     ChatTools(#[from] crate::chat_tool_runtime::ChatToolRuntimeError),
 }
 
-pub(crate) enum CompositionOutcome {
-    Active(AppState),
-    AwaitingCredentials(MigrationRecoveryState),
-}
-
 pub(crate) fn compose_app_state(
     app: &App,
     pty_tx: tokio::sync::mpsc::Sender<codez_platform::pty::PtyEvent>,
-) -> Result<CompositionOutcome, CompositionError> {
+) -> Result<AppState, CompositionError> {
     let path_resolver = app.path();
     let home_directory = resolve_path("user home", path_resolver.home_dir())?;
-    let legacy_config_directory = resolve_path("legacy config", path_resolver.config_dir())?;
-    let legacy_user_data = resolve_legacy_user_data(&legacy_config_directory)?;
     let resource_directory = resolve_path("application resource", path_resolver.resource_dir())?;
-    let paths = Arc::new(AppPaths::for_user_home(home_directory, resource_directory)?);
+    let paths = create_app_paths(home_directory, resource_directory)?;
 
     ensure_directory("application data", paths.data_directory())?;
     ensure_directory("application cache", paths.cache_directory())?;
     ensure_directory("application log", paths.log_directory())?;
     ensure_directory("application temporary", paths.temporary_directory())?;
-    ensure_directory("application migration", &paths.migration_directory())?;
     let logging = logging::initialize(paths.log_directory())?;
     let storage = Arc::new(AtomicFileStore::default());
     let persistence: Arc<dyn AtomicPersistence> = storage.clone();
     let credentials = Arc::new(OsCredentialStore::default());
     let cancellation = Arc::new(CancellationTree::new());
+    let session_maintenance = Arc::new(SessionMaintenanceCoordinator::new());
     let errors = Arc::new(ErrorReporter::default());
-    let migration_coordinator = Arc::new(create_migration_coordinator(
-        &paths,
-        legacy_user_data,
-        Arc::clone(&credentials),
-    )?);
-    match tauri::async_runtime::block_on(migration_coordinator.run())? {
-        StartupMigrationOutcome::Activated { commit, activation } => {
-            tracing::info!(
-                migration_run = commit.run_id.as_str(),
-                activated_files = activation.files.len(),
-                "legacy data repository is committed and active"
-            );
-        }
-        StartupMigrationOutcome::AwaitingCredentials { report } => {
-            return Ok(CompositionOutcome::AwaitingCredentials(
-                MigrationRecoveryState::new(errors, migration_coordinator, report, logging),
-            ));
-        }
-    }
     let model_ledger = Arc::new(codez_runtime::context::ledger::ModelLedgerStore::new(
         paths.data_directory().join("session-runtime"),
         Arc::clone(&persistence),
@@ -131,17 +105,92 @@ pub(crate) fn compose_app_state(
         paths.data_directory(),
         Arc::clone(&persistence),
     )?);
+    let fingerprint = Arc::new(codez_runtime::fingerprint::ReadFingerprintStore::default());
+    let mutation_coordinator =
+        Arc::new(codez_runtime::mutation_coordinator::FileMutationCoordinator::default());
+    let process_runner = Arc::new(codez_platform::NativeProcessRunner::new());
+    let edit_transaction =
+        Arc::new(codez_runtime::edit_transaction::EditTransactionService::new(paths.clone()));
+    let history_workspace: Arc<dyn HistoryRevertWorkspace> =
+        Arc::<codez_runtime::edit_transaction::EditTransactionService>::clone(&edit_transaction);
+    let history_revert = Arc::new(HistoryRevertService::new(
+        paths.data_directory(),
+        Arc::clone(&persistence),
+        Arc::clone(&model_ledger),
+        history_workspace,
+    ));
+    tauri::async_runtime::block_on(recover_pending_history_reverts(
+        history_revert.as_ref(),
+        session_maintenance.as_ref(),
+    ))
+    .map_err(|source| CompositionError::HistoryRevertRecovery {
+        source: Box::new(source),
+    })?;
     let chat_tools = Arc::new(ChatToolRuntime::new(
         paths.as_ref(),
         Arc::clone(&persistence),
         Arc::clone(&workspace_permissions),
+        Arc::clone(&fingerprint),
+        Arc::clone(&mutation_coordinator),
+        Arc::clone(&edit_transaction),
     )?);
+    let attachment = Arc::new(codez_runtime::attachment::AttachmentService::new(
+        paths.clone(),
+    ));
     let chat_runtime = Arc::new(ChatRuntime::new(
         Arc::clone(&cancellation),
         Arc::clone(&errors),
         Arc::clone(&model_ledger),
+        Arc::clone(&attachment),
         chat_tools,
+        Arc::clone(&edit_transaction),
+        ChatPromptSources::new(
+            paths.data_directory().to_path_buf(),
+            Arc::clone(&workspace_permissions),
+            process_runner.clone(),
+        ),
     ));
+    let provider_service = {
+        let providers_path = paths.data_directory().join("providers.json");
+        let repository = Arc::new(StorageProviderRepository::new(
+            Arc::clone(&storage),
+            providers_path,
+        ));
+        let provider_credentials = Arc::new(StorageProviderCredentials::new(credentials.clone()));
+        let service = tauri::async_runtime::block_on(
+            codez_providers::service::ProviderService::new(repository, provider_credentials),
+        )
+        .map_err(|source| CompositionError::Provider { source })?;
+        Arc::new(service)
+    };
+    let subagent_runtime = Arc::new(
+        SubAgentRuntime::new(
+            paths.data_directory(),
+            Arc::clone(&persistence),
+            Arc::clone(&provider_service),
+        )
+        .map_err(|source| CompositionError::SubAgentRuntime { source })?,
+    );
+    let session_deletion = Arc::new(SessionDeletionService::new(
+        paths.data_directory(),
+        Arc::clone(&persistence),
+        desktop_session_deletion_operations(SessionDeletionDependencies {
+            chat_runtime: Arc::clone(&chat_runtime),
+            history_revert: Arc::clone(&history_revert),
+            edit_transaction: Arc::clone(&edit_transaction),
+            subagent_runtime: Arc::clone(&subagent_runtime),
+            attachment: Arc::clone(&attachment),
+            model_ledger: Arc::clone(&model_ledger),
+            fingerprint: Arc::clone(&fingerprint),
+            session_store: SessionStore::new(
+                paths.data_directory().to_path_buf(),
+                storage.as_ref().clone(),
+            ),
+        }),
+        Arc::clone(&session_maintenance),
+    ));
+    tauri::async_runtime::block_on(session_deletion.recover_pending())
+        .map_err(|source| CompositionError::SessionDeletionRecovery { source })?;
     let recent_projects = Arc::new(RecentProjectsStore::new(
         paths.data_directory().to_path_buf(),
         storage.as_ref().clone(),
@@ -149,6 +198,10 @@ pub(crate) fn compose_app_state(
     let mcp_config = Arc::new(McpUserConfigService::new(
         Arc::clone(&persistence),
         paths.data_directory().join("mcp.json"),
+    ));
+    let mcp_project_config = Arc::new(McpProjectConfigService::new(
+        Arc::clone(&persistence),
+        paths.data_directory().join("mcp-project-trust.json"),
     ));
     let mcp_credentials: Arc<dyn codez_storage::CredentialStore> = credentials.clone();
     let mcp_secret_store: Arc<dyn codez_mcp::McpSecretStore> =
@@ -158,9 +211,13 @@ pub(crate) fn compose_app_state(
         paths.data_directory().join("mcp-secret-index.json"),
         Arc::clone(&mcp_secret_store),
     ));
-    let mcp_runtime = Arc::new(McpRuntimeManager::new(mcp_secret_store));
-
-    Ok(CompositionOutcome::Active(AppState {
+    let mcp_runtime = Arc::new(McpRuntimeManager::with_desktop_reverse_requests(
+        mcp_secret_store,
+        app.handle().clone(),
+        Arc::clone(&provider_service),
+        cancellation.application_token(),
+    ));
+    Ok(AppState {
         system: Arc::new(SystemService::new()),
         host_preferences: Arc::new(HostPreferences::new()),
         resources: Arc::new(ResourceLocator::new(
@@ -171,177 +228,109 @@ pub(crate) fn compose_app_state(
         recent_projects,
         credentials: Arc::clone(&credentials),
         cancellation,
+        session_maintenance,
+        session_deletion,
         shutdown: Arc::new(ShutdownCoordinator::default()),
         errors,
-        attachment: Arc::new(codez_runtime::attachment::AttachmentService::new(
-            paths.clone(),
-        )),
-        fingerprint: Arc::new(codez_runtime::fingerprint::ReadFingerprintStore::default()),
-        mutation_coordinator: Arc::new(
-            codez_runtime::mutation_coordinator::FileMutationCoordinator::default(),
-        ),
-        edit_transaction: Arc::new(
-            codez_runtime::edit_transaction::EditTransactionService::new(paths.clone()),
-        ),
+        attachment,
+        fingerprint,
+        mutation_coordinator,
+        edit_transaction,
+        history_revert,
         _logging: logging,
         paths: paths.clone(),
-        process_runner: Arc::new(codez_platform::NativeProcessRunner::new()),
+        process_runner,
         pty_manager: Arc::new(codez_platform::PtyManager::new(pty_tx)),
-        provider_service: {
-            let providers_path = paths.data_directory().join("providers.json");
-            let repository = Arc::new(StorageProviderRepository::new(
-                Arc::clone(&storage),
-                providers_path,
-            ));
-            let provider_credentials =
-                Arc::new(StorageProviderCredentials::new(credentials.clone()));
-            let service = tauri::async_runtime::block_on(
-                codez_providers::service::ProviderService::new(repository, provider_credentials),
-            )
-            .map_err(|source| CompositionError::Provider { source })?;
-            Arc::new(service)
-        },
+        provider_service,
         subagent_settings: tokio::sync::Mutex::new(()),
+        subagent_runtime,
         workspace_permissions,
         mcp_config,
+        mcp_project_config,
         mcp_secrets,
         mcp_runtime,
         model_ledger,
         chat_runtime,
-    }))
+    })
 }
 
-fn resolve_legacy_user_data(config_directory: &Path) -> Result<PathBuf, CompositionError> {
-    let primary = config_directory.join("CodeZ");
-    let alternate = config_directory.join("codez");
-    let primary_state = inspect_legacy_directory(&primary)?;
-    let alternate_state = inspect_legacy_directory(&alternate)?;
+#[derive(Debug, Error)]
+pub(crate) enum HistoryRevertStartupError {
+    #[error(transparent)]
+    HistoryRevert(#[from] HistoryRevertError),
+    #[error("failed to {action} history revert recovery for session {session_id}: {source}")]
+    Maintenance {
+        action: &'static str,
+        session_id: String,
+        #[source]
+        source: SessionMaintenanceError,
+    },
+}
 
-    match (primary_state, alternate_state) {
-        (None, None) | (Some(_), None) => Ok(primary),
-        (None, Some(_)) => Ok(alternate),
-        (Some(primary_has_data), Some(alternate_has_data)) => {
-            if same_file::is_same_file(&primary, &alternate).map_err(|source| {
-                CompositionError::InspectLegacyUserData {
-                    path: alternate.clone(),
-                    source,
-                }
-            })? {
-                return Ok(primary);
-            }
-            match (primary_has_data, alternate_has_data) {
-                (false, true) => Ok(alternate),
-                (true, true) => {
-                    Err(CompositionError::AmbiguousLegacyUserData { primary, alternate })
-                }
-                (true, false) | (false, false) => Ok(primary),
-            }
+async fn recover_pending_history_reverts(
+    service: &HistoryRevertService,
+    coordinator: &SessionMaintenanceCoordinator,
+) -> Result<(), HistoryRevertStartupError> {
+    let pending = service.pending_recoveries().await?;
+    let mut sessions = Vec::new();
+    for operation in pending {
+        if !sessions.contains(&operation.session_id) {
+            sessions.push(operation.session_id);
         }
     }
-}
 
-fn inspect_legacy_directory(path: &Path) -> Result<Option<bool>, CompositionError> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(source) => {
-            return Err(CompositionError::InspectLegacyUserData {
-                path: path.to_path_buf(),
+    for session_id in &sessions {
+        let maintenance = coordinator
+            .try_begin_maintenance(session_id.clone())
+            .map_err(|source| HistoryRevertStartupError::Maintenance {
+                action: "establish a persistent block for",
+                session_id: session_id.as_str().to_owned(),
                 source,
-            });
-        }
-    };
-    if !metadata.is_dir() {
-        return Ok(Some(true));
+            })?;
+        coordinator
+            .mark_recovery_required(maintenance.session_id())
+            .map_err(|source| HistoryRevertStartupError::Maintenance {
+                action: "mark",
+                session_id: session_id.as_str().to_owned(),
+                source,
+            })?;
     }
-    let mut entries =
-        fs::read_dir(path).map_err(|source| CompositionError::InspectLegacyUserData {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    entries
-        .next()
-        .transpose()
-        .map(|entry| Some(entry.is_some()))
-        .map_err(|source| CompositionError::InspectLegacyUserData {
-            path: path.to_path_buf(),
-            source,
-        })
+
+    let mut recovery_leases = Vec::with_capacity(sessions.len());
+    for session_id in sessions {
+        let session_label = session_id.as_str().to_owned();
+        recovery_leases.push(
+            coordinator
+                .try_begin_recovery_maintenance(session_id)
+                .map_err(|source| HistoryRevertStartupError::Maintenance {
+                    action: "begin",
+                    session_id: session_label,
+                    source,
+                })?,
+        );
+    }
+
+    service.recover_pending().await?;
+    for recovery in &recovery_leases {
+        coordinator
+            .clear_recovery_required(recovery.session_id())
+            .map_err(|source| HistoryRevertStartupError::Maintenance {
+                action: "finish",
+                session_id: recovery.session_id().as_str().to_owned(),
+                source,
+            })?;
+    }
+    Ok(())
 }
 
-fn create_migration_coordinator(
-    paths: &AppPaths,
-    legacy_user_data: PathBuf,
-    credentials: Arc<OsCredentialStore>,
-) -> Result<
-    LegacyMigrationCoordinator<ElectronSafeStorageReader, OsCredentialStore>,
-    CompositionError,
-> {
-    const MIGRATION_MAX_DOCUMENT_BYTES: u64 = 256 * 1024 * 1024;
-    const GLOBAL_MIGRATION_RUN_ID: &str = "legacy-global-v1";
-
-    let migration_files = AtomicFileStore::with_max_document_bytes(MIGRATION_MAX_DOCUMENT_BYTES)?;
-    let workspaces = legacy_workspace_roots(&legacy_user_data);
-    let roots = LegacyRoots::new(
-        legacy_user_data.clone(),
-        paths.home_directory().to_path_buf(),
-        workspaces,
-    )?;
-    let migration_directory = paths.migration_directory();
-    Ok(LegacyMigrationCoordinator::new(
-        LegacyMigrationService::new(migration_files.clone(), DiscoveryLimits::default()),
-        MigrationActivationService::new(migration_files),
-        roots,
-        paths.data_directory().to_path_buf(),
-        migration_directory.join("backups"),
-        migration_directory.join("staging"),
-        MigrationRunId::parse(GLOBAL_MIGRATION_RUN_ID)?,
-        Arc::new(ElectronSafeStorageReader::from_user_data(&legacy_user_data)),
-        credentials,
-    ))
-}
-
-fn legacy_workspace_roots(legacy_user_data: &Path) -> Vec<PathBuf> {
-    const MAX_RECENT_PROJECT_BYTES: u64 = 16 * 1024 * 1024;
-    const MAX_MIGRATION_WORKSPACES: usize = 100;
-
-    let path = legacy_user_data.join("recent-projects.json");
-    let Ok(metadata) = fs::symlink_metadata(&path) else {
-        return Vec::new();
-    };
-    if metadata.file_type().is_symlink()
-        || !metadata.is_file()
-        || metadata.len() > MAX_RECENT_PROJECT_BYTES
-    {
-        return Vec::new();
-    }
-    let Ok(bytes) = fs::read(path) else {
-        return Vec::new();
-    };
-    let Ok(document) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-        return Vec::new();
-    };
-    let Some(projects) = document
-        .get("projects")
-        .and_then(serde_json::Value::as_array)
-    else {
-        return Vec::new();
-    };
-    let mut roots = projects
-        .iter()
-        .filter_map(|project| {
-            project
-                .get("rootPath")
-                .or_else(|| project.get("path"))
-                .and_then(serde_json::Value::as_str)
-                .map(PathBuf::from)
-        })
-        .filter(|path| path.is_absolute())
-        .take(MAX_MIGRATION_WORKSPACES)
-        .collect::<Vec<_>>();
-    roots.sort_unstable();
-    roots.dedup();
-    roots
+fn create_app_paths(
+    home_directory: PathBuf,
+    resource_directory: PathBuf,
+) -> Result<Arc<AppPaths>, CompositionError> {
+    Ok(Arc::new(AppPaths::for_user_home(
+        home_directory,
+        resource_directory,
+    )?))
 }
 
 fn resolve_path(
@@ -361,47 +350,336 @@ fn ensure_directory(kind: &'static str, path: &Path) -> Result<(), CompositionEr
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{
+        path::{Path, PathBuf},
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+    };
 
-    use super::{CompositionError, resolve_legacy_user_data};
+    use async_trait::async_trait;
+    use codez_core::{
+        AppError, AppPaths, AtomicPersistence, SessionId, StreamId, WorkspaceRoot,
+        context::{ContextScopeId, LedgerAppendRequest, LedgerEventType},
+    };
+    use codez_runtime::{
+        context::ledger::ModelLedgerStore,
+        edit_transaction::{EditTransactionRegistration, EditTransactionService},
+        history_revert::{
+            HistoryRevertErrorCode, HistoryRevertOperation, HistoryRevertRequest,
+            HistoryRevertService, HistoryRevertWorkspace, HistoryRevertWorkspaceOutcome,
+        },
+        session_maintenance::{SessionMaintenanceCoordinator, SessionMaintenanceError},
+    };
+    use codez_storage::AtomicFileStore;
+    use tokio::fs;
 
-    #[test]
-    fn legacy_user_data_uses_the_lowercase_directory_when_it_is_the_only_source() {
-        let directory = tempfile::tempdir().expect("legacy path fixture must exist");
-        let lowercase = directory.path().join("codez");
-        fs::create_dir(&lowercase).expect("lowercase legacy directory must be created");
-        fs::write(lowercase.join("providers.json"), b"{}")
-            .expect("lowercase legacy fixture must be written");
+    use super::{create_app_paths, recover_pending_history_reverts};
 
-        let resolved = resolve_legacy_user_data(directory.path())
-            .expect("a single legacy directory must resolve");
+    struct ApplyThenFailWorkspace {
+        inner: Arc<EditTransactionService>,
+        fail_after_apply: AtomicBool,
+    }
 
-        assert!(
-            same_file::is_same_file(resolved, lowercase)
-                .expect("resolved legacy directory identity must be readable")
-        );
+    #[async_trait]
+    impl HistoryRevertWorkspace for ApplyThenFailWorkspace {
+        async fn prepare_backup(&self, operation: &HistoryRevertOperation) -> Result<(), AppError> {
+            HistoryRevertWorkspace::prepare_backup(self.inner.as_ref(), operation).await
+        }
+
+        async fn apply_revert(&self, operation: &HistoryRevertOperation) -> Result<(), AppError> {
+            HistoryRevertWorkspace::apply_revert(self.inner.as_ref(), operation).await?;
+            if self.fail_after_apply.swap(false, Ordering::SeqCst) {
+                return Err(AppError::storage(
+                    "The history revert transition was interrupted",
+                    "injected crash after workspace apply",
+                    true,
+                ));
+            }
+            Ok(())
+        }
+
+        async fn rollback_revert(
+            &self,
+            operation: &HistoryRevertOperation,
+        ) -> Result<(), AppError> {
+            HistoryRevertWorkspace::rollback_revert(self.inner.as_ref(), operation).await
+        }
+
+        async fn finalize_backup(
+            &self,
+            operation: &HistoryRevertOperation,
+            outcome: HistoryRevertWorkspaceOutcome,
+        ) -> Result<(), AppError> {
+            HistoryRevertWorkspace::finalize_backup(self.inner.as_ref(), operation, outcome).await
+        }
+    }
+
+    struct AlwaysFailWorkspace;
+
+    #[async_trait]
+    impl HistoryRevertWorkspace for AlwaysFailWorkspace {
+        async fn prepare_backup(
+            &self,
+            _operation: &HistoryRevertOperation,
+        ) -> Result<(), AppError> {
+            Ok(())
+        }
+
+        async fn apply_revert(&self, _operation: &HistoryRevertOperation) -> Result<(), AppError> {
+            Err(AppError::storage(
+                "The history revert workspace is unavailable",
+                "injected recovery failure",
+                true,
+            ))
+        }
+
+        async fn rollback_revert(
+            &self,
+            _operation: &HistoryRevertOperation,
+        ) -> Result<(), AppError> {
+            Ok(())
+        }
+
+        async fn finalize_backup(
+            &self,
+            _operation: &HistoryRevertOperation,
+            _outcome: HistoryRevertWorkspaceOutcome,
+        ) -> Result<(), AppError> {
+            Ok(())
+        }
+    }
+
+    fn test_app_paths(root: &Path) -> Arc<AppPaths> {
+        Arc::new(
+            AppPaths::new(
+                root.to_path_buf(),
+                root.to_path_buf(),
+                root.to_path_buf(),
+                root.to_path_buf(),
+                root.to_path_buf(),
+                root.to_path_buf(),
+            )
+            .expect("temporary startup paths must be absolute"),
+        )
+    }
+
+    fn test_persistence() -> Arc<dyn AtomicPersistence> {
+        Arc::new(AtomicFileStore::default())
+    }
+
+    fn ledger_request(
+        session_id: &SessionId,
+        event_id: &str,
+        message_id: &str,
+        ui_message_id: &str,
+    ) -> LedgerAppendRequest {
+        LedgerAppendRequest {
+            event_id: event_id.to_owned(),
+            session_id: session_id.as_str().to_owned(),
+            context_scope_id: ContextScopeId::Main,
+            turn_id: Some("turn-startup".to_owned()),
+            created_at: "2026-07-17T00:00:00.000Z".to_owned(),
+            r#type: LedgerEventType::UserMessage,
+            payload: serde_json::json!({
+                "message": {
+                    "id": message_id,
+                    "clientMessageId": ui_message_id,
+                    "turnId": "turn-startup",
+                    "role": "user",
+                    "content": message_id,
+                    "status": "complete",
+                    "createdAt": "2026-07-17T00:00:00.000Z"
+                },
+                "providerId": "provider-startup",
+                "model": "model-startup"
+            }),
+        }
+    }
+
+    async fn seed_history(ledger: &ModelLedgerStore, session_id: &SessionId) {
+        ledger
+            .append_event(ledger_request(
+                session_id,
+                "event-startup-1",
+                "message-startup-1",
+                "ui-startup-1",
+            ))
+            .await
+            .expect("first startup history message must persist");
+        ledger
+            .append_event(ledger_request(
+                session_id,
+                "event-startup-2",
+                "message-startup-2",
+                "ui-startup-2",
+            ))
+            .await
+            .expect("target startup history message must persist");
+    }
+
+    async fn stage_file_mutation(
+        service: &EditTransactionService,
+        transaction_id: &str,
+        path: &Path,
+    ) {
+        fs::write(path, "before\n")
+            .await
+            .expect("startup original file must be written");
+        service
+            .backup_file(transaction_id, path, Some("before\n".to_owned()))
+            .await
+            .expect("startup edit backup must persist");
+        fs::write(path, "after\n")
+            .await
+            .expect("startup changed file must be written");
+        service
+            .record_mutation(transaction_id, path.to_path_buf(), true)
+            .await
+            .expect("startup edit mutation must be recorded");
     }
 
     #[test]
-    fn legacy_user_data_rejects_two_distinct_nonempty_sources() {
-        let directory = tempfile::tempdir().expect("legacy path fixture must exist");
-        let primary = directory.path().join("CodeZ");
-        let alternate = directory.path().join("codez");
-        fs::create_dir(&primary).expect("primary legacy directory must be created");
-        if fs::create_dir(&alternate).is_err() {
-            return;
-        }
-        fs::write(primary.join("providers.json"), b"{}")
-            .expect("primary legacy fixture must be written");
-        fs::write(alternate.join("sessions.json"), b"{}")
-            .expect("alternate legacy fixture must be written");
+    fn startup_paths_use_only_the_fresh_codez_directory() {
+        let home = std::env::temp_dir().join("codez-composition-home");
+        let resources = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources");
 
-        let error = resolve_legacy_user_data(directory.path())
-            .expect_err("two distinct populated legacy roots must not be selected implicitly");
+        let paths = create_app_paths(home.clone(), resources)
+            .expect("absolute fixture roots must compose fresh application paths");
+
+        assert_eq!(paths.data_directory(), home.join(".codez"));
+    }
+
+    #[tokio::test]
+    async fn startup_recovery_resumes_a_real_workspace_adapter_after_restart() {
+        let temp = tempfile::tempdir().expect("startup recovery fixture must exist");
+        let root = temp.path().to_path_buf();
+        let workspace_directory = root.join("workspace");
+        fs::create_dir(&workspace_directory)
+            .await
+            .expect("startup workspace must be created");
+        let canonical_workspace = fs::canonicalize(&workspace_directory)
+            .await
+            .expect("startup workspace must canonicalize");
+        let session_id =
+            SessionId::parse("session-startup-recovery").expect("startup session must parse");
+        let persistence = test_persistence();
+        let ledger = Arc::new(ModelLedgerStore::new(
+            root.join("session-runtime"),
+            Arc::clone(&persistence),
+        ));
+        seed_history(&ledger, &session_id).await;
+        let first_edit_transaction = Arc::new(EditTransactionService::new(test_app_paths(&root)));
+        first_edit_transaction
+            .register_chat_transaction(
+                "transaction-startup-recovery",
+                EditTransactionRegistration {
+                    session_id: session_id.clone(),
+                    context_scope_id: ContextScopeId::Main,
+                    turn_id: StreamId::parse("turn-startup").expect("startup turn must parse"),
+                    workspace_root: WorkspaceRoot::from_canonical(canonical_workspace)
+                        .expect("startup workspace authority must be valid"),
+                },
+            )
+            .await
+            .expect("startup transaction must register");
+        let tracked_file = workspace_directory.join("tracked.txt");
+        stage_file_mutation(
+            first_edit_transaction.as_ref(),
+            "transaction-startup-recovery",
+            &tracked_file,
+        )
+        .await;
+        let interrupted_workspace: Arc<dyn HistoryRevertWorkspace> =
+            Arc::new(ApplyThenFailWorkspace {
+                inner: Arc::clone(&first_edit_transaction),
+                fail_after_apply: AtomicBool::new(true),
+            });
+        let interrupted_service = HistoryRevertService::new(
+            &root,
+            Arc::clone(&persistence),
+            Arc::clone(&ledger),
+            interrupted_workspace,
+        );
+        let request = HistoryRevertRequest {
+            session_id: session_id.clone(),
+            context_scope_id: ContextScopeId::Main,
+            target_ui_message_id: "ui-startup-2".to_owned(),
+            transaction_ids: vec!["transaction-startup-recovery".to_owned()],
+        };
+
+        let interrupted = interrupted_service
+            .execute(request)
+            .await
+            .expect_err("injected crash must leave a pending history revert");
+        assert_eq!(interrupted.code(), HistoryRevertErrorCode::RecoveryRequired);
+
+        let restarted_edit_transaction =
+            Arc::new(EditTransactionService::new(test_app_paths(&root)));
+        let restarted_workspace: Arc<dyn HistoryRevertWorkspace> =
+            Arc::<EditTransactionService>::clone(&restarted_edit_transaction);
+        let restarted_ledger = Arc::new(ModelLedgerStore::new(
+            root.join("session-runtime"),
+            Arc::clone(&persistence),
+        ));
+        let restarted_service =
+            HistoryRevertService::new(&root, persistence, restarted_ledger, restarted_workspace);
+        let coordinator = SessionMaintenanceCoordinator::new();
+
+        recover_pending_history_reverts(&restarted_service, &coordinator)
+            .await
+            .expect("startup must recover the interrupted real workspace operation");
+
+        assert!(
+            restarted_service
+                .pending_recoveries()
+                .await
+                .expect("recovered journal catalog must remain readable")
+                .is_empty()
+        );
+        assert_eq!(
+            fs::read_to_string(&tracked_file)
+                .await
+                .expect("recovered workspace file must remain readable"),
+            "before\n"
+        );
+        assert!(coordinator.try_begin_activity(session_id).is_ok());
+    }
+
+    #[tokio::test]
+    async fn startup_recovery_failure_keeps_the_session_blocked() {
+        let temp = tempfile::tempdir().expect("failed startup recovery fixture must exist");
+        let root = temp.path().to_path_buf();
+        let session_id = SessionId::parse("session-startup-blocked")
+            .expect("blocked startup session must parse");
+        let persistence = test_persistence();
+        let ledger = Arc::new(ModelLedgerStore::new(
+            root.join("session-runtime"),
+            Arc::clone(&persistence),
+        ));
+        seed_history(&ledger, &session_id).await;
+        let workspace: Arc<dyn HistoryRevertWorkspace> = Arc::new(AlwaysFailWorkspace);
+        let service = HistoryRevertService::new(&root, persistence, ledger, workspace);
+        let request = HistoryRevertRequest {
+            session_id: session_id.clone(),
+            context_scope_id: ContextScopeId::Main,
+            target_ui_message_id: "ui-startup-2".to_owned(),
+            transaction_ids: Vec::new(),
+        };
+        service
+            .execute(request)
+            .await
+            .expect_err("fixture history revert must remain pending");
+        let coordinator = SessionMaintenanceCoordinator::new();
+
+        recover_pending_history_reverts(&service, &coordinator)
+            .await
+            .expect_err("startup must fail while durable recovery remains incomplete");
 
         assert!(matches!(
-            error,
-            CompositionError::AmbiguousLegacyUserData { .. }
+            coordinator.try_begin_activity(session_id),
+            Err(SessionMaintenanceError::RecoveryRequired)
         ));
     }
 }

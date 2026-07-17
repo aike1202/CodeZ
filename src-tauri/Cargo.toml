@@ -44,8 +44,11 @@ tokio-util.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 chrono = { version = "0.4.45", features = ["serde"] }
+uuid.workspace = true
+rmcp = { version = "=2.2.0", default-features = false, features = ["client", "elicitation"] }
 
 [dev-dependencies]
+image = "0.25"
 serde_json.workspace = true
 
 

@@ -4,10 +4,15 @@ const { createServer } = require('http')
 let origin = ''
 let codeChallenge = ''
 let issuedAccessTokens = 0
+let revokedTokenCount = 0
 
 function sendJson(response, value, status = 200) {
-  response.writeHead(status, { 'Content-Type': 'application/json' })
-  response.end(JSON.stringify(value))
+  const body = JSON.stringify(value)
+  response.writeHead(status, {
+    'Content-Type': 'application/json',
+    'Content-Length': Buffer.byteLength(body)
+  })
+  response.end(body)
 }
 
 async function readBody(request) {
@@ -34,6 +39,7 @@ const http = createServer(async (request, response) => {
       authorization_endpoint: `${origin}/authorize`,
       token_endpoint: `${origin}/token`,
       registration_endpoint: `${origin}/register`,
+      revocation_endpoint: `${origin}/revoke`,
       response_types_supported: ['code'],
       grant_types_supported: ['authorization_code', 'refresh_token'],
       code_challenge_methods_supported: ['S256'],
@@ -94,6 +100,24 @@ const http = createServer(async (request, response) => {
       expires_in: 3600,
       scope: 'mcp'
     })
+    return
+  }
+
+  if (url.pathname === '/revoke' && request.method === 'POST') {
+    const params = new URLSearchParams(await readBody(request))
+    const token = params.get('token')
+    const hint = params.get('token_type_hint')
+    if (!token || !['refresh_token', 'access_token'].includes(hint)) {
+      sendJson(response, { error: 'invalid_request' }, 400)
+      return
+    }
+    revokedTokenCount += 1
+    response.writeHead(200).end()
+    return
+  }
+
+  if (url.pathname === '/revoke-status') {
+    sendJson(response, { count: revokedTokenCount })
     return
   }
 

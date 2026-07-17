@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, LoaderCircle, X } from 'lucide-react'
 import type { ComposerImageAttachment } from '@shared/types/attachment'
 import { nextPreviewIndex } from './imageAttachmentState'
 import { createPreviewObjectUrl } from './attachmentPreviewBytes'
+import { desktopApi } from '../../shared/desktop'
 import './ImagePreviewModal.css'
 
 interface ImagePreviewModalProps {
@@ -35,7 +36,7 @@ export default function ImagePreviewModal({
     setPreviewUrl(null)
     setLoadError(false)
 
-    void window.api.attachment.readPreview(attachment, 'original')
+    void desktopApi.attachment.readPreview(attachment, 'original')
       .then((preview) => {
         if (cancelled) return
         objectUrl = createPreviewObjectUrl(preview.bytes, preview.mimeType)

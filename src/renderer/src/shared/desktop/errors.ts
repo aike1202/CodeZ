@@ -1,10 +1,14 @@
 import type { CommandError, ErrorCode } from './generated/contracts'
 
-const ERROR_CODES = new Set<ErrorCode>([
+const ERROR_CODES: ReadonlySet<ErrorCode> = new Set([
   'VALIDATION',
+  'UNSUPPORTED',
   'PERMISSION_DENIED',
   'NOT_FOUND',
   'CONFLICT',
+  'RUN_ACTIVE',
+  'HISTORY_REVERT_STALE',
+  'RECOVERY_REQUIRED',
   'EXTERNAL',
   'PROCESS_FAILED',
   'CANCELLED',

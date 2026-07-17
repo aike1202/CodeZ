@@ -4,6 +4,7 @@ pub mod compaction;
 pub mod file_restorer;
 pub mod ledger;
 pub mod normalizer;
+pub mod provider_adapter;
 pub mod pruner;
 pub mod skill_restorer;
 pub mod skill_state;

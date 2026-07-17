@@ -3,7 +3,7 @@ import Sidebar from '../components/Sidebar'
 import TopBar from '../components/TopBar'
 import AppLayout from '../components/layout/AppLayout'
 import SettingsPage from '../pages/SettingsPage'
-import MigrationRecoveryScreen from '../components/MigrationRecoveryScreen'
+import McpReverseRequestApproval from '../components/McpReverseRequestApproval'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useProviderStore } from '../stores/providerStore'
 import { useChatStore, type SubAgentRecord } from '../stores/chatStore'
@@ -26,67 +26,19 @@ import {
   getFilePreviewTabId,
   useAppPreview
 } from './hooks/useAppPreview'
-import type { MigrationCredentialInput, MigrationRecoveryStatus } from '../shared/desktop'
 import { desktopApi } from '../shared/desktop'
 
 export default function App(): React.ReactElement {
-  const [status, setStatus] = useState<MigrationRecoveryStatus | null>(null)
-  const [checkingMigration, setCheckingMigration] = useState(true)
-
-  useEffect(() => {
-    let active = true
-    const migration = window.api.migration
-    if (!migration) {
-      setCheckingMigration(false)
-      return () => {
-        active = false
-      }
-    }
-    void migration.getStatus()
-      .then((nextStatus) => {
-        if (active) setStatus(nextStatus)
-      })
-      .catch(() => {
-        // An active desktop instance intentionally has no recovery state.
-        if (active) setStatus(null)
-      })
-      .finally(() => {
-        if (active) setCheckingMigration(false)
-      })
-    return () => {
-      active = false
-    }
-  }, [])
-
-  const submitCredentials = async (inputs: MigrationCredentialInput[]): Promise<void> => {
-    const migration = window.api.migration
-    if (!migration) throw new Error('迁移恢复功能不可用')
-    const nextStatus = await migration.submitCredentials(inputs)
-    setStatus(nextStatus)
-  }
-
-  const restartAfterMigration = async (): Promise<void> => {
-    const migration = window.api.migration
-    if (!migration) throw new Error('迁移恢复功能不可用')
-    await migration.restart()
-  }
-
-  if (checkingMigration) {
-    return <main className="migration-recovery-screen" />
-  }
-  if (status) {
-    return (
-      <MigrationRecoveryScreen
-        status={status}
-        onSubmit={submitCredentials}
-        onRestart={restartAfterMigration}
-      />
-    )
-  }
-  return <ActiveApp />
+  return (
+    <>
+      <ActiveApp />
+      <McpReverseRequestApproval />
+    </>
+  )
 }
 
 function ActiveApp(): React.ReactElement {
+  const planAvailable = desktopApi.capabilities.plan
   const loadProviders = useProviderStore((s) => s.loadProviders)
   const messages = useChatStore((s) => s.messages)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
@@ -148,14 +100,16 @@ function ActiveApp(): React.ReactElement {
   useEffect(() => {
     desktopApi.workspace.getRecentProjects().then((p) => useWorkspaceStore.getState().setRecentProjects(p)).catch(() => {})
     loadProviders()
-    const cleanupRuntimeStatusListener = window.api.chat.onRuntimeStatusChanged(
+    const cleanupRuntimeStatusListener = desktopApi.chat.onRuntimeStatusChanged(
       useChatStore.getState().applyRuntimeStatus
     )
     void loadSessions().then(() => {
       const sessionIds = useChatStore.getState().sessions.map((session) => session.id)
       return useChatStore.getState().refreshRuntimeStatuses(sessionIds)
     })
-    const cleanupPlanStateListener = useChatStore.getState().initPlanStateListener()
+    const cleanupPlanStateListener = planAvailable
+      ? useChatStore.getState().initPlanStateListener()
+      : () => undefined
 
     void desktopApi.theme.get().then((info) => {
       if (info.shouldUseDarkColors) document.documentElement.classList.add('dark')
@@ -170,7 +124,7 @@ function ActiveApp(): React.ReactElement {
       cleanupPlanStateListener()
       cleanupRuntimeStatusListener()
     }
-  }, [])
+  }, [planAvailable])
 
   useEffect(() => {
     if (!workspace) {
@@ -280,13 +234,15 @@ function ActiveApp(): React.ReactElement {
 
   if (currentView === 'settings') {
     return (
-      <div className="settings-view-wrapper">
-        <SettingsPage
-          initialTab={settingsTab}
-          onBack={() => setCurrentView(hasMessages ? 'chat' : 'home')}
-          onCreateFromSkill={handleCreateFromSkill}
-        />
-      </div>
+      <>
+        <div className="settings-view-wrapper">
+          <SettingsPage
+            initialTab={settingsTab}
+            onBack={() => setCurrentView(hasMessages ? 'chat' : 'home')}
+            onCreateFromSkill={handleCreateFromSkill}
+          />
+        </div>
+      </>
     )
   }
 
@@ -379,10 +335,12 @@ function ActiveApp(): React.ReactElement {
         />
       )}
 
-      <PlanListModal
-        isOpen={planListModalOpen}
-        onClose={() => setPlanListModalOpen(false)}
-      />
+      {planAvailable ? (
+        <PlanListModal
+          isOpen={planListModalOpen}
+          onClose={() => setPlanListModalOpen(false)}
+        />
+      ) : null}
     </>
   )
 }

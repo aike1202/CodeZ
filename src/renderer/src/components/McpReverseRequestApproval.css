@@ -1,0 +1,194 @@
+.mcp-reverse-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 58%);
+}
+
+.mcp-reverse-dialog {
+  width: min(580px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow: auto;
+  border: 1px solid var(--border-color, #3b3f45);
+  border-radius: 8px;
+  background: var(--bg-primary, #1d1f23);
+  box-shadow: 0 20px 56px rgb(0 0 0 / 42%);
+}
+
+.mcp-reverse-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border-color, #3b3f45);
+}
+
+.mcp-reverse-icon {
+  display: inline-grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  color: #fbbf24;
+  background: rgb(251 191 36 / 12%);
+}
+
+.mcp-reverse-header h2 {
+  margin: 1px 0 5px;
+  color: var(--text-primary, #f4f4f5);
+  font-size: 17px;
+  line-height: 1.35;
+}
+
+.mcp-reverse-header p,
+.mcp-reverse-body p {
+  margin: 0;
+  color: var(--text-secondary, #b4bac4);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.mcp-reverse-body {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px;
+}
+
+.mcp-reverse-metadata {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.mcp-reverse-metadata div {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border-color, #3b3f45);
+  border-radius: 5px;
+}
+
+.mcp-reverse-metadata dt {
+  margin-bottom: 3px;
+  color: var(--text-muted, #7e8794);
+  font-size: 11px;
+}
+
+.mcp-reverse-metadata dd {
+  overflow-wrap: anywhere;
+  margin: 0;
+  color: var(--text-primary, #f4f4f5);
+  font-size: 13px;
+}
+
+.mcp-reverse-request-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border-left: 3px solid #d97706;
+  background: rgb(217 119 6 / 8%);
+}
+
+.mcp-reverse-request-summary > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: #fbbf24;
+}
+
+.mcp-reverse-request-summary strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-primary, #f4f4f5);
+  font-size: 13px;
+}
+
+.mcp-reverse-warning {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #fbbf24 !important;
+}
+
+.mcp-reverse-form {
+  display: grid;
+  gap: 12px;
+}
+
+.mcp-reverse-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.mcp-reverse-fields label {
+  display: grid;
+  gap: 5px;
+  color: var(--text-primary, #f4f4f5);
+  font-size: 13px;
+}
+
+.mcp-reverse-fields label > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mcp-reverse-fields b {
+  color: #fbbf24;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.mcp-reverse-fields small {
+  color: var(--text-muted, #7e8794);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.mcp-reverse-fields input,
+.mcp-reverse-fields select {
+  width: 100%;
+  min-height: 34px;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color, #3b3f45);
+  border-radius: 5px;
+  color: var(--text-primary, #f4f4f5);
+  background: var(--bg-secondary, #25282d);
+}
+
+.mcp-reverse-fields input:focus,
+.mcp-reverse-fields select:focus {
+  outline: 2px solid rgb(59 130 246 / 58%);
+  outline-offset: 1px;
+}
+
+.mcp-reverse-unsupported,
+.mcp-reverse-error {
+  padding: 9px 10px;
+  border: 1px solid rgb(239 68 68 / 38%);
+  border-radius: 5px;
+  color: #fca5a5 !important;
+  background: rgb(239 68 68 / 8%);
+}
+
+.mcp-reverse-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border-color, #3b3f45);
+}
+
+@media (max-width: 600px) {
+  .mcp-reverse-overlay { padding: 12px; }
+  .mcp-reverse-dialog { max-height: calc(100vh - 24px); }
+  .mcp-reverse-header,
+  .mcp-reverse-body,
+  .mcp-reverse-actions { padding-left: 14px; padding-right: 14px; }
+  .mcp-reverse-metadata { grid-template-columns: 1fr; }
+}

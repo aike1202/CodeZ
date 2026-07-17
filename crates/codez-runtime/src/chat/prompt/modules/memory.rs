@@ -17,19 +17,11 @@ impl PromptModule for MemoryModule {
         0
     }
 
-    fn build<'a>(&'a self, ctx: &'a PromptContext) -> BoxFuture<'a, Option<String>> {
-        Box::pin(async move {
-            let mem_dir = ctx.workspace_root.join(".agents").join("brain");
-            let path_str = mem_dir.to_string_lossy();
+    fn is_enabled<'a>(&'a self, _ctx: &'a PromptContext) -> BoxFuture<'a, bool> {
+        Box::pin(async { false })
+    }
 
-            Some(format!(
-                r#"# Memory
-
-Persistent memory is stored at `{}`. Save only durable user preferences, corrections, project constraints, or external references that will matter in future conversations. Use one focused markdown file per memory and keep a one-line pointer in `MEMORY.md`; update existing memories instead of duplicating them.
-
-Do not store facts already recorded by the repository. Treat memory as potentially stale and verify repository state before relying on it."#,
-                path_str
-            ))
-        })
+    fn build<'a>(&'a self, _ctx: &'a PromptContext) -> BoxFuture<'a, Option<String>> {
+        Box::pin(async { None })
     }
 }

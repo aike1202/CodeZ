@@ -4,6 +4,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use codez_contracts::{ErrorCode, provider as wire};
 use codez_core::{
     AppErrorKind,
     provider::{ApiFormat, ProviderRepository, ThinkingEffort, ThinkingMode},
@@ -16,7 +17,12 @@ use codez_storage::{
     MigrationRunId, SecretValue,
 };
 
-use super::{StorageProviderCredentials, StorageProviderRepository};
+use crate::error::{ErrorReporter, command_result};
+
+use super::{
+    StorageProviderCredentials, StorageProviderRepository, provider_form_from_wire,
+    provider_info_to_wire,
+};
 
 #[derive(Default)]
 struct MemoryCredentialStore {
@@ -267,6 +273,105 @@ async fn provider_without_api_key_should_commit_activate_and_remain_unconfigured
     );
 }
 
+#[tokio::test]
+async fn provider_boundary_crud_should_keep_api_keys_out_of_metadata_and_wire_responses() {
+    const SECRET: &str = "sk-boundary-secret-that-must-not-cross-ipc";
+    let directory = tempfile::tempdir().expect("Provider boundary fixture directory must exist");
+    let providers_path = directory.path().join("providers.json");
+    let credentials = Arc::new(MemoryCredentialStore::default());
+    let service = provider_service(providers_path.clone(), Arc::clone(&credentials))
+        .await
+        .expect("Provider boundary service must initialize");
+
+    let created = service
+        .create(
+            provider_form_from_wire(wire_provider_form(SECRET))
+                .expect("valid wire Provider data must convert"),
+        )
+        .await
+        .expect("wire Provider creation must succeed");
+    let created_wire = provider_info_to_wire(created);
+    let created_payload =
+        serde_json::to_string(&created_wire).expect("Provider wire response must serialize");
+    let persisted_metadata =
+        fs::read_to_string(&providers_path).expect("Provider metadata must persist after creation");
+
+    let listed = service
+        .get_all()
+        .await
+        .expect("Provider listing must succeed")
+        .into_iter()
+        .map(provider_info_to_wire)
+        .collect::<Vec<_>>();
+    let listed_payload =
+        serde_json::to_string(&listed).expect("Provider list wire response must serialize");
+
+    let mut update = wire_provider_form("");
+    update.name = "Updated Boundary Provider".to_string();
+    let updated = service
+        .update(
+            &created_wire.id,
+            provider_form_from_wire(update).expect("valid wire Provider update must convert"),
+        )
+        .await
+        .map(provider_info_to_wire)
+        .expect("wire Provider update must succeed");
+
+    service
+        .delete(&created_wire.id)
+        .await
+        .expect("Provider deletion must succeed");
+
+    assert!(
+        created_wire.api_key_configured
+            && updated.api_key_configured
+            && !created_payload.contains(SECRET)
+            && !listed_payload.contains(SECRET)
+            && !persisted_metadata.contains(SECRET)
+            && service
+                .get_all()
+                .await
+                .expect("Provider listing must remain available after deletion")
+                .is_empty()
+            && credentials
+                .values
+                .lock()
+                .expect("credential fixture lock must remain available")
+                .is_empty(),
+        "Provider API keys must remain in the credential adapter and be removed on deletion"
+    );
+}
+
+#[tokio::test]
+async fn provider_boundary_should_map_invalid_wire_input_to_a_redacted_validation_error() {
+    const SECRET: &str = "sk-submitted-secret-that-must-not-appear-in-command-errors";
+    let directory = tempfile::tempdir().expect("Provider boundary fixture directory must exist");
+    let credentials = Arc::new(MemoryCredentialStore::default());
+    let service = provider_service(directory.path().join("providers.json"), credentials)
+        .await
+        .expect("Provider boundary service must initialize");
+    let reporter = ErrorReporter::default();
+    let mut data = wire_provider_form(SECRET);
+    data.name = "   ".to_string();
+
+    let result = async {
+        let data = provider_form_from_wire(data)?;
+        service.create(data).await.map(provider_info_to_wire)
+    }
+    .await;
+    let error = command_result(&reporter, result)
+        .expect_err("invalid Provider data must produce a command error");
+    let error_payload =
+        serde_json::to_string(&error).expect("Provider command error must serialize");
+
+    assert!(
+        error.code == ErrorCode::Validation
+            && !error.message.contains(SECRET)
+            && !error_payload.contains(SECRET),
+        "Provider command errors must not disclose submitted API keys"
+    );
+}
+
 async fn provider_service(
     providers_path: std::path::PathBuf,
     credentials: Arc<MemoryCredentialStore>,
@@ -277,6 +382,34 @@ async fn provider_service(
     ));
     let credential_adapter = Arc::new(StorageProviderCredentials::new(credentials));
     ProviderService::new(repository, credential_adapter).await
+}
+
+fn wire_provider_form(api_key: &str) -> wire::ProviderFormData {
+    wire::ProviderFormData {
+        name: "Boundary Provider".to_string(),
+        base_url: "https://provider.invalid/v1".to_string(),
+        api_format: Some(wire::ApiFormat::Openai),
+        api_key: api_key.to_string(),
+        models: vec![wire::ModelConfig {
+            id: "boundary-model".to_string(),
+            name: "boundary-model".to_string(),
+            max_context_tokens: 8_192,
+            max_input_tokens: None,
+            max_output_tokens: Some(2_048),
+            reasoning_counts_against_context: None,
+            supports_vision: None,
+            api_format: None,
+            thinking_mode: None,
+            thinking_effort: None,
+            thinking_budget_tokens: None,
+        }],
+        thinking: wire::ThinkingConfig {
+            enabled: true,
+            mode: wire::ThinkingMode::Auto,
+            effort: None,
+            budget_tokens: None,
+        },
+    }
 }
 
 fn write_legacy_provider(user_data: &std::path::Path, api_key_ref: &str, encryption: &str) {

@@ -301,6 +301,30 @@ describe('chat store task session restore', () => {
     )
   })
 
+  it('previews a revert through the desktop facade with newest transactions first', async () => {
+    const { useChatStore } = await import('../renderer/src/stores/chatStore')
+    const messages = [
+      { id: 'u1', role: 'user' as const, content: 'retry from here' },
+      { id: 'a1', role: 'agent' as const, content: 'first answer', txId: 'tx-1' },
+      { id: 'u2', role: 'user' as const, content: 'follow up' },
+      { id: 'a2', role: 'agent' as const, content: 'second answer', txId: 'tx-2' }
+    ]
+    const preview = { toDelete: ['created.ts'], toRestore: ['changed.ts'] }
+    ;(window as any).electron.ipcRenderer.invoke.mockResolvedValue(preview)
+    useChatStore.setState({
+      sessions: [{
+        id: 's1', projectId: 'p1', summary: 'x', relativeTime: 'now', messages
+      }],
+      activeSessionId: 's1',
+      messages
+    } as any)
+
+    await expect(useChatStore.getState().previewRevertMessage('u1')).resolves.toEqual(preview)
+    expect((window as any).electron.ipcRenderer.invoke).toHaveBeenCalledWith(
+      'chat:preview-revert-messages', 's1', 'u1', ['tx-2', 'tx-1']
+    )
+  })
+
   it('finishes a pending revert against its original session after switching sessions', async () => {
     const { useChatStore } = await import('../renderer/src/stores/chatStore')
     let resolveRevert: ((value: unknown) => void) | undefined

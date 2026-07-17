@@ -15,12 +15,15 @@ use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
 use codez_core::context::{
-    CONTEXT_SCHEMA_VERSION, ContextScopeId, LedgerAppendRequest, LedgerEvent,
-    SessionRuntimeSnapshot,
+    CONTEXT_SCHEMA_VERSION, ContextScopeId, HistoryRevertedPayload, LedgerAppendRequest,
+    LedgerEvent, LedgerEventType, SessionRuntimeSnapshot, UserMessagePayload,
 };
 use codez_core::{AppError, AtomicPersistence, IdentifierError, SessionId};
 
-use crate::context::state_machine::{StateMachineError, apply_event};
+use crate::context::{
+    skill_state::apply_message_to_session_skill_states,
+    state_machine::{StateMachineError, apply_event},
+};
 
 const MALFORMED_SUFFIX_WARNING: &str = "MALFORMED_LEDGER_SUFFIX_ISOLATED";
 const INVALID_SUFFIX_WARNING: &str = "INVALID_LEDGER_SUFFIX_ISOLATED";
@@ -183,6 +186,13 @@ pub struct LoadedSessionRuntime {
     pub warnings: Vec<String>,
 }
 
+/// Immutable history state used to coordinate an edit rollback with a ledger append.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HistoryRevertPlan {
+    pub expected_history_version: u32,
+    pub payload: HistoryRevertedPayload,
+}
+
 #[derive(Clone)]
 struct CacheEntry {
     runtime: LoadedSessionRuntime,
@@ -241,6 +251,41 @@ impl ModelLedgerStore {
     #[must_use]
     pub fn snapshot_path(&self, session_id: &SessionId) -> PathBuf {
         self.session_directory(session_id).join("snapshot.json")
+    }
+
+    /// Removes one session's reconstructed context history and invalidates all in-memory copies.
+    ///
+    /// The per-session writer lock prevents a concurrent ledger append from interleaving with
+    /// removal. Callers must first stop the producers that own the session; a later append is
+    /// intentionally allowed to create a new ledger for a newly created session with the same ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LedgerError`] when the runtime directory is unsafe or cannot be removed.
+    pub async fn delete_session(&self, session_id: &SessionId) -> Result<bool, LedgerError> {
+        let coordination = self.coordination(session_id);
+        let _writer = coordination.writer.lock().await;
+        let runtime_root = self.runtime_root.clone();
+        let session_directory = self.session_directory(session_id);
+        let error_path = session_directory.clone();
+        let removed = tokio::task::spawn_blocking(move || {
+            remove_session_directory_blocking(&runtime_root, &session_directory)
+        })
+        .await
+        .map_err(|source| LedgerError::TaskJoin {
+            path: error_path,
+            source,
+        })??;
+
+        if removed {
+            coordination.generation.fetch_add(1, Ordering::AcqRel);
+        }
+        self.cache.write().await.remove(session_id);
+        self.coordinations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(session_id);
+        Ok(removed)
     }
 
     /// Assigns sequence and history versions, then durably appends one event.
@@ -431,6 +476,116 @@ impl ModelLedgerStore {
         self.load(session_id)
             .await
             .map(|runtime| runtime.map(|runtime| runtime.snapshot))
+    }
+
+    /// Plans a history revert without mutating the durable ledger.
+    ///
+    /// The returned history version must be supplied to
+    /// [`Self::append_event_if_history_version`] after external edit transactions have been
+    /// reverted. This prevents stale UI state from replacing newer model history.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the target is empty, the scope or message is missing, the target is
+    /// represented by a compaction summary, or persisted ledger state cannot be loaded safely.
+    pub async fn plan_history_revert(
+        &self,
+        session_id: &SessionId,
+        context_scope_id: &ContextScopeId,
+        target_ui_message_id: &str,
+    ) -> Result<HistoryRevertPlan, AppError> {
+        if target_ui_message_id.trim().is_empty() {
+            return Err(AppError::validation("History revert target is empty"));
+        }
+
+        let coordination = self.coordination(session_id);
+        let _writer = coordination.writer.lock().await;
+        let entry = self
+            .load_locked(session_id, &coordination)
+            .await?
+            .ok_or_else(|| AppError::not_found("The session has no context history"))?;
+        let scope_key = context_scope_id.as_key();
+        let scope = entry
+            .runtime
+            .snapshot
+            .scopes
+            .get(scope_key.as_ref())
+            .ok_or_else(|| AppError::not_found("The requested context scope was not found"))?;
+
+        let target_message_id = scope
+            .active_messages
+            .iter()
+            .find(|message| {
+                message.role == "user"
+                    && message.client_message_id.as_deref() == Some(target_ui_message_id)
+            })
+            .map(|message| message.id.clone())
+            .or_else(|| {
+                entry
+                    .events_by_id
+                    .values()
+                    .filter(|event| {
+                        event.context_scope_id == *context_scope_id
+                            && event.r#type == LedgerEventType::UserMessage
+                    })
+                    .filter_map(|event| {
+                        let payload =
+                            serde_json::from_value::<UserMessagePayload>(event.payload.clone())
+                                .ok()?;
+                        let ui_message_id = payload
+                            .command_metadata
+                            .as_ref()?
+                            .get("uiMessageId")?
+                            .as_str()?;
+                        (ui_message_id == target_ui_message_id)
+                            .then_some((event.sequence, payload.message.id))
+                    })
+                    .max_by_key(|(sequence, _)| *sequence)
+                    .map(|(_, message_id)| message_id)
+            });
+        let target_index = target_message_id
+            .as_deref()
+            .and_then(|message_id| {
+                scope
+                    .active_messages
+                    .iter()
+                    .position(|message| message.id == message_id)
+            })
+            .ok_or_else(|| {
+                AppError::conflict(
+                    "The requested history point is no longer present after compaction",
+                )
+            })?;
+        let target_message = &scope.active_messages[target_index];
+        if target_message.role != "user" || history_target_is_compacted(scope, target_message) {
+            return Err(AppError::conflict(
+                "The requested history point is represented inside a compacted summary",
+            ));
+        }
+
+        let active_messages = scope.active_messages[..target_index].to_vec();
+        let mut skill_states = scope
+            .post_compaction_skill_states
+            .clone()
+            .unwrap_or_default();
+        for message in &active_messages {
+            skill_states = apply_message_to_session_skill_states(
+                Some(&skill_states),
+                &active_messages,
+                message,
+            );
+        }
+
+        Ok(HistoryRevertPlan {
+            expected_history_version: scope.history_version,
+            payload: HistoryRevertedPayload {
+                source_history_version: scope.history_version,
+                target_ui_message_id: target_ui_message_id.to_string(),
+                target_message_id: target_message.id.clone(),
+                active_messages,
+                skill_states: Some(skill_states),
+            },
+        })
     }
 
     /// Persists the fully replayed runtime as the next atomic snapshot.
@@ -752,6 +907,23 @@ impl ModelLedgerStore {
     }
 }
 
+fn history_target_is_compacted(
+    scope: &codez_core::context::SessionRuntimeScopeSnapshot,
+    target: &codez_core::context::NormalizedModelMessage,
+) -> bool {
+    if target.id.starts_with("legacy:") {
+        return true;
+    }
+    let covered_through_sequence = scope
+        .latest_compaction
+        .as_ref()
+        .and_then(|summary| summary.get("coveredThroughSequence"))
+        .and_then(serde_json::Value::as_u64);
+    target.source_sequence.is_some_and(|sequence| {
+        covered_through_sequence.is_some_and(|covered| u64::from(sequence) <= covered)
+    })
+}
+
 fn parse_ledger_records(bytes: &[u8]) -> ParsedLedgerRecords {
     let mut records = Vec::new();
     let mut cursor = 0;
@@ -1024,6 +1196,35 @@ fn prepare_session_directory_blocking(
     }
 }
 
+fn remove_session_directory_blocking(
+    runtime_root: &Path,
+    session_directory: &Path,
+) -> Result<bool, LedgerError> {
+    if !validate_directory(runtime_root, false)? {
+        return Ok(false);
+    }
+    match fs::symlink_metadata(session_directory) {
+        Ok(metadata) if unsafe_directory_metadata(&metadata) => Err(LedgerError::UnsafeDirectory(
+            session_directory.to_path_buf(),
+        )),
+        Ok(_) => fs::remove_dir_all(session_directory)
+            .map(|()| true)
+            .map_err(|source| {
+                directory_io(
+                    "remove session runtime directory",
+                    session_directory,
+                    source,
+                )
+            }),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(directory_io(
+            "inspect session runtime directory for removal",
+            session_directory,
+            source,
+        )),
+    }
+}
+
 fn validate_directory(path: &Path, create: bool) -> Result<bool, LedgerError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if unsafe_directory_metadata(&metadata) => {
@@ -1243,6 +1444,25 @@ mod tests {
         }
     }
 
+    fn request_with_ui_message(
+        session_id: &str,
+        event_id: &str,
+        message_id: &str,
+        ui_message_id: &str,
+        persist_on_message: bool,
+    ) -> LedgerAppendRequest {
+        let mut request = request(session_id, event_id, message_id);
+        if persist_on_message {
+            request.payload["message"]["clientMessageId"] =
+                serde_json::Value::String(ui_message_id.to_string());
+        } else {
+            request.payload["commandMetadata"] = serde_json::json!({
+                "uiMessageId": ui_message_id,
+            });
+        }
+        request
+    }
+
     #[tokio::test]
     async fn concurrent_appends_share_one_monotonic_session_sequence() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
@@ -1273,6 +1493,110 @@ mod tests {
         sequences.sort_unstable();
 
         assert_eq!(sequences, (1..=24).collect::<Vec<_>>());
+    }
+
+    #[tokio::test]
+    async fn delete_session_removes_durable_history_and_invalidates_the_cache() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let root = directory.path().join("runtime");
+        let store = ledger_store(&root);
+        let session_id = SessionId::parse("session-1").expect("fixture session ID must be valid");
+
+        store
+            .append_event(request("session-1", "event-1", "message-1"))
+            .await
+            .expect("fixture history must persist");
+        assert!(
+            store
+                .get_snapshot(&session_id)
+                .await
+                .expect("fixture history must load")
+                .is_some()
+        );
+
+        assert!(
+            store
+                .delete_session(&session_id)
+                .await
+                .expect("session history must delete")
+        );
+        assert!(!store.session_directory(&session_id).exists());
+        assert!(
+            store
+                .get_snapshot(&session_id)
+                .await
+                .expect("deleted history lookup must succeed")
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn history_revert_plan_keeps_only_messages_before_the_ui_target() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let store = ledger_store(&directory.path().join("runtime"));
+        let session_id = SessionId::parse("session-1").expect("fixture session ID must be valid");
+        store
+            .append_event(request_with_ui_message(
+                "session-1",
+                "event-1",
+                "message-1",
+                "ui-message-1",
+                true,
+            ))
+            .await
+            .expect("first fixture message must persist");
+        store
+            .append_event(request_with_ui_message(
+                "session-1",
+                "event-2",
+                "message-2",
+                "ui-message-2",
+                true,
+            ))
+            .await
+            .expect("target fixture message must persist");
+
+        let plan = store
+            .plan_history_revert(&session_id, &ContextScopeId::Main, "ui-message-2")
+            .await
+            .expect("the active target must produce a revert plan");
+
+        assert_eq!(
+            (
+                plan.expected_history_version,
+                plan.payload.target_message_id.as_str(),
+                plan.payload
+                    .active_messages
+                    .iter()
+                    .map(|message| message.id.as_str())
+                    .collect::<Vec<_>>(),
+            ),
+            (2, "message-2", vec!["message-1"])
+        );
+    }
+
+    #[tokio::test]
+    async fn history_revert_plan_recovers_ui_identity_from_event_metadata() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let store = ledger_store(&directory.path().join("runtime"));
+        let session_id = SessionId::parse("session-1").expect("fixture session ID must be valid");
+        store
+            .append_event(request_with_ui_message(
+                "session-1",
+                "event-1",
+                "message-1",
+                "ui-message-1",
+                false,
+            ))
+            .await
+            .expect("fixture message metadata must persist");
+
+        let plan = store
+            .plan_history_revert(&session_id, &ContextScopeId::Main, "ui-message-1")
+            .await
+            .expect("event metadata must remain a supported lookup path");
+
+        assert_eq!(plan.payload.target_message_id, "message-1");
     }
 
     #[tokio::test]

@@ -275,6 +275,7 @@ pub async fn workspace_grep(
     state: State<'_, AppState>,
 ) -> Result<GrepContract, CommandError> {
     let result = async {
+        let filesystem = open_filesystem(&root_path).await?;
         let search = create_search_service(&state)?;
         let mode = match output_mode.as_deref() {
             Some("content") => GrepOutputMode::Content,
@@ -295,10 +296,15 @@ pub async fn workspace_grep(
             head_limit,
             offset,
         };
-        let ws_root = PathBuf::from(&root_path);
         let cancellation = codez_core::CancellationToken::new();
         let result = search
-            .grep(&ws_root, &pattern, path.as_deref(), &options, cancellation)
+            .grep(
+                filesystem.workspace_root().as_path(),
+                &pattern,
+                path.as_deref(),
+                &options,
+                cancellation,
+            )
             .await?;
         Ok(GrepContract {
             lines: result.lines,
@@ -320,17 +326,16 @@ pub async fn workspace_open_in_explorer(
     state: State<'_, AppState>,
 ) -> Result<bool, CommandError> {
     let result = async {
-        let path = PathBuf::from(&root_path);
-        if !path.is_absolute() {
-            return Err(AppError::validation("Path must be absolute"));
-        }
-        opener::open(&path).map(|()| true).map_err(|source| {
-            AppError::external(
-                "Failed to open path in file explorer",
-                source.to_string(),
-                false,
-            )
-        })
+        let filesystem = open_filesystem(&root_path).await?;
+        opener::open(filesystem.workspace_root().as_path())
+            .map(|()| true)
+            .map_err(|source| {
+                AppError::external(
+                    "Failed to open path in file explorer",
+                    source.to_string(),
+                    false,
+                )
+            })
     }
     .await;
     command_result(&state.errors, result)
@@ -349,22 +354,16 @@ pub async fn workspace_open_in_editor(
     state: State<'_, AppState>,
 ) -> Result<bool, CommandError> {
     let result = async {
-        let command = if let Some(exe) = &exe_path {
-            format!("\"{exe}\" \"{root_path}\"")
-        } else {
-            let cmd = editor_command_name(&editor_id);
-            format!("{cmd} \"{root_path}\"")
-        };
-
-        let output = tokio::process::Command::new(shell_program())
-            .args(shell_args(&command))
-            .output()
-            .await
+        let filesystem = open_filesystem(&root_path).await?;
+        let executable = resolve_editor_executable(&editor_id, exe_path.as_deref()).await?;
+        let child = tokio::process::Command::new(executable)
+            .arg(filesystem.workspace_root().as_path())
+            .spawn()
             .map_err(|source| {
                 AppError::external("Failed to open editor", source.to_string(), false)
             })?;
-
-        Ok(output.status.success())
+        drop(child);
+        Ok(true)
     }
     .await;
     command_result(&state.errors, result)
@@ -445,46 +444,84 @@ fn create_search_service(state: &AppState) -> Result<codez_runtime::SearchServic
     codez_runtime::SearchService::new(rg_path, state.process_runner.clone())
 }
 
-fn editor_command_name(editor_id: &str) -> &str {
-    match editor_id {
-        "VSCode" => "code",
-        "Cursor" => "cursor",
-        "IntelliJ IDEA" => "idea",
-        "PyCharm" => "pycharm",
-        "WebStorm" => "webstorm",
-        "CLion" => "CLion",
-        "Sublime Text" => "subl",
-        "Android Studio" => "studio",
-        "HBuilderX" => "hbuilderx",
-        "Eclipse" => "eclipse",
-        _ => "code",
+const EDITOR_DEFINITIONS: &[(&str, &str)] = &[
+    ("VSCode", "code"),
+    ("Cursor", "cursor"),
+    ("IntelliJ IDEA", "idea"),
+    ("PyCharm", "pycharm"),
+    ("WebStorm", "webstorm"),
+    ("CLion", "clion"),
+    ("Sublime Text", "subl"),
+    ("Android Studio", "studio"),
+    ("HBuilderX", "hbuilderx"),
+    ("Eclipse", "eclipse"),
+];
+
+fn editor_command_name(editor_id: &str) -> Result<&'static str, AppError> {
+    EDITOR_DEFINITIONS
+        .iter()
+        .find_map(|(id, command)| (*id == editor_id).then_some(*command))
+        .ok_or_else(|| AppError::validation("Unsupported editor"))
+}
+
+async fn resolve_editor_executable(
+    editor_id: &str,
+    requested_executable: Option<&str>,
+) -> Result<PathBuf, AppError> {
+    let command = editor_command_name(editor_id)?;
+    let discovered = find_command(command).await.ok_or_else(|| {
+        AppError::not_found(format!(
+            "The {editor_id} command is not available on this system"
+        ))
+    })?;
+    let discovered = canonicalize_editor_executable(&discovered).await?;
+
+    if let Some(requested_executable) = requested_executable {
+        let requested = canonicalize_editor_executable(requested_executable).await?;
+        if !same_editor_executable(&requested, &discovered) {
+            return Err(AppError::permission_denied(
+                "The requested editor executable was not discovered for the selected editor",
+            ));
+        }
     }
+
+    Ok(discovered)
 }
 
-fn shell_program() -> &'static str {
-    if cfg!(windows) { "cmd" } else { "sh" }
+async fn canonicalize_editor_executable(path: &str) -> Result<PathBuf, AppError> {
+    let path = PathBuf::from(path);
+    if !path.is_absolute() {
+        return Err(AppError::validation(
+            "Editor executable path must be absolute",
+        ));
+    }
+    tokio::fs::canonicalize(&path).await.map_err(|source| {
+        AppError::external(
+            "The editor executable cannot be resolved",
+            format!(
+                "canonicalize editor executable {}: {source}",
+                path.display()
+            ),
+            false,
+        )
+    })
 }
 
-fn shell_args(command: &str) -> Vec<String> {
-    if cfg!(windows) {
-        vec!["/C".to_string(), command.to_string()]
-    } else {
-        vec!["-c".to_string(), command.to_string()]
+fn same_editor_executable(left: &Path, right: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        left.to_string_lossy()
+            .eq_ignore_ascii_case(&right.to_string_lossy())
+    }
+    #[cfg(not(windows))]
+    {
+        left == right
     }
 }
 
 async fn detect_editors() -> Vec<EditorInfo> {
-    let definitions = [
-        ("VSCode", "code"),
-        ("Cursor", "cursor"),
-        ("IntelliJ IDEA", "idea"),
-        ("PyCharm", "pycharm"),
-        ("WebStorm", "webstorm"),
-        ("Sublime Text", "subl"),
-    ];
-
     let mut editors = Vec::new();
-    for (id, cmd) in definitions {
+    for (id, cmd) in EDITOR_DEFINITIONS {
         if let Some(exe_path) = find_command(cmd).await {
             editors.push(EditorInfo {
                 id: id.to_string(),
@@ -539,9 +576,11 @@ fn file_tree_contract(node: RuntimeFileTreeNode) -> FileTreeNode {
 mod tests {
     use std::{fs, path::Path, sync::Arc};
 
-    use codez_core::FileSystem;
+    use codez_core::{AppErrorKind, FileSystem};
     use codez_platform::NativeFileSystem;
     use codez_runtime::{WorkspaceEntryKind, WorkspaceService};
+
+    use super::editor_command_name;
 
     #[tokio::test]
     async fn native_workspace_service_recurses_ignores_and_detects_specific_projects() {
@@ -605,5 +644,13 @@ mod tests {
         assert_eq!(project.package_manager.as_deref(), Some("pnpm"));
         assert!(preview.content.contains("export const value"));
         assert!(invalid_preview.content.contains("unsupported encoding"));
+    }
+
+    #[test]
+    fn editor_command_name_rejects_unknown_editors() {
+        let error = editor_command_name("unknown-editor")
+            .expect_err("unrecognized editor identifiers must not select a fallback executable");
+
+        assert_eq!(error.kind(), AppErrorKind::Validation);
     }
 }

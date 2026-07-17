@@ -11,6 +11,7 @@ import { ThoughtIcon, SearchIcon, CmdIcon, AskIcon } from '../../../svg-icons'
 import IconSkills from '../../../icons/IconSkills'
 import { CircleAlert, CircleCheck, Loader2, Minimize2, Square } from 'lucide-react'
 import { FileIcon, FolderIcon } from '@react-symbols/icons/utils'
+import { desktopApi } from '../../../../shared/desktop'
 import './LogItemRow.css'
 
 const VERB_TRANSLATIONS: Record<string, string> = {
@@ -151,7 +152,7 @@ export function LogItemRow({
     if (isStopping) return
     setIsStopping(true)
     try {
-      const result = await window.api.chat.interruptTool(item.id)
+      const result = await desktopApi.chat.interruptTool(item.id)
       if (!result.ok) setIsStopping(false)
     } catch (error) {
       console.warn('Failed to stop command:', error)

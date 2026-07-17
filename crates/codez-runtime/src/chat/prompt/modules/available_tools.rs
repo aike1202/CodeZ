@@ -21,6 +21,17 @@ impl PromptModule for AvailableToolsModule {
         Box::pin(async move {
             let mut lines = Vec::new();
 
+            if let Some(available) = &ctx.available_tools {
+                if !available.is_empty() {
+                    lines.push("<available_tools>".to_string());
+                    lines.push("Tools available in this Provider round:".to_string());
+                    for tool in available {
+                        lines.push(format!("- {}: {}", tool.name, tool.summary));
+                    }
+                    lines.push("</available_tools>".to_string());
+                }
+            }
+
             if let Some(deferred) = &ctx.deferred_tools {
                 if !deferred.is_empty() {
                     lines.push("<deferred_tools>".to_string());
@@ -34,9 +45,6 @@ impl PromptModule for AvailableToolsModule {
                     lines.push("</deferred_tools>".to_string());
                 }
             }
-
-            // TODO: Port McpInstructionRegistry logic here
-
             if lines.is_empty() {
                 None
             } else {

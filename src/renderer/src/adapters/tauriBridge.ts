@@ -6,13 +6,23 @@ import type {
   MigrationCredentialInput,
   MigrationRecoveryStatus,
   PermissionMode,
-  SubAgentDetailResult,
-  SubAgentInfo,
   SubAgentModelSelection,
+  SubAgentRunCancelResult,
+  SubAgentRunRequest,
+  SubAgentRunState,
 } from '../shared/desktop/generated/contracts'
-import { defaultSettings, defaultWebSearchSettings } from '@shared/types/settings'
+
+const subAgentRunSessions = new Map<string, string>()
+
+function subAgentSessionForRun(runId: string): string {
+  const sessionId = subAgentRunSessions.get(runId)
+  if (!sessionId) throw new Error('The sub-agent run session is unavailable.')
+  return sessionId
+}
 import type {
   McpListPayload,
+  McpPromptGetResult,
+  McpResourceReadResult,
   McpServerCatalog,
   McpServerConfig,
   McpServerStatus,
@@ -22,6 +32,8 @@ import type {
   ChatAskUserRequest,
   ChatAskUserRequestEvent,
   ChatPermissionApprovalEvent,
+  McpReverseRequestEvent,
+  McpReverseRequestResponse,
 } from '../shared/desktop/generated/contracts'
 
 function permissionRequestForUi(request: any): any {
@@ -56,26 +68,6 @@ function ignoredAskUserAnswers(request: ChatAskUserRequest): ChatAskUserAnswer[]
     question: question.question,
     answer: question.multiSelect ? ['__IGNORED__'] : '__IGNORED__',
   }))
-}
-
-/**
- * Merge raw settings from disk with defaultSettings, including deep-merge
- * for nested objects like webSearch. Mirrors SettingsService.init() in Electron.
- */
-function mergeWithDefaults(raw: any): any {
-  if (!raw || typeof raw !== 'object') return { ...defaultSettings }
-  return {
-    ...defaultSettings,
-    ...raw,
-    webSearch: {
-      ...defaultWebSearchSettings,
-      ...(raw.webSearch || {}),
-      engines: {
-        ...defaultWebSearchSettings.engines,
-        ...(raw.webSearch?.engines || {}),
-      },
-    },
-  }
 }
 
 // Compatibility layer implementing window.api interface over Tauri IPC commands
@@ -124,21 +116,15 @@ export const tauriBridge: any = {
       }),
     promoteDrafts: (sessionId: string, attachments: any[]) =>
       invoke('attachment_promote_drafts', { sessionId, attachments }),
-    rollbackPromotion: async () => {},
+    rollbackPromotion: (sessionId: string, attachmentIds: string[]) =>
+      invoke('attachment_rollback_promotion', { sessionId, attachmentIds }),
     discardDrafts: (draftIds: string[]) => invoke('attachment_discard_drafts', { draftIds }),
     readPreview: (attachment: any, variant: string) =>
       invoke('attachment_read_preview', { attachment, variant }),
   },
   settings: {
-    get: async () => {
-      try {
-        const raw = await invoke('settings_get');
-        return mergeWithDefaults(raw);
-      } catch {
-        return { ...defaultSettings };
-      }
-    },
-    save: (settings: any) => invoke('settings_save', { settings }),
+    get: () => desktopApi.settings.get(),
+    save: (settings: any) => desktopApi.settings.save(settings),
   },
   chat: {
     predictNextInput: async (request: any) => invoke('chat_predict_next_input', { request }),
@@ -249,12 +235,18 @@ export const tauriBridge: any = {
             case 'failed':
               terminal = true
               terminalReceived = true
-              callbacks.onError?.(payload.error?.message || 'The Rust chat run failed.')
+              callbacks.onError?.(
+                payload.error?.message || 'The Rust chat run failed.',
+                payload.txId,
+              )
               break
             case 'interrupted':
               terminal = true
               terminalReceived = true
-              callbacks.onError?.(payload.reason || 'The Rust chat run was interrupted.')
+              callbacks.onError?.(
+                payload.reason || 'The Rust chat run was interrupted.',
+                payload.txId,
+              )
               break
             case 'usage':
               break
@@ -319,43 +311,28 @@ export const tauriBridge: any = {
       invoke('chat_respond_ask_user', { requestId, answers }),
   },
   session: {
-    list: () => invoke('session_list').catch(() => []),
-    get: (sessionId: string) => invoke('session_get', { sessionId }).catch(() => null),
-    save: (session: any) => invoke('session_save', { session }),
-    delete: (sessionId: string) => invoke('session_delete', { sessionId }),
+    list: () => desktopApi.session.list(),
+    get: (sessionId: string) => desktopApi.session.get(sessionId),
+    save: (session: any) => desktopApi.session.save(session),
+    delete: (sessionId: string) => desktopApi.session.delete(sessionId),
   },
   terminal: {
-    start: (workspaceId: string, rootPath: string) => invoke('terminal_start', { workspaceId, rootPath }),
-    write: (workspaceId: string, text: string) => invoke('terminal_write', { workspaceId, text }),
-    resize: (workspaceId: string, cols: number, rows: number) => invoke('terminal_resize', { workspaceId, cols, rows }),
-    kill: (workspaceId: string) => invoke('terminal_kill', { workspaceId }),
-    onOutput: (callback: any) => {
-      let active = true;
-      const unlisten = listen('terminal:output', (event: any) => {
-        if (!active) return;
-        const { id, sequence, data } = event.payload;
-        try {
-          callback(id, data);
-        } finally {
-          void invoke('terminal_ack', { workspaceId: id, sequence }).catch(() => undefined);
-        }
-      });
-      return () => { active = false; unlisten.then((f) => f()); };
-    },
-    onExit: (callback: any) => {
-      let active = true;
-      const unlisten = listen('terminal:exit', (event: any) => {
-        if (active) callback(event.payload.id);
-      });
-      return () => { active = false; unlisten.then((f) => f()); };
-    },
+    start: (workspaceId: string, rootPath: string) => desktopApi.terminal.start(workspaceId, rootPath),
+    write: (workspaceId: string, text: string) => desktopApi.terminal.write(workspaceId, text),
+    resize: (workspaceId: string, cols: number, rows: number) =>
+      desktopApi.terminal.resize(workspaceId, cols, rows),
+    kill: (workspaceId: string) => desktopApi.terminal.kill(workspaceId),
+    onOutput: (callback: (workspaceId: string, data: string | Uint8Array) => void) =>
+      desktopApi.terminal.onOutput(({ workspaceId, data }) => callback(workspaceId, data)),
+    onExit: (callback: (workspaceId: string) => void) =>
+      desktopApi.terminal.onExit(({ workspaceId }) => callback(workspaceId)),
   },
   task: {
     list: async () => invoke('task_list'),
     get: async (taskId: string) => invoke('task_get', { taskId }),
-    getByProject: async (projectId: string) => invoke('task_get_by_project', { projectId }),
+    getByProject: (projectId: string) => desktopApi.task.getByProject(projectId),
     save: async (task: any) => invoke('task_save', { task }),
-    delete: async (taskId: string) => invoke('task_delete', { taskId }),
+    delete: (taskId: string) => desktopApi.task.delete(taskId),
   },
   theme: {
     get: () => invoke('theme_get'),
@@ -390,19 +367,57 @@ export const tauriBridge: any = {
     rename: async (oldPath: string, newFilename: string, workspaceRoot: string, scope: string) => invoke('rules_rename', { oldPath, newFilename, workspaceRoot, scope }),
   },
   mcp: {
-    list: async (): Promise<McpListPayload> => invoke('mcp_list'),
-    saveUser: async (servers: Record<string, McpServerConfig>): Promise<McpListPayload> =>
-      invoke('mcp_save_user', { servers }),
-    setEnabled: async (name: string, enabled: boolean): Promise<McpListPayload> =>
-      invoke('mcp_set_enabled', { name, enabled }),
-    getCatalog: async (name: string): Promise<McpServerCatalog> => invoke('mcp_get_catalog', { name }),
-    reconnect: async (name: string): Promise<void> => invoke('mcp_reconnect', { name }),
-    authorize: async (name: string): Promise<void> => invoke('mcp_authorize', { name }),
-    logout: async (name: string): Promise<void> => invoke('mcp_logout', { name }),
-    trustProject: async (fingerprint: string): Promise<void> => invoke('mcp_trust_project', { fingerprint }),
-    listSecretKeys: async (): Promise<string[]> => invoke('mcp_list_secret_keys'),
+    list: async (workspaceRoot?: string | null): Promise<McpListPayload> =>
+      invoke('mcp_list', { workspaceRoot }),
+    saveUser: async (
+      servers: Record<string, McpServerConfig>,
+      workspaceRoot?: string | null,
+    ): Promise<McpListPayload> => invoke('mcp_save_user', { servers, workspaceRoot }),
+    setEnabled: async (
+      name: string,
+      enabled: boolean,
+      workspaceRoot?: string | null,
+    ): Promise<McpListPayload> => invoke('mcp_set_enabled', { name, enabled, workspaceRoot }),
+    getCatalog: async (name: string, workspaceRoot?: string | null): Promise<McpServerCatalog> =>
+      invoke('mcp_get_catalog', { name, workspaceRoot }),
+    readResource: async (
+      name: string,
+      uri: string,
+      workspaceRoot?: string | null,
+    ): Promise<McpResourceReadResult> => invoke('mcp_read_resource', { name, uri, workspaceRoot }),
+    subscribeResource: async (
+      name: string,
+      uri: string,
+      workspaceRoot?: string | null,
+    ): Promise<void> => invoke('mcp_subscribe_resource', { name, uri, workspaceRoot }),
+    unsubscribeResource: async (
+      name: string,
+      uri: string,
+      workspaceRoot?: string | null,
+    ): Promise<void> => invoke('mcp_unsubscribe_resource', { name, uri, workspaceRoot }),
+    getPrompt: async (
+      name: string,
+      prompt: string,
+      arguments_: Record<string, unknown>,
+      workspaceRoot?: string | null,
+    ): Promise<McpPromptGetResult> =>
+      invoke('mcp_get_prompt', { name, prompt, arguments: arguments_, workspaceRoot }),
+    reconnect: async (name: string, workspaceRoot?: string | null): Promise<void> =>
+      invoke('mcp_reconnect', { name, workspaceRoot }),
+    authorize: async (name: string, workspaceRoot?: string | null): Promise<void> =>
+      invoke('mcp_authorize', { name, workspaceRoot }),
+    logout: async (name: string, workspaceRoot?: string | null): Promise<void> =>
+      invoke('mcp_logout', { name, workspaceRoot }),
+    trustProject: async (fingerprint: string, workspaceRoot?: string | null): Promise<void> =>
+      invoke('mcp_trust_project', { fingerprint, workspaceRoot }),
+    listSecretKeys: async (workspaceRoot?: string | null): Promise<string[]> =>
+      invoke('mcp_list_secret_keys', { workspaceRoot }),
     setSecret: async (key: string, value: string): Promise<string[]> => invoke('mcp_set_secret', { key, value }),
     deleteSecret: async (key: string): Promise<string[]> => invoke('mcp_delete_secret', { key }),
+    respondReverseRequest: async (
+      requestId: string,
+      response: McpReverseRequestResponse,
+    ): Promise<void> => invoke('mcp_respond_reverse_request', { requestId, response }),
     onChanged: (callback: (statuses: McpServerStatus[]) => void) => {
       let active = true;
       const unlisten = listen<McpServerStatus[]>('mcp:status-changed', (event) => {
@@ -410,20 +425,52 @@ export const tauriBridge: any = {
       });
       return () => { active = false; unlisten.then((f) => f()); };
     },
+    onReverseRequest: (callback: (event: McpReverseRequestEvent) => void) => {
+      let active = true;
+      const unlisten = listen<McpReverseRequestEvent>('mcp:reverse-request', (event) => {
+        if (active) callback(event.payload);
+      });
+      return () => { active = false; void unlisten.then((dispose) => dispose()).catch(() => undefined); };
+    },
   },
   subAgent: {
-    list: async (): Promise<SubAgentInfo[]> => invoke('subagent_list'),
-    toggle: async (type: string, enabled: boolean): Promise<void> =>
-      invoke('subagent_toggle', { subagentType: type, enabled }),
-    getDetail: async (type: string): Promise<SubAgentDetailResult> =>
-      invoke('subagent_get_detail', { subagentType: type }),
-    setModel: async (type: string, selections: SubAgentModelSelection[]): Promise<void> =>
-      invoke('subagent_set_model', { subagentType: type, selections }),
+    list: () => desktopApi.subAgent.list(),
+    toggle: (type: string, enabled: boolean) => desktopApi.subAgent.toggle(type, enabled),
+    getDetail: (type: string) => desktopApi.subAgent.getDetail(type),
+    setModel: (type: string, selections: SubAgentModelSelection[]) =>
+      desktopApi.subAgent.setModel(type, selections),
+    run: async (request: SubAgentRunRequest): Promise<SubAgentRunState> => {
+      const state = await desktopApi.subAgent.run(request)
+      subAgentRunSessions.set(state.runId, state.sessionId)
+      return state
+    },
+    getRun: async (runId: string): Promise<SubAgentRunState> =>
+      desktopApi.subAgent.getRun(subAgentSessionForRun(runId), runId),
+    cancelRun: async (runId: string): Promise<SubAgentRunCancelResult> =>
+      desktopApi.subAgent.cancelRun(subAgentSessionForRun(runId), runId),
+    onState: (callback: (state: SubAgentRunState) => void) => {
+      return desktopApi.subAgent.onState((state) => {
+        subAgentRunSessions.set(state.runId, state.sessionId)
+        callback(state)
+      })
+    },
   },
   logger: {
-    info: (...args: any[]) => console.log('[CodeZ]', ...args),
-    warn: (...args: any[]) => console.warn('[CodeZ]', ...args),
-    error: (...args: any[]) => console.error('[CodeZ]', ...args),
-    debug: (...args: any[]) => console.debug('[CodeZ]', ...args),
+    info: (message: string) => {
+      console.info('[CodeZ]', message)
+      void desktopApi.logger.info(message).catch(() => undefined)
+    },
+    warn: (message: string) => {
+      console.warn('[CodeZ]', message)
+      void desktopApi.logger.warn(message).catch(() => undefined)
+    },
+    error: (message: string) => {
+      console.error('[CodeZ]', message)
+      void desktopApi.logger.error(message).catch(() => undefined)
+    },
+    debug: (message: string) => {
+      console.debug('[CodeZ]', message)
+      void desktopApi.logger.debug(message).catch(() => undefined)
+    },
   },
 };

@@ -19,6 +19,12 @@ impl PromptModule for GitStatusModule {
 
     fn build<'a>(&'a self, ctx: &'a PromptContext) -> BoxFuture<'a, Option<String>> {
         Box::pin(async move {
+            if ctx.workspace_root.is_none() {
+                return Some(
+                    "<git_status>unavailable: no project workspace is selected</git_status>"
+                        .to_string(),
+                );
+            }
             let snapshot = ctx.git_status.as_deref().unwrap_or("");
             if snapshot.is_empty() {
                 Some(

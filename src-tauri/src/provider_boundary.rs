@@ -345,6 +345,7 @@ pub(crate) fn chat_message_from_wire(
         }),
         tool_call_id: value.tool_call_id,
         name: value.name,
+        images: Vec::new(),
     }
 }
 

@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+
 use codez_core::provider::{
     AgentStopReason, ChatMessage, ChatStreamEvent, ProviderTokenUsage, Role, ThinkingEffort,
     ThinkingMode, ToolCall, ToolCallFunction,
@@ -200,13 +202,40 @@ fn build_anthropic_messages(messages: &[ChatMessage]) -> Result<Value, ChatProvi
     let mut index = 0;
     while index < messages.len() {
         let message = &messages[index];
+        if !message.images.is_empty() && message.role != Role::User {
+            return Err(ChatProviderError::Parse(
+                "only user messages can include image input".to_string(),
+            ));
+        }
         match message.role {
             Role::System => index += 1,
             Role::User => {
-                output.push(json!({
-                    "role": "user",
-                    "content": message.content.as_deref().unwrap_or("")
-                }));
+                if message.images.is_empty() {
+                    output.push(json!({
+                        "role": "user",
+                        "content": message.content.as_deref().unwrap_or("")
+                    }));
+                } else {
+                    let mut content = Vec::with_capacity(message.images.len().saturating_add(1));
+                    if let Some(text) = message
+                        .content
+                        .as_deref()
+                        .filter(|text| !text.trim().is_empty())
+                    {
+                        content.push(json!({ "type": "text", "text": text }));
+                    }
+                    for image in &message.images {
+                        content.push(json!({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": image.mime_type,
+                                "data": BASE64_STANDARD.encode(&image.bytes)
+                            }
+                        }));
+                    }
+                    output.push(json!({ "role": "user", "content": content }));
+                }
                 index += 1;
             }
             Role::Assistant => {
@@ -514,8 +543,8 @@ fn map_anthropic_stop_reason(reason: &str) -> AgentStopReason {
 #[cfg(test)]
 mod tests {
     use codez_core::provider::{
-        AgentStopReason, ChatMessage, ChatStreamEvent, Role, SecretValue, ThinkingConfig,
-        ThinkingMode, ToolDefinition, ToolDefinitionFunction,
+        AgentStopReason, ChatImage, ChatMessage, ChatStreamEvent, Role, SecretValue,
+        ThinkingConfig, ThinkingMode, ToolDefinition, ToolDefinitionFunction,
     };
     use serde_json::{Value, json};
 
@@ -537,6 +566,7 @@ mod tests {
                     tool_calls: None,
                     tool_call_id: None,
                     name: None,
+                    images: Vec::new(),
                 },
                 ChatMessage {
                     role: Role::User,
@@ -544,6 +574,7 @@ mod tests {
                     tool_calls: None,
                     tool_call_id: None,
                     name: None,
+                    images: Vec::new(),
                 },
             ],
             tools: Some(vec![ToolDefinition {
@@ -606,6 +637,37 @@ mod tests {
                     "cache_control": { "type": "ephemeral" }
                 }]
             })
+        );
+    }
+
+    #[test]
+    fn request_encodes_verified_user_images_as_anthropic_source_blocks() {
+        let mut config = fixture_config();
+        config.tools = None;
+        config.messages = vec![ChatMessage {
+            role: Role::User,
+            content: None,
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+            images: vec![ChatImage {
+                mime_type: "image/webp".to_string(),
+                bytes: vec![1, 2, 3],
+            }],
+        }];
+
+        let payload = build_request_payload(&config).expect("image payload is valid");
+
+        assert_eq!(
+            payload["messages"][0]["content"],
+            json!([{
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/webp",
+                    "data": "AQID"
+                }
+            }])
         );
     }
 

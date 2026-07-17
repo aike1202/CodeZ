@@ -3,7 +3,8 @@ import Button from '../../ui/Button'
 import Card from '../../ui/Card'
 import IconPlus from '../../icons/IconPlus'
 import { useChatStore } from '../../../stores/chatStore'
-import { ImagePlus } from 'lucide-react'
+import { ClipboardList, ImagePlus } from 'lucide-react'
+import { desktopApi } from '../../../shared/desktop'
 
 interface PlusActionMenuProps {
   isOpen: boolean
@@ -18,6 +19,8 @@ export default function PlusActionMenu({
   onCloseOthers,
   onAddPhotos
 }: PlusActionMenuProps): React.ReactElement {
+  const planAvailable = desktopApi.capabilities.plan
+
   return (
     <div className="relative">
       <Button
@@ -50,18 +53,19 @@ export default function PlusActionMenu({
               <ImagePlus size={17} aria-hidden="true" />
               <span>添加照片</span>
             </button>
-            <div
-              className="prompt-dropdown-provider"
-              onClick={() => {
-                setIsOpen(false)
-                useChatStore.getState().setPlanListModalOpen(true)
-              }}
-              style={{ cursor: 'pointer', padding: '10px 14px' }}
-            >
-              <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
-                <span style={{ fontSize: '1.1em' }}>📋</span> 绑定开发计划
-              </span>
-            </div>
+            {planAvailable ? (
+              <button
+                type="button"
+                className="prompt-dropdown-provider prompt-action-menu-item"
+                onClick={() => {
+                  setIsOpen(false)
+                  useChatStore.getState().setPlanListModalOpen(true)
+                }}
+              >
+                <ClipboardList size={17} aria-hidden="true" />
+                <span>绑定开发计划</span>
+              </button>
+            ) : null}
           </Card>
         </>
       )}

@@ -5,6 +5,7 @@ import Stack from '../ui/Stack'
 import Card from '../ui/Card'
 import IconClose from '../icons/IconClose'
 import IconTrash from '../icons/IconTrash'
+import { desktopApi, type TaskHistoryRecord } from '../../shared/desktop/api'
 import './TaskHistoryModal.css'
 
 interface TaskHistoryModalProps {
@@ -13,25 +14,29 @@ interface TaskHistoryModalProps {
 }
 
 export default function TaskHistoryModal({ workspaceId, onClose }: TaskHistoryModalProps) {
-  const [tasks, setTasks] = useState<any[]>([])
+  const [tasks, setTasks] = useState<TaskHistoryRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
 
   useEffect(() => {
-    window.api.task.getByProject(workspaceId).then((data) => {
-      setTasks(data || [])
-      setLoading(false)
-    }).catch((err) => {
-      console.error(err)
-      setLoading(false)
+    let active = true
+    void desktopApi.task.getByProject(workspaceId).then((data) => {
+      if (active) setTasks(data)
+    }).catch((error) => {
+      console.error(error)
+    }).finally(() => {
+      if (active) setLoading(false)
     })
+    return () => {
+      active = false
+    }
   }, [workspaceId])
 
   const handleDelete = async (taskId: string, e: React.MouseEvent) => {
     e.stopPropagation()
     if (confirm('确定要删除此任务记录吗？')) {
-      await window.api.task.delete(taskId)
-      setTasks(tasks.filter((t) => t.id !== taskId))
+      await desktopApi.task.delete(taskId)
+      setTasks((current) => current.filter((task) => task.id !== taskId))
     }
   }
 
@@ -65,7 +70,7 @@ export default function TaskHistoryModal({ workspaceId, onClose }: TaskHistoryMo
                       >
                         <Stack className="min-w-0">
                           <span className="task-title">{task.title || '未命名任务'}</span>
-                          <span className="task-time">{new Date(task.timestamp).toLocaleString()}</span>
+                          <span className="task-time">{new Date(task.timestamp ?? 0).toLocaleString()}</span>
                         </Stack>
                         <Flex align="center" gap={3}>
                           <span className={`task-badge ${

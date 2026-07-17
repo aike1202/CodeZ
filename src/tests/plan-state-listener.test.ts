@@ -15,6 +15,7 @@ describe('plan state listener lifecycle', () => {
     const on = vi.fn()
     const removeListener = vi.fn()
     ;(globalThis as any).window = {
+      api: { plan: {} },
       electron: {
         ipcRenderer: {
           on,
@@ -41,5 +42,19 @@ describe('plan state listener lifecycle', () => {
       'plan:state-changed',
       'plan:linked'
     ])
+  })
+
+  it('does not register Electron Plan listeners in the Tauri renderer', async () => {
+    const on = vi.fn()
+    ;(globalThis as any).window = {
+      __TAURI_INTERNALS__: {},
+      electron: { ipcRenderer: { on } }
+    }
+
+    const { useChatStore } = await import('../renderer/src/stores/chatStore')
+    const cleanup = useChatStore.getState().initPlanStateListener()
+
+    expect(on).not.toHaveBeenCalled()
+    expect(cleanup()).toBeUndefined()
   })
 })

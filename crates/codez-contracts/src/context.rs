@@ -8,6 +8,50 @@ use crate::{ComposerImageAttachment, chat::AgentStopReason, provider::ProviderTo
 pub const MAIN_CONTEXT_SCOPE: &str = "main";
 pub const CONTEXT_SCHEMA_VERSION: u16 = 1;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum ContextPressureLevel {
+    Normal,
+    Warning,
+    Prune,
+    Compact,
+    Overflow,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum ContextEstimateSource {
+    Provider,
+    Tokenizer,
+    Heuristic,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ContextBudgetSnapshot {
+    pub hard_input_limit: u32,
+    pub usable_input_budget: u32,
+    pub output_reserve_tokens: u32,
+    pub safety_margin_tokens: u32,
+    pub system_prompt_tokens: u32,
+    pub tool_schema_tokens: u32,
+    pub instruction_tokens: u32,
+    pub protocol_tokens: u32,
+    pub summary_tokens: u32,
+    pub recent_history_tokens: u32,
+    pub raw_history_tokens: u32,
+    pub current_input_tokens: u32,
+    pub total_input_tokens: u32,
+    #[ts(type = "number")]
+    pub provider_adjustment_tokens: i64,
+    pub pressure_level: ContextPressureLevel,
+    pub estimate_source: ContextEstimateSource,
+    pub history_version: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, TS)]
 #[ts(type = "string")]
 pub enum ContextScopeId {

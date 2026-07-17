@@ -1,4 +1,6 @@
 use std::{
+    fs::{File, OpenOptions},
+    path::Path,
     process::{ExitStatus, Stdio},
     sync::{
         Arc,
@@ -8,7 +10,9 @@ use std::{
 };
 
 use codez_core::{
-    AppError, CancellationToken, PortFuture, ProcessOutput, ProcessRequest, ProcessRunner,
+    AppError, AppErrorKind, CancellationToken, PortFuture, ProcessOutput, ProcessRequest,
+    ProcessRunner, SpawnedProcess, SpawnedProcessOutput, SpawnedProcessOutputTarget,
+    SpawnedProcessRequest, SpawnedProcessRunner, SpawnedProcessTermination,
 };
 use dashmap::DashMap;
 #[cfg(unix)]
@@ -18,7 +22,7 @@ use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
 use process_wrap::tokio::{CreationFlags, JobObject};
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
-    sync::Notify,
+    sync::{Notify, watch},
     task::JoinHandle,
 };
 #[cfg(windows)]
@@ -58,6 +62,63 @@ enum ProcessCompletion {
     Cancelled,
     TimedOut,
     Shutdown,
+}
+
+enum SpawnedCaptureTasks {
+    Captured {
+        stdout: JoinHandle<Result<CapturedStream, std::io::Error>>,
+        stderr: JoinHandle<Result<CapturedStream, std::io::Error>>,
+    },
+    Files,
+}
+
+#[derive(Debug, Clone)]
+enum SharedProcessCompletion {
+    Output(SpawnedProcessOutput),
+    Error(SharedProcessError),
+}
+
+#[derive(Debug, Clone)]
+struct SharedProcessError {
+    kind: AppErrorKind,
+    message: String,
+    diagnostic: Option<String>,
+    retryable: bool,
+}
+
+impl SharedProcessError {
+    fn from_app_error(error: AppError) -> Self {
+        Self {
+            kind: error.kind(),
+            message: error.public_message().to_string(),
+            diagnostic: error.diagnostic().map(str::to_string),
+            retryable: error.retryable(),
+        }
+    }
+
+    fn into_app_error(self) -> AppError {
+        let diagnostic = self.diagnostic.unwrap_or_else(|| self.message.clone());
+        match self.kind {
+            AppErrorKind::Validation => AppError::validation(self.message),
+            AppErrorKind::Unsupported => AppError::unsupported(self.message),
+            AppErrorKind::PermissionDenied => AppError::permission_denied(self.message),
+            AppErrorKind::NotFound => AppError::not_found(self.message),
+            AppErrorKind::Conflict => AppError::conflict(self.message),
+            AppErrorKind::RunActive => AppError::run_active(self.message),
+            AppErrorKind::External => AppError::external(self.message, diagnostic, self.retryable),
+            AppErrorKind::ProcessFailed => AppError::process_failed(self.message, diagnostic),
+            AppErrorKind::Cancelled => AppError::cancelled(self.message),
+            AppErrorKind::Timeout => AppError::timeout(self.message),
+            AppErrorKind::Storage => AppError::storage(self.message, diagnostic, self.retryable),
+            AppErrorKind::Internal => AppError::internal(diagnostic),
+        }
+    }
+}
+
+struct NativeSpawnedProcess {
+    pid: Option<u32>,
+    terminate: CancellationToken,
+    completion: watch::Receiver<Option<SharedProcessCompletion>>,
 }
 
 impl Default for NativeProcessRunner {
@@ -260,6 +321,250 @@ impl ProcessRunner for NativeProcessRunner {
     }
 }
 
+impl SpawnedProcessRunner for NativeProcessRunner {
+    fn spawn(&self, request: SpawnedProcessRequest) -> PortFuture<'_, Arc<dyn SpawnedProcess>> {
+        Box::pin(async move {
+            request.validate()?;
+            let max_bytes = usize::try_from(request.max_output_bytes).map_err(|_| {
+                AppError::validation("The process output limit is unsupported on this platform")
+            })?;
+            let (active_guard, shutdown) = self.register_process()?;
+
+            let mut command = tokio::process::Command::new(&request.program);
+            command
+                .args(&request.arguments)
+                .current_dir(&request.current_directory)
+                .env_clear()
+                .envs(&request.environment)
+                .stdin(Stdio::null());
+
+            match &request.output {
+                SpawnedProcessOutputTarget::Capture => {
+                    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+                }
+                SpawnedProcessOutputTarget::Files {
+                    stdout_path,
+                    stderr_path,
+                } => {
+                    let stdout = create_output_file(stdout_path)?;
+                    let stderr = create_output_file(stderr_path)?;
+                    command
+                        .stdout(Stdio::from(stdout))
+                        .stderr(Stdio::from(stderr));
+                }
+            }
+
+            let mut command = CommandWrap::from(command);
+            #[cfg(windows)]
+            {
+                command.wrap(CreationFlags(CREATE_NO_WINDOW));
+                command.wrap(JobObject);
+            }
+            #[cfg(unix)]
+            command.wrap(ProcessGroup::leader());
+            command.wrap(KillOnDrop);
+
+            let started = Instant::now();
+            let mut child = command.spawn().map_err(|source| {
+                AppError::external(
+                    "The child process could not be started",
+                    format!("spawn {:?}: {source}", request.program),
+                    false,
+                )
+            })?;
+            let pid = child.id();
+            let capture = match request.output {
+                SpawnedProcessOutputTarget::Capture => {
+                    let stdout = child.stdout().take().ok_or_else(|| {
+                        AppError::internal("spawned process stdout was not piped after spawn")
+                    })?;
+                    let stderr = child.stderr().take().ok_or_else(|| {
+                        AppError::internal("spawned process stderr was not piped after spawn")
+                    })?;
+                    let budget = Arc::new(OutputBudget::new(max_bytes));
+                    SpawnedCaptureTasks::Captured {
+                        stdout: spawn_stream_reader(stdout, Arc::clone(&budget)),
+                        stderr: spawn_stream_reader(stderr, budget),
+                    }
+                }
+                SpawnedProcessOutputTarget::Files { .. } => SpawnedCaptureTasks::Files,
+            };
+            let terminate = CancellationToken::new();
+            let supervisor_terminate = terminate.clone();
+            let (completion_tx, completion_rx) = watch::channel(None);
+            tokio::spawn(async move {
+                let _active_guard = active_guard;
+                let completion = supervise_spawned_process(
+                    &mut *child,
+                    capture,
+                    started,
+                    &supervisor_terminate,
+                    &shutdown,
+                )
+                .await
+                .map_or_else(
+                    |error| {
+                        SharedProcessCompletion::Error(SharedProcessError::from_app_error(error))
+                    },
+                    SharedProcessCompletion::Output,
+                );
+                completion_tx.send_replace(Some(completion));
+            });
+
+            Ok(Arc::new(NativeSpawnedProcess {
+                pid,
+                terminate,
+                completion: completion_rx,
+            }) as Arc<dyn SpawnedProcess>)
+        })
+    }
+}
+
+impl SpawnedProcess for NativeSpawnedProcess {
+    fn pid(&self) -> Option<u32> {
+        self.pid
+    }
+
+    fn wait(&self) -> PortFuture<'_, SpawnedProcessOutput> {
+        Box::pin(wait_for_shared_completion(self.completion.clone()))
+    }
+
+    fn terminate(&self) -> PortFuture<'_, SpawnedProcessOutput> {
+        Box::pin(async move {
+            self.terminate.cancel();
+            tokio::time::timeout(
+                PROCESS_TREE_EXIT_TIMEOUT + PIPE_DRAIN_TIMEOUT + Duration::from_secs(1),
+                wait_for_shared_completion(self.completion.clone()),
+            )
+            .await
+            .map_err(|_| {
+                AppError::timeout("The child process tree termination was not confirmed")
+            })?
+        })
+    }
+}
+
+fn create_output_file(path: &Path) -> Result<File, AppError> {
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|source| {
+            AppError::storage(
+                "The process output artifact could not be created",
+                format!("create {:?}: {source}", path),
+                false,
+            )
+        })
+}
+
+async fn wait_for_shared_completion(
+    mut receiver: watch::Receiver<Option<SharedProcessCompletion>>,
+) -> Result<SpawnedProcessOutput, AppError> {
+    loop {
+        if let Some(completion) = receiver.borrow().clone() {
+            return match completion {
+                SharedProcessCompletion::Output(output) => Ok(output),
+                SharedProcessCompletion::Error(error) => Err(error.into_app_error()),
+            };
+        }
+        receiver.changed().await.map_err(|_| {
+            AppError::internal("spawned process supervisor closed without a terminal result")
+        })?;
+    }
+}
+
+async fn supervise_spawned_process(
+    child: &mut dyn ChildWrapper,
+    capture: SpawnedCaptureTasks,
+    started: Instant,
+    terminate: &CancellationToken,
+    shutdown: &CancellationToken,
+) -> Result<SpawnedProcessOutput, AppError> {
+    let completion = tokio::select! {
+        biased;
+        status = child.wait() => ProcessCompletion::Exited(status),
+        () = terminate.cancelled() => ProcessCompletion::Cancelled,
+        () = shutdown.cancelled() => ProcessCompletion::Shutdown,
+    };
+
+    match completion {
+        ProcessCompletion::Exited(status) => {
+            let status = status.map_err(|source| {
+                AppError::external(
+                    "The child process exit status could not be read",
+                    source.to_string(),
+                    false,
+                )
+            })?;
+            spawned_output(
+                status.code(),
+                capture,
+                started,
+                SpawnedProcessTermination::Exited,
+            )
+            .await
+        }
+        ProcessCompletion::Cancelled | ProcessCompletion::Shutdown => {
+            let reason = if matches!(completion, ProcessCompletion::Shutdown) {
+                "application shutdown"
+            } else {
+                "interruption"
+            };
+            terminate_and_confirm(child, reason).await?;
+            let exit_code = child
+                .try_wait()
+                .map_err(|source| {
+                    AppError::external(
+                        "The terminated child process status could not be read",
+                        source.to_string(),
+                        false,
+                    )
+                })?
+                .and_then(|status| status.code());
+            spawned_output(
+                exit_code,
+                capture,
+                started,
+                SpawnedProcessTermination::Terminated,
+            )
+            .await
+        }
+        ProcessCompletion::TimedOut => Err(AppError::internal(
+            "spawned process supervisor entered an impossible timeout state",
+        )),
+    }
+}
+
+async fn spawned_output(
+    exit_code: Option<i32>,
+    capture: SpawnedCaptureTasks,
+    started: Instant,
+    termination: SpawnedProcessTermination,
+) -> Result<SpawnedProcessOutput, AppError> {
+    let (stdout, stderr) = match capture {
+        SpawnedCaptureTasks::Captured { stdout, stderr } => collect_streams(stdout, stderr).await?,
+        SpawnedCaptureTasks::Files => (
+            CapturedStream {
+                bytes: Vec::new(),
+                truncated: false,
+            },
+            CapturedStream {
+                bytes: Vec::new(),
+                truncated: false,
+            },
+        ),
+    };
+    Ok(SpawnedProcessOutput {
+        exit_code,
+        stdout: stdout.bytes,
+        stderr: stderr.bytes,
+        output_truncated: stdout.truncated || stderr.truncated,
+        elapsed: started.elapsed(),
+        termination,
+    })
+}
+
 struct OutputBudget {
     limit: usize,
     used: AtomicUsize,
@@ -432,7 +737,10 @@ mod tests {
         time::Duration,
     };
 
-    use codez_core::{AppErrorKind, CancellationToken, ProcessRequest, ProcessRunner};
+    use codez_core::{
+        AppErrorKind, CancellationToken, ProcessRequest, ProcessRunner, SpawnedProcessOutputTarget,
+        SpawnedProcessRequest, SpawnedProcessRunner, SpawnedProcessTermination,
+    };
     use tempfile::tempdir;
 
     use super::NativeProcessRunner;
@@ -681,6 +989,80 @@ mod tests {
             .expect_err("stopped runner must reject new work");
 
         assert_eq!(error.kind(), AppErrorKind::Conflict);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn spawned_process_should_interrupt_a_long_bash_command_and_run_the_next_command() {
+        let Some(bash) = windows_git_bash() else {
+            return;
+        };
+        let directory = tempdir().expect("temporary directory must be available");
+        let runner = NativeProcessRunner::new();
+        let long_process = runner
+            .spawn(spawned_bash_request(
+                &bash,
+                directory.path(),
+                "/usr/bin/sleep 120",
+            ))
+            .await
+            .expect("long-running Bash fixture must start");
+
+        let first_wait =
+            tokio::time::timeout(Duration::from_millis(100), long_process.wait()).await;
+        assert!(first_wait.is_err(), "the first wait window must expire");
+        let interrupted = long_process
+            .terminate()
+            .await
+            .expect("the Bash process tree interruption must be confirmed");
+        let next_process = runner
+            .spawn(spawned_bash_request(
+                &bash,
+                directory.path(),
+                "printf recovered",
+            ))
+            .await
+            .expect("the same runner must accept a subsequent Bash command");
+        let next = next_process
+            .wait()
+            .await
+            .expect("the subsequent Bash command must complete");
+
+        assert_eq!(
+            (interrupted.termination, next.exit_code, next.stdout),
+            (
+                SpawnedProcessTermination::Terminated,
+                Some(0),
+                b"recovered".to_vec(),
+            )
+        );
+    }
+
+    #[cfg(windows)]
+    fn windows_git_bash() -> Option<PathBuf> {
+        [
+            PathBuf::from(r"C:\Program Files\Git\bin\bash.exe"),
+            PathBuf::from(r"C:\Program Files\Git\usr\bin\bash.exe"),
+            PathBuf::from(r"C:\Program Files (x86)\Git\bin\bash.exe"),
+        ]
+        .into_iter()
+        .find_map(|candidate| dunce::canonicalize(candidate).ok())
+    }
+
+    #[cfg(windows)]
+    fn spawned_bash_request(
+        executable: &Path,
+        current_directory: &Path,
+        command: &str,
+    ) -> SpawnedProcessRequest {
+        SpawnedProcessRequest {
+            program: executable.to_path_buf(),
+            arguments: ["-c", command].into_iter().map(OsString::from).collect(),
+            current_directory: current_directory.to_path_buf(),
+            environment: BTreeMap::new(),
+            max_output_bytes: 64 * 1024,
+            output: SpawnedProcessOutputTarget::Capture,
+        }
     }
 
     #[cfg(windows)]

@@ -237,4 +237,62 @@ impl ReadFingerprintStore {
         }
         false
     }
+
+    /// Drops all in-memory read and delivery state owned by one deleted session.
+    pub async fn clear_session(&self, session_id: &str) {
+        self.sessions.remove(session_id);
+        self.deliveries.remove(session_id);
+        self.inflight
+            .retain(|key, _| !key.starts_with(&format!("{session_id}:")));
+
+        if let Some((_, snapshots)) = self.snapshots.remove(session_id) {
+            let released_bytes = snapshots
+                .iter()
+                .map(|entry| entry.value().buffer.len())
+                .sum::<usize>();
+            self.snapshot_bytes
+                .fetch_update(
+                    std::sync::atomic::Ordering::SeqCst,
+                    std::sync::atomic::Ordering::SeqCst,
+                    |current| Some(current.saturating_sub(released_bytes)),
+                )
+                .ok();
+        }
+
+        self.snapshot_order
+            .lock()
+            .await
+            .retain(|entry| entry.session_id != session_id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{path::PathBuf, sync::Arc};
+
+    use super::{ReadFingerprintStore, ReadSnapshot};
+
+    #[tokio::test]
+    async fn clear_session_removes_read_snapshots_and_delivery_tracking() {
+        let store = ReadFingerprintStore::new(10, 1_024);
+        let path = PathBuf::from("fixture.txt");
+        let snapshot = Arc::new(ReadSnapshot {
+            sha256: "fixture-sha".to_string(),
+            buffer: b"fixture".to_vec(),
+            stat_signature: "fixture-stat".to_string(),
+        });
+        store
+            .record_snapshot("session-1", &path, Arc::clone(&snapshot))
+            .await;
+        store.record_delivery("session-1", "main", &path, "fixture-sha");
+
+        store.clear_session("session-1").await;
+
+        assert!(
+            store
+                .get_snapshot("session-1", &path, "fixture-stat")
+                .is_none()
+        );
+        assert!(!store.has_delivery("session-1", "main", &path, "fixture-sha"));
+    }
 }

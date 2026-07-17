@@ -1,5 +1,12 @@
 pub mod bash;
 pub mod edit;
+mod file_mutation;
+pub mod glob;
+pub mod grep;
+pub mod list_files;
+pub mod notebook_edit;
 mod path;
+pub mod powershell;
 pub mod read;
+mod search_support;
 pub mod write;

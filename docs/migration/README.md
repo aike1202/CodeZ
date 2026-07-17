@@ -2,6 +2,8 @@
 
 本目录记录实施证据，不替代需求、架构和计划文档。
 
+> **当前范围（2026-07-17）**：Tauri 只在 `~/.codez` 初始化并运行新状态；不读取、复制或迁移 Electron `userData`、旧 `~/.codez` 实验数据或旧密钥。Electron 的源码、测试、配置、依赖和安装基线永久保留，本项目不执行 Electron 删除。MCP 暂缓，不能阻塞 Workspace、Terminal、Skills、Host、Provider、Chat、Tool、Permission、Agent 和 Renderer bridge 的迁移。详情见 `current-execution-scope.md`；下方历史 Phase 2/9/10 描述仅保留审计记录，已被本说明覆盖。
+
 ## 当前状态
 
 下列状态按当前工作树的代码边界记录。某个 crate、command 或测试存在，不等于对应用户流程已经由 Rust/Tauri 完整承接；只有各 Phase 的出口和 Phase 9 删除门禁才构成迁移完成证据。

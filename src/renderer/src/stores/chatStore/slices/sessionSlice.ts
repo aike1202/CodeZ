@@ -8,6 +8,8 @@ import type {
   ToolCallState
 } from '../types'
 import { useWorkspaceStore } from '../../workspaceStore'
+import { desktopApi } from '../../../shared/desktop'
+import type { SessionData } from '@shared/types/session'
 import type {
   SessionRuntimeStatus,
   SubAgentHandoff,
@@ -37,10 +39,12 @@ const normalizeMessage = (message: ChatMessage): ChatMessage => ({
     : undefined
 })
 
-function normalizeSession(session: ChatSession): ChatSession {
+function normalizeSession(session: SessionData): ChatSession {
   return {
     ...session,
-    messages: Array.isArray(session.messages) ? session.messages.map(normalizeMessage) : [],
+    messages: Array.isArray(session.messages)
+      ? session.messages.map((message) => normalizeMessage(message as ChatMessage))
+      : [],
     queuedPrompts: Array.isArray(session.queuedPrompts)
       ? session.queuedPrompts.map((prompt) => ({
           ...prompt,
@@ -454,8 +458,8 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
 
   loadSessions: async () => {
     try {
-      const sessions = await window.api.session.list()
-      if (Array.isArray(sessions) && sessions.length > 0) {
+      const sessions = await desktopApi.session.list()
+      if (sessions.length > 0) {
         set({ sessions: sessions.map((session) => normalizeSession(session)) })
       }
     } catch (err) {
@@ -490,17 +494,15 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     const seq = ++_selectSessionSeq
     // 优先从主进程获取最新数据，避免使用内存中的旧快照
     try {
-      const runtimeStatusPromise = window.api.chat?.getRuntimeStatus
-        ? window.api.chat.getRuntimeStatus(sessionId).catch((error) => {
-            console.warn(
-              '[sessionSlice.selectSession] Runtime status unavailable; restoring as interrupted:',
-              error
-            )
-            return inactiveRuntimeStatus(sessionId)
-          })
-        : Promise.resolve(inactiveRuntimeStatus(sessionId))
+      const runtimeStatusPromise = desktopApi.chat.getRuntimeStatus(sessionId).catch((error) => {
+        console.warn(
+          '[sessionSlice.selectSession] Runtime status unavailable; restoring as interrupted:',
+          error
+        )
+        return inactiveRuntimeStatus(sessionId)
+      })
       const [freshSession, runtimeStatus] = await Promise.all([
-        window.api.session.get(sessionId),
+        desktopApi.session.get(sessionId),
         runtimeStatusPromise
       ])
       // 防止竞态：IPC 返回时用户可能已切换到其他会话
@@ -510,9 +512,7 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
           runtimeStatus.activeSubAgentIds.length > 0 ||
           Boolean(get().streamCleanups[sessionId])
         const cachedSession = get().sessions.find((session) => session.id === sessionId)
-        const freshMessages = Array.isArray(freshSession.messages)
-          ? freshSession.messages.map(normalizeMessage)
-          : []
+        const freshMessages = freshSession.messages.map((message) => normalizeMessage(message as ChatMessage))
         const cachedMessages = cachedSession?.messages.map(normalizeMessage) || []
         const memoryHasNewerTerminalState = Boolean(cachedSession) &&
           hasNewerSettledSubAgent(freshMessages, cachedMessages)
@@ -523,7 +523,7 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
           ? { messages: sourceMessages, changed: false }
           : healInterruptedSubAgents(sourceMessages)
         const interruptedRequests = interruptPendingRequests(healed.messages, runtimeStatus)
-        const normalizedFreshSession = normalizeSession(freshSession as ChatSession)
+        const normalizedFreshSession = normalizeSession(freshSession)
         const healedSession = {
           ...freshSession,
           messages: interruptedRequests.messages,
@@ -548,9 +548,9 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
           }
         })
         if (healed.changed || interruptedRequests.changed) {
-          await window.api.session.save(healedSession)
+          await desktopApi.session.save(healedSession)
         }
-        if (freshSession.linkedPlanSlug) {
+        if (desktopApi.capabilities.plan && freshSession.linkedPlanSlug) {
           try {
             const workspace = useWorkspaceStore.getState().workspace
             if (workspace) {
@@ -590,7 +590,7 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
         pendingInternalContinuation: null,
         activePlan: null
       }))
-      if (session.linkedPlanSlug) {
+      if (desktopApi.capabilities.plan && session.linkedPlanSlug) {
         try {
           const workspace = useWorkspaceStore.getState().workspace
           if (workspace) {
@@ -607,6 +607,8 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
   },
 
   linkPlanToSession: async (sessionId: string, planSlug: string | null) => {
+    if (!desktopApi.capabilities.plan) return
+
     set((s) => ({
       sessions: s.sessions.map((sess) =>
         sess.id === sessionId ? { ...sess, linkedPlanSlug: planSlug || undefined } : sess
@@ -635,7 +637,7 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     const session = sessions.find((s) => s.id === activeSessionId)
     if (session) {
       try {
-        await window.api.session.save(session)
+        await desktopApi.session.save(session)
       } catch (err) {
         console.error('[sessionSlice.persistCurrentSession] Failed:', err)
       }
@@ -647,7 +649,7 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     const session = sessions.find((s) => s.id === sessionId)
     if (session) {
       try {
-        await window.api.session.save(session)
+        await desktopApi.session.save(session)
       } catch (err) {
         console.error('[sessionSlice.persistSession] Failed:', err)
       }
@@ -738,7 +740,7 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     const session = get().sessions.find((s) => s.id === sessionId)
     if (session) {
       try {
-        await window.api.session.save(session)
+        await desktopApi.session.save(session)
       } catch (err) {
         console.error('[sessionSlice] persist failed:', err)
       }
@@ -753,6 +755,12 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
       get().setStreamCleanup(sessionId, null)
     }
 
+    const beforeDelete = get()
+    const previousSessionIndex = beforeDelete.sessions.findIndex((session) => session.id === sessionId)
+    const previousSession = beforeDelete.sessions[previousSessionIndex]
+    const previousActiveSessionId = beforeDelete.activeSessionId
+    const previousMessages = previousActiveSessionId === sessionId ? beforeDelete.messages : null
+    const previousComposerDraft = beforeDelete.composerDrafts[sessionId]
     let isAlreadyDeleted = false
     set((s) => {
       const session = s.sessions.find((x) => x.id === sessionId)
@@ -779,9 +787,40 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     })
     get().clearRuntimeStatus(sessionId)
     try {
-      await window.api.session.delete(sessionId)
+      await desktopApi.session.delete(sessionId)
     } catch (err) {
       get().allowRuntimeStatus(sessionId)
+      if (previousSession) {
+        set((state) => {
+          const sessions = [...state.sessions]
+          const currentIndex = sessions.findIndex((session) => session.id === sessionId)
+          if (isAlreadyDeleted) {
+            if (currentIndex === -1) {
+              sessions.splice(Math.min(previousSessionIndex, sessions.length), 0, previousSession)
+            }
+          } else if (currentIndex >= 0 && sessions[currentIndex].isDeleted) {
+            const current = sessions[currentIndex]
+            sessions[currentIndex] = {
+              ...current,
+              isDeleted: previousSession.isDeleted,
+              deletedAt: previousSession.deletedAt
+            }
+          }
+
+          const composerDrafts = { ...state.composerDrafts }
+          if (previousComposerDraft && composerDrafts[sessionId] === undefined) {
+            composerDrafts[sessionId] = previousComposerDraft
+          }
+          const restoreActiveSession =
+            previousActiveSessionId === sessionId && state.activeSessionId === null
+          return {
+            sessions,
+            composerDrafts,
+            activeSessionId: restoreActiveSession ? sessionId : state.activeSessionId,
+            messages: restoreActiveSession && previousMessages ? previousMessages : state.messages
+          }
+        })
+      }
       console.error('[sessionSlice.deleteSession] Failed:', err)
     }
   },
@@ -797,7 +836,7 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     const session = get().sessions.find((s) => s.id === sessionId)
     if (session) {
       try {
-        await window.api.session.save(session)
+        await desktopApi.session.save(session)
       } catch (err) {
         console.error('[sessionSlice] persist failed:', err)
       }

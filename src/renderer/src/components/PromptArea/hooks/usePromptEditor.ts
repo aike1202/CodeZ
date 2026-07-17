@@ -8,6 +8,7 @@ import type { ComposerImageAttachment } from '@shared/types/attachment'
 import { supportsImageInput } from '@shared/utils/imageCapabilities'
 import { evaluateImageSendState } from '../../chat/imageAttachmentState'
 import { restoreRejectedPromptText } from '../promptSubmissionState'
+import { desktopApi } from '../../../shared/desktop'
 
 export function usePromptEditor(
   onSend: (
@@ -109,8 +110,8 @@ export function usePromptEditor(
 
   useEffect(() => {
     if (workspace) {
-      window.api.skill.getAll(workspace.rootPath).then(setDynamicSkills).catch(() => {})
-      ;(window as any).api.workspace.getAllPaths(workspace.rootPath).then((paths: any) => {
+      desktopApi.skill.getAll(workspace.rootPath).then(setDynamicSkills).catch(() => {})
+      desktopApi.workspace.getAllPaths(workspace.rootPath).then((paths) => {
         if (Array.isArray(paths)) {
           setFlattenedFiles(paths)
         }

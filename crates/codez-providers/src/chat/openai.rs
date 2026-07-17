@@ -1,12 +1,14 @@
 use std::collections::BTreeMap;
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use codez_core::provider::{
-    AgentStopReason, ChatStreamEvent, ProviderTokenUsage, Role, ThinkingEffort, ThinkingMode,
-    ToolCall, ToolCallFunction,
+    AgentStopReason, ChatMessage, ChatStreamEvent, ProviderTokenUsage, Role, ThinkingEffort,
+    ThinkingMode, ToolCall, ToolCallFunction,
 };
 use eventsource_stream::Eventsource;
 use futures_util::stream::{BoxStream, StreamExt};
 use reqwest::{Client, Url};
+use serde::Serialize;
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -124,21 +126,99 @@ fn openai_endpoint(base_url: &str) -> Result<Url, ChatProviderError> {
     Ok(url)
 }
 
-fn build_request_payload(config: &ChatRequestConfig) -> Result<Value, ChatProviderError> {
-    let mut messages = config.messages.clone();
-    for message in &mut messages {
-        if message.role == Role::System {
-            message.content = message.content.as_deref().map(strip_system_prompt_marker);
-        }
+#[derive(Serialize)]
+struct OpenAiToolCall<'a> {
+    id: &'a str,
+    #[serde(rename = "type")]
+    r#type: &'a str,
+    function: &'a ToolCallFunction,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "thought_signature")]
+    thought_signature: Option<&'a str>,
+}
+
+fn openai_message_value(message: &ChatMessage) -> Result<Value, ChatProviderError> {
+    if !message.images.is_empty() && message.role != Role::User {
+        return Err(ChatProviderError::Parse(
+            "only user messages can include image input".to_string(),
+        ));
     }
+
+    let mut value = Map::new();
+    value.insert(
+        "role".to_string(),
+        serde_json::to_value(message.role)
+            .map_err(|error| ChatProviderError::Parse(error.to_string()))?,
+    );
+    if message.images.is_empty() {
+        if let Some(content) = message.content.as_deref() {
+            let content = if message.role == Role::System {
+                strip_system_prompt_marker(content)
+            } else {
+                content.to_string()
+            };
+            value.insert("content".to_string(), Value::String(content));
+        }
+    } else {
+        let mut content = Vec::with_capacity(message.images.len().saturating_add(1));
+        if let Some(text) = message
+            .content
+            .as_deref()
+            .filter(|text| !text.trim().is_empty())
+        {
+            content.push(json!({ "type": "text", "text": text }));
+        }
+        for image in &message.images {
+            content.push(json!({
+                "type": "image_url",
+                "image_url": {
+                    "url": format!(
+                        "data:{};base64,{}",
+                        image.mime_type,
+                        BASE64_STANDARD.encode(&image.bytes)
+                    )
+                }
+            }));
+        }
+        value.insert("content".to_string(), Value::Array(content));
+    }
+    if let Some(calls) = message.tool_calls.as_ref() {
+        let calls = calls
+            .iter()
+            .map(|call| OpenAiToolCall {
+                id: &call.id,
+                r#type: &call.r#type,
+                function: &call.function,
+                thought_signature: call.thought_signature.as_deref(),
+            })
+            .collect::<Vec<_>>();
+        value.insert(
+            "tool_calls".to_string(),
+            serde_json::to_value(calls)
+                .map_err(|error| ChatProviderError::Parse(error.to_string()))?,
+        );
+    }
+    if let Some(tool_call_id) = message.tool_call_id.as_deref() {
+        value.insert(
+            "tool_call_id".to_string(),
+            Value::String(tool_call_id.to_string()),
+        );
+    }
+    if let Some(name) = message.name.as_deref() {
+        value.insert("name".to_string(), Value::String(name.to_string()));
+    }
+    Ok(Value::Object(value))
+}
+
+fn build_request_payload(config: &ChatRequestConfig) -> Result<Value, ChatProviderError> {
+    let messages = config
+        .messages
+        .iter()
+        .map(openai_message_value)
+        .collect::<Result<Vec<_>, _>>()?;
 
     let mut body = Map::new();
     body.insert("model".to_string(), Value::String(config.model.clone()));
-    body.insert(
-        "messages".to_string(),
-        serde_json::to_value(messages)
-            .map_err(|error| ChatProviderError::Parse(error.to_string()))?,
-    );
+    body.insert("messages".to_string(), Value::Array(messages));
     if let Some(tools) = config.tools.as_ref().filter(|tools| !tools.is_empty()) {
         body.insert(
             "tools".to_string(),
@@ -540,8 +620,9 @@ fn longest_tag_prefix_suffix(value: &str, tag: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use codez_core::provider::{
-        AgentStopReason, ChatMessage, ChatStreamEvent, Role, SecretValue, ThinkingConfig,
-        ThinkingMode, ToolDefinition, ToolDefinitionFunction,
+        AgentStopReason, ChatImage, ChatMessage, ChatStreamEvent, Role, SecretValue,
+        ThinkingConfig, ThinkingMode, ToolCall, ToolCallFunction, ToolDefinition,
+        ToolDefinitionFunction,
     };
     use serde_json::{Value, json};
 
@@ -564,6 +645,7 @@ mod tests {
                     tool_calls: None,
                     tool_call_id: None,
                     name: None,
+                    images: Vec::new(),
                 },
                 ChatMessage {
                     role: Role::User,
@@ -571,6 +653,7 @@ mod tests {
                     tool_calls: None,
                     tool_call_id: None,
                     name: None,
+                    images: Vec::new(),
                 },
             ],
             tools: Some(vec![ToolDefinition {
@@ -635,6 +718,81 @@ mod tests {
                 "stream_options": { "include_usage": true },
                 "max_tokens": 256
             })
+        );
+    }
+
+    #[test]
+    fn request_uses_openai_tool_continuation_field_names() {
+        let mut config = fixture_config();
+        config.tools = None;
+        config.messages = vec![
+            ChatMessage {
+                role: Role::Assistant,
+                content: Some("I will inspect the file.".to_string()),
+                tool_calls: Some(vec![ToolCall {
+                    id: "call-read".to_string(),
+                    r#type: "function".to_string(),
+                    function: ToolCallFunction {
+                        name: "Read".to_string(),
+                        arguments: r#"{"files":[{"file_path":"src/lib.rs"}]}"#.to_string(),
+                    },
+                    thought_signature: Some("provider-signature".to_string()),
+                }]),
+                tool_call_id: None,
+                name: None,
+                images: Vec::new(),
+            },
+            ChatMessage {
+                role: Role::Tool,
+                content: Some("file contents".to_string()),
+                tool_calls: None,
+                tool_call_id: Some("call-read".to_string()),
+                name: Some("Read".to_string()),
+                images: Vec::new(),
+            },
+        ];
+
+        let payload = build_request_payload(&config).expect("tool continuation payload is valid");
+        let messages = payload["messages"]
+            .as_array()
+            .expect("OpenAI payload contains messages");
+
+        assert_eq!(
+            messages[0]["tool_calls"][0]["thought_signature"],
+            "provider-signature"
+        );
+        assert_eq!(messages[1]["tool_call_id"], "call-read");
+        assert!(messages[0].get("toolCalls").is_none());
+        assert!(messages[1].get("toolCallId").is_none());
+    }
+
+    #[test]
+    fn request_encodes_verified_user_images_as_openai_data_urls() {
+        let mut config = fixture_config();
+        config.tools = None;
+        config.messages = vec![ChatMessage {
+            role: Role::User,
+            content: Some("inspect this image".to_string()),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+            images: vec![ChatImage {
+                mime_type: "image/png".to_string(),
+                bytes: vec![1, 2, 3],
+            }],
+        }];
+
+        let payload = build_request_payload(&config).expect("image payload is valid");
+
+        assert_eq!(
+            payload["messages"][0]["content"],
+            json!([
+                { "type": "text", "text": "inspect this image" },
+                {
+                    "type": "image_url",
+                    "image_url": { "url": "data:image/png;base64,AQID" }
+                }
+            ])
         );
     }
 

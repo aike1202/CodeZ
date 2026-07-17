@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::HashMap,
     future::Future,
     path::Path,
@@ -8,10 +9,17 @@ use std::{
 
 use codez_contracts::chat::{ChatAskUserAnswer, ChatAskUserQuestion, ChatAskUserRequest};
 use codez_core::{
-    AppError, AppPaths, AtomicPersistence, CancellationToken, SessionId, StreamId, WorkspaceRoot,
+    AppError, AppPaths, AtomicPersistence, CancellationToken, FileSystem, ProcessRunner, SessionId,
+    StreamId, WorkspaceRoot,
+    context::ContextScopeId,
     provider::{ToolDefinition, ToolDefinitionFunction},
 };
+use codez_platform::{NativeFileSystem, NativeProcessRunner, ResourceLocator};
 use codez_runtime::{
+    SearchService,
+    edit_transaction::EditTransactionService,
+    fingerprint::ReadFingerprintStore,
+    mutation_coordinator::FileMutationCoordinator,
     permission::{
         audit::{PermissionAuditError, PermissionAuditLog},
         service::{PermissionApprovalHandler, PermissionService},
@@ -19,7 +27,11 @@ use codez_runtime::{
     },
     tools::{
         authorization::AuthorizationBinding,
-        builtin::{bash::BashTool, edit::EditTool, read::ReadTool, write::WriteTool},
+        builtin::{
+            bash::BashTool, edit::EditTool, glob::GlobTool, grep::GrepTool,
+            list_files::ListFilesTool, notebook_edit::NotebookEditTool, read::ReadTool,
+            write::WriteTool,
+        },
         exposure::{ToolCatalogError, ToolCatalogSnapshot},
         journal::{ToolExecutionJournal, ToolJournalIdentity},
         large_result::LargeToolResultStore,
@@ -27,7 +39,7 @@ use codez_runtime::{
             ToolAuthorizationDecision, ToolExecutionPipeline, ToolExecutionPipelineContext,
         },
         processor::ToolResultProcessor,
-        registry::ToolHandler,
+        registry::{ToolFileServices, ToolHandler},
         scheduler::ToolScheduler,
         types::{
             AgentRole, NormalizedToolCall, PreparedToolCall, ToolEffect, ToolExecutionError,
@@ -60,6 +72,8 @@ pub(crate) enum ChatToolRuntimeError {
     PermissionAudit(#[from] PermissionAuditError),
     #[error(transparent)]
     Catalog(#[from] ToolCatalogError),
+    #[error(transparent)]
+    Search(#[from] AppError),
 }
 
 /// Invalid data rejected before it can become a per-run tool execution context.
@@ -86,6 +100,8 @@ pub(crate) struct ChatToolRunContext {
     approval_handler: Option<Arc<dyn PermissionApprovalHandler>>,
     ask_user_handler: Option<Arc<dyn AskUserHandler>>,
     active_tools: Arc<ToolCancellationRegistry>,
+    context_scope_id: ContextScopeId,
+    transaction_id: String,
 }
 
 #[derive(Default)]
@@ -119,6 +135,8 @@ impl ChatToolRunContext {
             approval_handler,
             ask_user_handler,
             active_tools: Arc::new(ToolCancellationRegistry::default()),
+            context_scope_id: ContextScopeId::Main,
+            transaction_id: format!("tx_{}", uuid::Uuid::new_v4()),
         })
     }
 
@@ -129,6 +147,31 @@ impl ChatToolRunContext {
 
     pub(crate) fn cancel_tool(&self, call_id: &str) -> bool {
         self.active_tools.cancel(call_id)
+    }
+
+    #[must_use]
+    pub(crate) fn transaction_id(&self) -> &str {
+        &self.transaction_id
+    }
+
+    #[must_use]
+    pub(crate) fn context_scope_id(&self) -> &ContextScopeId {
+        &self.context_scope_id
+    }
+
+    #[must_use]
+    pub(crate) fn session_id(&self) -> &SessionId {
+        &self.session_id
+    }
+
+    #[must_use]
+    pub(crate) fn run_id(&self) -> &StreamId {
+        &self.run_id
+    }
+
+    #[must_use]
+    pub(crate) fn workspace_root(&self) -> &WorkspaceRoot {
+        &self.workspace_root
     }
 
     fn register_tool(&self, call_id: &str) -> CancellationToken {
@@ -183,6 +226,9 @@ pub(crate) struct ChatToolRuntime {
     catalog: ToolCatalogSnapshot,
     pipeline: ToolExecutionPipeline,
     permission: Arc<PermissionService>,
+    fingerprint_store: Arc<ReadFingerprintStore>,
+    mutation_coordinator: Arc<FileMutationCoordinator>,
+    edit_transaction_service: Arc<EditTransactionService>,
 }
 
 impl ChatToolRuntime {
@@ -199,6 +245,9 @@ impl ChatToolRuntime {
         paths: &AppPaths,
         persistence: Arc<dyn AtomicPersistence>,
         workspace_permissions: Arc<WorkspacePermissionStore>,
+        fingerprint_store: Arc<ReadFingerprintStore>,
+        mutation_coordinator: Arc<FileMutationCoordinator>,
+        edit_transaction_service: Arc<EditTransactionService>,
     ) -> Result<Self, ChatToolRuntimeError> {
         let data_root = paths.data_directory();
         let rules = Arc::new(PermissionRuleStore::new(
@@ -210,7 +259,13 @@ impl ChatToolRuntime {
             Arc::clone(&persistence),
         )?);
         let permission = Arc::new(PermissionService::new(workspace_permissions, rules, audit));
-        let catalog = builtin_catalog()?;
+        let resources = ResourceLocator::new(paths.resource_directory().to_path_buf());
+        let process_runner: Arc<dyn ProcessRunner> = Arc::new(NativeProcessRunner::new());
+        let search = Arc::new(SearchService::new(
+            resources.ripgrep_executable(),
+            process_runner,
+        )?);
+        let catalog = builtin_catalog(search)?;
         let result_store = Arc::new(LargeToolResultStore::new(data_root.join("tool-results")));
         let processor = Arc::new(ToolResultProcessor::new(result_store, None, true));
         let journal = Arc::new(ToolExecutionJournal::new(
@@ -229,6 +284,9 @@ impl ChatToolRuntime {
             catalog,
             pipeline,
             permission,
+            fingerprint_store,
+            mutation_coordinator,
+            edit_transaction_service,
         })
     }
 
@@ -250,6 +308,11 @@ impl ChatToolRuntime {
             .collect::<Vec<_>>();
         definitions.push(ask_user_tool_definition());
         definitions
+    }
+
+    /// Clears ephemeral permission decisions owned by a deleted session.
+    pub(crate) async fn clear_session_permissions(&self, session_id: &str) {
+        self.permission.clear_session(session_id).await;
     }
 
     /// Executes normalized provider calls in deterministic position order.
@@ -292,7 +355,28 @@ impl ChatToolRuntime {
         calls: Vec<NormalizedToolCall>,
         run: &ChatToolRunContext,
     ) -> Vec<ToolPipelineResult> {
-        let context = PipelineContext { runtime: self, run };
+        let file_system =
+            match NativeFileSystem::open(run.workspace_root.as_path().to_path_buf()).await {
+                Ok(file_system) => file_system,
+                Err(error) => {
+                    tracing::warn!(error = %error, "chat tool workspace adapter could not open");
+                    return calls
+                        .into_iter()
+                        .map(|call| self.workspace_unavailable_result(call))
+                        .collect();
+                }
+            };
+        let file_system: Arc<dyn FileSystem> = Arc::new(file_system);
+        let context = PipelineContext {
+            runtime: self,
+            run,
+            file_services: ToolFileServices {
+                file_system,
+                fingerprint_store: Arc::clone(&self.fingerprint_store),
+                mutation_coordinator: Arc::clone(&self.mutation_coordinator),
+                edit_transaction_service: Arc::clone(&self.edit_transaction_service),
+            },
+        };
         let mut results = self.pipeline.execute_batch(calls, &context).await;
         run.finish_tools(&results);
         results.sort_by_key(|result| result.call.position);
@@ -362,6 +446,24 @@ impl ChatToolRuntime {
                 error: tool_error(
                     "TOOL_CALL_INVALID",
                     "Each tool call in a batch requires a unique position.",
+                    false,
+                ),
+                model_content: None,
+                ui_content: None,
+                effects: None,
+            },
+            max_result_chars: None,
+        }
+    }
+
+    fn workspace_unavailable_result(&self, call: NormalizedToolCall) -> ToolPipelineResult {
+        ToolPipelineResult {
+            canonical_name: self.catalog.canonical_name(&call.name).to_string(),
+            call,
+            result: ToolExecutionResult::Error {
+                error: tool_error(
+                    "TOOL_WORKSPACE_INVALID",
+                    "The workspace is no longer available for tool execution.",
                     false,
                 ),
                 model_content: None,
@@ -447,12 +549,16 @@ fn ask_user_error_result(
     }
 }
 
-fn builtin_catalog() -> Result<ToolCatalogSnapshot, ToolCatalogError> {
+fn builtin_catalog(search: Arc<SearchService>) -> Result<ToolCatalogSnapshot, ToolCatalogError> {
     let handlers: Vec<Arc<dyn ToolHandler>> = vec![
         Arc::new(ReadTool::new()),
         Arc::new(WriteTool::new()),
         Arc::new(EditTool::new()),
         Arc::new(BashTool::new()),
+        Arc::new(GlobTool::new(Arc::clone(&search))),
+        Arc::new(GrepTool::new(search)),
+        Arc::new(ListFilesTool::new()),
+        Arc::new(NotebookEditTool::new()),
     ];
     ToolCatalogSnapshot::from_handlers(BUILTIN_CATALOG_ID, handlers)
 }
@@ -484,6 +590,7 @@ fn tool_error(code: &str, message: &str, recoverable: bool) -> ToolExecutionErro
 struct PipelineContext<'a> {
     runtime: &'a ChatToolRuntime,
     run: &'a ChatToolRunContext,
+    file_services: ToolFileServices,
 }
 
 impl ToolExecutionPipelineContext for PipelineContext<'_> {
@@ -501,6 +608,18 @@ impl ToolExecutionPipelineContext for PipelineContext<'_> {
 
     fn session_id(&self) -> Option<&str> {
         Some(self.run.session_id.as_str())
+    }
+
+    fn context_scope_id(&self) -> Cow<'_, str> {
+        self.run.context_scope_id.as_key()
+    }
+
+    fn transaction_id(&self) -> Option<&str> {
+        Some(&self.run.transaction_id)
+    }
+
+    fn file_services(&self) -> Option<ToolFileServices> {
+        Some(self.file_services.clone())
     }
 
     fn agent_role(&self) -> &AgentRole {
@@ -578,6 +697,7 @@ mod tests {
         _data: tempfile::TempDir,
         workspace: tempfile::TempDir,
         runtime: ChatToolRuntime,
+        edit_transaction: Arc<codez_runtime::edit_transaction::EditTransactionService>,
     }
 
     impl Fixture {
@@ -585,7 +705,7 @@ mod tests {
             let data = tempfile::tempdir().expect("temporary data directory must be available");
             let workspace =
                 tempfile::tempdir().expect("temporary workspace directory must be available");
-            let paths = app_paths(data.path());
+            let paths = Arc::new(app_paths(data.path()));
             fs::create_dir_all(paths.data_directory())
                 .expect("fixture application data directory must be created");
             let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
@@ -593,12 +713,23 @@ mod tests {
                 WorkspacePermissionStore::new(paths.data_directory(), Arc::clone(&persistence))
                     .expect("fixture permission mode store must be valid"),
             );
-            let runtime = ChatToolRuntime::new(&paths, persistence, modes)
-                .expect("fixture tool runtime must compose");
+            let edit_transaction = Arc::new(
+                codez_runtime::edit_transaction::EditTransactionService::new(Arc::clone(&paths)),
+            );
+            let runtime = ChatToolRuntime::new(
+                paths.as_ref(),
+                persistence,
+                modes,
+                Arc::new(codez_runtime::fingerprint::ReadFingerprintStore::default()),
+                Arc::new(codez_runtime::mutation_coordinator::FileMutationCoordinator::default()),
+                Arc::clone(&edit_transaction),
+            )
+            .expect("fixture tool runtime must compose");
             Self {
                 _data: data,
                 workspace,
                 runtime,
+                edit_transaction,
             }
         }
 
@@ -625,6 +756,23 @@ mod tests {
                 ask_user_handler,
             )
             .expect("fixture run context must be valid")
+        }
+
+        async fn registered_run_context(&self) -> ChatToolRunContext {
+            let context = self.run_context();
+            self.edit_transaction
+                .register_chat_transaction(
+                    context.transaction_id(),
+                    codez_runtime::edit_transaction::EditTransactionRegistration {
+                        session_id: context.session_id().clone(),
+                        context_scope_id: context.context_scope_id().clone(),
+                        turn_id: context.run_id().clone(),
+                        workspace_root: context.workspace_root().clone(),
+                    },
+                )
+                .await
+                .expect("fixture chat transaction must register");
+            context
         }
     }
 
@@ -685,7 +833,17 @@ mod tests {
 
         assert_eq!(
             names,
-            vec!["Read", "Write", "Edit", "Bash", "AskUserQuestion"]
+            vec![
+                "Read",
+                "Write",
+                "Edit",
+                "Bash",
+                "Glob",
+                "Grep",
+                "list_files",
+                "NotebookEdit",
+                "AskUserQuestion",
+            ]
         );
         assert!(definitions.iter().all(|definition| {
             definition.r#type == "function"
@@ -725,10 +883,263 @@ mod tests {
             )
             .await;
 
+        assert!(
+            matches!(
+                results.as_slice(),
+                [result] if matches!(result.result, ToolExecutionResult::Success { .. })
+            ),
+            "unexpected read result: {results:#?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn search_tools_execute_through_the_real_chat_pipeline() {
+        let fixture = Fixture::new();
+        let source = fixture.workspace.path().join("源代码");
+        tokio::fs::create_dir_all(&source)
+            .await
+            .expect("fixture source directory must be created");
+        tokio::fs::write(source.join("z.rs"), "fn z() {}")
+            .await
+            .expect("fixture z file must be written");
+        tokio::fs::write(source.join("a.rs"), "fn a() {}")
+            .await
+            .expect("fixture a file must be written");
+
+        let results = fixture
+            .runtime
+            .execute(
+                vec![
+                    call(
+                        0,
+                        "Glob",
+                        serde_json::json!({"pattern": "*.rs", "path": "源代码"}),
+                    ),
+                    call(1, "list_files", serde_json::json!({"dirPath": "源代码"})),
+                ],
+                &fixture.run_context(),
+            )
+            .await;
+
+        assert!(
+            matches!(
+                results.as_slice(),
+                [
+                    codez_runtime::tools::types::ToolPipelineResult {
+                        result: ToolExecutionResult::Success { model_content: glob, .. },
+                        ..
+                    },
+                    codez_runtime::tools::types::ToolPipelineResult {
+                        result: ToolExecutionResult::Success { model_content: listing, .. },
+                        ..
+                    }
+                ] if glob == "源代码/a.rs\n源代码/z.rs"
+                    && listing == "[FILE] a.rs\n[FILE] z.rs"
+            ),
+            "unexpected search results: {results:#?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_bundled_ripgrep_is_a_typed_tool_error() {
+        let fixture = Fixture::new();
+        let results = fixture
+            .runtime
+            .execute(
+                vec![call(0, "Grep", serde_json::json!({"pattern": "needle"}))],
+                &fixture.run_context(),
+            )
+            .await;
+
         assert!(matches!(
             results.as_slice(),
-            [result] if matches!(result.result, ToolExecutionResult::Success { .. })
+            [result] if error_code(&result.result) == Some("TOOL_SEARCH_UNAVAILABLE")
         ));
+    }
+
+    #[tokio::test]
+    async fn write_then_edit_in_one_transaction_finishes_without_deadlock() {
+        let fixture = Fixture::new();
+        let context = fixture.registered_run_context().await;
+        let write = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            fixture.runtime.execute(
+                vec![call(
+                    0,
+                    "Write",
+                    serde_json::json!({"file_path": "chain.txt", "content": "alpha"}),
+                )],
+                &context,
+            ),
+        )
+        .await
+        .expect("write pipeline must not deadlock");
+        assert!(
+            matches!(
+                write.as_slice(),
+                [result] if matches!(result.result, ToolExecutionResult::Success { .. })
+            ),
+            "unexpected write result: {write:#?}"
+        );
+
+        let edit = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            fixture.runtime.execute(
+                vec![call(
+                    0,
+                    "Edit",
+                    serde_json::json!({
+                        "file_path": "chain.txt",
+                        "edits": [{"old_string": "alpha", "new_string": "beta"}]
+                    }),
+                )],
+                &context,
+            ),
+        )
+        .await
+        .expect("edit pipeline must not deadlock");
+        let statuses = fixture
+            .edit_transaction
+            .get_file_statuses(context.transaction_id())
+            .await
+            .expect("transaction status must be readable");
+
+        assert!(
+            matches!(
+                edit.as_slice(),
+                [result] if matches!(result.result, ToolExecutionResult::Success { .. })
+            ) && statuses.len() == 1
+                && fs::read_to_string(fixture.workspace.path().join("chain.txt"))
+                    .expect("mutated file must be readable")
+                    == "beta"
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_rejects_a_file_that_was_not_delivered_to_the_context() {
+        let fixture = Fixture::new();
+        let target = fixture.workspace.path().join("stale.txt");
+        fs::write(&target, "original").expect("fixture file must be written");
+        let context = fixture.registered_run_context().await;
+
+        let results = fixture
+            .runtime
+            .execute(
+                vec![call(
+                    0,
+                    "Edit",
+                    serde_json::json!({
+                        "file_path": "stale.txt",
+                        "edits": [{"old_string": "original", "new_string": "changed"}]
+                    }),
+                )],
+                &context,
+            )
+            .await;
+        let statuses = fixture
+            .edit_transaction
+            .get_file_statuses(context.transaction_id())
+            .await
+            .expect("transaction status must be readable");
+
+        assert!(
+            matches!(results.as_slice(), [result] if error_code(&result.result) == Some("TOOL_EDIT_CONFLICT"))
+                && statuses.is_empty()
+                && fs::read_to_string(target).expect("fixture file must remain readable")
+                    == "original"
+        );
+    }
+
+    #[tokio::test]
+    async fn write_rejects_an_external_change_after_read_delivery() {
+        let fixture = Fixture::new();
+        let target = fixture.workspace.path().join("changed-after-read.txt");
+        fs::write(&target, "read version").expect("fixture file must be written");
+        let context = fixture.registered_run_context().await;
+        let read = fixture
+            .runtime
+            .execute(
+                vec![call(
+                    0,
+                    "Read",
+                    serde_json::json!({"files": [{"file_path": "changed-after-read.txt"}]}),
+                )],
+                &context,
+            )
+            .await;
+        assert!(
+            matches!(
+                read.as_slice(),
+                [result] if matches!(result.result, ToolExecutionResult::Success { .. })
+            ),
+            "unexpected read result: {read:#?}"
+        );
+        fs::write(&target, "external version").expect("external change must be written");
+
+        let write = fixture
+            .runtime
+            .execute(
+                vec![call(
+                    0,
+                    "Write",
+                    serde_json::json!({
+                        "file_path": "changed-after-read.txt",
+                        "content": "agent version"
+                    }),
+                )],
+                &context,
+            )
+            .await;
+
+        assert!(
+            matches!(write.as_slice(), [result] if error_code(&result.result) == Some("TOOL_FILE_STALE"))
+                && fs::read_to_string(target).expect("external version must remain readable")
+                    == "external version"
+        );
+    }
+
+    #[tokio::test]
+    async fn no_op_write_leaves_the_transaction_empty() {
+        let fixture = Fixture::new();
+        let target = fixture.workspace.path().join("unchanged.txt");
+        fs::write(&target, "same").expect("fixture file must be written");
+        let context = fixture.registered_run_context().await;
+        fixture
+            .runtime
+            .execute(
+                vec![call(
+                    0,
+                    "Read",
+                    serde_json::json!({"files": [{"file_path": "unchanged.txt"}]}),
+                )],
+                &context,
+            )
+            .await;
+
+        let write = fixture
+            .runtime
+            .execute(
+                vec![call(
+                    0,
+                    "Write",
+                    serde_json::json!({"file_path": "unchanged.txt", "content": "same"}),
+                )],
+                &context,
+            )
+            .await;
+        let statuses = fixture
+            .edit_transaction
+            .get_file_statuses(context.transaction_id())
+            .await
+            .expect("transaction status must be readable");
+
+        assert!(
+            matches!(
+                write.as_slice(),
+                [result] if matches!(result.result, ToolExecutionResult::Success { .. })
+            ) && statuses.is_empty(),
+            "unexpected no-op write result: {write:#?}; statuses: {statuses:#?}"
+        );
     }
 
     #[tokio::test]

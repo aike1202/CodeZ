@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { RuleFile } from '@shared/types/rules'
+import { desktopApi } from '../shared/desktop'
 import { useWorkspaceStore } from './workspaceStore'
 
 interface RulesState {
@@ -22,7 +23,7 @@ export const useRulesStore = create<RulesState>((set, get) => ({
     try {
       const recentProjects = useWorkspaceStore.getState().recentProjects || []
       const workspaces = recentProjects.map(p => ({ id: p.id, rootPath: p.rootPath }))
-      const rules = await window.api.rules.getList(workspaces as any)
+      const rules = await desktopApi.rules.getList(workspaces)
       set({ rules, isLoading: false })
     } catch (err: any) {
       set({ error: err.message, isLoading: false })
@@ -32,7 +33,7 @@ export const useRulesStore = create<RulesState>((set, get) => ({
   saveRule: async (rule: RuleFile) => {
     try {
       const workspaceRoot = useWorkspaceStore.getState().workspace?.rootPath || ''
-      const success = await window.api.rules.save(rule, workspaceRoot)
+      const success = await desktopApi.rules.save(rule, workspaceRoot)
       if (success) {
         await get().loadRules()
       }
@@ -45,7 +46,7 @@ export const useRulesStore = create<RulesState>((set, get) => ({
 
   deleteRule: async (rulePath: string) => {
     try {
-      const success = await window.api.rules.delete(rulePath)
+      const success = await desktopApi.rules.delete(rulePath)
       if (success) {
         await get().loadRules()
       }
@@ -64,7 +65,7 @@ export const useRulesStore = create<RulesState>((set, get) => ({
         const proj = recentProjects.find(p => p.id === projectId)
         if (proj) workspaceRoot = proj.rootPath
       }
-      const success = await window.api.rules.rename(oldPath, newFilename, workspaceRoot, scope)
+      const success = await desktopApi.rules.rename(oldPath, newFilename, workspaceRoot, scope)
       if (success) {
         await get().loadRules()
       }

@@ -105,9 +105,17 @@ fn stdio_config(fixture_name: &str) -> TestResult<StdioServerConfig> {
 }
 
 async fn start_http_fixture() -> TestResult<(Child, String)> {
+    start_network_fixture("mcp-streamable-http-server.cjs").await
+}
+
+async fn start_legacy_sse_fixture() -> TestResult<(Child, String)> {
+    start_network_fixture("mcp-legacy-sse-server.cjs").await
+}
+
+async fn start_network_fixture(fixture_name: &str) -> TestResult<(Child, String)> {
     let mut command = Command::new(node_executable()?);
     command
-        .arg(fixture("mcp-streamable-http-server.cjs"))
+        .arg(fixture(fixture_name))
         .current_dir(workspace_root())
         .env_clear()
         .envs(explicit_test_environment())
@@ -119,16 +127,16 @@ async fn start_http_fixture() -> TestResult<(Child, String)> {
     let stdout = child
         .stdout
         .take()
-        .ok_or("HTTP fixture stdout was not piped")?;
+        .ok_or("network fixture stdout was not piped")?;
     let mut lines = BufReader::new(stdout).lines();
     let line = timeout(Duration::from_secs(5), lines.next_line())
         .await
-        .map_err(|_| "HTTP fixture did not report its address")??
-        .ok_or("HTTP fixture exited before reporting its address")?;
+        .map_err(|_| "network fixture did not report its address")??
+        .ok_or("network fixture exited before reporting its address")?;
     let message: Value = serde_json::from_str(&line)?;
     let endpoint = message["url"]
         .as_str()
-        .ok_or("HTTP fixture address was invalid")?
+        .ok_or("network fixture address was invalid")?
         .to_owned();
     Ok((child, endpoint))
 }
@@ -302,13 +310,37 @@ async fn production_http_gateway_supports_subscriptions_without_broad_404_recove
     Ok(())
 }
 
-#[test]
-fn production_legacy_sse_path_returns_stable_unsupported_error() {
-    let error = McpGateway::new()
-        .connect_legacy_sse()
-        .expect_err("legacy SSE must not report fake success");
+#[tokio::test]
+async fn production_legacy_sse_gateway_connects_discovers_and_calls_a_local_server() -> TestResult {
+    let (mut fixture_process, endpoint) = start_legacy_sse_fixture().await?;
+    let gateway = test_gateway();
+    let server_id = McpServerId::new("legacy-sse-fixture")?;
+    let cancellation = CancellationToken::new();
+    let info = gateway
+        .connect_legacy_sse(
+            server_id.clone(),
+            StreamableHttpServerConfig::new(&endpoint, BTreeMap::new())?,
+            &cancellation,
+        )
+        .await?;
 
-    assert!(matches!(error, McpError::UnsupportedTransport { .. }));
+    assert_eq!(info.transport, codez_mcp::McpTransportKind::LegacySse);
+    let catalog = gateway.list_catalog(&server_id, &cancellation).await?;
+    assert!(catalog.tools.iter().any(|tool| tool.name == "echo"));
+    let response = gateway
+        .call_tool(
+            &server_id,
+            "echo",
+            arguments(json!({ "message": "hello" })),
+            &cancellation,
+        )
+        .await?;
+    assert_eq!(result_text(&response), Some("sse:hello"));
+
+    gateway.disconnect(&server_id, &cancellation).await?;
+    fixture_process.kill().await?;
+    fixture_process.wait().await?;
+    Ok(())
 }
 
 #[test]

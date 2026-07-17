@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import Button from '../../ui/Button'
 import Flex from '../../ui/Flex'
 import Stack from '../../ui/Stack'
@@ -8,6 +8,14 @@ import { RotateCw, SquareTerminal, Trash2 } from 'lucide-react'
 import './TerminalPanel.css'
 import type { TerminalPanelProps, TerminalTab } from './types'
 import { TerminalInstance } from './components/TerminalInstance'
+import { desktopApi } from '../../../shared/desktop'
+
+let terminalInstanceSequence = 0
+
+function createTerminalId(): string {
+  terminalInstanceSequence = (terminalInstanceSequence + 1) >>> 0
+  return `term-${Date.now().toString(36)}-${terminalInstanceSequence.toString(36)}`
+}
 
 export default function TerminalPanel({
   workspaceId,
@@ -24,14 +32,30 @@ export default function TerminalPanel({
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [clearTriggers, setClearTriggers] = useState<Record<string, number>>({})
   const [resetTriggers, setResetTriggers] = useState<Record<string, number>>({})
+  const tabsRef = useRef<TerminalTab[]>([])
 
   useEffect(() => {
-    if (tabs.length === 0) {
-      const firstId = `term_${workspaceId}_${Date.now()}`
-      setTabs([{ id: firstId, name: '终端 1' }])
-      setActiveTabId(firstId)
+    tabsRef.current = tabs
+  }, [tabs])
+
+  useEffect(() => {
+    const previousTabs = tabsRef.current
+    for (const tab of previousTabs) {
+      void desktopApi.terminal.kill(tab.id).catch(() => undefined)
     }
+
+    const firstTab = { id: createTerminalId(), name: '终端 1' }
+    setTabs([firstTab])
+    setActiveTabId(firstTab.id)
+    setClearTriggers({})
+    setResetTriggers({})
   }, [workspaceId])
+
+  useEffect(() => () => {
+    for (const tab of tabsRef.current) {
+      void desktopApi.terminal.kill(tab.id).catch(() => undefined)
+    }
+  }, [])
 
   const handleDragMouseDown = (e: React.MouseEvent) => {
     if (layout === 'side' || !setHeight) return
@@ -57,14 +81,14 @@ export default function TerminalPanel({
   }
 
   const handleAddTab = () => {
-    const newId = `term_${workspaceId}_${Date.now()}`
+    const newId = createTerminalId()
     setTabs((current) => [...current, { id: newId, name: `终端 ${current.length + 1}` }])
     setActiveTabId(newId)
   }
 
   const handleCloseTab = async (e: React.MouseEvent, tabId: string) => {
     e.stopPropagation()
-    await window.api.terminal.kill(tabId)
+    await desktopApi.terminal.kill(tabId)
 
     const newTabs = tabs.filter((t) => t.id !== tabId)
     setTabs(newTabs)

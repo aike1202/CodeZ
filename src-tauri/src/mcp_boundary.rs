@@ -103,7 +103,7 @@ pub(crate) fn servers_from_wire(
 }
 
 pub(crate) fn list_payload(
-    servers: Vec<domain::UserMcpServer>,
+    servers: Vec<domain::ScopedMcpServer>,
     runtime_statuses: Vec<wire::McpServerStatus>,
 ) -> wire::McpListPayload {
     let updated_at = Utc::now().to_rfc3339();
@@ -124,21 +124,27 @@ pub(crate) fn list_payload(
         };
         let fingerprint = server.fingerprint.clone();
         let name = server.name.clone();
+        let scope = scope_to_wire(server.scope);
+        let trusted = server.trusted;
+        let effective = server.effective;
         configs.push(wire::ScopedMcpServerConfig {
             name: server.name,
-            scope: wire::McpConfigScope::User,
+            scope,
             config: server_config_to_wire(server.config),
             fingerprint: fingerprint.clone(),
-            trusted: true,
-            effective: true,
+            trusted,
+            effective,
             shadowed_by: None,
             policy_disabled: None,
         });
+        if !effective {
+            continue;
+        }
         let status = match statuses_by_name.remove(&name) {
             Some(status) => status,
             None => wire::McpServerStatus {
                 name,
-                scope: wire::McpConfigScope::User,
+                scope,
                 state,
                 fingerprint,
                 transport,
@@ -157,6 +163,13 @@ pub(crate) fn list_payload(
     }
 
     wire::McpListPayload { configs, statuses }
+}
+
+fn scope_to_wire(value: domain::McpConfigScope) -> wire::McpConfigScope {
+    match value {
+        domain::McpConfigScope::User => wire::McpConfigScope::User,
+        domain::McpConfigScope::Project => wire::McpConfigScope::Project,
+    }
 }
 
 pub(crate) fn secret_key_from_wire(
@@ -351,10 +364,13 @@ mod tests {
         let payload = list_payload(
             servers
                 .into_iter()
-                .map(|(name, config)| codez_mcp::UserMcpServer {
+                .map(|(name, config)| codez_mcp::ScopedMcpServer {
                     fingerprint: "fingerprint".to_string(),
                     name,
+                    scope: codez_mcp::McpConfigScope::User,
                     config,
+                    trusted: true,
+                    effective: true,
                 })
                 .collect(),
             Vec::new(),

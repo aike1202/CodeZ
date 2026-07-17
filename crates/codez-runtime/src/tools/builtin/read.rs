@@ -1,5 +1,7 @@
+use codez_core::{AppError, AppErrorKind, FileKind};
 use serde_json::Value;
 
+use crate::tools::builtin::file_mutation::{ensure_authorized_path, services, sha256};
 use crate::tools::builtin::path::{ToolPathError, resolve_tool_path};
 use crate::tools::registry::{
     BoxFuture, DefaultToolDescriptor, ToolAvailability, ToolBehavior, ToolContext, ToolDescriptor,
@@ -165,14 +167,32 @@ impl ToolHandler for ReadTool {
                     Ok(resolved) => resolved,
                     Err(error) => return path_error(error),
                 };
+                if !resolved.inside_workspace {
+                    return path_error(ToolPathError::OutsideWorkspace);
+                }
                 let approved = context.authorized_effects.effects.iter().any(|effect| {
                     matches!(effect, ToolEffect::ReadFile { path, .. } if PathLike::eq(path, &resolved.path))
                 });
                 if !approved {
                     return path_error(ToolPathError::AuthorizationMismatch);
                 }
-                let metadata = match tokio::fs::metadata(&resolved.path).await {
-                    Ok(metadata) if metadata.is_file() => metadata,
+                let services = match services(context) {
+                    Ok(services) => services,
+                    Err(error) => return app_error(error),
+                };
+                let safe_path = match services
+                    .file_system
+                    .resolve(std::path::Path::new(raw_path))
+                    .await
+                {
+                    Ok(path) => path,
+                    Err(error) => return app_error(error),
+                };
+                if let Err(error) = ensure_authorized_path(&resolved.path, &safe_path) {
+                    return app_error(error);
+                }
+                let metadata = match services.file_system.metadata(&safe_path).await {
+                    Ok(metadata) if metadata.kind == FileKind::File => metadata,
                     Ok(_) => {
                         return execution_error(
                             "TOOL_PATH_INVALID",
@@ -180,41 +200,47 @@ impl ToolHandler for ReadTool {
                             true,
                         );
                     }
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                        return execution_error("TOOL_FILE_NOT_FOUND", "File not found.", true);
-                    }
-                    Err(_) => {
-                        return execution_error(
-                            "TOOL_READ_FAILED",
-                            "The file metadata could not be read.",
-                            false,
-                        );
-                    }
+                    Err(error) => return app_error(error),
                 };
-                if metadata.len() > MAX_READ_BYTES {
+                if metadata.byte_length > MAX_READ_BYTES {
                     return execution_error(
                         "TOOL_FILE_TOO_LARGE",
                         "The file exceeds the 10 MiB read limit.",
                         true,
                     );
                 }
-                let content = match tokio::fs::read_to_string(&resolved.path).await {
+                let bytes = match services
+                    .file_system
+                    .read_bounded(&safe_path, MAX_READ_BYTES)
+                    .await
+                {
+                    Ok(bytes) => bytes,
+                    Err(error) => return app_error(error),
+                };
+                let content = match String::from_utf8(bytes) {
                     Ok(content) => content,
-                    Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+                    Err(_) => {
                         return execution_error(
                             "TOOL_FILE_NOT_TEXT",
                             "The file is not valid UTF-8 text.",
                             true,
                         );
                     }
-                    Err(_) => {
-                        return execution_error(
-                            "TOOL_READ_FAILED",
-                            "The file could not be read.",
-                            false,
-                        );
-                    }
                 };
+                if let Some(session_id) = context.session_id.as_deref() {
+                    let sha256 = sha256(content.as_bytes());
+                    services.fingerprint_store.record(
+                        session_id,
+                        &safe_path.absolute_path(),
+                        &sha256,
+                    );
+                    services.fingerprint_store.record_delivery(
+                        session_id,
+                        &context.context_scope_id,
+                        &safe_path.absolute_path(),
+                        &sha256,
+                    );
+                }
                 let offset = item.get("offset").and_then(Value::as_u64).unwrap_or(1);
                 let limit = item.get("limit").and_then(Value::as_u64).unwrap_or(800);
                 let start = usize::try_from(offset.saturating_sub(1)).unwrap_or(usize::MAX);
@@ -249,6 +275,17 @@ impl PathLike {
 
 fn path_error(error: ToolPathError) -> ToolExecutionResult {
     execution_error("TOOL_PATH_NOT_AUTHORIZED", &error.to_string(), false)
+}
+
+fn app_error(error: AppError) -> ToolExecutionResult {
+    let (code, recoverable) = match error.kind() {
+        AppErrorKind::Conflict => ("TOOL_PATH_CHANGED", true),
+        AppErrorKind::NotFound => ("TOOL_FILE_NOT_FOUND", true),
+        AppErrorKind::Validation => ("TOOL_READ_INVALID", true),
+        AppErrorKind::PermissionDenied => ("TOOL_PATH_NOT_AUTHORIZED", false),
+        _ => ("TOOL_READ_FAILED", false),
+    };
+    execution_error(code, error.public_message(), recoverable)
 }
 
 fn execution_error(code: &str, message: &str, recoverable: bool) -> ToolExecutionResult {

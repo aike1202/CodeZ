@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
+import { desktopApi } from '../../../../shared/desktop'
 
 interface TerminalInstanceProps {
   terminalId: string
@@ -29,6 +30,8 @@ export function TerminalInstance({
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
+  const lifecycleRef = useRef(0)
+  const resetInFlightRef = useRef(false)
 
   useEffect(() => {
     if (!visible || !panelVisible) return
@@ -70,21 +73,40 @@ export function TerminalInstance({
   }, [resetTrigger])
 
   const handleResetInternal = async () => {
-    if (termRef.current) {
-      termRef.current.write('\r\n\x1b[33m[正在重置终端进程...]\x1b[0m\r\n')
-      await window.api.terminal.kill(terminalId)
-      await window.api.terminal.start(terminalId, rootPath)
-      if (termRef.current && fitAddonRef.current) {
-        const { cols, rows } = termRef.current
-        await window.api.terminal.resize(terminalId, cols, rows)
+    const term = termRef.current
+    if (!term || resetInFlightRef.current) return
+
+    const lifecycle = lifecycleRef.current
+    resetInFlightRef.current = true
+    term.write('\r\n\x1b[33m[正在重置终端进程...]\x1b[0m\r\n')
+    try {
+      await desktopApi.terminal.kill(terminalId)
+      if (lifecycle !== lifecycleRef.current) return
+
+      await desktopApi.terminal.start(terminalId, rootPath)
+      if (lifecycle !== lifecycleRef.current) {
+        await desktopApi.terminal.kill(terminalId).catch(() => undefined)
+        return
       }
-      termRef.current.write('\x1b[32m[终端进程已重启]\x1b[0m\r\n')
-      termRef.current.focus()
+      const { cols, rows } = term
+      await desktopApi.terminal.resize(terminalId, cols, rows)
+      term.write('\x1b[32m[终端进程已重启]\x1b[0m\r\n')
+      term.focus()
+    } catch (error) {
+      if (lifecycle === lifecycleRef.current) {
+        termRef.current?.write(`\r\n\x1b[31m[重置终端失败]: ${String(error)}\x1b[0m\r\n`)
+      }
+    } finally {
+      if (lifecycle === lifecycleRef.current) resetInFlightRef.current = false
     }
   }
 
   useEffect(() => {
     if (!containerRef.current) return
+
+    const lifecycle = lifecycleRef.current + 1
+    lifecycleRef.current = lifecycle
+    let disposed = false
 
     const term = new Terminal({
       cursorBlink: true,
@@ -127,32 +149,38 @@ export function TerminalInstance({
     termRef.current = term
     fitAddonRef.current = fitAddon
 
-    window.api.terminal
+    void desktopApi.terminal
       .start(terminalId, rootPath)
-      .then(() => {
+      .then(async () => {
+        if (disposed || lifecycle !== lifecycleRef.current) {
+          await desktopApi.terminal.kill(terminalId).catch(() => undefined)
+          return
+        }
         const { cols, rows } = term
-        window.api.terminal.resize(terminalId, cols, rows).catch(() => {})
+        desktopApi.terminal.resize(terminalId, cols, rows).catch(() => {})
       })
-      .catch((err: any) => {
+      .catch((error: unknown) => {
+        if (disposed || lifecycle !== lifecycleRef.current) return
+        const err = String(error)
         term.write(`\r\n\x1b[31m[无法启动终端]: ${err}\x1b[0m\r\n`)
       })
 
     const termDataDisposable = term.onData((data) => {
-      window.api.terminal.write(terminalId, data).catch(() => {})
+      desktopApi.terminal.write(terminalId, data).catch(() => {})
     })
 
     const termResizeDisposable = term.onResize((size) => {
-      window.api.terminal.resize(terminalId, size.cols, size.rows).catch(() => {})
+      desktopApi.terminal.resize(terminalId, size.cols, size.rows).catch(() => {})
     })
 
-    const unsubscribeOutput = window.api.terminal.onOutput((tId: string, data: string) => {
-      if (tId === terminalId) {
+    const unsubscribeOutput = desktopApi.terminal.onOutput(({ workspaceId, data }) => {
+      if (workspaceId === terminalId) {
         term.write(data)
       }
     })
 
-    const unsubscribeExit = window.api.terminal.onExit((tId: string) => {
-      if (tId === terminalId) {
+    const unsubscribeExit = desktopApi.terminal.onExit(({ workspaceId }) => {
+      if (workspaceId === terminalId) {
         term.write('\r\n\x1b[31m[系统进程：当前终端 Shell 已退出]\x1b[0m\r\n')
       }
     })
@@ -172,6 +200,9 @@ export function TerminalInstance({
     }
 
     return () => {
+      disposed = true
+      lifecycleRef.current += 1
+      resetInFlightRef.current = false
       clearTimeout(timer)
       termDataDisposable.dispose()
       termResizeDisposable.dispose()

@@ -7,6 +7,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tokio::fs;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use codez_core::{
@@ -15,6 +16,7 @@ use codez_core::{
 };
 
 const DRAFT_TTL_SECS: u64 = 24 * 60 * 60;
+const MAX_ATTACHMENT_METADATA_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AttachmentMetadata {
@@ -27,6 +29,12 @@ pub struct DecodedImage {
     pub mime_type: String,
     pub width: u32,
     pub height: u32,
+}
+
+/// Verified session image content resolved for a single outbound Provider request.
+pub struct ResolvedSessionImage {
+    pub attachment: SessionImageAttachment,
+    pub bytes: Vec<u8>,
 }
 
 pub struct ImageCodec;
@@ -104,6 +112,7 @@ impl ImageCodec {
 
 pub struct AttachmentService {
     root_path: PathBuf,
+    promotion_lock: Mutex<()>,
 }
 
 impl AttachmentService {
@@ -111,13 +120,16 @@ impl AttachmentService {
     pub fn new(app_paths: Arc<AppPaths>) -> Self {
         Self {
             root_path: app_paths.data_directory().join("attachments"),
+            promotion_lock: Mutex::new(()),
         }
     }
 
     fn assert_identifier(value: &str, label: &str) -> Result<(), AppError> {
-        if !value
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        if value.is_empty()
+            || value.len() > 256
+            || !value
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
         {
             return Err(AppError::validation(format!(
                 "Invalid {} identifier",
@@ -159,6 +171,159 @@ impl AttachmentService {
         let resolved = self.directory_for(storage_key)?.join(variant);
         self.assert_contained(&resolved)?;
         Ok(resolved)
+    }
+
+    fn expected_session_storage_key(session_id: &str, attachment_id: &str) -> String {
+        format!("attachment:sessions/{session_id}/{attachment_id}")
+    }
+
+    fn validate_session_image_reference(
+        session_id: &str,
+        attachment: &SessionImageAttachment,
+    ) -> Result<String, AppError> {
+        Self::assert_identifier(session_id, "session")?;
+        Self::assert_identifier(&attachment.id, "attachment")?;
+        let expected_storage_key = Self::expected_session_storage_key(session_id, &attachment.id);
+        if attachment.session_id != session_id
+            || attachment.scope != "session"
+            || attachment.kind != "image"
+            || attachment.storage_key != expected_storage_key
+        {
+            return Err(AppError::validation(
+                "Attachment does not belong to this session",
+            ));
+        }
+        Ok(expected_storage_key)
+    }
+
+    async fn assert_path_has_no_symlink_component(&self, target: &Path) -> Result<(), AppError> {
+        let relative = target
+            .strip_prefix(&self.root_path)
+            .map_err(|_| AppError::validation("Invalid attachment storage key"))?;
+        let mut current = self.root_path.clone();
+        for component in relative.components() {
+            let Component::Normal(component) = component else {
+                return Err(AppError::validation("Invalid attachment storage key"));
+            };
+            current.push(component);
+            match fs::symlink_metadata(&current).await {
+                Ok(metadata) if metadata.file_type().is_symlink() => {
+                    return Err(AppError::validation("Attachment storage is invalid"));
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                Err(error) => {
+                    return Err(AppError::storage(
+                        "Attachment storage could not be inspected",
+                        error.to_string(),
+                        true,
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn read_bounded_regular_file(
+        &self,
+        path: &Path,
+        max_bytes: u64,
+        label: &'static str,
+    ) -> Result<Vec<u8>, AppError> {
+        self.assert_path_has_no_symlink_component(path).await?;
+        let metadata = fs::symlink_metadata(path).await.map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                AppError::not_found(format!("Attachment {label} was not found"))
+            } else {
+                AppError::storage(
+                    "Attachment storage could not be inspected",
+                    error.to_string(),
+                    true,
+                )
+            }
+        })?;
+        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+            return Err(AppError::validation("Attachment storage is invalid"));
+        }
+        if metadata.len() == 0 || metadata.len() > max_bytes {
+            return Err(AppError::validation(format!(
+                "Attachment {label} exceeds the allowed size"
+            )));
+        }
+        let bytes = fs::read(path).await.map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                AppError::not_found(format!("Attachment {label} was not found"))
+            } else {
+                AppError::storage(
+                    "Attachment storage could not be read",
+                    error.to_string(),
+                    true,
+                )
+            }
+        })?;
+        if u64::try_from(bytes.len()).ok() != Some(metadata.len()) {
+            return Err(AppError::validation(
+                "Attachment storage changed while being read",
+            ));
+        }
+        Ok(bytes)
+    }
+
+    /// Resolves an original image from the owning session for an outbound Provider request.
+    ///
+    /// The caller-supplied attachment is treated only as an identity reference. MIME type,
+    /// byte length, and contents come from the verified metadata and payload stored under the
+    /// matching session directory.
+    pub async fn read_session_image(
+        &self,
+        session_id: &str,
+        attachment: &SessionImageAttachment,
+        max_bytes: u64,
+    ) -> Result<ResolvedSessionImage, AppError> {
+        if max_bytes == 0 {
+            return Err(AppError::validation(
+                "Attachment image limit must be positive",
+            ));
+        }
+        let storage_key = Self::validate_session_image_reference(session_id, attachment)?;
+        let metadata_path = self.path_for(&storage_key, "meta.json")?;
+        let metadata_bytes = self
+            .read_bounded_regular_file(&metadata_path, MAX_ATTACHMENT_METADATA_BYTES, "metadata")
+            .await?;
+        let metadata: AttachmentMetadata = serde_json::from_slice(&metadata_bytes)
+            .map_err(|_| AppError::validation("Attachment metadata is invalid"))?;
+        let ComposerImageAttachment::Session(stored) = metadata.attachment else {
+            return Err(AppError::validation("Attachment metadata is invalid"));
+        };
+        let stored_storage_key = Self::validate_session_image_reference(session_id, &stored)?;
+        if stored_storage_key != storage_key
+            || !matches!(
+                stored.mime_type.as_str(),
+                "image/jpeg" | "image/png" | "image/webp"
+            )
+        {
+            return Err(AppError::unsupported(
+                "The stored attachment image format is not supported",
+            ));
+        }
+        if stored.size_bytes == 0 || stored.size_bytes > max_bytes {
+            return Err(AppError::validation(
+                "Attachment image exceeds the Provider size limit",
+            ));
+        }
+        let original_path = self.path_for(&storage_key, "original")?;
+        let bytes = self
+            .read_bounded_regular_file(&original_path, stored.size_bytes, "image")
+            .await?;
+        if u64::try_from(bytes.len()).ok() != Some(stored.size_bytes) {
+            return Err(AppError::validation(
+                "Attachment image size does not match metadata",
+            ));
+        }
+        Ok(ResolvedSessionImage {
+            attachment: stored,
+            bytes,
+        })
     }
 
     pub async fn import_draft(
@@ -267,6 +432,7 @@ impl AttachmentService {
         session_id: &str,
         attachments: Vec<ComposerImageAttachment>,
     ) -> Result<Vec<SessionImageAttachment>, AppError> {
+        let _promotion_guard = self.promotion_lock.lock().await;
         Self::assert_identifier(session_id, "session")?;
         let mut created = Vec::new();
         let mut promoted = Vec::new();
@@ -275,7 +441,7 @@ impl AttachmentService {
             match attachment {
                 ComposerImageAttachment::Session(s) => {
                     if s.session_id != session_id {
-                        self.rollback_promotion(session_id, &created).await;
+                        self.rollback_created_promotions(session_id, &created).await;
                         return Err(AppError::validation(
                             "Attachment does not belong to this session",
                         ));
@@ -292,7 +458,7 @@ impl AttachmentService {
                     }
 
                     if let Err(e) = Self::copy_dir_recursive(&source_dir, &destination_dir).await {
-                        self.rollback_promotion(session_id, &created).await;
+                        self.rollback_created_promotions(session_id, &created).await;
                         return Err(AppError::internal(format!(
                             "Failed to promote attachment: {}",
                             e
@@ -341,6 +507,15 @@ impl AttachmentService {
         Ok(promoted)
     }
 
+    async fn rollback_created_promotions(&self, session_id: &str, attachment_ids: &[String]) {
+        if let Err(error) = self
+            .rollback_promotion_locked(session_id, attachment_ids)
+            .await
+        {
+            tracing::warn!(error = %error, "attachment promotion cleanup failed");
+        }
+    }
+
     async fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
         fs::create_dir_all(dst).await?;
         let mut entries = fs::read_dir(src).await?;
@@ -359,19 +534,109 @@ impl AttachmentService {
         Ok(())
     }
 
-    pub async fn rollback_promotion(&self, session_id: &str, attachment_ids: &[String]) {
-        if Self::assert_identifier(session_id, "session").is_err() {
-            return;
-        }
-        for id in attachment_ids {
-            if Self::assert_identifier(id, "attachment").is_ok() {
-                if let Ok(dir) =
-                    self.directory_for(&format!("attachment:sessions/{}/{}", session_id, id))
-                {
-                    let _ = fs::remove_dir_all(dir).await;
-                }
+    /// Removes copies created by draft promotion while retaining their draft sources.
+    ///
+    /// The session and attachment identifiers are validated before any filesystem changes.
+    /// Existing copies move to a private staging directory before deletion, so a failed move
+    /// cannot leave a partially visible rollback in the session attachment namespace.
+    pub async fn rollback_promotion(
+        &self,
+        session_id: &str,
+        attachment_ids: &[String],
+    ) -> Result<(), AppError> {
+        let _promotion_guard = self.promotion_lock.lock().await;
+        self.rollback_promotion_locked(session_id, attachment_ids)
+            .await
+    }
+
+    async fn rollback_promotion_locked(
+        &self,
+        session_id: &str,
+        attachment_ids: &[String],
+    ) -> Result<(), AppError> {
+        Self::assert_identifier(session_id, "session")?;
+
+        let mut seen = HashSet::with_capacity(attachment_ids.len());
+        let mut targets = Vec::with_capacity(attachment_ids.len());
+        for attachment_id in attachment_ids {
+            Self::assert_identifier(attachment_id, "attachment")?;
+            if seen.insert(attachment_id.as_str()) {
+                let directory = self.directory_for(&format!(
+                    "attachment:sessions/{}/{}",
+                    session_id, attachment_id
+                ))?;
+                targets.push((attachment_id.as_str(), directory));
             }
         }
+
+        let mut existing_targets = Vec::with_capacity(targets.len());
+        for (attachment_id, directory) in targets {
+            let exists = fs::try_exists(&directory).await.map_err(|error| {
+                AppError::storage(
+                    "Attachment promotion rollback could not be completed",
+                    format!("check promoted attachment {attachment_id}: {error}"),
+                    true,
+                )
+            })?;
+            if exists {
+                existing_targets.push((attachment_id, directory));
+            }
+        }
+
+        if existing_targets.is_empty() {
+            return Ok(());
+        }
+
+        let staging_directory = self
+            .root_path
+            .join(".promotion-rollbacks")
+            .join(Uuid::new_v4().to_string());
+        self.assert_contained(&staging_directory)?;
+        fs::create_dir_all(&staging_directory)
+            .await
+            .map_err(|error| {
+                AppError::storage(
+                    "Attachment promotion rollback could not be completed",
+                    format!("create rollback staging directory: {error}"),
+                    true,
+                )
+            })?;
+
+        let mut moved = Vec::with_capacity(existing_targets.len());
+        for (attachment_id, source) in existing_targets {
+            let staged = staging_directory.join(attachment_id);
+            if let Err(error) = fs::rename(&source, &staged).await {
+                let restore_error = Self::restore_staged_promotions(&moved).await.err();
+                let _ = fs::remove_dir_all(&staging_directory).await;
+                let diagnostic = match restore_error {
+                    Some(restore_error) => format!(
+                        "stage promoted attachment {attachment_id}: {error}; restore staged attachments: {restore_error}"
+                    ),
+                    None => format!("stage promoted attachment {attachment_id}: {error}"),
+                };
+                return Err(AppError::storage(
+                    "Attachment promotion rollback could not be completed",
+                    diagnostic,
+                    true,
+                ));
+            }
+            moved.push((source, staged));
+        }
+
+        if let Err(error) = fs::remove_dir_all(&staging_directory).await {
+            tracing::warn!(
+                error = %error,
+                "attachment promotion rollback completed but staging cleanup failed"
+            );
+        }
+        Ok(())
+    }
+
+    async fn restore_staged_promotions(moved: &[(PathBuf, PathBuf)]) -> Result<(), std::io::Error> {
+        for (source, staged) in moved.iter().rev() {
+            fs::rename(staged, source).await?;
+        }
+        Ok(())
     }
 
     pub async fn discard_drafts(&self, draft_ids: &[String]) -> Result<(), AppError> {
@@ -418,11 +683,31 @@ impl AttachmentService {
     }
 
     pub async fn delete_session(&self, session_id: &str) -> Result<(), AppError> {
+        let _promotion_guard = self.promotion_lock.lock().await;
         Self::assert_identifier(session_id, "session")?;
         let target = self.root_path.join("sessions").join(session_id);
         self.assert_contained(&target)?;
-        let _ = fs::remove_dir_all(target).await;
-        Ok(())
+        self.assert_path_has_no_symlink_component(&target).await?;
+        match fs::symlink_metadata(&target).await {
+            Ok(metadata) if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() => {
+                Err(AppError::validation(
+                    "Session attachment storage is invalid",
+                ))
+            }
+            Ok(_) => fs::remove_dir_all(&target).await.map_err(|error| {
+                AppError::storage(
+                    "Session attachments could not be deleted",
+                    format!("remove {}: {error}", target.display()),
+                    false,
+                )
+            }),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(AppError::storage(
+                "Session attachment storage could not be inspected",
+                format!("inspect {}: {error}", target.display()),
+                false,
+            )),
+        }
     }
 
     pub async fn cleanup_orphans(
@@ -477,11 +762,15 @@ impl AttachmentService {
 
 #[cfg(test)]
 mod tests {
-    use std::{path::Path, sync::Arc};
+    use std::{
+        path::{Path, PathBuf},
+        sync::Arc,
+    };
 
-    use codez_core::{AppErrorKind, AppPaths};
+    use codez_core::{AppErrorKind, AppPaths, ComposerImageAttachment, SessionImageAttachment};
+    use tokio::fs;
 
-    use super::AttachmentService;
+    use super::{AttachmentMetadata, AttachmentService};
 
     fn attachment_service(root: &Path) -> AttachmentService {
         let paths = AppPaths::new(
@@ -494,6 +783,72 @@ mod tests {
         )
         .expect("absolute fixture paths must be valid");
         AttachmentService::new(Arc::new(paths))
+    }
+
+    fn attachment_directory(
+        root: &Path,
+        scope: &str,
+        owner_id: &str,
+        attachment_id: &str,
+    ) -> PathBuf {
+        root.join("data")
+            .join("attachments")
+            .join(scope)
+            .join(owner_id)
+            .join(attachment_id)
+    }
+
+    async fn write_attachment_copy(path: &Path) {
+        fs::create_dir_all(path)
+            .await
+            .expect("fixture attachment directory must be created");
+        fs::write(path.join("original"), [1_u8, 2, 3])
+            .await
+            .expect("fixture attachment source must be written");
+    }
+
+    fn session_attachment(
+        session_id: &str,
+        attachment_id: &str,
+        mime_type: &str,
+        size_bytes: u64,
+    ) -> SessionImageAttachment {
+        SessionImageAttachment {
+            id: attachment_id.to_string(),
+            kind: "image".to_string(),
+            name: "fixture-image".to_string(),
+            mime_type: mime_type.to_string(),
+            width: 1,
+            height: 1,
+            size_bytes,
+            storage_key: format!("attachment:sessions/{session_id}/{attachment_id}"),
+            scope: "session".to_string(),
+            session_id: session_id.to_string(),
+        }
+    }
+
+    async fn write_session_attachment(
+        root: &Path,
+        attachment: &SessionImageAttachment,
+        bytes: &[u8],
+    ) {
+        let path = attachment_directory(root, "sessions", &attachment.session_id, &attachment.id);
+        fs::create_dir_all(&path)
+            .await
+            .expect("fixture session attachment directory must be created");
+        fs::write(path.join("original"), bytes)
+            .await
+            .expect("fixture image must be written");
+        let metadata = AttachmentMetadata {
+            attachment: ComposerImageAttachment::Session(attachment.clone()),
+            created_at: 0,
+        };
+        fs::write(
+            path.join("meta.json"),
+            serde_json::to_vec(&metadata).expect("fixture metadata must serialize"),
+        )
+        .await
+        .expect("fixture metadata must be written");
     }
 
     #[test]
@@ -516,6 +871,162 @@ mod tests {
         let error = service
             .path_for("attachment:drafts/draft-1/image-1", "../original")
             .expect_err("attachment variants must be direct child names");
+
+        assert_eq!(error.kind(), AppErrorKind::Validation);
+    }
+
+    #[tokio::test]
+    async fn rollback_promotion_removes_the_session_copy_and_keeps_the_draft() {
+        let directory = tempfile::tempdir().expect("temporary fixture directory must exist");
+        let service = attachment_service(directory.path());
+        let draft = attachment_directory(directory.path(), "drafts", "draft-1", "image-1");
+        let promoted = attachment_directory(directory.path(), "sessions", "session-1", "image-1");
+        write_attachment_copy(&draft).await;
+        write_attachment_copy(&promoted).await;
+
+        service
+            .rollback_promotion("session-1", &["image-1".to_string()])
+            .await
+            .expect("valid promoted attachment must roll back");
+
+        assert!(
+            fs::try_exists(&draft)
+                .await
+                .expect("draft path must be readable")
+        );
+        assert!(
+            !fs::try_exists(&promoted)
+                .await
+                .expect("session path must be readable")
+        );
+    }
+
+    #[tokio::test]
+    async fn rollback_promotion_treats_missing_or_already_removed_copies_as_success() {
+        let directory = tempfile::tempdir().expect("temporary fixture directory must exist");
+        let service = attachment_service(directory.path());
+        let promoted = attachment_directory(directory.path(), "sessions", "session-1", "image-1");
+        write_attachment_copy(&promoted).await;
+
+        service
+            .rollback_promotion(
+                "session-1",
+                &[
+                    "missing".to_string(),
+                    "image-1".to_string(),
+                    "image-1".to_string(),
+                ],
+            )
+            .await
+            .expect("missing copies and duplicate ids must be idempotent");
+        service
+            .rollback_promotion("session-1", &["image-1".to_string()])
+            .await
+            .expect("a repeated rollback must be idempotent");
+
+        assert!(
+            !fs::try_exists(&promoted)
+                .await
+                .expect("session path must be readable")
+        );
+    }
+
+    #[tokio::test]
+    async fn rollback_promotion_rejects_invalid_identifiers_before_removing_copies() {
+        let directory = tempfile::tempdir().expect("temporary fixture directory must exist");
+        let service = attachment_service(directory.path());
+        let promoted = attachment_directory(directory.path(), "sessions", "session-1", "image-1");
+        write_attachment_copy(&promoted).await;
+
+        let traversal_error = service
+            .rollback_promotion("session-1", &["../image-1".to_string()])
+            .await
+            .expect_err("traversal input must be rejected");
+        let empty_session_error = service
+            .rollback_promotion("", &["image-1".to_string()])
+            .await
+            .expect_err("empty session input must be rejected");
+
+        assert_eq!(traversal_error.kind(), AppErrorKind::Validation);
+        assert_eq!(empty_session_error.kind(), AppErrorKind::Validation);
+        assert!(
+            fs::try_exists(&promoted)
+                .await
+                .expect("session path must be readable")
+        );
+    }
+
+    #[tokio::test]
+    async fn rollback_promotion_cannot_remove_an_attachment_from_another_session() {
+        let directory = tempfile::tempdir().expect("temporary fixture directory must exist");
+        let service = attachment_service(directory.path());
+        let first = attachment_directory(directory.path(), "sessions", "session-1", "image-1");
+        let second = attachment_directory(directory.path(), "sessions", "session-2", "image-1");
+        write_attachment_copy(&first).await;
+        write_attachment_copy(&second).await;
+
+        service
+            .rollback_promotion("session-2", &["image-1".to_string()])
+            .await
+            .expect("session-scoped rollback must succeed");
+
+        assert!(
+            fs::try_exists(&first)
+                .await
+                .expect("other session path must be readable")
+        );
+        assert!(
+            !fs::try_exists(&second)
+                .await
+                .expect("target session path must be readable")
+        );
+    }
+
+    #[tokio::test]
+    async fn read_session_image_uses_verified_stored_metadata() {
+        let directory = tempfile::tempdir().expect("temporary fixture directory must exist");
+        let service = attachment_service(directory.path());
+        let stored = session_attachment("session-1", "image-1", "image/png", 3);
+        write_session_attachment(directory.path(), &stored, &[1, 2, 3]).await;
+        let mut requested = stored.clone();
+        requested.mime_type = "image/jpeg".to_string();
+        requested.name = "untrusted-name.jpg".to_string();
+
+        let image = service
+            .read_session_image("session-1", &requested, 8)
+            .await
+            .expect("session-owned image must resolve");
+
+        assert_eq!(image.attachment.mime_type, "image/png");
+        assert_eq!(image.bytes, vec![1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn read_session_image_rejects_cross_session_references() {
+        let directory = tempfile::tempdir().expect("temporary fixture directory must exist");
+        let service = attachment_service(directory.path());
+        let stored = session_attachment("session-2", "image-1", "image/png", 3);
+        write_session_attachment(directory.path(), &stored, &[1, 2, 3]).await;
+
+        let error = match service.read_session_image("session-1", &stored, 8).await {
+            Ok(_) => panic!("another session's image must not resolve"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.kind(), AppErrorKind::Validation);
+    }
+
+    #[tokio::test]
+    async fn read_session_image_rejects_images_over_the_provider_limit() {
+        let directory = tempfile::tempdir().expect("temporary fixture directory must exist");
+        let service = attachment_service(directory.path());
+        let stored = session_attachment("session-1", "image-1", "image/png", 3);
+        write_session_attachment(directory.path(), &stored, &[1, 2, 3]).await;
+
+        let error = match service.read_session_image("session-1", &stored, 2).await {
+            Ok(_) => panic!("images exceeding the Provider limit must fail closed"),
+            Err(error) => error,
+        };
 
         assert_eq!(error.kind(), AppErrorKind::Validation);
     }

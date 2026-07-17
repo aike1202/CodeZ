@@ -179,6 +179,20 @@ pub struct ChatMessage {
     pub tool_call_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Verified image content used only while building a provider request.
+    ///
+    /// The desktop runtime rehydrates these bytes from the session attachment
+    /// store. They are deliberately excluded from persisted and generic wire
+    /// representations.
+    #[serde(skip, default)]
+    pub images: Vec<ChatImage>,
+}
+
+/// Verified image content available to a provider request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatImage {
+    pub mime_type: String,
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

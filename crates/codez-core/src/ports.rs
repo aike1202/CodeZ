@@ -4,6 +4,7 @@ use std::{
     future::Future,
     path::{Path, PathBuf},
     pin::Pin,
+    sync::Arc,
     time::{Duration, SystemTime},
 };
 
@@ -150,6 +151,107 @@ pub trait ProcessRunner: Send + Sync {
         request: ProcessRequest,
         cancellation: CancellationToken,
     ) -> PortFuture<'a, ProcessOutput>;
+}
+
+/// Output routing for a supervised process that may outlive one wait window.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpawnedProcessOutputTarget {
+    /// Captures stdout and stderr in memory under one combined byte limit.
+    Capture,
+    /// Streams stdout and stderr directly to distinct, caller-owned files.
+    Files {
+        stdout_path: PathBuf,
+        stderr_path: PathBuf,
+    },
+}
+
+/// Explicit request for a process whose lifetime is controlled through a handle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpawnedProcessRequest {
+    pub program: PathBuf,
+    pub arguments: Vec<OsString>,
+    pub current_directory: PathBuf,
+    pub environment: BTreeMap<OsString, OsString>,
+    pub max_output_bytes: u64,
+    pub output: SpawnedProcessOutputTarget,
+}
+
+impl SpawnedProcessRequest {
+    /// Rejects requests that depend on ambient process state or invalid output paths.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError`] when an executable, working directory, or output path
+    /// is relative, when file targets alias each other, or when the capture limit is zero.
+    pub fn validate(&self) -> Result<(), AppError> {
+        if !self.program.is_absolute() {
+            return Err(AppError::validation(
+                "Spawned process program path must be absolute",
+            ));
+        }
+        if !self.current_directory.is_absolute() {
+            return Err(AppError::validation(
+                "Spawned process working directory must be absolute",
+            ));
+        }
+        if self.max_output_bytes == 0 {
+            return Err(AppError::validation(
+                "Spawned process output limit must be positive",
+            ));
+        }
+        if let SpawnedProcessOutputTarget::Files {
+            stdout_path,
+            stderr_path,
+        } = &self.output
+        {
+            if !stdout_path.is_absolute() || !stderr_path.is_absolute() {
+                return Err(AppError::validation(
+                    "Spawned process output paths must be absolute",
+                ));
+            }
+            if stdout_path == stderr_path {
+                return Err(AppError::validation(
+                    "Spawned process output paths must be distinct",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Reason a supervised process reached its terminal state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpawnedProcessTermination {
+    Exited,
+    Terminated,
+}
+
+/// Terminal result retained by a long-lived process handle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpawnedProcessOutput {
+    pub exit_code: Option<i32>,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+    pub output_truncated: bool,
+    pub elapsed: Duration,
+    pub termination: SpawnedProcessTermination,
+}
+
+/// One owned process tree that supports repeatable waits and confirmed termination.
+pub trait SpawnedProcess: Send + Sync {
+    /// Returns the top-level process identifier when the platform supplied one.
+    fn pid(&self) -> Option<u32>;
+
+    /// Waits for and returns the retained terminal result.
+    fn wait(&self) -> PortFuture<'_, SpawnedProcessOutput>;
+
+    /// Terminates the owned process tree and waits for confirmed completion.
+    fn terminate(&self) -> PortFuture<'_, SpawnedProcessOutput>;
+}
+
+/// Starts process trees whose handles remain valid across multiple wait windows.
+pub trait SpawnedProcessRunner: Send + Sync {
+    fn spawn(&self, request: SpawnedProcessRequest) -> PortFuture<'_, Arc<dyn SpawnedProcess>>;
 }
 
 /// Domain event publisher implemented by the active host adapter.

@@ -14,7 +14,7 @@ pub enum PromptLayer {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptSkillSummary {
     pub name: String,
-    pub description: String,
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,7 +25,7 @@ pub struct PromptToolSummary {
 
 #[derive(Debug, Clone)]
 pub struct PromptContext {
-    pub workspace_root: PathBuf,
+    pub workspace_root: Option<PathBuf>,
     pub model_id: String,
     pub model_display_name: String,
     pub context_window_tokens: u32,

@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import type { ComposerImageAttachment } from '@shared/types/attachment'
 import { mergeRejectedAttachments } from '../promptSubmissionState'
+import { desktopApi } from '../../../shared/desktop'
 
 interface UseImageAttachmentsResult {
   attachments: ComposerImageAttachment[]
@@ -35,11 +36,11 @@ export function useImageAttachments(): UseImageAttachmentsResult {
         }
         try {
           const bytes = new Uint8Array(await file.arrayBuffer())
-          const attachment = await window.api.attachment.importDraft({
-            name: file.name || 'photo',
-            declaredMimeType: file.type,
+          const attachment = await desktopApi.attachment.importDraft(
+            file.name || 'photo',
+            file.type,
             bytes
-          })
+          )
           return { attachment }
         } catch (error) {
           return {
@@ -64,7 +65,7 @@ export function useImageAttachments(): UseImageAttachmentsResult {
     const removed = attachments.find((attachment) => attachment.id === id)
     setAttachments((current) => current.filter((attachment) => attachment.id !== id))
     if (removed?.scope === 'draft') {
-      await window.api.attachment.discardDrafts([removed.draftId]).catch(() => undefined)
+      await desktopApi.attachment.discardDrafts([removed.draftId]).catch(() => undefined)
     }
   }, [attachments])
 

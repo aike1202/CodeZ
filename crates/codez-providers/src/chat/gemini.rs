@@ -1,3 +1,4 @@
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use codez_core::provider::{
     AgentStopReason, ChatMessage, ChatStreamEvent, ProviderTokenUsage, Role, ThinkingEffort,
     ThinkingMode, ToolCall, ToolCallFunction,
@@ -182,6 +183,11 @@ fn build_gemini_contents(
     let mut index = 0;
     while index < messages.len() {
         let message = &messages[index];
+        if !message.images.is_empty() && message.role != Role::User {
+            return Err(ChatProviderError::Parse(
+                "only user messages can include image input".to_string(),
+            ));
+        }
         match message.role {
             Role::System => {
                 if let Some(content) = message.content.as_deref() {
@@ -190,12 +196,20 @@ fn build_gemini_contents(
                 index += 1;
             }
             Role::User => {
-                let parts = message
+                let mut parts = message
                     .content
                     .as_deref()
                     .filter(|content| !content.trim().is_empty())
                     .map(|content| vec![json!({ "text": content })])
                     .unwrap_or_default();
+                parts.extend(message.images.iter().map(|image| {
+                    json!({
+                        "inlineData": {
+                            "mimeType": image.mime_type,
+                            "data": BASE64_STANDARD.encode(&image.bytes)
+                        }
+                    })
+                }));
                 push_or_merge_content(&mut contents, "user", parts);
                 index += 1;
             }
@@ -489,8 +503,8 @@ fn map_gemini_stop_reason(reason: &str) -> AgentStopReason {
 #[cfg(test)]
 mod tests {
     use codez_core::provider::{
-        AgentStopReason, ChatMessage, ChatStreamEvent, Role, SecretValue, ThinkingConfig,
-        ThinkingMode, ToolDefinition, ToolDefinitionFunction,
+        AgentStopReason, ChatImage, ChatMessage, ChatStreamEvent, Role, SecretValue,
+        ThinkingConfig, ThinkingMode, ToolDefinition, ToolDefinitionFunction,
     };
     use serde_json::{Value, json};
 
@@ -510,6 +524,7 @@ mod tests {
                     tool_calls: None,
                     tool_call_id: None,
                     name: None,
+                    images: Vec::new(),
                 },
                 ChatMessage {
                     role: Role::User,
@@ -517,6 +532,7 @@ mod tests {
                     tool_calls: None,
                     tool_call_id: None,
                     name: None,
+                    images: Vec::new(),
                 },
             ],
             tools: Some(vec![ToolDefinition {
@@ -578,6 +594,33 @@ mod tests {
                 }],
                 "generationConfig": { "maxOutputTokens": 256 }
             })
+        );
+    }
+
+    #[test]
+    fn request_encodes_verified_user_images_as_gemini_inline_data() {
+        let mut config = fixture_config();
+        config.tools = None;
+        config.messages = vec![ChatMessage {
+            role: Role::User,
+            content: Some("inspect this image".to_string()),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+            images: vec![ChatImage {
+                mime_type: "image/jpeg".to_string(),
+                bytes: vec![1, 2, 3],
+            }],
+        }];
+
+        let payload = build_request_payload(&config).expect("image payload is valid");
+
+        assert_eq!(
+            payload["contents"][0]["parts"],
+            json!([
+                { "text": "inspect this image" },
+                { "inlineData": { "mimeType": "image/jpeg", "data": "AQID" } }
+            ])
         );
     }
 

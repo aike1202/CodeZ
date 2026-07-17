@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { GeneralSettings } from '@shared/types/settings'
+import { desktopApi } from '../shared/desktop'
 
 interface SettingsState {
   settings: GeneralSettings | null
@@ -15,7 +16,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   loadSettings: async () => {
     set({ loading: true })
     try {
-      const data = await window.api.settings.get()
+      const data = await desktopApi.settings.get()
       set({ settings: data, loading: false })
     } catch (error) {
       console.error('Failed to load settings:', error)
@@ -32,7 +33,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ settings: updated })
     
     try {
-      await window.api.settings.save(updated)
+      await desktopApi.settings.save(updated)
     } catch (error) {
       console.error('Failed to save settings:', error)
       // Revert on failure

@@ -9,7 +9,10 @@ pub mod pty;
 mod resources;
 mod system;
 
-pub use executable::{GitDiscoveryError, GitInstallation};
+pub use executable::{
+    BashDiscoveryError, BashInstallation, GitDiscoveryError, GitInstallation,
+    PowerShellDiscoveryError, PowerShellInstallation,
+};
 pub use filesystem::{NativeFileSystem, NativeFileSystemError};
 pub use process::NativeProcessRunner;
 pub use pty::{PtyEvent, PtyManager};

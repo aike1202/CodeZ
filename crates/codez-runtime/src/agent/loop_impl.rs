@@ -338,10 +338,7 @@ mod tests {
         let agent = loop_with([ScriptedOutcome::Continue, ScriptedOutcome::Complete]);
 
         assert!(matches!(agent.run_step().await, Ok(AgentStatus::Idle)));
-        assert!(matches!(
-            agent.run_step().await,
-            Ok(AgentStatus::Completed)
-        ));
+        assert!(matches!(agent.run_step().await, Ok(AgentStatus::Completed)));
     }
 
     #[tokio::test]
@@ -351,7 +348,10 @@ mod tests {
         let error = agent.run_step().await.expect_err("fixture step must fail");
 
         assert!(matches!(error, AgentLoopError::Execution(_)));
-        assert_eq!(agent.snapshot().await.current_error.as_deref(), Some("The agent step failed"));
+        assert_eq!(
+            agent.snapshot().await.current_error.as_deref(),
+            Some("The agent step failed")
+        );
     }
 
     #[tokio::test]
@@ -370,7 +370,10 @@ mod tests {
         let second = agent.run_step().await;
 
         assert!(matches!(first, Ok(AgentStatus::Idle)));
-        assert!(matches!(second, Err(AgentLoopError::StepLimitExceeded { .. })));
+        assert!(matches!(
+            second,
+            Err(AgentLoopError::StepLimitExceeded { .. })
+        ));
         assert_eq!(agent.current_status().await, AgentStatus::Failed);
     }
 

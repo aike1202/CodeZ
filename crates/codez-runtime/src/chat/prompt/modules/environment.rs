@@ -26,7 +26,6 @@ impl PromptModule for EnvironmentModule {
             } else {
                 "Bash"
             };
-            let cwd = ctx.workspace_root.to_string_lossy();
             let date = ctx
                 .now
                 .unwrap_or_else(Utc::now)
@@ -35,7 +34,6 @@ impl PromptModule for EnvironmentModule {
 
             let mut lines = vec![
                 "# Environment".to_string(),
-                format!("- Primary working directory: {}", cwd),
                 format!("- Platform: {}", platform),
                 format!("- Shell: {}", shell),
                 format!("- OS: {}", std::env::consts::OS),
@@ -43,6 +41,26 @@ impl PromptModule for EnvironmentModule {
                 format!("- Model: {} ({})", ctx.model_display_name, ctx.model_id),
                 format!("- Context window: {} tokens", ctx.context_window_tokens),
             ];
+
+            if let Some(workspace_root) = ctx.workspace_root.as_deref() {
+                lines.insert(
+                    1,
+                    format!(
+                        "- Primary working directory: {}",
+                        workspace_root.to_string_lossy()
+                    ),
+                );
+            } else {
+                lines.insert(
+                    1,
+                    "- Project workspace: unavailable; workspace-scoped tools and instructions are disabled"
+                        .to_string(),
+                );
+            }
+
+            if let Some(session_id) = ctx.session_id.as_deref() {
+                lines.push(format!("- Session: {session_id}"));
+            }
 
             if let Some(api_format) = &ctx.api_format {
                 lines.push(format!("- API format: {}", api_format));

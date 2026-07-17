@@ -11,6 +11,11 @@ export interface McpServerConfig {
   env?: Record<string, string>
   url?: string
   headers?: Record<string, string>
+  oauth?: {
+    clientId?: string
+    callbackPort?: number
+    scope?: string
+  }
   timeoutMs?: number
   handshakeTimeoutMs?: number
   alwaysLoadTools?: string[]
@@ -88,6 +93,17 @@ export interface McpServerCatalog {
   prompts: McpPromptCatalogItem[]
   updatedAt?: string
   stale: boolean
+}
+
+export interface McpResourceReadResult {
+  server: string
+  contents: unknown
+}
+
+export interface McpPromptGetResult {
+  server: string
+  description?: string
+  messages: unknown
 }
 
 export interface McpListPayload {

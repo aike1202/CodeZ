@@ -14,6 +14,7 @@ import { useChatStore, type ChatMessage, type SubAgentRecord } from '../../../st
 import { useSendMessage } from '../hooks/useSendMessage'
 import { ChatMessageList } from './components/ChatMessageList'
 import ConversationNavigator from '../ConversationNavigator'
+import { desktopApi } from '../../../shared/desktop'
 
 /** 距底部小于视口高度的此比例算"在底部" */
 const SCROLL_BOTTOM_RATIO = 0.15
@@ -241,7 +242,7 @@ export default function ChatArea({
   const handleResolvePermission = useCallback(
     async (msgId: string, requestId: string, response: PermissionApprovalResponse) => {
       try {
-        await window.api.chat.respondToApproval(requestId, response)
+        await desktopApi.chat.respondToApproval(requestId, response)
       } catch (error) {
         console.warn('Failed to send approval response to backend:', error)
       } finally {
@@ -258,7 +259,7 @@ export default function ChatArea({
       answers: Array<{ question: string; answer: string | string[] }>
     ) => {
       try {
-        await window.api.chat.respondAskUser(requestId, answers)
+        await desktopApi.chat.respondAskUser(requestId, answers)
       } catch (error) {
         console.warn('Failed to send ask-user response to backend:', error)
       } finally {
@@ -438,7 +439,7 @@ export default function ChatArea({
               handleSendMessage(message, modelName, false, attachments)}
             onSteer={async (prompt) => {
               if (!activeSessionId) return false
-              const result = await window.api.chat.steer(activeSessionId, {
+              const result = await desktopApi.chat.steer(activeSessionId, {
                 queueId: prompt.id,
                 text: prompt.text,
                 attachments: prompt.attachments.filter((attachment) => attachment.scope === 'session')

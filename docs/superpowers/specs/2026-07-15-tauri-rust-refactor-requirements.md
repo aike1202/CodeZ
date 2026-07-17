@@ -8,6 +8,8 @@
 >
 > 关联计划：`docs/superpowers/plans/2026-07-15-tauri-rust-refactor.md`
 
+> **2026-07-17 范围覆盖。** 以下较早的“旧数据迁移、凭据重录、升级/回退演练后删除 Electron”的描述不再是本轮目标。Tauri 从 `~/.codez` 创建并使用全新状态，不读取、复制或转换 Electron `userData` 或旧实验数据；旧数据保持原位。Electron 源码、测试、构建配置、依赖和安装基线无限期保留，不设删除阶段。Plan 不纳入 Tauri/Rust 迁移，不实现 Rust Plan CRUD、事件、持久化或兼容层；renderer 只隔离相关入口，Electron 旧实现原样保留。MCP 后续单列恢复，不阻塞其余领域迁移。执行顺序见 `docs/migration/current-execution-scope.md`。
+
 ## 1. 决策摘要
 
 CodeZ 停止继续扩展 Electron 版本，桌面容器最终直接替换为 Tauri，Electron 不作为长期兼容运行时，也不设计 Electron/Tauri 双启动、运行时切换或双版本数据同步。迁移实施期间必须保留 Electron 源码、测试、构建配置和可用基线，直到 Tauri 功能、数据、安全、测试、安装升级与回退全部验收通过后，才在独立清理阶段删除；源码暂时保留不等于最终产品支持双运行时。

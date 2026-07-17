@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{CommandError, SessionImageAttachment, provider::ProviderTokenUsage};
+use crate::{
+    CommandError, SessionImageAttachment, context::ContextBudgetSnapshot,
+    provider::ProviderTokenUsage,
+};
 
 pub const CHAT_STREAM_CONTRACT_VERSION: u16 = 1;
 
@@ -254,6 +257,9 @@ pub struct ChatCompactionResult {
     pub message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub retryable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub tokens_before: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -283,6 +289,21 @@ pub struct ChatCompactionResponse {
 pub struct ChatFileDiff {
     pub path: String,
     pub diff: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ChatHistoryRevertResult {
+    pub history_version: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ChatHistoryRevertPreview {
+    pub to_delete: Vec<String>,
+    pub to_restore: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -430,6 +451,36 @@ pub struct PromptPredictionResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ContextCompactionStarted {
+    pub trigger: String,
+    pub tokens_before: u32,
+    pub history_version: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ContextCompactionCompleted {
+    pub trigger: String,
+    pub tokens_before: u32,
+    pub tokens_after: u32,
+    pub history_version: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ContextCompactionFailed {
+    pub trigger: String,
+    pub error_code: String,
+    pub message: String,
+    pub retryable: bool,
+    pub history_version: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", content = "payload", rename_all = "camelCase")]
 #[ts(tag = "kind", content = "payload", rename_all = "camelCase")]
 pub enum ChatStreamFrameEvent {
@@ -442,6 +493,10 @@ pub enum ChatStreamFrameEvent {
     Usage {
         usage: ProviderTokenUsage,
     },
+    ContextBudget(ContextBudgetSnapshot),
+    ContextCompactionStarted(ContextCompactionStarted),
+    ContextCompactionCompleted(ContextCompactionCompleted),
+    ContextCompactionFailed(ContextCompactionFailed),
     ToolCalls {
         calls: Vec<ToolCall>,
     },
@@ -470,9 +525,15 @@ pub enum ChatStreamFrameEvent {
         #[serde(rename = "providerCode")]
         #[ts(rename = "providerCode")]
         provider_code: Option<ChatProviderErrorCode>,
+        #[serde(rename = "txId")]
+        #[ts(rename = "txId")]
+        tx_id: Option<String>,
     },
     Interrupted {
         reason: String,
+        #[serde(rename = "txId")]
+        #[ts(rename = "txId")]
+        tx_id: Option<String>,
     },
 }
 
@@ -498,4 +559,64 @@ pub struct ChatStreamFrame {
     #[serde(flatten)]
     #[ts(flatten)]
     pub event: ChatStreamFrameEvent,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{ChatStreamFrameEvent, CommandError};
+
+    #[test]
+    fn failed_terminal_frame_serializes_a_retained_transaction_id() {
+        let event = ChatStreamFrameEvent::Failed {
+            error: CommandError::internal("provider failed"),
+            provider_code: None,
+            tx_id: Some("tx-failed".to_string()),
+        };
+
+        assert_eq!(
+            serde_json::to_value(event).expect("terminal frame must serialize"),
+            json!({
+                "kind": "failed",
+                "payload": {
+                    "error": {
+                        "code": "INTERNAL",
+                        "message": "provider failed",
+                        "retryable": false,
+                        "correlationId": null
+                    },
+                    "providerCode": null,
+                    "txId": "tx-failed"
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn interrupted_terminal_frame_serializes_a_retained_transaction_id() {
+        let event = ChatStreamFrameEvent::Interrupted {
+            reason: "stopped".to_string(),
+            tx_id: Some("tx-interrupted".to_string()),
+        };
+
+        assert_eq!(
+            serde_json::to_value(event).expect("terminal frame must serialize"),
+            json!({
+                "kind": "interrupted",
+                "payload": { "reason": "stopped", "txId": "tx-interrupted" }
+            })
+        );
+    }
+
+    #[test]
+    fn interrupted_terminal_frame_keeps_an_empty_transaction_absent() {
+        let event = ChatStreamFrameEvent::Interrupted {
+            reason: "stopped".to_string(),
+            tx_id: None,
+        };
+        let value = serde_json::to_value(event).expect("terminal frame must serialize");
+
+        assert_eq!(value["payload"]["txId"], serde_json::Value::Null);
+    }
 }

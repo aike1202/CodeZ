@@ -58,6 +58,54 @@ describe('desktop error mapping', () => {
     expect(error.code).toBe('PROCESS_FAILED')
   })
 
+  it('preserves retryable RUN_ACTIVE errors from session coordination', () => {
+    const error = normalizeDesktopError(JSON.stringify({
+      code: 'RUN_ACTIVE',
+      message: 'The session has an active run',
+      retryable: true,
+      correlationId: 'cmd-run-active-1'
+    }))
+
+    expect(error).toMatchObject({
+      name: 'DesktopCommandError',
+      code: 'RUN_ACTIVE',
+      message: 'The session has an active run',
+      retryable: true,
+      correlationId: 'cmd-run-active-1'
+    })
+  })
+
+  it.each([
+    ['HISTORY_REVERT_STALE', true],
+    ['RECOVERY_REQUIRED', true]
+  ] as const)('preserves the %s history recovery code', (code, retryable) => {
+    const error = normalizeDesktopError({
+      code,
+      message: 'History revert requires a retry',
+      retryable,
+      correlationId: 'cmd-history-1'
+    })
+
+    expect(error).toMatchObject({ code, retryable, correlationId: 'cmd-history-1' })
+  })
+
+  it('preserves UNSUPPORTED errors instead of degrading them to INTERNAL', () => {
+    const error = normalizeDesktopError({
+      code: 'UNSUPPORTED',
+      message: 'This operation is not supported on the current platform',
+      retryable: false,
+      correlationId: null
+    })
+
+    expect(error).toMatchObject({
+      name: 'DesktopCommandError',
+      code: 'UNSUPPORTED',
+      message: 'This operation is not supported on the current platform',
+      retryable: false,
+      correlationId: null
+    })
+  })
+
   it('does not expose messages from unstructured errors', () => {
     const error = normalizeDesktopError(new Error('apiKey=secret-value'))
 

@@ -23,6 +23,10 @@ export interface ParseResult {
   clientAction?: ClientAction
 }
 
+export interface SlashCommandFeatures {
+  plan?: boolean
+}
+
 export const builtinCommands: SlashCommand[] = [
   {
     name: 'goal',
@@ -38,9 +42,11 @@ export const builtinCommands: SlashCommand[] = [
 
 export function parseSlashCommand(
   message: string,
-  dynamicSkills: SkillDefinition[] = []
+  dynamicSkills: SkillDefinition[] = [],
+  features: SlashCommandFeatures = {}
 ): ParseResult {
   const trimMsg = message.trim()
+  const planEnabled = features.plan !== false
 
   const compactSlashMatch = trimMsg.match(/^\/compact(?:\s+(.*))?$/i)
   const compactPillMatch = trimMsg.match(/^\[\$compact\]\([^)]+\)(?:\s+(.*))?$/i)
@@ -58,7 +64,7 @@ export function parseSlashCommand(
   }
 
   // ── Plan commands: /plan, /plans, /plan list, /plan new <description> ──
-  if (trimMsg === '/plan' || trimMsg === '/plans' || trimMsg.startsWith('/plan ')) {
+  if (planEnabled && (trimMsg === '/plan' || trimMsg === '/plans' || trimMsg.startsWith('/plan '))) {
     const rest = trimMsg.startsWith('/plans') ? trimMsg.slice(6).trim() : trimMsg.slice(5).trim() // after '/plan' or '/plans'
     if (!rest) {
       // /plan alone → show plan list modal
@@ -92,7 +98,7 @@ export function parseSlashCommand(
 
   // ── /<slug> plan loading ──
   // Match /<kebab-case> patterns that look like plan slugs
-  if (trimMsg.startsWith('/')) {
+  if (planEnabled && trimMsg.startsWith('/')) {
     const parts = trimMsg.split(/\s+/)
     const potentialSlug = parts[0].substring(1) // remove leading '/'
     // A slug-like pattern: only lowercase, digits, hyphens

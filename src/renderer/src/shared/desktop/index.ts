@@ -1,5 +1,5 @@
 export { desktopApi } from './api'
-export type { DesktopApi } from './api'
+export type { DesktopApi, TerminalExitEvent, TerminalOutputEvent } from './api'
 export { desktopEvents } from './events'
 export type { DesktopEvents } from './events'
 export { DesktopCommandError, normalizeDesktopError } from './errors'

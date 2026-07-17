@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { FileTreeNode, FileContent, ProjectInfo, WorkspaceInfo } from '@shared/types/workspace'
 import type { PermissionMode } from '@shared/types/permission'
 import { DEFAULT_PERMISSION_MODE } from '@shared/types/permission'
+import { desktopApi } from '../shared/desktop'
 
 interface WorkspaceState {
   currentView: 'home' | 'workspace'
@@ -69,7 +70,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   setError: (error) => set({ error }),
   loadPermissionMode: async (rootPath) => {
     try {
-      const permissionMode = await window.api.permission.getMode(rootPath)
+      const permissionMode = await desktopApi.permission.getMode(rootPath)
       if (get().workspace?.rootPath === rootPath) set({ permissionMode })
     } catch {
       if (get().workspace?.rootPath === rootPath) set({ permissionMode: DEFAULT_PERMISSION_MODE })
@@ -81,7 +82,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const previous = get().permissionMode
     set({ permissionMode })
     try {
-      await window.api.permission.setMode(rootPath, permissionMode)
+      await desktopApi.permission.setMode(rootPath, permissionMode)
     } catch {
       set({ permissionMode: previous })
     }

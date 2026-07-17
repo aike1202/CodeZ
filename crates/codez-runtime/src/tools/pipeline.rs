@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -13,7 +14,7 @@ use crate::tools::authorization::{
 use crate::tools::exposure::{ToolCatalogSnapshot, ToolExposurePlan};
 use crate::tools::journal::{ToolExecutionJournal, ToolJournalEvent, ToolJournalIdentity};
 use crate::tools::processor::ToolResultProcessor;
-use crate::tools::registry::ToolContext;
+use crate::tools::registry::{ToolContext, ToolFileServices};
 use crate::tools::scheduler::ToolScheduler;
 use crate::tools::types::{
     AgentRole, NormalizedToolCall, PreparedToolCall, ToolAvailabilityContext, ToolExecutionError,
@@ -67,6 +68,15 @@ pub trait ToolExecutionPipelineContext: Send + Sync {
     fn exposure(&self) -> Option<&ToolExposurePlan>;
     fn workspace_root(&self) -> &Path;
     fn session_id(&self) -> Option<&str>;
+    fn context_scope_id(&self) -> Cow<'_, str> {
+        Cow::Borrowed(codez_core::context::MAIN_CONTEXT_SCOPE)
+    }
+    fn transaction_id(&self) -> Option<&str> {
+        None
+    }
+    fn file_services(&self) -> Option<ToolFileServices> {
+        None
+    }
     fn agent_role(&self) -> &AgentRole;
     fn journal_identity(&self) -> Option<ToolJournalIdentity>;
     fn cancellation_token(&self, call: &NormalizedToolCall) -> CancellationToken;
@@ -582,13 +592,19 @@ impl ToolExecutionPipeline {
         let tool_context = ToolContext {
             execution_id: receipt.id().to_string(),
             session_id: context.session_id().map(str::to_string),
+            context_scope_id: context.context_scope_id().into_owned(),
+            transaction_id: context.transaction_id().map(str::to_string),
             workspace_root: workspace_root.to_path_buf(),
             cancellation: cancellation.clone(),
             authorized_effects: item.effects.clone(),
+            file_services: context.file_services(),
         };
         let behavior = item.handler.descriptor().behavior();
         let execution = item.handler.execute(&item.input, &tool_context);
-        let raw_result = if let Some(timeout_ms) = behavior.timeout_ms {
+        let raw_result = if behavior.interrupt == crate::tools::types::ToolInterruptBehavior::Block
+        {
+            execution.await
+        } else if let Some(timeout_ms) = behavior.timeout_ms {
             tokio::select! {
                 () = cancellation.cancelled() => cancelled_execution("Tool execution was cancelled."),
                 result = tokio::time::timeout(Duration::from_millis(u64::from(timeout_ms)), execution) => {

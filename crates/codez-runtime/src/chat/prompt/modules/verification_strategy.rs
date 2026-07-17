@@ -77,7 +77,8 @@ impl PromptModule for VerificationStrategyModule {
 
     fn build<'a>(&'a self, ctx: &'a PromptContext) -> BoxFuture<'a, Option<String>> {
         Box::pin(async move {
-            let scripts = Self::read_package_scripts(&ctx.workspace_root).await;
+            let workspace_root = ctx.workspace_root.as_deref()?;
+            let scripts = Self::read_package_scripts(workspace_root).await;
             Self::format_prompt_section(scripts)
         })
     }

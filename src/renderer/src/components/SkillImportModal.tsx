@@ -6,6 +6,7 @@ import Card from './ui/Card'
 import Button from './ui/Button'
 import { IconClose, IconDownload, IconRefreshCw, IconPackage, IconCheck } from './Icons'
 import './SkillImportModal.css'
+import { desktopApi } from '../shared/desktop'
 
 interface Props {
   onClose: () => void
@@ -21,7 +22,7 @@ export default function SkillImportModal({ onClose, onImported }: Props): React.
   const loadList = async () => {
     setLoading(true)
     try {
-      const data = await window.api.skill.listExternal()
+      const data = await desktopApi.skill.listExternal()
       setGroups(data)
     } catch (e) {
       console.error('Failed to list external skills', e)
@@ -46,7 +47,7 @@ export default function SkillImportModal({ onClose, onImported }: Props): React.
     const key = `${skill.sourceName}/${skill.dirName}`
     setImportingKey(key)
     try {
-      const ok = await window.api.skill.importSingle(skill.sourceName, skill.dirName)
+      const ok = await desktopApi.skill.importSingle(skill.sourceName, skill.dirName)
       if (ok) {
         setGroups((prev) =>
           prev.map((g) =>

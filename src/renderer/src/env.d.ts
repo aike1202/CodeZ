@@ -3,10 +3,17 @@
 
 import type {
   McpListPayload,
+  McpPromptGetResult,
+  McpResourceReadResult,
   McpServerCatalog,
   McpServerConfig,
   McpServerStatus,
 } from './components/SettingsMcpTab/types'
+import type {
+  McpReverseRequestEvent,
+  McpReverseRequestResponse,
+} from './shared/desktop/generated/contracts'
+import type { SessionData } from '@shared/types/session'
 
 declare global {
   interface Window {
@@ -132,9 +139,9 @@ declare global {
         ) => Promise<void>
       }
       session: {
-        list: () => Promise<any>
-        get: (sessionId: string) => Promise<any | null>
-        save: (session: any) => Promise<void>
+        list: () => Promise<SessionData[]>
+        get: (sessionId: string) => Promise<SessionData | null>
+        save: (session: SessionData) => Promise<void>
         delete: (sessionId: string) => Promise<void>
       }
       terminal: {
@@ -142,7 +149,7 @@ declare global {
         write: (workspaceId: string, text: string) => Promise<void>
         resize: (workspaceId: string, cols: number, rows: number) => Promise<void>
         kill: (workspaceId: string) => Promise<void>
-        onOutput: (callback: (workspaceId: string, data: string) => void) => () => void
+        onOutput: (callback: (workspaceId: string, data: string | Uint8Array) => void) => () => void
         onExit: (callback: (workspaceId: string) => void) => () => void
       }
 
@@ -178,18 +185,29 @@ declare global {
         save: (settings: any) => Promise<boolean>
       }
       mcp: {
-        list: () => Promise<McpListPayload>
-        saveUser: (servers: Record<string, McpServerConfig>) => Promise<McpListPayload>
-        setEnabled: (name: string, enabled: boolean) => Promise<McpListPayload>
-        getCatalog: (name: string) => Promise<McpServerCatalog>
-        reconnect: (name: string) => Promise<void>
-        authorize: (name: string) => Promise<void>
-        logout: (name: string) => Promise<void>
-        trustProject: (fingerprint: string) => Promise<void>
-        listSecretKeys: () => Promise<string[]>
+        list: (workspaceRoot?: string | null) => Promise<McpListPayload>
+        saveUser: (servers: Record<string, McpServerConfig>, workspaceRoot?: string | null) => Promise<McpListPayload>
+        setEnabled: (name: string, enabled: boolean, workspaceRoot?: string | null) => Promise<McpListPayload>
+        getCatalog: (name: string, workspaceRoot?: string | null) => Promise<McpServerCatalog>
+        readResource: (name: string, uri: string, workspaceRoot?: string | null) => Promise<McpResourceReadResult>
+        subscribeResource: (name: string, uri: string, workspaceRoot?: string | null) => Promise<void>
+        unsubscribeResource: (name: string, uri: string, workspaceRoot?: string | null) => Promise<void>
+        getPrompt: (
+          name: string,
+          prompt: string,
+          arguments_: Record<string, unknown>,
+          workspaceRoot?: string | null,
+        ) => Promise<McpPromptGetResult>
+        reconnect: (name: string, workspaceRoot?: string | null) => Promise<void>
+        authorize: (name: string, workspaceRoot?: string | null) => Promise<void>
+        logout: (name: string, workspaceRoot?: string | null) => Promise<void>
+        trustProject: (fingerprint: string, workspaceRoot?: string | null) => Promise<void>
+        listSecretKeys: (workspaceRoot?: string | null) => Promise<string[]>
         setSecret: (key: string, value: string) => Promise<string[]>
         deleteSecret: (key: string) => Promise<string[]>
+        respondReverseRequest: (requestId: string, response: McpReverseRequestResponse) => Promise<void>
         onChanged: (callback: (statuses: McpServerStatus[]) => void) => () => void
+        onReverseRequest: (callback: (event: McpReverseRequestEvent) => void) => () => void
       }
       subAgent: {
         list: () => Promise<import('./shared/desktop/generated/contracts').SubAgentInfo[]>
@@ -201,6 +219,18 @@ declare global {
           type: string,
           selections: import('./shared/desktop/generated/contracts').SubAgentModelSelection[]
         ) => Promise<void>
+        run: (
+          request: import('./shared/desktop/generated/contracts').SubAgentRunRequest
+        ) => Promise<import('./shared/desktop/generated/contracts').SubAgentRunState>
+        getRun: (
+          runId: string
+        ) => Promise<import('./shared/desktop/generated/contracts').SubAgentRunState>
+        cancelRun: (
+          runId: string
+        ) => Promise<import('./shared/desktop/generated/contracts').SubAgentRunCancelResult>
+        onState: (
+          callback: (state: import('./shared/desktop/generated/contracts').SubAgentRunState) => void
+        ) => () => void
       }
       logger: {
         info: (...args: any[]) => void

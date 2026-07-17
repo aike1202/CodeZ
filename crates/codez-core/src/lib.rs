@@ -27,6 +27,8 @@ pub use persistence::{AtomicCreateOutcome, AtomicPersistence};
 pub use ports::{
     Clock, DirectoryEntry, DirectoryListing, EventSink, FileKind, FileMetadata, FileSystem,
     IdGenerator, PortFuture, ProcessOutput, ProcessRequest, ProcessRunner, RecentProjectRepository,
+    SpawnedProcess, SpawnedProcessOutput, SpawnedProcessOutputTarget, SpawnedProcessRequest,
+    SpawnedProcessRunner, SpawnedProcessTermination,
 };
 pub use redaction::{RedactedText, redact_sensitive_text, redact_sensitive_value};
 pub use system::SystemHealth;

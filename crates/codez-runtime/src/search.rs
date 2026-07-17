@@ -1,13 +1,16 @@
 use std::{
     collections::VecDeque,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
 
 use codez_core::{
-    AppError, CancellationToken, FileKind, FileSystem, ProcessOutput, ProcessRequest, ProcessRunner,
+    AppError, AppErrorKind, CancellationToken, FileKind, FileSystem, ProcessOutput, ProcessRequest,
+    ProcessRunner, SafeWorkspacePath,
 };
 use globset::{Glob, GlobMatcher};
+use thiserror::Error;
 
 /// Options controlling grep output format and filtering.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,11 +71,99 @@ pub struct GrepResult {
     pub truncated: bool,
 }
 
-const DEFAULT_GLOB_LIMIT: usize = 1_000;
-const MAX_GLOB_LIMIT: usize = 5_000;
+/// Typed failures raised by bounded workspace search operations.
+#[derive(Debug, Error)]
+pub enum SearchError {
+    #[error("{0}")]
+    InvalidInput(String),
+    #[error("the search path is outside the verified workspace or contains a link")]
+    PathNotAuthorized,
+    #[error("the search path is not a directory")]
+    PathNotDirectory,
+    #[error("the bundled ripgrep executable is unavailable")]
+    RipgrepUnavailable,
+    #[error("the search was cancelled")]
+    Cancelled,
+    #[error("the search exceeded its time limit")]
+    TimedOut,
+    #[error("ripgrep failed")]
+    RipgrepFailed {
+        #[source]
+        source: Box<AppError>,
+    },
+    #[error("the workspace search failed")]
+    Workspace {
+        #[source]
+        source: Box<AppError>,
+    },
+}
+
+impl SearchError {
+    /// Stable code used by tool adapters without parsing error messages.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::InvalidInput(_) => "TOOL_SEARCH_INPUT_INVALID",
+            Self::PathNotAuthorized => "TOOL_SEARCH_PATH_NOT_AUTHORIZED",
+            Self::PathNotDirectory => "TOOL_SEARCH_PATH_INVALID",
+            Self::RipgrepUnavailable => "TOOL_SEARCH_UNAVAILABLE",
+            Self::Cancelled => "TOOL_SEARCH_CANCELLED",
+            Self::TimedOut => "TOOL_SEARCH_TIMEOUT",
+            Self::RipgrepFailed { .. } => "TOOL_SEARCH_FAILED",
+            Self::Workspace { source } => match source.kind() {
+                AppErrorKind::PermissionDenied => "TOOL_SEARCH_PATH_NOT_AUTHORIZED",
+                AppErrorKind::NotFound | AppErrorKind::Validation => "TOOL_SEARCH_PATH_INVALID",
+                AppErrorKind::Cancelled => "TOOL_SEARCH_CANCELLED",
+                AppErrorKind::Timeout => "TOOL_SEARCH_TIMEOUT",
+                _ => "TOOL_SEARCH_FAILED",
+            },
+        }
+    }
+
+    /// Whether repeating the same operation may succeed without changing its input.
+    #[must_use]
+    pub const fn retryable(&self) -> bool {
+        match self {
+            Self::TimedOut => true,
+            Self::Workspace { source } | Self::RipgrepFailed { source } => source.retryable(),
+            _ => false,
+        }
+    }
+}
+
+impl From<SearchError> for AppError {
+    fn from(value: SearchError) -> Self {
+        match value {
+            SearchError::InvalidInput(message) => AppError::validation(message),
+            SearchError::PathNotAuthorized => {
+                AppError::permission_denied("The search path is not allowed")
+            }
+            SearchError::PathNotDirectory => {
+                AppError::validation("The search path must be a directory")
+            }
+            SearchError::RipgrepUnavailable => {
+                AppError::unsupported("The bundled search executable is unavailable")
+            }
+            SearchError::Cancelled => AppError::cancelled("The search was cancelled"),
+            SearchError::TimedOut => AppError::timeout("The search timed out"),
+            SearchError::RipgrepFailed { source } | SearchError::Workspace { source } => *source,
+        }
+    }
+}
+
+pub const DEFAULT_GLOB_LIMIT: usize = 1_000;
+pub const MAX_GLOB_LIMIT: usize = 5_000;
+pub const DEFAULT_GREP_LIMIT: usize = 1_000;
+pub const MAX_GREP_LIMIT: usize = 5_000;
+pub const MAX_SEARCH_PATH_BYTES: usize = 4_096;
+pub const MAX_SEARCH_PATTERN_BYTES: usize = 16 * 1_024;
+pub const MAX_SEARCH_FILTER_BYTES: usize = 4_096;
+
 const MAX_GLOB_ENTRIES: usize = 100_000;
-const GREP_TIMEOUT_SECS: u64 = 60;
-const GREP_MAX_OUTPUT: u64 = 32 * 1024 * 1024;
+const MAX_GREP_OFFSET: usize = 100_000;
+const MAX_GREP_CONTEXT_LINES: u32 = 1_000;
+const SEARCH_TIMEOUT: Duration = Duration::from_secs(30);
+const GREP_MAX_OUTPUT: u64 = 4 * 1_024 * 1_024;
 
 const IGNORED_DIRECTORIES: &[&str] = &[
     "node_modules",
@@ -92,26 +183,29 @@ const IGNORED_DIRECTORIES: &[&str] = &[
     ".output",
 ];
 
-/// Workspace search service providing glob pattern matching and grep via ripgrep.
+/// Workspace search service providing glob matching and supervised ripgrep execution.
+#[derive(Clone)]
 pub struct SearchService {
     rg_path: PathBuf,
     process_runner: Arc<dyn ProcessRunner>,
 }
 
 impl std::fmt::Debug for SearchService {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SearchService")
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SearchService")
             .field("rg_path", &self.rg_path)
             .finish_non_exhaustive()
     }
 }
 
 impl SearchService {
-    /// Creates a search service with a validated ripgrep path and process runner.
+    /// Creates a search service with a trusted ripgrep location and process runner.
     ///
     /// # Errors
     ///
-    /// Returns [`AppError`] when the ripgrep path is not absolute.
+    /// Returns [`AppError`] when the ripgrep path is not absolute. File presence is checked at
+    /// execution time so a missing packaged resource becomes a typed unavailable result.
     pub fn new(rg_path: PathBuf, process_runner: Arc<dyn ProcessRunner>) -> Result<Self, AppError> {
         if !rg_path.is_absolute() {
             return Err(AppError::validation(
@@ -124,38 +218,87 @@ impl SearchService {
         })
     }
 
-    /// Finds files matching a glob pattern within the workspace.
-    ///
-    /// Uses pure Rust glob matching with recursive directory traversal.
-    /// Results are returned as workspace-relative posix paths.
+    /// Finds files matching a glob pattern within a verified workspace.
     ///
     /// # Errors
     ///
-    /// Returns [`AppError`] for invalid patterns, path escapes, or filesystem failures.
+    /// Returns [`SearchError`] for invalid patterns, unsafe paths, timeouts, or filesystem errors.
     pub async fn glob_files(
         &self,
         filesystem: &dyn FileSystem,
         pattern: &str,
         sub_path: Option<&str>,
         head_limit: Option<usize>,
-    ) -> Result<GlobResult, AppError> {
+    ) -> Result<GlobResult, SearchError> {
+        self.glob_files_cancellable(
+            filesystem,
+            pattern,
+            sub_path,
+            head_limit,
+            CancellationToken::new(),
+        )
+        .await
+    }
+
+    /// Finds files with explicit cancellation in addition to the fixed deadline.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SearchError`] for invalid input, unsafe paths, cancellation, timeouts, or I/O.
+    pub async fn glob_files_cancellable(
+        &self,
+        filesystem: &dyn FileSystem,
+        pattern: &str,
+        sub_path: Option<&str>,
+        head_limit: Option<usize>,
+        cancellation: CancellationToken,
+    ) -> Result<GlobResult, SearchError> {
+        validate_required_text("Glob pattern", pattern, MAX_SEARCH_PATTERN_BYTES)?;
         let matcher = build_glob_matcher(pattern)?;
-        let limit = normalize_limit(head_limit);
-        let start = resolve_sub_path(filesystem, sub_path).await?;
+        let limit = normalize_limit(head_limit, DEFAULT_GLOB_LIMIT, MAX_GLOB_LIMIT);
+        let operation = self.glob_inner(filesystem, &matcher, sub_path, limit, &cancellation);
+        tokio::select! {
+            () = cancellation.cancelled() => Err(SearchError::Cancelled),
+            result = tokio::time::timeout(SEARCH_TIMEOUT, operation) => {
+                result.map_err(|_| SearchError::TimedOut)?
+            }
+        }
+    }
+
+    async fn glob_inner(
+        &self,
+        filesystem: &dyn FileSystem,
+        matcher: &GlobMatcher,
+        sub_path: Option<&str>,
+        limit: usize,
+        cancellation: &CancellationToken,
+    ) -> Result<GlobResult, SearchError> {
+        let start = resolve_search_directory(filesystem, sub_path).await?;
+        let match_root = start.relative_path().to_path_buf();
         let mut queue = VecDeque::from([start]);
         let mut matches = Vec::new();
-        let mut scanned = 0usize;
+        let mut scanned = 0_usize;
+        let mut scan_truncated = false;
 
         while let Some(directory) = queue.pop_front() {
+            if cancellation.is_cancelled() {
+                return Err(SearchError::Cancelled);
+            }
             if scanned >= MAX_GLOB_ENTRIES {
+                scan_truncated = true;
                 break;
             }
             let listing = filesystem
                 .read_directory(&directory, MAX_GLOB_ENTRIES.saturating_sub(scanned))
-                .await?;
+                .await
+                .map_err(workspace_error)?;
             scanned = scanned.saturating_add(listing.entries.len());
+            scan_truncated |= listing.truncated;
 
             for entry in listing.entries {
+                if cancellation.is_cancelled() {
+                    return Err(SearchError::Cancelled);
+                }
                 let Some(name) = entry.name.to_str() else {
                     continue;
                 };
@@ -168,17 +311,23 @@ impl SearchService {
                 if entry.kind != FileKind::File {
                     continue;
                 }
-                let relative = to_posix(&entry.path.relative_path().to_string_lossy());
-                if matcher.is_match(&relative) {
-                    matches.push(relative);
+                let workspace_relative = to_posix(&entry.path.relative_path().to_string_lossy());
+                let pattern_relative = entry
+                    .path
+                    .relative_path()
+                    .strip_prefix(&match_root)
+                    .map_or(entry.path.relative_path(), |relative| relative);
+                if matcher.is_match(to_posix(&pattern_relative.to_string_lossy())) {
+                    matches.push(workspace_relative);
                 }
             }
         }
 
+        matches.sort_unstable();
+        matches.dedup();
         let total = matches.len();
-        let truncated = total > limit;
+        let truncated = scan_truncated || total > limit;
         matches.truncate(limit);
-
         Ok(GlobResult {
             paths: matches,
             truncated,
@@ -186,11 +335,12 @@ impl SearchService {
         })
     }
 
-    /// Searches file contents using ripgrep through the process runner port.
+    /// Searches file contents using ripgrep through the supervised process port.
     ///
     /// # Errors
     ///
-    /// Returns [`AppError`] when the ripgrep process fails or the path escapes.
+    /// Returns [`SearchError`] for invalid input, unsafe paths, unavailable ripgrep, cancellation,
+    /// timeout, or a genuine ripgrep failure. Ripgrep exit code 1 with empty stderr is no-match.
     pub async fn grep(
         &self,
         workspace_root: &Path,
@@ -198,82 +348,292 @@ impl SearchService {
         sub_path: Option<&str>,
         options: &GrepOptions,
         cancellation: CancellationToken,
-    ) -> Result<GrepResult, AppError> {
-        if pattern.is_empty() {
-            return Err(AppError::validation("Search pattern must not be empty"));
-        }
-        let search_dir = resolve_grep_dir(workspace_root, sub_path)?;
-        let rg_args = build_rg_args(pattern, &search_dir, options);
+    ) -> Result<GrepResult, SearchError> {
+        let search_dir = resolve_native_search_directory(workspace_root, sub_path).await?;
+        self.grep_directory(workspace_root, &search_dir, pattern, options, cancellation)
+            .await
+    }
+
+    /// Searches contents using the same workspace filesystem authority as the tool pipeline.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SearchError`] under the same conditions as [`Self::grep`].
+    pub async fn grep_filesystem(
+        &self,
+        filesystem: &dyn FileSystem,
+        pattern: &str,
+        sub_path: Option<&str>,
+        options: &GrepOptions,
+        cancellation: CancellationToken,
+    ) -> Result<GrepResult, SearchError> {
+        let search_path = resolve_search_directory(filesystem, sub_path).await?;
+        self.grep_directory(
+            filesystem.workspace_root().as_path(),
+            &search_path.absolute_path(),
+            pattern,
+            options,
+            cancellation,
+        )
+        .await
+    }
+
+    async fn grep_directory(
+        &self,
+        workspace_root: &Path,
+        search_dir: &Path,
+        pattern: &str,
+        options: &GrepOptions,
+        cancellation: CancellationToken,
+    ) -> Result<GrepResult, SearchError> {
+        validate_required_text("Search pattern", pattern, MAX_SEARCH_PATTERN_BYTES)?;
+        validate_grep_options(options)?;
+        ensure_ripgrep_available(&self.rg_path).await?;
         let request = ProcessRequest {
             program: self.rg_path.clone(),
-            arguments: rg_args.into_iter().map(Into::into).collect(),
-            current_directory: search_dir.clone(),
+            arguments: build_rg_args(pattern, options)
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            current_directory: search_dir.to_path_buf(),
             environment: std::collections::BTreeMap::new(),
-            timeout: std::time::Duration::from_secs(GREP_TIMEOUT_SECS),
+            timeout: SEARCH_TIMEOUT,
             max_output_bytes: GREP_MAX_OUTPUT,
         };
 
-        let output = self
-            .process_runner
-            .as_ref()
-            .run(request, cancellation)
-            .await;
+        let output = self.process_runner.run(request, cancellation).await;
         let output = match output {
             Ok(output) => output,
-            Err(error) if error.kind() == codez_core::AppErrorKind::ProcessFailed => {
-                // rg exits 1 for no matches
+            Err(error) if is_rg_no_match(&error) => {
                 return Ok(GrepResult {
                     lines: Vec::new(),
                     truncated: false,
                 });
             }
-            Err(error) => return Err(error),
+            Err(error) if error.kind() == AppErrorKind::Cancelled => {
+                return Err(SearchError::Cancelled);
+            }
+            Err(error) if error.kind() == AppErrorKind::Timeout => {
+                return Err(SearchError::TimedOut);
+            }
+            Err(error) => {
+                return Err(SearchError::RipgrepFailed {
+                    source: Box::new(error),
+                });
+            }
         };
 
-        parse_grep_output(output, workspace_root, &search_dir, options)
+        parse_grep_output(output, workspace_root, search_dir, options)
     }
 }
 
-fn build_glob_matcher(pattern: &str) -> Result<GlobMatcher, AppError> {
-    let glob = Glob::new(pattern)
-        .map_err(|source| AppError::validation(format!("Invalid glob pattern: {source}")))?;
-    Ok(glob.compile_matcher())
-}
-
-fn normalize_limit(head_limit: Option<usize>) -> usize {
-    head_limit
-        .map(|limit| limit.clamp(1, MAX_GLOB_LIMIT))
-        .unwrap_or(DEFAULT_GLOB_LIMIT)
-}
-
-async fn resolve_sub_path(
+/// Resolves a directory without permitting path escape, symlink, or Windows reparse traversal.
+///
+/// # Errors
+///
+/// Returns [`SearchError`] when the path is invalid, unsafe, missing, or not a directory.
+pub async fn resolve_search_directory(
     filesystem: &dyn FileSystem,
     sub_path: Option<&str>,
-) -> Result<codez_core::SafeWorkspacePath, AppError> {
-    let relative = sub_path.unwrap_or("");
-    filesystem.resolve(Path::new(relative)).await
+) -> Result<SafeWorkspacePath, SearchError> {
+    let input = sub_path.unwrap_or(".");
+    validate_path_text(input)?;
+    reject_link_components(filesystem.workspace_root().as_path(), Path::new(input)).await?;
+    let resolved = filesystem
+        .resolve(Path::new(input))
+        .await
+        .map_err(workspace_error)?;
+    let metadata = filesystem
+        .metadata(&resolved)
+        .await
+        .map_err(workspace_error)?;
+    if metadata.kind != FileKind::Directory {
+        return Err(SearchError::PathNotDirectory);
+    }
+    Ok(resolved)
 }
 
-fn resolve_grep_dir(workspace_root: &Path, sub_path: Option<&str>) -> Result<PathBuf, AppError> {
-    let dir = match sub_path {
-        Some(relative) => {
-            let resolved = workspace_root.join(relative);
-            let canonical = dunce::canonicalize(&resolved).map_err(|_| {
-                AppError::validation("Search path does not exist or is inaccessible")
-            })?;
-            let ws_canonical = dunce::canonicalize(workspace_root).map_err(|_| {
-                AppError::validation("Workspace root does not exist or is inaccessible")
-            })?;
-            if !canonical.starts_with(&ws_canonical) {
-                return Err(AppError::validation(
-                    "Search path is outside of the workspace",
-                ));
-            }
-            canonical
+fn build_glob_matcher(pattern: &str) -> Result<GlobMatcher, SearchError> {
+    Glob::new(pattern)
+        .map(|glob| glob.compile_matcher())
+        .map_err(|source| SearchError::InvalidInput(format!("Invalid glob pattern: {source}")))
+}
+
+fn normalize_limit(value: Option<usize>, default: usize, maximum: usize) -> usize {
+    value.map_or(default, |limit| limit.clamp(1, maximum))
+}
+
+fn validate_required_text(
+    label: &str,
+    value: &str,
+    maximum_bytes: usize,
+) -> Result<(), SearchError> {
+    if value.is_empty() {
+        return Err(SearchError::InvalidInput(format!(
+            "{label} must not be empty"
+        )));
+    }
+    if value.len() > maximum_bytes {
+        return Err(SearchError::InvalidInput(format!(
+            "{label} exceeds its {maximum_bytes}-byte limit"
+        )));
+    }
+    if value.chars().any(|character| character == '\0') {
+        return Err(SearchError::InvalidInput(format!(
+            "{label} contains an invalid character"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_path_text(value: &str) -> Result<(), SearchError> {
+    validate_required_text("Search path", value, MAX_SEARCH_PATH_BYTES)
+}
+
+fn validate_grep_options(options: &GrepOptions) -> Result<(), SearchError> {
+    if let Some(filter) = options.glob_filter.as_deref() {
+        validate_required_text("Glob filter", filter, MAX_SEARCH_FILTER_BYTES)?;
+    }
+    if let Some(filter) = options.type_filter.as_deref() {
+        validate_required_text("Type filter", filter, MAX_SEARCH_FILTER_BYTES)?;
+    }
+    for (label, value) in [
+        ("after-context", options.context_after),
+        ("before-context", options.context_before),
+        ("around-context", options.context_around),
+    ] {
+        if value.is_some_and(|lines| lines > MAX_GREP_CONTEXT_LINES) {
+            return Err(SearchError::InvalidInput(format!(
+                "{label} exceeds {MAX_GREP_CONTEXT_LINES} lines"
+            )));
         }
-        None => workspace_root.to_path_buf(),
+    }
+    if options
+        .offset
+        .is_some_and(|offset| offset > MAX_GREP_OFFSET)
+    {
+        return Err(SearchError::InvalidInput(format!(
+            "Search offset exceeds {MAX_GREP_OFFSET} entries"
+        )));
+    }
+    Ok(())
+}
+
+async fn resolve_native_search_directory(
+    workspace_root: &Path,
+    sub_path: Option<&str>,
+) -> Result<PathBuf, SearchError> {
+    if !workspace_root.is_absolute() || !workspace_root.is_dir() {
+        return Err(SearchError::PathNotAuthorized);
+    }
+    let input = sub_path.unwrap_or(".");
+    validate_path_text(input)?;
+    reject_link_components(workspace_root, Path::new(input)).await?;
+    let candidate = if Path::new(input).is_absolute() {
+        PathBuf::from(input)
+    } else {
+        workspace_root.join(input)
     };
-    Ok(dir)
+    let canonical = dunce::canonicalize(candidate).map_err(|_| SearchError::PathNotAuthorized)?;
+    if !canonical.starts_with(workspace_root) {
+        return Err(SearchError::PathNotAuthorized);
+    }
+    if !canonical.is_dir() {
+        return Err(SearchError::PathNotDirectory);
+    }
+    Ok(canonical)
+}
+
+async fn reject_link_components(
+    workspace_root: &Path,
+    requested: &Path,
+) -> Result<(), SearchError> {
+    let candidate = if requested.is_absolute() {
+        requested.to_path_buf()
+    } else {
+        workspace_root.join(requested)
+    };
+    let relative = candidate
+        .strip_prefix(workspace_root)
+        .map_err(|_| SearchError::PathNotAuthorized)?;
+    let mut current = workspace_root.to_path_buf();
+    for component in relative.components() {
+        match component {
+            Component::CurDir => continue,
+            Component::Normal(part) => current.push(part),
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(SearchError::PathNotAuthorized);
+            }
+        }
+        let metadata = tokio::fs::symlink_metadata(&current)
+            .await
+            .map_err(|source| SearchError::Workspace {
+                source: Box::new(match source.kind() {
+                    std::io::ErrorKind::NotFound => {
+                        AppError::not_found("The search path does not exist")
+                    }
+                    std::io::ErrorKind::PermissionDenied => {
+                        AppError::permission_denied("The search path is not accessible")
+                    }
+                    _ => AppError::external(
+                        "The search path could not be inspected",
+                        source.to_string(),
+                        true,
+                    ),
+                }),
+            })?;
+        if metadata_is_link_or_reparse(&metadata) {
+            return Err(SearchError::PathNotAuthorized);
+        }
+    }
+    Ok(())
+}
+
+fn metadata_is_link_or_reparse(metadata: &std::fs::Metadata) -> bool {
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+async fn ensure_ripgrep_available(path: &Path) -> Result<(), SearchError> {
+    match tokio::fs::metadata(path).await {
+        Ok(metadata) if metadata.is_file() => Ok(()),
+        Ok(_) | Err(_) => Err(SearchError::RipgrepUnavailable),
+    }
+}
+
+fn workspace_error(source: AppError) -> SearchError {
+    match source.kind() {
+        AppErrorKind::Cancelled => SearchError::Cancelled,
+        AppErrorKind::Timeout => SearchError::TimedOut,
+        _ => SearchError::Workspace {
+            source: Box::new(source),
+        },
+    }
+}
+
+fn is_rg_no_match(error: &AppError) -> bool {
+    if error.kind() != AppErrorKind::ProcessFailed {
+        return false;
+    }
+    let Some(diagnostic) = error.diagnostic() else {
+        return false;
+    };
+    let Some((status, stderr)) = diagnostic.split_once("; stderr=") else {
+        return false;
+    };
+    matches!(status, "status=exit code: 1" | "status=exit status: 1") && stderr.is_empty()
 }
 
 fn should_ignore_dir(name: &str) -> bool {
@@ -289,52 +649,56 @@ fn to_posix(path: &str) -> String {
     path.replace('\\', "/")
 }
 
-fn build_rg_args(pattern: &str, search_dir: &Path, options: &GrepOptions) -> Vec<String> {
-    let mut args = vec![
+fn build_rg_args(pattern: &str, options: &GrepOptions) -> Vec<String> {
+    let mut arguments = vec![
         "--no-heading".to_string(),
         "--color".to_string(),
         "never".to_string(),
+        "--no-follow".to_string(),
+        "--sort".to_string(),
+        "path".to_string(),
     ];
 
     match options.output_mode {
-        GrepOutputMode::FilesWithMatches => args.push("-l".to_string()),
-        GrepOutputMode::Count => args.push("-c".to_string()),
+        GrepOutputMode::FilesWithMatches => arguments.push("-l".to_string()),
+        GrepOutputMode::Count => arguments.push("-c".to_string()),
         GrepOutputMode::Content => {
+            arguments.push("--with-filename".to_string());
             if options.line_numbers {
-                args.push("-n".to_string());
+                arguments.push("-n".to_string());
             }
             if options.only_matching {
-                args.push("-o".to_string());
+                arguments.push("-o".to_string());
             }
         }
     }
 
     if let Some(after) = options.context_after {
-        args.extend(["-A".to_string(), after.to_string()]);
+        arguments.extend(["-A".to_string(), after.to_string()]);
     }
     if let Some(before) = options.context_before {
-        args.extend(["-B".to_string(), before.to_string()]);
+        arguments.extend(["-B".to_string(), before.to_string()]);
     }
     if let Some(around) = options.context_around {
-        args.extend(["-C".to_string(), around.to_string()]);
+        arguments.extend(["-C".to_string(), around.to_string()]);
     }
     if options.case_insensitive {
-        args.push("-i".to_string());
+        arguments.push("-i".to_string());
     }
     if options.multiline {
-        args.push("--multiline".to_string());
+        arguments.push("--multiline".to_string());
     }
-    if let Some(ref glob_filter) = options.glob_filter {
-        args.extend(["--glob".to_string(), glob_filter.clone()]);
+    if let Some(glob_filter) = &options.glob_filter {
+        arguments.extend(["--glob".to_string(), glob_filter.clone()]);
     }
-    if let Some(ref type_filter) = options.type_filter {
-        args.extend(["--type".to_string(), type_filter.clone()]);
+    if let Some(type_filter) = &options.type_filter {
+        arguments.extend(["--type".to_string(), type_filter.clone()]);
     }
 
-    args.push("--".to_string());
-    args.push(pattern.to_string());
-    args.push(search_dir.to_string_lossy().into_owned());
-    args
+    arguments.push("--".to_string());
+    arguments.push(pattern.to_string());
+    arguments.push(".".to_string());
+    arguments
 }
 
 fn parse_grep_output(
@@ -342,140 +706,356 @@ fn parse_grep_output(
     workspace_root: &Path,
     search_dir: &Path,
     options: &GrepOptions,
-) -> Result<GrepResult, AppError> {
+) -> Result<GrepResult, SearchError> {
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut lines: Vec<String> = stdout
+    let offset = options.offset.unwrap_or_default();
+    let limit = normalize_limit(options.head_limit, DEFAULT_GREP_LIMIT, MAX_GREP_LIMIT);
+    let mut lines = stdout
         .split('\n')
+        .map(str::trim_end)
         .filter(|line| !line.is_empty())
         .map(|line| relativize_grep_line(line, workspace_root, search_dir))
         .map(|line| to_posix(&line))
-        .collect();
-
-    if let Some(offset) = options.offset {
-        if offset > 0 && offset < lines.len() {
-            lines = lines.split_off(offset);
-        } else if offset >= lines.len() {
-            lines.clear();
-        }
-    }
-
-    let truncated = options
-        .head_limit
-        .is_some_and(|limit| limit > 0 && lines.len() > limit);
-    if let Some(limit) = options.head_limit {
-        if limit > 0 {
-            lines.truncate(limit);
-        }
-    }
-
+        .skip(offset)
+        .take(limit.saturating_add(1))
+        .collect::<Vec<_>>();
+    let truncated = output.output_truncated || lines.len() > limit;
+    lines.truncate(limit);
     Ok(GrepResult { lines, truncated })
 }
 
 fn relativize_grep_line(line: &str, workspace_root: &Path, search_dir: &Path) -> String {
-    let Some(colon_pos) = line.find(':') else {
+    if line == "--" {
+        return line.to_string();
+    }
+    let Some((path_part, rest)) = split_grep_path(line) else {
         return relativize_path(line, workspace_root, search_dir);
     };
-    let path_part = &line[..colon_pos];
-    let rest = &line[colon_pos..];
     let relative = relativize_path(path_part, workspace_root, search_dir);
     format!("{relative}{rest}")
 }
 
-fn relativize_path(path_str: &str, workspace_root: &Path, search_dir: &Path) -> String {
-    let path = Path::new(path_str);
+fn split_grep_path(line: &str) -> Option<(&str, &str)> {
+    #[cfg(windows)]
+    let start = if line.as_bytes().get(1) == Some(&b':') {
+        2
+    } else {
+        0
+    };
+    #[cfg(not(windows))]
+    let start = 0;
+    line[start..]
+        .find(':')
+        .map(|index| start + index)
+        .map(|index| (&line[..index], &line[index..]))
+}
+
+fn relativize_path(path_text: &str, workspace_root: &Path, search_dir: &Path) -> String {
+    let path = Path::new(path_text);
     if path.is_absolute() {
         if let Ok(relative) = path.strip_prefix(workspace_root) {
             return relative.to_string_lossy().into_owned();
         }
+        return path_text.to_string();
     }
-    if let Some(stripped) = path_str.strip_prefix("./") {
-        return stripped.to_string();
-    }
-    if let Ok(absolute) = search_dir.join(path_str).canonicalize() {
-        if let Ok(relative) = absolute.strip_prefix(workspace_root) {
-            return relative.to_string_lossy().into_owned();
-        }
-    }
-    path_str.to_string()
+    let stripped = path_text.strip_prefix("./").unwrap_or(path_text);
+    let absolute = search_dir.join(stripped);
+    absolute.strip_prefix(workspace_root).map_or_else(
+        |_| path_text.to_string(),
+        |relative| relative.to_string_lossy().into_owned(),
+    )
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
+
     use super::*;
+
+    enum RunnerResponse {
+        Immediate(Result<ProcessOutput, AppError>),
+        WaitForCancellation,
+    }
+
+    struct ScriptedRunner {
+        response: Mutex<Option<RunnerResponse>>,
+    }
+
+    impl ProcessRunner for ScriptedRunner {
+        fn run<'a>(
+            &'a self,
+            _request: ProcessRequest,
+            cancellation: CancellationToken,
+        ) -> codez_core::PortFuture<'a, ProcessOutput> {
+            let response = self
+                .response
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take()
+                .expect("scripted runner must be called exactly once");
+            Box::pin(async move {
+                match response {
+                    RunnerResponse::Immediate(result) => result,
+                    RunnerResponse::WaitForCancellation => {
+                        cancellation.cancelled().await;
+                        Err(AppError::cancelled("fixture cancellation"))
+                    }
+                }
+            })
+        }
+    }
+
+    fn grep_fixture(
+        response: RunnerResponse,
+    ) -> (tempfile::TempDir, SearchService, CancellationToken) {
+        let workspace = tempfile::tempdir().expect("temporary workspace must be created");
+        let executable = workspace.path().join(if cfg!(windows) {
+            "rg-fixture.exe"
+        } else {
+            "rg-fixture"
+        });
+        std::fs::write(&executable, b"fixture").expect("fixture executable file must be written");
+        let runner = ScriptedRunner {
+            response: Mutex::new(Some(response)),
+        };
+        let search = SearchService::new(executable, Arc::new(runner))
+            .expect("absolute fixture executable must be accepted");
+        (workspace, search, CancellationToken::new())
+    }
 
     #[test]
     fn glob_matcher_accepts_valid_patterns() {
         let matcher = build_glob_matcher("**/*.ts").expect("valid glob must compile");
-        assert!(matcher.is_match("src/app.ts"));
-        assert!(!matcher.is_match("src/app.js"));
+        assert!(matcher.is_match("src/app.ts") && !matcher.is_match("src/app.js"));
     }
 
     #[test]
     fn glob_matcher_rejects_invalid_patterns() {
-        let result = build_glob_matcher("[invalid");
-        assert!(result.is_err());
+        assert!(matches!(
+            build_glob_matcher("[invalid"),
+            Err(SearchError::InvalidInput(_))
+        ));
     }
 
     #[test]
     fn normalize_limit_clamps_to_bounds() {
-        assert_eq!(normalize_limit(None), DEFAULT_GLOB_LIMIT);
-        assert_eq!(normalize_limit(Some(0)), 1);
-        assert_eq!(normalize_limit(Some(10_000)), MAX_GLOB_LIMIT);
-        assert_eq!(normalize_limit(Some(500)), 500);
+        assert_eq!(
+            [
+                normalize_limit(None, DEFAULT_GLOB_LIMIT, MAX_GLOB_LIMIT),
+                normalize_limit(Some(0), DEFAULT_GLOB_LIMIT, MAX_GLOB_LIMIT),
+                normalize_limit(Some(10_000), DEFAULT_GLOB_LIMIT, MAX_GLOB_LIMIT),
+            ],
+            [DEFAULT_GLOB_LIMIT, 1, MAX_GLOB_LIMIT]
+        );
     }
 
     #[test]
     fn ignored_directories_are_rejected() {
-        assert!(should_ignore_dir("node_modules"));
-        assert!(should_ignore_dir(".git"));
-        assert!(should_ignore_dir(".hidden"));
-        assert!(!should_ignore_dir("src"));
+        assert!(
+            should_ignore_dir("node_modules")
+                && should_ignore_dir(".git")
+                && should_ignore_dir(".hidden")
+                && !should_ignore_dir("src")
+        );
     }
 
     #[test]
-    fn rg_args_build_files_with_matches_mode() {
-        let options = GrepOptions::default();
-        let args = build_rg_args("pattern", Path::new("/workspace"), &options);
-        assert!(args.contains(&"-l".to_string()));
-        assert!(args.contains(&"pattern".to_string()));
-    }
-
-    #[test]
-    fn rg_args_build_content_mode_with_options() {
+    fn rg_args_are_argument_vector_without_shell_composition() {
         let options = GrepOptions {
             output_mode: GrepOutputMode::Content,
             line_numbers: true,
             case_insensitive: true,
             context_around: Some(3),
             glob_filter: Some("**/*.ts".to_string()),
-            ..Default::default()
+            ..GrepOptions::default()
         };
-        let args = build_rg_args("error", Path::new("/ws"), &options);
-        assert!(args.contains(&"-n".to_string()));
-        assert!(args.contains(&"-i".to_string()));
-        assert!(args.contains(&"-C".to_string()));
-        assert!(args.contains(&"**/*.ts".to_string()));
+        let arguments = build_rg_args("error; exit 9", &options);
+        assert!(
+            arguments.windows(2).any(|pair| pair == ["--sort", "path"])
+                && arguments.contains(&"error; exit 9".to_string())
+                && arguments.last().is_some_and(|value| value == ".")
+        );
     }
 
     #[test]
-    fn posix_conversion_replaces_backslashes() {
-        assert_eq!(to_posix("src\\app\\main.ts"), "src/app/main.ts");
-        assert_eq!(to_posix("already/posix"), "already/posix");
+    fn no_match_requires_exit_one_and_empty_stderr() {
+        let no_match = AppError::process_failed("process failed", "status=exit code: 1; stderr=");
+        let real_failure =
+            AppError::process_failed("process failed", "status=exit code: 2; stderr=regex error");
+        assert!(is_rg_no_match(&no_match) && !is_rg_no_match(&real_failure));
     }
 
     #[test]
-    fn relativize_strips_workspace_prefix() {
-        let ws = Path::new("C:\\project");
-        let dir = Path::new("C:\\project\\src");
-        let result = relativize_path("C:\\project\\src\\main.rs", ws, dir);
-        assert_eq!(result, "src\\main.rs");
+    fn grep_output_is_workspace_relative_stable_text() {
+        let workspace = Path::new("/workspace");
+        let search = Path::new("/workspace/src");
+        let output = ProcessOutput {
+            exit_code: Some(0),
+            stdout: b"./z.rs:2:z\n./a.rs:1:a\n".to_vec(),
+            stderr: Vec::new(),
+            output_truncated: false,
+            elapsed: Duration::from_millis(1),
+        };
+        let result = parse_grep_output(
+            output,
+            workspace,
+            search,
+            &GrepOptions {
+                output_mode: GrepOutputMode::Content,
+                ..GrepOptions::default()
+            },
+        )
+        .expect("valid output must parse");
+        assert_eq!(result.lines, ["src/z.rs:2:z", "src/a.rs:1:a"]);
     }
 
     #[test]
-    fn relativize_handles_dot_slash_prefix() {
-        let ws = Path::new("/project");
-        let dir = Path::new("/project");
-        let result = relativize_path("./src/main.rs", ws, dir);
-        assert_eq!(result, "src/main.rs");
+    fn grep_output_reports_process_and_result_truncation() {
+        let output = ProcessOutput {
+            exit_code: Some(0),
+            stdout: b"a\nb\n".to_vec(),
+            stderr: Vec::new(),
+            output_truncated: false,
+            elapsed: Duration::from_millis(1),
+        };
+        let result = parse_grep_output(
+            output,
+            Path::new("/workspace"),
+            Path::new("/workspace"),
+            &GrepOptions {
+                head_limit: Some(1),
+                ..GrepOptions::default()
+            },
+        )
+        .expect("valid output must parse");
+        assert!(result.truncated && result.lines == ["a"]);
+    }
+
+    #[test]
+    fn unicode_paths_and_content_remain_intact() {
+        let result = relativize_grep_line(
+            "./源代码/入口.rs:7:你好",
+            Path::new("/工作区"),
+            Path::new("/工作区"),
+        );
+        assert_eq!(result, "源代码/入口.rs:7:你好");
+    }
+
+    #[tokio::test]
+    async fn grep_treats_only_clean_exit_one_as_no_match() {
+        let (workspace, search, cancellation) = grep_fixture(RunnerResponse::Immediate(Err(
+            AppError::process_failed("process failed", "status=exit code: 1; stderr="),
+        )));
+        let root =
+            dunce::canonicalize(workspace.path()).expect("fixture workspace must canonicalize");
+        let result = search
+            .grep(
+                &root,
+                "missing",
+                None,
+                &GrepOptions::default(),
+                cancellation,
+            )
+            .await
+            .expect("clean ripgrep exit one must mean no match");
+        assert_eq!(
+            result,
+            GrepResult {
+                lines: Vec::new(),
+                truncated: false
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn grep_preserves_a_real_ripgrep_failure() {
+        let (workspace, search, cancellation) =
+            grep_fixture(RunnerResponse::Immediate(Err(AppError::process_failed(
+                "process failed",
+                "status=exit code: 2; stderr=invalid regex",
+            ))));
+        let root =
+            dunce::canonicalize(workspace.path()).expect("fixture workspace must canonicalize");
+        let error = search
+            .grep(
+                &root,
+                "[invalid",
+                None,
+                &GrepOptions::default(),
+                cancellation,
+            )
+            .await
+            .expect_err("ripgrep exit two must remain a failure");
+        assert!(matches!(
+            error,
+            SearchError::RipgrepFailed { source }
+                if source.kind() == AppErrorKind::ProcessFailed
+        ));
+    }
+
+    #[tokio::test]
+    async fn grep_cancellation_is_typed_and_interruptible() {
+        let (workspace, search, cancellation) = grep_fixture(RunnerResponse::WaitForCancellation);
+        let root =
+            dunce::canonicalize(workspace.path()).expect("fixture workspace must canonicalize");
+        cancellation.cancel();
+        let error = search
+            .grep(&root, "needle", None, &GrepOptions::default(), cancellation)
+            .await
+            .expect_err("cancelled grep must fail");
+        assert!(matches!(error, SearchError::Cancelled));
+    }
+
+    #[tokio::test]
+    async fn search_paths_reject_parent_escape() {
+        let workspace = tempfile::tempdir().expect("temporary workspace must be created");
+        let root =
+            dunce::canonicalize(workspace.path()).expect("fixture workspace must canonicalize");
+        let error = resolve_native_search_directory(&root, Some("../outside"))
+            .await
+            .expect_err("parent traversal must be rejected");
+        assert!(matches!(error, SearchError::PathNotAuthorized));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn search_paths_reject_symbolic_link_directories() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempfile::tempdir().expect("temporary workspace must be created");
+        let target = workspace.path().join("target");
+        std::fs::create_dir(&target).expect("fixture target must be created");
+        symlink(&target, workspace.path().join("linked")).expect("fixture symlink must be created");
+        let root =
+            dunce::canonicalize(workspace.path()).expect("fixture workspace must canonicalize");
+        let error = resolve_native_search_directory(&root, Some("linked"))
+            .await
+            .expect_err("linked search path must be rejected");
+        assert!(matches!(error, SearchError::PathNotAuthorized));
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn search_paths_reject_windows_reparse_directories() {
+        use std::os::windows::fs::symlink_dir;
+
+        let workspace = tempfile::tempdir().expect("temporary workspace must be created");
+        let target = workspace.path().join("target");
+        std::fs::create_dir(&target).expect("fixture target must be created");
+        let link = workspace.path().join("linked");
+        match symlink_dir(&target, &link) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => return,
+            Err(error) => panic!("fixture reparse directory could not be created: {error}"),
+        }
+        let root =
+            dunce::canonicalize(workspace.path()).expect("fixture workspace must canonicalize");
+        let error = resolve_native_search_directory(&root, Some("linked"))
+            .await
+            .expect_err("reparse search path must be rejected");
+        assert!(matches!(error, SearchError::PathNotAuthorized));
     }
 }

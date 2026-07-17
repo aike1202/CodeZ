@@ -1,5 +1,7 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    io,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -7,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use codez_contracts::chat::{
     AgentStopReason, CHAT_STREAM_CONTRACT_VERSION, ChatAskUserAnswer, ChatAskUserRequest,
     ChatAskUserRequestEvent, ChatCommandMetadata, ChatMessage, ChatPermissionApprovalEvent,
@@ -15,24 +17,33 @@ use codez_contracts::chat::{
     ChatPermissionCheck, ChatProviderErrorCode, ChatRunState, ChatRuntimeStatus,
     ChatRuntimeStatusChanged, ChatSteerInput, ChatSteerRejection, ChatSteerResult, ChatStreamFrame,
     ChatStreamFrameEvent, ChatStreamInput, ChatStreamRequest, ChatStreamStopResult,
-    ChatToolInterruptResult, PromptPredictionContextMessage, PromptPredictionRequest,
+    ChatToolInterruptResult, ContextCompactionCompleted, ContextCompactionFailed,
+    ContextCompactionStarted, PromptPredictionContextMessage, PromptPredictionRequest,
     PromptPredictionResponse, Role, ToolCall as ChatToolCall,
     ToolCallFunction as ChatToolCallFunction,
 };
+use codez_contracts::context::{
+    ContextBudgetSnapshot as WireContextBudgetSnapshot,
+    ContextEstimateSource as WireContextEstimateSource,
+    ContextPressureLevel as WireContextPressureLevel,
+};
 use codez_core::context::{
     AssistantMessagePayload, ContextScopeId, LedgerAppendRequest, LedgerEventType,
-    NormalizedModelMessage, NormalizedToolCall as LedgerToolCall, ToolResultPayload,
+    ModelContextItem, ModelContextItemMessage, NormalizedModelMessage,
+    NormalizedToolCall as LedgerToolCall, SessionRuntimeScopeSnapshot, ToolResultPayload,
     TurnCompletedPayload, TurnInterruptedPayload, UserMessagePayload,
 };
 use codez_core::provider::{
-    AgentStopReason as DomainAgentStopReason, ApiFormat,
-    ChatStreamEvent as ProviderChatStreamEvent, ThinkingConfig, ThinkingMode,
+    AgentStopReason as DomainAgentStopReason, ApiFormat, ChatImage,
+    ChatMessage as ProviderChatMessage, ChatStreamEvent as ProviderChatStreamEvent,
+    ProviderTokenUsage, Role as ProviderRole, ThinkingConfig, ThinkingMode,
     ToolCall as ProviderToolCall, ToolDefinition,
 };
 use codez_core::{
-    AppError, CancellationToken, SessionId, StreamId, ToolCallId, WorkspaceRoot,
-    redact_sensitive_text,
+    AppError, CancellationToken, FileKind, FileSystem, ProcessRunner, SessionId,
+    SessionImageAttachment, StreamId, ToolCallId, WorkspaceRoot, redact_sensitive_text,
 };
+use codez_platform::{GitInstallation, NativeFileSystem, NativeFileSystemError};
 use codez_providers::{
     chat::{
         ChatProvider, ChatProviderError, ChatRequestConfig, anthropic::AnthropicProvider,
@@ -40,28 +51,62 @@ use codez_providers::{
     },
     service::{ProviderService, ResolvedProviderChatConfig},
 };
+use codez_runtime::attachment::{AttachmentService, ResolvedSessionImage};
 use codez_runtime::{
     CancellationTree,
     cancellation::SessionCancellation,
-    chat::stream_state::{ChatStreamState, ChatStreamStateMachine},
+    chat::{
+        prompt::{
+            builder::create_default_pipeline,
+            pipeline::PromptPipeline,
+            types::{PromptContext, PromptSkillSummary, PromptToolSummary},
+        },
+        stream_state::{ChatStreamState, ChatStreamStateMachine},
+    },
     context::{
+        budget::{
+            ContextBudgetError, ContextBudgetService, ContextBudgetSnapshot, ContextPressureLevel,
+            MeasureContextRequest, ModelContextCapabilities,
+        },
+        builder::{
+            BuildModelContextItemsInput, ModelContextBuildError, build_model_context_items,
+            require_current_input_message,
+        },
+        compaction::{CompactionResult, CompactionStatus},
         ledger::{LedgerError, ModelLedgerStore},
-        normalizer::ModelHistoryNormalizer,
+        normalizer::{HistoryProtocolError, ModelHistoryNormalizer},
+        provider_adapter::{
+            ModelContextAdapterError, ProviderUsageFingerprintInput, ProviderUsageRequestProfile,
+            fingerprint_provider_request, model_context_items_to_chat_messages,
+        },
+        pruner::{ToolOutputPruneOptions, ToolOutputPruner},
     },
-    permission::contract::PermissionApprovalScope as RuntimePermissionApprovalScope,
-    permission::service::{
-        PermissionApprovalHandler, PermissionApprovalRequest as RuntimePermissionApprovalRequest,
-        PermissionApprovalResponse as RuntimePermissionApprovalResponse,
+    edit_transaction::{EditTransactionRegistration, EditTransactionService},
+    git::GitService,
+    permission::{
+        contract::PermissionApprovalScope as RuntimePermissionApprovalScope,
+        decision::PermissionMode,
+        service::{
+            PermissionApprovalHandler,
+            PermissionApprovalRequest as RuntimePermissionApprovalRequest,
+            PermissionApprovalResponse as RuntimePermissionApprovalResponse,
+        },
+        store::{PermissionStoreError, WorkspacePermissionStore},
     },
+    session_maintenance::SessionActivityLease,
     tools::types::{
         NormalizedToolCall as RuntimeToolCall, ToolExecutionResult, ToolPipelineResult,
     },
 };
 use futures_util::{StreamExt, stream::BoxStream};
+use serde::Deserialize;
 use tauri::{AppHandle, Emitter, ipc::Channel};
+use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
+    attachment_boundary::session_from_wire,
+    chat_compaction::{AutoCompactionRequest, compact_active_chat_context},
     chat_interaction::AskUserResponseRegistry,
     chat_tool_runtime::{AskUserHandler, ChatToolRunContext, ChatToolRuntime},
     error::ErrorReporter,
@@ -87,7 +132,6 @@ const PERMISSION_REQUEST_EVENT: &str = "chat:permission-request";
 const ASK_USER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const PERMISSION_RESPONSE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const MAX_PENDING_PERMISSION_REQUESTS: usize = 256;
-const MAX_LEDGER_HISTORY_TOKENS: u32 = 128_000;
 const MAX_INTERRUPTED_CONTENT_BYTES: usize = 16 * 1024;
 const MAX_COMMAND_METADATA_BYTES: usize = 64 * 1024;
 const MAX_COMMAND_METADATA_FILES: usize = 128;
@@ -97,15 +141,619 @@ const MAX_PROVIDER_TOOL_CALL_ID_BYTES: usize = 512;
 const MAX_PROVIDER_TOOL_NAME_BYTES: usize = 512;
 const MAX_PROVIDER_TOOL_ARGUMENT_BYTES: usize = 128 * 1024;
 const MAX_TOOL_ROUNDS_PER_RUN: usize = 64;
+const MAX_CHAT_IMAGE_ATTACHMENTS: usize = 500;
+const MAX_CONTEXT_PREPARATION_ATTEMPTS: usize = 2;
+const MAX_PROMPT_RULE_FILE_BYTES: u64 = 1024 * 1024;
+const MAX_PROMPT_RULES_BYTES: usize = 2 * 1024 * 1024;
+const MAX_PROMPT_RULE_FILES: usize = 1024;
+const MEBIBYTE: u64 = 1024 * 1024;
 
 pub(crate) struct ChatRuntime {
     cancellation: Arc<CancellationTree>,
     errors: Arc<ErrorReporter>,
     ledger: Arc<ModelLedgerStore>,
+    attachment: Arc<AttachmentService>,
     tools: Arc<ChatToolRuntime>,
+    edit_transaction: Arc<EditTransactionService>,
+    prompt: Arc<ChatPromptAssembler>,
     registry: Mutex<RegistryState>,
     ask_user_responses: Arc<AskUserResponseRegistry>,
     permission_responses: Arc<PermissionResponseRegistry>,
+}
+
+struct ChatPromptAssembler {
+    data_root: PathBuf,
+    workspace_permissions: Arc<WorkspacePermissionStore>,
+    process_runner: Arc<dyn ProcessRunner>,
+    pipeline: PromptPipeline,
+}
+
+pub(crate) struct ChatPromptSources {
+    data_root: PathBuf,
+    workspace_permissions: Arc<WorkspacePermissionStore>,
+    process_runner: Arc<dyn ProcessRunner>,
+}
+
+impl ChatPromptSources {
+    pub(crate) fn new(
+        data_root: PathBuf,
+        workspace_permissions: Arc<WorkspacePermissionStore>,
+        process_runner: Arc<dyn ProcessRunner>,
+    ) -> Self {
+        Self {
+            data_root,
+            workspace_permissions,
+            process_runner,
+        }
+    }
+}
+
+struct ChatPromptBuildInput<'a> {
+    resolved: &'a ResolvedProviderChatConfig,
+    session_id: &'a SessionId,
+    workspace_root: Option<&'a WorkspaceRoot>,
+    tool_schemas: &'a [ToolDefinition],
+    scope: &'a SessionRuntimeScopeSnapshot,
+    now: &'a DateTime<Utc>,
+    cancellation: &'a CancellationToken,
+}
+
+#[derive(Debug, Error)]
+enum ChatPromptError {
+    #[error("system prompt preparation was cancelled")]
+    Cancelled,
+    #[error(transparent)]
+    Permission(#[from] PermissionStoreError),
+    #[error("failed to open prompt rule authority {path}: {source}")]
+    OpenAuthority {
+        path: PathBuf,
+        #[source]
+        source: NativeFileSystemError,
+    },
+    #[error("failed to {action} prompt rule path {path}: {source}")]
+    RuleAccess {
+        action: &'static str,
+        path: PathBuf,
+        #[source]
+        source: AppError,
+    },
+    #[error("failed to {action} prompt rule path {path}: {source}")]
+    RuleIo {
+        action: &'static str,
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[error("prompt rule path canonicalization worker failed for {path}: {source}")]
+    CanonicalizeTask {
+        path: PathBuf,
+        #[source]
+        source: tokio::task::JoinError,
+    },
+    #[error("prompt rule path is a symbolic link: {0}")]
+    SymbolicLink(PathBuf),
+    #[error("prompt rule path is not a regular file: {0}")]
+    NotAFile(PathBuf),
+    #[error("prompt rule path is not a directory: {0}")]
+    NotADirectory(PathBuf),
+    #[error("prompt rule path escaped its authority: {0}")]
+    OutsideAuthority(PathBuf),
+    #[error("prompt rule file exceeds the {MAX_PROMPT_RULE_FILE_BYTES}-byte limit: {0}")]
+    RuleTooLarge(PathBuf),
+    #[error("combined prompt rules exceed the {MAX_PROMPT_RULES_BYTES}-byte limit")]
+    RulesTooLarge,
+    #[error("prompt rule directory exceeds the {MAX_PROMPT_RULE_FILES}-entry limit: {0}")]
+    TooManyRuleFiles(PathBuf),
+    #[error("prompt rule file is not valid UTF-8: {path}")]
+    InvalidUtf8 {
+        path: PathBuf,
+        #[source]
+        source: std::string::FromUtf8Error,
+    },
+    #[error("prompt rule file name is not valid Unicode: {0}")]
+    InvalidFileName(PathBuf),
+    #[error("the default system prompt pipeline produced an empty prompt")]
+    EmptyPrompt,
+}
+
+#[derive(Debug, Deserialize)]
+struct RuleFrontmatter {
+    enabled: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SkillFrontmatter {
+    description: Option<String>,
+}
+
+impl ChatPromptAssembler {
+    fn new(
+        data_root: PathBuf,
+        workspace_permissions: Arc<WorkspacePermissionStore>,
+        process_runner: Arc<dyn ProcessRunner>,
+    ) -> Self {
+        Self {
+            data_root,
+            workspace_permissions,
+            process_runner,
+            pipeline: create_default_pipeline(),
+        }
+    }
+
+    async fn build(&self, input: ChatPromptBuildInput<'_>) -> Result<String, ChatPromptError> {
+        ensure_prompt_not_cancelled(input.cancellation)?;
+        let global_rules = self.load_global_rules(input.cancellation);
+        let workspace_rules = self.load_workspace_rules(input.workspace_root, input.cancellation);
+        let permission_mode = self.permission_mode(input.workspace_root, input.cancellation);
+        let git_status = self.git_status(input.workspace_root, input.cancellation);
+        let (global_rules, workspace_rules, permission_mode, git_status) =
+            tokio::join!(global_rules, workspace_rules, permission_mode, git_status);
+        ensure_prompt_not_cancelled(input.cancellation)?;
+
+        let context = PromptContext {
+            workspace_root: input
+                .workspace_root
+                .map(|workspace| workspace.as_path().to_path_buf()),
+            model_id: input.resolved.model.id.clone(),
+            model_display_name: input.resolved.model.name.clone(),
+            context_window_tokens: input.resolved.model.max_context_tokens,
+            session_id: Some(input.session_id.as_str().to_owned()),
+            api_format: Some(api_format_name(input.resolved.api_format).to_owned()),
+            permission_mode: permission_mode?,
+            thinking_enabled: Some(input.resolved.thinking.enabled),
+            available_tools: Some(prompt_tool_summaries(input.tool_schemas)),
+            deferred_tools: Some(Vec::new()),
+            active_skills: active_prompt_skills(input.scope),
+            global_rules: global_rules?,
+            workspace_rules: workspace_rules?,
+            directory_rules: None,
+            git_status,
+            now: Some(input.now.to_owned()),
+        };
+        let prompt = self.pipeline.run(&context).await;
+        if prompt.trim().is_empty() {
+            return Err(ChatPromptError::EmptyPrompt);
+        }
+        Ok(prompt)
+    }
+
+    async fn load_global_rules(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<Option<String>, ChatPromptError> {
+        self.load_rules(
+            &self.data_root,
+            &[Path::new("AGENTS.md")],
+            Some(Path::new("rules")),
+            cancellation,
+        )
+        .await
+    }
+
+    async fn load_workspace_rules(
+        &self,
+        workspace_root: Option<&WorkspaceRoot>,
+        cancellation: &CancellationToken,
+    ) -> Result<Option<String>, ChatPromptError> {
+        let Some(workspace_root) = workspace_root else {
+            return Ok(None);
+        };
+        self.load_rules(
+            workspace_root.as_path(),
+            &[
+                Path::new("AGENTS.md"),
+                Path::new(".agents/AGENTS.md"),
+                Path::new(".clinerules"),
+                Path::new(".cursorrules"),
+            ],
+            Some(Path::new(".codez/rules")),
+            cancellation,
+        )
+        .await
+    }
+
+    async fn load_rules(
+        &self,
+        authority_root: &Path,
+        fixed_paths: &[&Path],
+        markdown_directory: Option<&Path>,
+        cancellation: &CancellationToken,
+    ) -> Result<Option<String>, ChatPromptError> {
+        ensure_prompt_not_cancelled(cancellation)?;
+        let filesystem = NativeFileSystem::open(authority_root.to_path_buf())
+            .await
+            .map_err(|source| ChatPromptError::OpenAuthority {
+                path: authority_root.to_path_buf(),
+                source,
+            })?;
+        let mut rendered = Vec::new();
+        let mut total_bytes = 0_usize;
+        for relative in fixed_paths {
+            ensure_prompt_not_cancelled(cancellation)?;
+            if let Some(rule) =
+                load_prompt_rule(&filesystem, authority_root, relative, cancellation).await?
+            {
+                add_prompt_rule(&mut rendered, &mut total_bytes, rule)?;
+            }
+        }
+        if let Some(relative) = markdown_directory {
+            for rule in
+                load_prompt_rule_directory(&filesystem, authority_root, relative, cancellation)
+                    .await?
+            {
+                add_prompt_rule(&mut rendered, &mut total_bytes, rule)?;
+            }
+        }
+        if rendered.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(rendered.join("\n\n")))
+        }
+    }
+
+    async fn permission_mode(
+        &self,
+        workspace_root: Option<&WorkspaceRoot>,
+        cancellation: &CancellationToken,
+    ) -> Result<Option<String>, ChatPromptError> {
+        let Some(workspace_root) = workspace_root else {
+            return Ok(None);
+        };
+        let mode = tokio::select! {
+            biased;
+            () = cancellation.cancelled() => return Err(ChatPromptError::Cancelled),
+            result = self.workspace_permissions.get_mode(workspace_root.as_path()) => result,
+        }?;
+        Ok(Some(
+            match mode {
+                PermissionMode::Auto => "auto",
+                PermissionMode::FullAccess => "full-access",
+            }
+            .to_string(),
+        ))
+    }
+
+    async fn git_status(
+        &self,
+        workspace_root: Option<&WorkspaceRoot>,
+        cancellation: &CancellationToken,
+    ) -> Option<String> {
+        if cancellation.is_cancelled() {
+            return None;
+        }
+        let workspace_root = workspace_root?;
+        let installation = GitInstallation::discover().ok()?;
+        let (git_executable, process_environment) = installation.into_parts();
+        let service = GitService::new(
+            git_executable,
+            process_environment,
+            Arc::clone(&self.process_runner),
+        )
+        .ok()?;
+        let filesystem = NativeFileSystem::open(workspace_root.as_path().to_path_buf())
+            .await
+            .ok()?;
+        let snapshot = tokio::select! {
+            biased;
+            () = cancellation.cancelled() => return None,
+            result = service.get_snapshot(&filesystem, cancellation.child_token()) => result,
+        };
+        snapshot
+            .ok()
+            .map(|snapshot| snapshot.snapshot)
+            .filter(|snapshot| !snapshot.trim().is_empty())
+    }
+}
+
+fn prompt_tool_summaries(tool_schemas: &[ToolDefinition]) -> Vec<PromptToolSummary> {
+    tool_schemas
+        .iter()
+        .map(|schema| PromptToolSummary {
+            name: schema.function.name.clone(),
+            summary: schema.function.description.clone(),
+        })
+        .collect()
+}
+
+fn active_prompt_skills(scope: &SessionRuntimeScopeSnapshot) -> Option<Vec<PromptSkillSummary>> {
+    let active = scope
+        .skill_states
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .filter(|state| state.status == "active")
+        .map(|state| PromptSkillSummary {
+            name: state.name.clone(),
+            description: state
+                .content
+                .as_deref()
+                .and_then(skill_description_from_content),
+        })
+        .collect::<Vec<_>>();
+    (!active.is_empty()).then_some(active)
+}
+
+fn skill_description_from_content(content: &str) -> Option<String> {
+    let frontmatter = yaml_frontmatter(content)?;
+    serde_yaml::from_str::<SkillFrontmatter>(frontmatter)
+        .ok()?
+        .description
+        .filter(|description| !description.trim().is_empty())
+}
+
+async fn load_prompt_rule(
+    filesystem: &NativeFileSystem,
+    authority_root: &Path,
+    relative_path: &Path,
+    cancellation: &CancellationToken,
+) -> Result<Option<String>, ChatPromptError> {
+    load_prompt_rule_with_hook(
+        filesystem,
+        authority_root,
+        relative_path,
+        cancellation,
+        || {},
+    )
+    .await
+}
+
+async fn load_prompt_rule_with_hook<F>(
+    filesystem: &NativeFileSystem,
+    authority_root: &Path,
+    relative_path: &Path,
+    cancellation: &CancellationToken,
+    before_read: F,
+) -> Result<Option<String>, ChatPromptError>
+where
+    F: FnOnce(),
+{
+    ensure_prompt_not_cancelled(cancellation)?;
+    let path = authority_root.join(relative_path);
+    let metadata = match tokio::fs::symlink_metadata(&path).await {
+        Ok(metadata) => metadata,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(ChatPromptError::RuleIo {
+                action: "inspect",
+                path,
+                source,
+            });
+        }
+    };
+    if metadata_is_link_or_reparse(&metadata) {
+        return Err(ChatPromptError::SymbolicLink(path));
+    }
+    if !metadata.is_file() {
+        return Err(ChatPromptError::NotAFile(path));
+    }
+    if metadata.len() > MAX_PROMPT_RULE_FILE_BYTES {
+        return Err(ChatPromptError::RuleTooLarge(path));
+    }
+    validate_prompt_path(filesystem, authority_root, relative_path).await?;
+    let safe_path = FileSystem::resolve(filesystem, relative_path)
+        .await
+        .map_err(|source| ChatPromptError::RuleAccess {
+            action: "resolve",
+            path: path.clone(),
+            source,
+        })?;
+    before_read();
+    let bytes = tokio::select! {
+        biased;
+        () = cancellation.cancelled() => return Err(ChatPromptError::Cancelled),
+        result = filesystem.read_bounded(&safe_path, MAX_PROMPT_RULE_FILE_BYTES) => {
+            result.map_err(|source| ChatPromptError::RuleAccess {
+                action: "read",
+                path: path.clone(),
+                source,
+            })?
+        },
+    };
+    validate_prompt_path(filesystem, authority_root, relative_path).await?;
+    let content = String::from_utf8(bytes).map_err(|source| ChatPromptError::InvalidUtf8 {
+        path: path.clone(),
+        source,
+    })?;
+    if rule_is_disabled(&content) || content.trim().is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(format!(
+        "[Source: {}]\n{}",
+        relative_path.to_string_lossy(),
+        content.trim()
+    )))
+}
+
+async fn load_prompt_rule_directory(
+    filesystem: &NativeFileSystem,
+    authority_root: &Path,
+    relative_directory: &Path,
+    cancellation: &CancellationToken,
+) -> Result<Vec<String>, ChatPromptError> {
+    ensure_prompt_not_cancelled(cancellation)?;
+    let directory = authority_root.join(relative_directory);
+    let metadata = match tokio::fs::symlink_metadata(&directory).await {
+        Ok(metadata) => metadata,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(source) => {
+            return Err(ChatPromptError::RuleIo {
+                action: "inspect directory",
+                path: directory,
+                source,
+            });
+        }
+    };
+    if metadata_is_link_or_reparse(&metadata) {
+        return Err(ChatPromptError::SymbolicLink(directory));
+    }
+    if !metadata.is_dir() {
+        return Err(ChatPromptError::NotADirectory(directory));
+    }
+    validate_prompt_path(filesystem, authority_root, relative_directory).await?;
+    let safe_directory = FileSystem::resolve(filesystem, relative_directory)
+        .await
+        .map_err(|source| ChatPromptError::RuleAccess {
+            action: "resolve directory",
+            path: directory.clone(),
+            source,
+        })?;
+    let listing = tokio::select! {
+        biased;
+        () = cancellation.cancelled() => return Err(ChatPromptError::Cancelled),
+        result = filesystem.read_directory(&safe_directory, MAX_PROMPT_RULE_FILES) => {
+            result.map_err(|source| ChatPromptError::RuleAccess {
+                action: "read directory",
+                path: directory.clone(),
+                source,
+            })?
+        },
+    };
+    validate_prompt_path(filesystem, authority_root, relative_directory).await?;
+    if listing.truncated {
+        return Err(ChatPromptError::TooManyRuleFiles(directory));
+    }
+    let mut relative_paths = listing
+        .entries
+        .into_iter()
+        .filter(|entry| entry.kind == FileKind::File)
+        .map(|entry| {
+            let path = entry.path.absolute_path();
+            let name = entry
+                .name
+                .into_string()
+                .map_err(|_| ChatPromptError::InvalidFileName(path.clone()))?;
+            Ok(name.ends_with(".md").then(|| relative_directory.join(name)))
+        })
+        .collect::<Result<Vec<_>, ChatPromptError>>()?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    relative_paths.sort();
+    let mut rules = Vec::with_capacity(relative_paths.len());
+    for relative_path in relative_paths {
+        ensure_prompt_not_cancelled(cancellation)?;
+        if let Some(rule) =
+            load_prompt_rule(filesystem, authority_root, &relative_path, cancellation).await?
+        {
+            rules.push(rule);
+        }
+    }
+    Ok(rules)
+}
+
+async fn validate_prompt_path(
+    filesystem: &NativeFileSystem,
+    authority_root: &Path,
+    relative_path: &Path,
+) -> Result<(), ChatPromptError> {
+    let authority_metadata =
+        tokio::fs::symlink_metadata(authority_root)
+            .await
+            .map_err(|source| ChatPromptError::RuleIo {
+                action: "inspect authority",
+                path: authority_root.to_path_buf(),
+                source,
+            })?;
+    if metadata_is_link_or_reparse(&authority_metadata) {
+        return Err(ChatPromptError::SymbolicLink(authority_root.to_path_buf()));
+    }
+    if !authority_metadata.is_dir() {
+        return Err(ChatPromptError::NotADirectory(authority_root.to_path_buf()));
+    }
+
+    let mut current = authority_root.to_path_buf();
+    for component in relative_path.components() {
+        let std::path::Component::Normal(segment) = component else {
+            return Err(ChatPromptError::OutsideAuthority(
+                authority_root.join(relative_path),
+            ));
+        };
+        current.push(segment);
+        let metadata = tokio::fs::symlink_metadata(&current)
+            .await
+            .map_err(|source| ChatPromptError::RuleIo {
+                action: "inspect path component",
+                path: current.clone(),
+                source,
+            })?;
+        if metadata_is_link_or_reparse(&metadata) {
+            return Err(ChatPromptError::SymbolicLink(current));
+        }
+    }
+
+    let canonical_input = current.clone();
+    let canonical = tokio::task::spawn_blocking(move || dunce::canonicalize(&canonical_input))
+        .await
+        .map_err(|source| ChatPromptError::CanonicalizeTask {
+            path: current.clone(),
+            source,
+        })?
+        .map_err(|source| ChatPromptError::RuleIo {
+            action: "canonicalize",
+            path: current.clone(),
+            source,
+        })?;
+    if canonical.strip_prefix(filesystem.root().as_path()).is_err() {
+        return Err(ChatPromptError::OutsideAuthority(current));
+    }
+    Ok(())
+}
+
+fn metadata_is_link_or_reparse(metadata: &std::fs::Metadata) -> bool {
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }
+    #[cfg(not(windows))]
+    false
+}
+
+fn ensure_prompt_not_cancelled(cancellation: &CancellationToken) -> Result<(), ChatPromptError> {
+    if cancellation.is_cancelled() {
+        Err(ChatPromptError::Cancelled)
+    } else {
+        Ok(())
+    }
+}
+
+fn add_prompt_rule(
+    rendered: &mut Vec<String>,
+    total_bytes: &mut usize,
+    rule: String,
+) -> Result<(), ChatPromptError> {
+    *total_bytes = total_bytes.saturating_add(rule.len());
+    if *total_bytes > MAX_PROMPT_RULES_BYTES {
+        return Err(ChatPromptError::RulesTooLarge);
+    }
+    rendered.push(rule);
+    Ok(())
+}
+
+fn rule_is_disabled(content: &str) -> bool {
+    yaml_frontmatter(content)
+        .and_then(|frontmatter| serde_yaml::from_str::<RuleFrontmatter>(frontmatter).ok())
+        .is_some_and(|frontmatter| frontmatter.enabled == Some(false))
+}
+
+fn yaml_frontmatter(content: &str) -> Option<&str> {
+    let (opening, remaining) = content.split_once('\n')?;
+    if opening.trim_end_matches('\r') != "---" {
+        return None;
+    }
+    let mut offset = 0_usize;
+    for line in remaining.split_inclusive('\n') {
+        if line.trim_end_matches(['\r', '\n']) == "---" {
+            return Some(&remaining[..offset]);
+        }
+        offset = offset.saturating_add(line.len());
+    }
+    None
 }
 
 #[derive(Default)]
@@ -132,8 +780,31 @@ struct RegisteredRun {
     controls: mpsc::Receiver<RunControl>,
 }
 
+struct ChatRunGuard {
+    runtime: Arc<ChatRuntime>,
+    app: AppHandle,
+    entry: Arc<RunEntry>,
+    _activity: SessionActivityLease,
+}
+
+impl Drop for ChatRunGuard {
+    fn drop(&mut self) {
+        self.runtime.finish(&self.app, &self.entry);
+    }
+}
+
+pub(crate) struct ProviderRunStart {
+    pub(crate) providers: Arc<ProviderService>,
+    pub(crate) request: ChatStreamRequest,
+    pub(crate) resolved: ResolvedProviderChatConfig,
+    pub(crate) workspace_root: Option<WorkspaceRoot>,
+    pub(crate) events: Channel<ChatStreamFrame>,
+    pub(crate) activity: SessionActivityLease,
+}
+
 struct ProviderRunRequest {
     input: ChatStreamInput,
+    attachments: Vec<SessionImageAttachment>,
     resolved: ResolvedProviderChatConfig,
     tool_run: Option<Arc<ChatToolRunContext>>,
     events: Channel<ChatStreamFrame>,
@@ -171,6 +842,28 @@ struct DesktopAskUserHandler {
     registry: Arc<AskUserResponseRegistry>,
 }
 
+struct PendingPermissionRequestGuard<'a> {
+    registry: &'a PermissionResponseRegistry,
+    request_id: &'a str,
+}
+
+impl Drop for PendingPermissionRequestGuard<'_> {
+    fn drop(&mut self) {
+        self.registry.deny(self.request_id);
+    }
+}
+
+struct PendingAskUserRequestGuard<'a> {
+    registry: &'a AskUserResponseRegistry,
+    request_id: &'a str,
+}
+
+impl Drop for PendingAskUserRequestGuard<'_> {
+    fn drop(&mut self) {
+        self.registry.cancel(self.request_id);
+    }
+}
+
 struct FrameSink {
     entry: Arc<RunEntry>,
     events: Channel<ChatStreamFrame>,
@@ -185,6 +878,8 @@ enum TerminalOutcome {
     Completed {
         full_content: String,
         stop_reason: Option<AgentStopReason>,
+        usage: Option<ProviderTokenUsage>,
+        request_fingerprint: String,
     },
     Failed {
         error: AppError,
@@ -201,7 +896,7 @@ struct ConversationLedger {
     run_id: StreamId,
     provider_id: String,
     model_id: String,
-    messages: Vec<ChatMessage>,
+    current_input_message_id: String,
     next_record: u32,
     interrupted_content: Option<String>,
 }
@@ -211,38 +906,18 @@ impl ConversationLedger {
         store: Arc<ModelLedgerStore>,
         entry: &RunEntry,
         input: &ChatStreamInput,
+        input_attachments: &[SessionImageAttachment],
+        attachment_service: &AttachmentService,
         resolved: &ResolvedProviderChatConfig,
     ) -> Result<Self, AppError> {
-        let history = store
-            .load(&entry.session_id)
-            .await
-            .map_err(|error| ledger_error("load chat history", error))?
-            .and_then(|runtime| {
-                runtime
-                    .snapshot
-                    .scopes
-                    .into_iter()
-                    .find_map(|(scope_id, scope)| {
-                        (scope_id == "main").then_some(scope.active_messages)
-                    })
-            })
-            .unwrap_or_default();
-        let recovered = ModelHistoryNormalizer::normalize_recovered_history(&history);
-        let safe_history = ModelHistoryNormalizer::select_protocol_safe_tail(
-            &recovered,
-            history_token_budget(resolved),
-        );
-        let messages = safe_history
-            .iter()
-            .map(chat_message_from_ledger)
-            .collect::<Result<Vec<_>, _>>()?;
+        let image_policy = provider_image_policy(resolved.api_format);
         let mut ledger = Self {
             store,
             session_id: entry.session_id.clone(),
             run_id: entry.run_id.clone(),
             provider_id: resolved.provider_id.clone(),
             model_id: resolved.model.id.clone(),
-            messages,
+            current_input_message_id: String::new(),
             next_record: 0,
             interrupted_content: None,
         };
@@ -254,11 +929,33 @@ impl ConversationLedger {
             .map_err(|error| {
                 AppError::internal(format!("serialize typed chat command metadata: {error}"))
             })?;
+        let client_message_id = input
+            .command_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.ui_message_id.clone());
+        if input.is_system.unwrap_or(false) && !input_attachments.is_empty() {
+            return Err(AppError::validation(
+                "System chat messages cannot include images",
+            ));
+        }
+        let resolved_images = resolve_session_images(
+            attachment_service,
+            &entry.session_id,
+            input_attachments,
+            image_policy,
+        )
+        .await?;
+        let persisted_attachments = resolved_images
+            .iter()
+            .map(|image| image.attachment.clone())
+            .collect();
         ledger
             .record_user(
                 input.text.clone(),
+                client_message_id,
                 input.is_system.unwrap_or(false),
                 command_metadata,
+                persisted_attachments,
             )
             .await?;
         Ok(ledger)
@@ -267,13 +964,15 @@ impl ConversationLedger {
     async fn record_user(
         &mut self,
         content: String,
+        client_message_id: Option<String>,
         is_system: bool,
         command_metadata: Option<serde_json::Value>,
+        attachments: Vec<SessionImageAttachment>,
     ) -> Result<(), AppError> {
         let (record_id, created_at) = self.next_record("user")?;
         let message = NormalizedModelMessage {
             id: record_id.clone(),
-            client_message_id: None,
+            client_message_id,
             turn_id: self.run_id.as_str().to_string(),
             role: if is_system {
                 "system".to_string()
@@ -287,7 +986,13 @@ impl ConversationLedger {
             status: "complete".to_string(),
             created_at: created_at.clone(),
             source_sequence: None,
-            attachments: None,
+            attachments: (!attachments.is_empty()).then(|| {
+                attachments
+                    .iter()
+                    .cloned()
+                    .map(codez_core::ComposerImageAttachment::Session)
+                    .collect()
+            }),
             file_references: None,
         };
         self.append_payload(
@@ -302,18 +1007,26 @@ impl ConversationLedger {
             },
         )
         .await?;
-        self.messages.push(chat_message_from_ledger(&message)?);
+        self.current_input_message_id = message.id;
         Ok(())
     }
 
-    async fn record_assistant(&mut self, content: String) -> Result<(), AppError> {
-        self.record_assistant_message(content, None).await
+    async fn record_assistant(
+        &mut self,
+        content: String,
+        usage: Option<ProviderTokenUsage>,
+        request_fingerprint: String,
+    ) -> Result<(), AppError> {
+        self.record_assistant_message(content, None, usage, request_fingerprint)
+            .await
     }
 
     async fn record_assistant_tool_calls(
         &mut self,
         content: String,
         calls: &[ProviderToolCall],
+        usage: Option<ProviderTokenUsage>,
+        request_fingerprint: String,
     ) -> Result<(), AppError> {
         let tool_calls = calls
             .iter()
@@ -324,7 +1037,7 @@ impl ConversationLedger {
                 thought_signature: call.thought_signature.clone(),
             })
             .collect();
-        self.record_assistant_message(content, Some(tool_calls))
+        self.record_assistant_message(content, Some(tool_calls), usage, request_fingerprint)
             .await
     }
 
@@ -332,6 +1045,8 @@ impl ConversationLedger {
         &mut self,
         content: String,
         tool_calls: Option<Vec<LedgerToolCall>>,
+        usage: Option<ProviderTokenUsage>,
+        request_fingerprint: String,
     ) -> Result<(), AppError> {
         let (record_id, created_at) = self.next_record("assistant")?;
         let message = NormalizedModelMessage {
@@ -354,13 +1069,12 @@ impl ConversationLedger {
             created_at,
             LedgerEventType::AssistantMessage,
             AssistantMessagePayload {
-                message: message.clone(),
-                usage: None,
-                request_fingerprint: None,
+                message,
+                usage,
+                request_fingerprint: Some(request_fingerprint),
             },
         )
         .await?;
-        self.messages.push(chat_message_from_ledger(&message)?);
         Ok(())
     }
 
@@ -398,7 +1112,6 @@ impl ConversationLedger {
             },
         )
         .await?;
-        self.messages.push(chat_message_from_ledger(&message)?);
         Ok(())
     }
 
@@ -414,8 +1127,15 @@ impl ConversationLedger {
             TerminalOutcome::Completed {
                 full_content,
                 stop_reason,
+                usage,
+                request_fingerprint,
             } => {
-                self.record_assistant(full_content.clone()).await?;
+                self.record_assistant(
+                    full_content.clone(),
+                    usage.clone(),
+                    request_fingerprint.clone(),
+                )
+                .await?;
                 let (record_id, completed_at) = self.next_record("completed")?;
                 self.append_payload(
                     record_id,
@@ -423,7 +1143,7 @@ impl ConversationLedger {
                     LedgerEventType::TurnCompleted,
                     TurnCompletedPayload {
                         stop_reason: domain_stop_reason(stop_reason.as_ref()),
-                        usage: None,
+                        usage: usage.clone(),
                         completed_at,
                     },
                 )
@@ -531,13 +1251,28 @@ impl ChatRuntime {
         cancellation: Arc<CancellationTree>,
         errors: Arc<ErrorReporter>,
         ledger: Arc<ModelLedgerStore>,
+        attachment: Arc<AttachmentService>,
         tools: Arc<ChatToolRuntime>,
+        edit_transaction: Arc<EditTransactionService>,
+        prompt_sources: ChatPromptSources,
     ) -> Self {
+        let ChatPromptSources {
+            data_root,
+            workspace_permissions,
+            process_runner,
+        } = prompt_sources;
         Self {
             cancellation,
             errors,
             ledger,
+            attachment,
             tools,
+            edit_transaction,
+            prompt: Arc::new(ChatPromptAssembler::new(
+                data_root,
+                workspace_permissions,
+                process_runner,
+            )),
             registry: Mutex::new(RegistryState::default()),
             ask_user_responses: Arc::new(AskUserResponseRegistry::new()),
             permission_responses: Arc::new(PermissionResponseRegistry::default()),
@@ -547,14 +1282,30 @@ impl ChatRuntime {
     pub(crate) fn start_provider_run(
         self: &Arc<Self>,
         app: AppHandle,
-        providers: Arc<ProviderService>,
-        request: ChatStreamRequest,
-        resolved: ResolvedProviderChatConfig,
-        workspace_root: Option<WorkspaceRoot>,
-        events: Channel<ChatStreamFrame>,
+        start: ProviderRunStart,
     ) -> Result<String, AppError> {
+        let ProviderRunStart {
+            providers,
+            request,
+            resolved,
+            workspace_root,
+            events,
+            activity,
+        } = start;
+        if activity.session_id().as_str() != request.session_id {
+            return Err(AppError::internal(
+                "chat activity lease does not match the requested session",
+            ));
+        }
         validate_stream_request(&request)?;
+        let attachments = session_attachments_from_input(&request.input, &request.session_id)?;
         let registered = self.register(&request)?;
+        let guard = ChatRunGuard {
+            runtime: Arc::clone(self),
+            app: app.clone(),
+            entry: Arc::clone(&registered.entry),
+            _activity: activity,
+        };
         let permission_handler: Arc<dyn PermissionApprovalHandler> =
             Arc::new(DesktopPermissionApprovalHandler {
                 app: app.clone(),
@@ -584,7 +1335,6 @@ impl ChatRuntime {
         {
             Ok(context) => context,
             Err(error) => {
-                self.finish(&app, &registered.entry);
                 return Err(AppError::validation(error.to_string()));
             }
         };
@@ -599,6 +1349,7 @@ impl ChatRuntime {
 
         let runtime = Arc::clone(self);
         tauri::async_runtime::spawn(async move {
+            let _guard = guard;
             runtime
                 .drive_provider_run(
                     app,
@@ -606,6 +1357,7 @@ impl ChatRuntime {
                     registered,
                     ProviderRunRequest {
                         input: request.input,
+                        attachments,
                         resolved,
                         tool_run,
                         events,
@@ -788,6 +1540,13 @@ impl ChatRuntime {
         })
     }
 
+    /// Clears ephemeral tool permission decisions owned by a deleted session.
+    pub(crate) async fn clear_session_permissions(&self, session_id: &SessionId) {
+        self.tools
+            .clear_session_permissions(session_id.as_str())
+            .await;
+    }
+
     async fn drive_provider_run(
         self: Arc<Self>,
         app: AppHandle,
@@ -796,9 +1555,31 @@ impl ChatRuntime {
         request: ProviderRunRequest,
     ) {
         let entry = Arc::clone(&registered.entry);
+        let tool_run = request.tool_run.clone();
         let mut sink = FrameSink::new(Arc::clone(&entry), request.events, registered.controls);
         let mut conversation = None;
-        let outcome = if entry.cancellation.is_cancelled() {
+        let transaction_registration = if let Some(tool_run) = tool_run.as_deref() {
+            self.edit_transaction
+                .register_chat_transaction(
+                    tool_run.transaction_id(),
+                    EditTransactionRegistration {
+                        session_id: tool_run.session_id().clone(),
+                        context_scope_id: tool_run.context_scope_id().clone(),
+                        turn_id: tool_run.run_id().clone(),
+                        workspace_root: tool_run.workspace_root().clone(),
+                    },
+                )
+                .await
+        } else {
+            Ok(())
+        };
+        let transaction_registered = transaction_registration.is_ok() && tool_run.is_some();
+        let outcome = if let Err(error) = transaction_registration {
+            TerminalOutcome::Failed {
+                error,
+                provider_code: None,
+            }
+        } else if entry.cancellation.is_cancelled() {
             TerminalOutcome::Interrupted {
                 reason: "The chat run was cancelled before it started".to_string(),
             }
@@ -811,14 +1592,20 @@ impl ChatRuntime {
                         Arc::clone(&self.ledger),
                         &entry,
                         &request.input,
+                        &request.attachments,
+                        self.attachment.as_ref(),
                         &request.resolved,
                     )
                     .await
                     {
                         Ok(mut prepared) => {
                             let outcome = run_provider_conversation(
-                                &providers,
-                                &self.tools,
+                                ProviderConversationServices {
+                                    providers: &providers,
+                                    tools: &self.tools,
+                                    attachment_service: &self.attachment,
+                                    prompt: &self.prompt,
+                                },
                                 request.resolved,
                                 entry.cancellation.token(),
                                 &mut prepared,
@@ -850,6 +1637,26 @@ impl ChatRuntime {
         } else {
             outcome
         };
+        let (outcome, transaction_id) = if transaction_registered {
+            let result = match tool_run.as_deref() {
+                Some(tool_run) => self.finish_tool_transaction(tool_run).await,
+                None => Err(AppError::internal(
+                    "a registered chat edit transaction lost its tool run context",
+                )),
+            };
+            match result {
+                Ok(transaction_id) => (outcome, transaction_id),
+                Err(error) => (
+                    TerminalOutcome::Failed {
+                        error,
+                        provider_code: None,
+                    },
+                    None,
+                ),
+            }
+        } else {
+            (outcome, None)
+        };
         let outcome = if let Some(conversation) = conversation.as_mut() {
             match conversation.persist_terminal(&outcome).await {
                 Ok(()) => outcome,
@@ -861,9 +1668,20 @@ impl ChatRuntime {
         } else {
             outcome
         };
-        self.select_and_emit_terminal(&app, &entry, &mut sink, outcome)
+        if transaction_id.is_some()
+            && matches!(
+                &outcome,
+                TerminalOutcome::Failed { .. } | TerminalOutcome::Interrupted { .. }
+            )
+        {
+            tracing::warn!(
+                run_id = entry.run_id.as_str(),
+                transaction_id = ?transaction_id,
+                "chat ended after file mutations; rollback transaction was retained"
+            );
+        }
+        self.select_and_emit_terminal(&app, &entry, &mut sink, outcome, transaction_id)
             .await;
-        self.finish(&app, &entry);
     }
 
     async fn select_and_emit_terminal(
@@ -872,6 +1690,7 @@ impl ChatRuntime {
         entry: &Arc<RunEntry>,
         sink: &mut FrameSink,
         outcome: TerminalOutcome,
+        transaction_id: Option<String>,
     ) {
         if entry.terminal_selected.swap(true, Ordering::AcqRel) {
             tracing::error!(
@@ -884,12 +1703,13 @@ impl ChatRuntime {
             TerminalOutcome::Completed {
                 full_content,
                 stop_reason,
+                ..
             } => (
                 ChatStreamState::Completed,
                 ChatStreamFrameEvent::Completed {
                     full_content: bounded_terminal_content(full_content),
                     stop_reason,
-                    tx_id: None,
+                    tx_id: transaction_id,
                 },
             ),
             TerminalOutcome::Failed {
@@ -900,11 +1720,15 @@ impl ChatRuntime {
                 ChatStreamFrameEvent::Failed {
                     error: self.errors.report(error),
                     provider_code,
+                    tx_id: transaction_id,
                 },
             ),
             TerminalOutcome::Interrupted { reason } => (
                 ChatStreamState::Interrupted,
-                ChatStreamFrameEvent::Interrupted { reason },
+                ChatStreamFrameEvent::Interrupted {
+                    reason,
+                    tx_id: transaction_id,
+                },
             ),
         };
         if let Err(error) = entry.transition_to(state) {
@@ -918,6 +1742,27 @@ impl ChatRuntime {
             return;
         }
         sink.wait_for_terminal_ack().await;
+    }
+
+    async fn finish_tool_transaction(
+        &self,
+        tool_run: &ChatToolRunContext,
+    ) -> Result<Option<String>, AppError> {
+        let statuses = self
+            .edit_transaction
+            .get_file_statuses(tool_run.transaction_id())
+            .await?;
+        if statuses.is_empty() {
+            self.edit_transaction
+                .discard_empty_transaction_for_session(
+                    tool_run.session_id().as_str(),
+                    tool_run.transaction_id(),
+                )
+                .await?;
+            Ok(None)
+        } else {
+            Ok(Some(tool_run.transaction_id().to_owned()))
+        }
     }
 
     fn register(&self, request: &ChatStreamRequest) -> Result<RegisteredRun, AppError> {
@@ -1097,12 +1942,15 @@ impl PermissionApprovalHandler for DesktopPermissionApprovalHandler {
         request: &RuntimePermissionApprovalRequest,
     ) -> Result<RuntimePermissionApprovalResponse, Box<dyn std::error::Error + Send + Sync>> {
         let receiver = self.registry.register(&self.run_id, &request.id)?;
+        let _pending = PendingPermissionRequestGuard {
+            registry: self.registry.as_ref(),
+            request_id: &request.id,
+        };
         let event = ChatPermissionApprovalEvent {
             run_id: self.run_id.as_str().to_string(),
             request: permission_request_to_wire(request),
         };
         if let Err(error) = self.app.emit(PERMISSION_REQUEST_EVENT, event) {
-            self.registry.deny(&request.id);
             return Err(Box::new(AppError::external(
                 "The desktop could not receive the permission approval request",
                 error.to_string(),
@@ -1112,14 +1960,8 @@ impl PermissionApprovalHandler for DesktopPermissionApprovalHandler {
 
         tokio::select! {
             result = receiver => Ok(result.unwrap_or_else(|_| denied_permission_response())),
-            () = self.cancellation.cancelled() => {
-                self.registry.deny(&request.id);
-                Ok(denied_permission_response())
-            }
-            () = tokio::time::sleep(PERMISSION_RESPONSE_TIMEOUT) => {
-                self.registry.deny(&request.id);
-                Ok(denied_permission_response())
-            }
+            () = self.cancellation.cancelled() => Ok(denied_permission_response()),
+            () = tokio::time::sleep(PERMISSION_RESPONSE_TIMEOUT) => Ok(denied_permission_response()),
         }
     }
 }
@@ -1132,12 +1974,15 @@ impl AskUserHandler for DesktopAskUserHandler {
     ) -> Result<Vec<ChatAskUserAnswer>, AppError> {
         let request_id = request.id.clone();
         let receiver = self.registry.register(&self.run_id, request.clone())?;
+        let _pending = PendingAskUserRequestGuard {
+            registry: self.registry.as_ref(),
+            request_id: &request_id,
+        };
         let event = ChatAskUserRequestEvent {
             run_id: self.run_id.as_str().to_string(),
             request,
         };
         if let Err(error) = self.app.emit(ASK_USER_REQUEST_EVENT, event) {
-            self.registry.cancel(&request_id);
             return Err(AppError::external(
                 "The desktop could not receive the ask-user request",
                 error.to_string(),
@@ -1148,12 +1993,10 @@ impl AskUserHandler for DesktopAskUserHandler {
             result = receiver => result.map_err(|_| {
                 AppError::cancelled("The ask-user request was cancelled before an answer arrived")
             }),
-            () = self.cancellation.cancelled() => {
-                self.registry.cancel(&request_id);
-                Err(AppError::cancelled("The chat run stopped before the user answered"))
-            }
+            () = self.cancellation.cancelled() => Err(AppError::cancelled(
+                "The chat run stopped before the user answered",
+            )),
             () = tokio::time::sleep(ASK_USER_RESPONSE_TIMEOUT) => {
-                self.registry.cancel(&request_id);
                 Err(AppError::timeout("The ask-user request timed out"))
             }
         }
@@ -1390,20 +2233,866 @@ impl FrameSink {
     }
 }
 
-async fn run_provider_conversation(
+#[derive(Clone, Copy)]
+struct ProviderImagePolicy {
+    max_images: usize,
+    max_image_bytes: u64,
+    max_encoded_bytes: u64,
+}
+
+const fn provider_image_policy(api_format: ApiFormat) -> ProviderImagePolicy {
+    match api_format {
+        ApiFormat::Openai => ProviderImagePolicy {
+            max_images: 500,
+            max_image_bytes: 50 * MEBIBYTE,
+            max_encoded_bytes: 50 * MEBIBYTE,
+        },
+        ApiFormat::Anthropic => ProviderImagePolicy {
+            max_images: 100,
+            max_image_bytes: 5 * MEBIBYTE,
+            max_encoded_bytes: 32 * MEBIBYTE,
+        },
+        ApiFormat::Gemini => ProviderImagePolicy {
+            max_images: MAX_CHAT_IMAGE_ATTACHMENTS,
+            max_image_bytes: 20 * MEBIBYTE,
+            max_encoded_bytes: 20 * MEBIBYTE,
+        },
+    }
+}
+
+async fn resolve_session_images(
+    attachment_service: &AttachmentService,
+    session_id: &SessionId,
+    attachments: &[SessionImageAttachment],
+    policy: ProviderImagePolicy,
+) -> Result<Vec<ResolvedSessionImage>, AppError> {
+    if attachments.len() > policy.max_images {
+        return Err(AppError::validation(
+            "Too many image attachments were supplied for this Provider",
+        ));
+    }
+
+    let mut attachment_ids = HashSet::with_capacity(attachments.len());
+    let mut encoded_total = 0_u64;
+    let mut images = Vec::with_capacity(attachments.len());
+    for attachment in attachments {
+        if !attachment_ids.insert(attachment.id.as_str()) {
+            return Err(AppError::validation(
+                "The same image attachment cannot be supplied more than once",
+            ));
+        }
+        let image = attachment_service
+            .read_session_image(session_id.as_str(), attachment, policy.max_image_bytes)
+            .await?;
+        let encoded_size = base64_encoded_size(image.bytes.len())?;
+        encoded_total = encoded_total.checked_add(encoded_size).ok_or_else(|| {
+            AppError::validation("Image attachments exceed the Provider request limit")
+        })?;
+        if encoded_total > policy.max_encoded_bytes {
+            return Err(AppError::validation(
+                "Image attachments exceed the Provider request limit",
+            ));
+        }
+        images.push(image);
+    }
+    Ok(images)
+}
+
+fn base64_encoded_size(bytes: usize) -> Result<u64, AppError> {
+    let bytes = u64::try_from(bytes)
+        .map_err(|_| AppError::validation("Attachment image size is invalid"))?;
+    bytes
+        .div_ceil(3)
+        .checked_mul(4)
+        .ok_or_else(|| AppError::validation("Attachment image size is invalid"))
+}
+
+fn provider_images_from_resolved(images: Vec<ResolvedSessionImage>) -> Vec<ChatImage> {
+    images
+        .into_iter()
+        .map(|image| ChatImage {
+            mime_type: image.attachment.mime_type,
+            bytes: image.bytes,
+        })
+        .collect()
+}
+
+async fn hydrate_context_images(
+    messages: &mut [ProviderChatMessage],
+    items: &[ModelContextItem],
+    attachment_service: &AttachmentService,
+    session_id: &SessionId,
+    policy: ProviderImagePolicy,
+) -> Result<(), AppError> {
+    if messages.len() != items.len() {
+        return Err(AppError::internal(
+            "Chat context image hydration did not preserve item alignment",
+        ));
+    }
+    for (message, item) in messages.iter_mut().zip(items) {
+        let ModelContextItemMessage::Normalized(recorded) = &item.message else {
+            continue;
+        };
+        let Some(attachments) = recorded.attachments.as_deref() else {
+            continue;
+        };
+        if attachments.is_empty() {
+            continue;
+        }
+        if message.role != ProviderRole::User {
+            return Err(AppError::storage(
+                "Chat session history could not be loaded safely",
+                "a non-user message contains image attachments",
+                false,
+            ));
+        }
+        let session_attachments = attachments
+            .iter()
+            .map(|attachment| match attachment {
+                codez_core::ComposerImageAttachment::Session(attachment) => Ok(attachment.clone()),
+                codez_core::ComposerImageAttachment::Draft(_) => Err(AppError::storage(
+                    "Chat session history could not be loaded safely",
+                    "a persisted chat message contains a draft image attachment",
+                    false,
+                )),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        message.images = provider_images_from_resolved(
+            resolve_session_images(attachment_service, session_id, &session_attachments, policy)
+                .await?,
+        );
+    }
+    Ok(())
+}
+
+struct PreparedProviderRequest {
+    messages: Vec<ProviderChatMessage>,
+    request_fingerprint: String,
+    budget: ContextBudgetSnapshot,
+}
+
+struct PrepareProviderRequestInput<'a> {
+    providers: &'a Arc<ProviderService>,
+    attachment_service: &'a AttachmentService,
+    prompt: &'a ChatPromptAssembler,
+    resolved: &'a ResolvedProviderChatConfig,
+    cancellation: &'a CancellationToken,
+    conversation: &'a ConversationLedger,
+    workspace_root: Option<&'a WorkspaceRoot>,
+    tool_schemas: &'a [ToolDefinition],
+    prompt_now: &'a DateTime<Utc>,
+}
+
+#[derive(Clone)]
+struct ContextFragments {
+    summary: Option<String>,
+    resume: Option<String>,
+    skill_context: Option<codez_core::context::PostCompactionSkillContext>,
+    session_skill_state: Option<String>,
+    file_context: Option<codez_core::context::PostCompactionFileContext>,
+}
+
+struct ProviderUsageBaseline {
+    usage: ProviderTokenUsage,
+    additional_tokens: u32,
+}
+
+#[derive(Debug, Error)]
+enum ChatContextError {
+    #[error("the main context scope is missing from the durable chat ledger")]
+    ScopeMissing,
+    #[error(transparent)]
+    Ledger(#[from] LedgerError),
+    #[error(transparent)]
+    Budget(#[from] ContextBudgetError),
+    #[error(transparent)]
+    Build(#[from] ModelContextBuildError),
+    #[error(transparent)]
+    Adapter(#[from] ModelContextAdapterError),
+    #[error(transparent)]
+    Protocol(#[from] HistoryProtocolError),
+    #[error(transparent)]
+    Prompt(#[from] ChatPromptError),
+    #[error("context metadata could not be serialized: {0}")]
+    Serialization(#[from] serde_json::Error),
+    #[error(
+        "model context requires {total_input_tokens} tokens, exceeding the hard input limit of {hard_input_limit}"
+    )]
+    HardLimitExceeded {
+        total_input_tokens: u32,
+        hard_input_limit: u32,
+    },
+}
+
+async fn prepare_provider_request(
+    input: PrepareProviderRequestInput<'_>,
+    sink: &mut FrameSink,
+) -> Result<PreparedProviderRequest, AppError> {
+    let PrepareProviderRequestInput {
+        providers,
+        attachment_service,
+        prompt,
+        resolved,
+        cancellation,
+        conversation,
+        workspace_root,
+        tool_schemas,
+        prompt_now,
+    } = input;
+    for attempt in 0..MAX_CONTEXT_PREPARATION_ATTEMPTS {
+        let loaded = conversation
+            .store
+            .load(&conversation.session_id)
+            .await
+            .map_err(ChatContextError::from)
+            .map_err(context_app_error)?
+            .ok_or(ChatContextError::ScopeMissing)
+            .map_err(context_app_error)?;
+        let scope = loaded
+            .snapshot
+            .scopes
+            .get("main")
+            .cloned()
+            .ok_or(ChatContextError::ScopeMissing)
+            .map_err(context_app_error)?;
+        let mut history =
+            ModelHistoryNormalizer::normalize_recovered_history(&scope.active_messages);
+        ModelHistoryNormalizer::assert_protocol_invariant(&history)
+            .map_err(ChatContextError::from)
+            .map_err(context_app_error)?;
+        let current =
+            require_current_input_message(&history, &conversation.current_input_message_id)
+                .map_err(ChatContextError::from)
+                .map_err(context_app_error)?;
+        let current_input = current.content.clone();
+        let current_attachments = current.attachments.clone().unwrap_or_default();
+        let current_turn_id = current.turn_id.clone();
+        let raw_history_tokens = history
+            .iter()
+            .filter(|message| message.id != conversation.current_input_message_id)
+            .try_fold(0_u32, |total, message| {
+                ContextBudgetService::estimate_message_tokens(message)
+                    .map(|tokens| total.saturating_add(tokens))
+            })
+            .map_err(ChatContextError::from)
+            .map_err(context_app_error)?;
+        let fragments = context_fragments(&scope)
+            .map_err(ChatContextError::from)
+            .map_err(context_app_error)?;
+        let system_prompt = prompt
+            .build(ChatPromptBuildInput {
+                resolved,
+                session_id: &conversation.session_id,
+                workspace_root,
+                tool_schemas,
+                scope: &scope,
+                now: prompt_now,
+                cancellation,
+            })
+            .await
+            .map_err(ChatContextError::from)
+            .map_err(context_app_error)?;
+        let capabilities = model_context_capabilities(resolved);
+
+        let protected_ids = unconsumed_tool_result_ids(&history, &current_turn_id);
+        let mut budget = measure_chat_context(ChatContextMeasureInput {
+            scope: &scope,
+            history: &history,
+            current_input_message_id: &conversation.current_input_message_id,
+            current_input: &current_input,
+            current_attachments: &current_attachments,
+            raw_history_tokens,
+            fragments: &fragments,
+            capabilities: &capabilities,
+            resolved,
+            tool_schemas,
+            system_prompt: &system_prompt,
+        })
+        .map_err(context_app_error)?;
+        let max_single_tool_tokens = 8_000.min(budget.usable_input_budget / 10);
+        let emergency = ToolOutputPruner::prune(
+            &history,
+            &ToolOutputPruneOptions {
+                target_tokens: u32::MAX,
+                protected_tail_start: history.len(),
+                max_single_tool_tokens: Some(max_single_tool_tokens),
+                protected_message_ids: Some(protected_ids.clone()),
+            },
+        )
+        .map_err(ChatContextError::from)
+        .map_err(context_app_error)?;
+        if !emergency.records.is_empty() {
+            history = emergency.messages;
+            budget = measure_chat_context(ChatContextMeasureInput {
+                scope: &scope,
+                history: &history,
+                current_input_message_id: &conversation.current_input_message_id,
+                current_input: &current_input,
+                current_attachments: &current_attachments,
+                raw_history_tokens,
+                fragments: &fragments,
+                capabilities: &capabilities,
+                resolved,
+                tool_schemas,
+                system_prompt: &system_prompt,
+            })
+            .map_err(context_app_error)?;
+        }
+
+        if matches!(
+            budget.pressure_level,
+            ContextPressureLevel::Prune
+                | ContextPressureLevel::Compact
+                | ContextPressureLevel::Overflow
+        ) {
+            let protected_tail = ModelHistoryNormalizer::select_protocol_safe_tail(
+                &history,
+                ContextBudgetService::recent_tail_budget(budget.usable_input_budget),
+            );
+            let protected_tail_start = protected_tail
+                .first()
+                .and_then(|first| history.iter().position(|message| message.id == first.id))
+                .unwrap_or(history.len());
+            history = ToolOutputPruner::prune(
+                &history,
+                &ToolOutputPruneOptions {
+                    target_tokens: budget.usable_input_budget.saturating_mul(3) / 4,
+                    protected_tail_start,
+                    max_single_tool_tokens: Some(max_single_tool_tokens),
+                    protected_message_ids: Some(protected_ids),
+                },
+            )
+            .map_err(ChatContextError::from)
+            .map_err(context_app_error)?
+            .messages;
+            budget = measure_chat_context(ChatContextMeasureInput {
+                scope: &scope,
+                history: &history,
+                current_input_message_id: &conversation.current_input_message_id,
+                current_input: &current_input,
+                current_attachments: &current_attachments,
+                raw_history_tokens,
+                fragments: &fragments,
+                capabilities: &capabilities,
+                resolved,
+                tool_schemas,
+                system_prompt: &system_prompt,
+            })
+            .map_err(context_app_error)?;
+        }
+
+        if attempt + 1 < MAX_CONTEXT_PREPARATION_ATTEMPTS
+            && matches!(
+                budget.pressure_level,
+                ContextPressureLevel::Compact | ContextPressureLevel::Overflow
+            )
+        {
+            let result = compact_context_with_frames(
+                Arc::clone(providers),
+                Arc::clone(&conversation.store),
+                cancellation.child_token(),
+                AutoCompactionRequest {
+                    session_id: &conversation.session_id,
+                    trigger: "auto_threshold",
+                    capabilities,
+                    reasoning_budget_tokens: resolved.thinking.budget_tokens,
+                    provider_id: &resolved.provider_id,
+                    model: &resolved.model.id,
+                    required_message_id: &conversation.current_input_message_id,
+                },
+                &budget,
+                sink,
+            )
+            .await?;
+            if result.status == CompactionStatus::Completed {
+                continue;
+            }
+        }
+
+        if budget.total_input_tokens > budget.hard_input_limit {
+            return Err(context_app_error(ChatContextError::HardLimitExceeded {
+                total_input_tokens: budget.total_input_tokens,
+                hard_input_limit: budget.hard_input_limit,
+            }));
+        }
+
+        let items = build_context_items(
+            history,
+            &conversation.current_input_message_id,
+            fragments,
+            &system_prompt,
+        )
+        .map_err(ChatContextError::from)
+        .map_err(context_app_error)?;
+        let mut messages = model_context_items_to_chat_messages(&items)
+            .map_err(ChatContextError::from)
+            .map_err(context_app_error)?;
+        hydrate_context_images(
+            &mut messages,
+            &items,
+            attachment_service,
+            &conversation.session_id,
+            provider_image_policy(resolved.api_format),
+        )
+        .await?;
+        let request_fingerprint = request_fingerprint(resolved, &items, &messages, tool_schemas)
+            .map_err(ChatContextError::from)
+            .map_err(context_app_error)?;
+        return Ok(PreparedProviderRequest {
+            messages,
+            request_fingerprint,
+            budget,
+        });
+    }
+
+    Err(AppError::internal(
+        "chat context preparation exhausted its bounded retry state",
+    ))
+}
+
+struct ChatContextMeasureInput<'a> {
+    scope: &'a SessionRuntimeScopeSnapshot,
+    history: &'a [NormalizedModelMessage],
+    current_input_message_id: &'a str,
+    current_input: &'a str,
+    current_attachments: &'a [codez_core::ComposerImageAttachment],
+    raw_history_tokens: u32,
+    fragments: &'a ContextFragments,
+    capabilities: &'a ModelContextCapabilities,
+    resolved: &'a ResolvedProviderChatConfig,
+    tool_schemas: &'a [ToolDefinition],
+    system_prompt: &'a str,
+}
+
+fn measure_chat_context(
+    input: ChatContextMeasureInput<'_>,
+) -> Result<ContextBudgetSnapshot, ChatContextError> {
+    let recent_history = input
+        .history
+        .iter()
+        .filter(|message| message.id != input.current_input_message_id)
+        .cloned()
+        .collect::<Vec<_>>();
+    let instructions = context_instruction_fragments(input.fragments);
+    let baseline = provider_usage_baseline(
+        input.scope,
+        input.history,
+        input.current_input_message_id,
+        input.fragments,
+        input.resolved,
+        input.tool_schemas,
+        input.system_prompt,
+    )?;
+    Ok(ContextBudgetService::measure_request(
+        &MeasureContextRequest {
+            capabilities: input.capabilities,
+            system_prompt: input.system_prompt,
+            tool_schemas: input.tool_schemas,
+            instructions: &instructions,
+            summary: input.fragments.summary.as_deref(),
+            recent_history: &recent_history,
+            raw_history_tokens: Some(input.raw_history_tokens),
+            current_input: input.current_input,
+            current_attachments: input.current_attachments,
+            history_version: input.scope.history_version,
+            provider_usage: baseline.as_ref().map(|baseline| &baseline.usage),
+            provider_usage_additional_tokens: baseline
+                .as_ref()
+                .map_or(0, |baseline| baseline.additional_tokens),
+            reasoning_budget_tokens: input.resolved.thinking.budget_tokens.unwrap_or(0),
+            projected_additional_tokens: 0,
+        },
+    )?)
+}
+
+fn provider_usage_baseline(
+    scope: &SessionRuntimeScopeSnapshot,
+    history: &[NormalizedModelMessage],
+    current_input_message_id: &str,
+    fragments: &ContextFragments,
+    resolved: &ResolvedProviderChatConfig,
+    tool_schemas: &[ToolDefinition],
+    system_prompt: &str,
+) -> Result<Option<ProviderUsageBaseline>, ChatContextError> {
+    let Some(usage) = scope.last_provider_usage.as_ref() else {
+        return Ok(None);
+    };
+    let Some(anchor_id) = scope.last_provider_usage_message_id.as_deref() else {
+        return Ok(None);
+    };
+    let Some(expected_fingerprint) = scope.last_provider_usage_request_fingerprint.as_deref()
+    else {
+        return Ok(None);
+    };
+    if scope.last_provider_usage_provider_id.as_deref() != Some(resolved.provider_id.as_str())
+        || scope.last_provider_usage_model.as_deref() != Some(resolved.model.id.as_str())
+    {
+        return Ok(None);
+    }
+
+    let items = build_context_items(
+        history.to_vec(),
+        current_input_message_id,
+        fragments.clone(),
+        system_prompt,
+    )?;
+    let Some(anchor_item_index) = items.iter().position(|item| {
+        matches!(
+            &item.message,
+            ModelContextItemMessage::Normalized(message) if message.id == anchor_id
+        )
+    }) else {
+        return Ok(None);
+    };
+    let Some(anchor_message_index) = history.iter().position(|message| message.id == anchor_id)
+    else {
+        return Ok(None);
+    };
+    let prefix_items = &items[..anchor_item_index];
+    let prefix_messages = model_context_items_to_chat_messages(prefix_items)?;
+    let actual_fingerprint =
+        request_fingerprint(resolved, prefix_items, &prefix_messages, tool_schemas)?;
+    if actual_fingerprint != expected_fingerprint {
+        return Ok(None);
+    }
+    let additional_tokens =
+        history[anchor_message_index + 1..]
+            .iter()
+            .try_fold(0_u32, |total, message| {
+                ContextBudgetService::estimate_message_tokens(message)
+                    .map(|tokens| total.saturating_add(tokens))
+            })?;
+    Ok(Some(ProviderUsageBaseline {
+        usage: usage.clone(),
+        additional_tokens,
+    }))
+}
+
+fn build_context_items(
+    history: Vec<NormalizedModelMessage>,
+    current_input_message_id: &str,
+    fragments: ContextFragments,
+    system_prompt: &str,
+) -> Result<Vec<ModelContextItem>, ModelContextBuildError> {
+    build_model_context_items(BuildModelContextItemsInput {
+        system_prompt: system_prompt.to_owned(),
+        instructions: Vec::new(),
+        summary: fragments.summary,
+        resume: fragments.resume,
+        skill_context: fragments.skill_context,
+        session_skill_state: fragments.session_skill_state,
+        file_context: fragments.file_context,
+        current_input_message_id: current_input_message_id.to_string(),
+        history,
+    })
+}
+
+fn context_fragments(
+    scope: &SessionRuntimeScopeSnapshot,
+) -> Result<ContextFragments, serde_json::Error> {
+    let summary = scope
+        .latest_compaction
+        .as_ref()
+        .map(render_compaction_summary);
+    let resume = scope
+        .resume_state
+        .as_ref()
+        .filter(|resume| Some(resume.revision) != scope.latest_compaction_resume_revision)
+        .map(serde_json::to_string)
+        .transpose()?;
+    let session_skill_state = scope
+        .skill_states
+        .as_deref()
+        .filter(|states| states.iter().any(|state| state.status == "active"))
+        .map(serde_json::to_string)
+        .transpose()?;
+    Ok(ContextFragments {
+        summary,
+        resume,
+        skill_context: scope.post_compaction_skill_context.clone(),
+        session_skill_state,
+        file_context: scope.post_compaction_file_context.clone(),
+    })
+}
+
+fn context_instruction_fragments(fragments: &ContextFragments) -> Vec<String> {
+    [
+        fragments.resume.as_deref(),
+        fragments
+            .skill_context
+            .as_ref()
+            .map(|context| context.content.as_str()),
+        fragments.session_skill_state.as_deref(),
+        fragments
+            .file_context
+            .as_ref()
+            .map(|context| context.content.as_str()),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|value| !value.trim().is_empty())
+    .map(str::to_string)
+    .collect()
+}
+
+fn render_compaction_summary(summary: &serde_json::Value) -> String {
+    let content = summary
+        .get("content")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let covered = summary
+        .get("coveredThroughSequence")
+        .and_then(serde_json::Value::as_u64);
+    if summary.get("version").and_then(serde_json::Value::as_u64) == Some(2)
+        && !content.trim().is_empty()
+    {
+        let boundary = covered.map_or_else(String::new, |sequence| {
+            format!("\nCovered through sequence: {sequence}")
+        });
+        format!("<compaction_summary version=\"2\">\n{content}{boundary}\n</compaction_summary>")
+    } else {
+        summary.to_string()
+    }
+}
+
+fn unconsumed_tool_result_ids(
+    history: &[NormalizedModelMessage],
+    current_turn_id: &str,
+) -> HashSet<String> {
+    let last_assistant = history
+        .iter()
+        .rposition(|message| message.turn_id == current_turn_id && message.role == "assistant");
+    history[last_assistant.map_or(0, |index| index.saturating_add(1))..]
+        .iter()
+        .filter(|message| message.turn_id == current_turn_id && message.role == "tool")
+        .map(|message| message.id.clone())
+        .collect()
+}
+
+fn request_fingerprint(
+    resolved: &ResolvedProviderChatConfig,
+    items: &[ModelContextItem],
+    messages: &[ProviderChatMessage],
+    tool_schemas: &[ToolDefinition],
+) -> Result<String, ModelContextAdapterError> {
+    fingerprint_provider_request(&ProviderUsageFingerprintInput {
+        context_items: items,
+        messages,
+        tool_schemas,
+        profile: ProviderUsageRequestProfile {
+            provider_id: &resolved.provider_id,
+            model: &resolved.model.id,
+            api_format: api_format_name(resolved.api_format),
+            base_url: &resolved.base_url,
+            thinking: &resolved.thinking,
+            max_output_tokens: resolved.model.max_output_tokens,
+            reasoning_budget_tokens: resolved.thinking.budget_tokens.unwrap_or(0),
+        },
+    })
+}
+
+fn model_context_capabilities(resolved: &ResolvedProviderChatConfig) -> ModelContextCapabilities {
+    ModelContextCapabilities {
+        context_window_tokens: Some(resolved.model.max_context_tokens),
+        max_output_tokens: resolved.model.max_output_tokens,
+        max_input_tokens: resolved.model.max_input_tokens,
+        reasoning_counts_against_context: resolved.model.reasoning_counts_against_context,
+    }
+}
+
+fn context_app_error(error: ChatContextError) -> AppError {
+    match error {
+        ChatContextError::Budget(ContextBudgetError::CurrentInputMissing) => {
+            AppError::validation("The current chat input is empty")
+        }
+        ChatContextError::Budget(ContextBudgetError::CurrentInputTooLarge { .. })
+        | ChatContextError::HardLimitExceeded { .. } => {
+            AppError::validation("The model context exceeds its hard input limit")
+        }
+        error @ (ChatContextError::Ledger(_)
+        | ChatContextError::ScopeMissing
+        | ChatContextError::Protocol(_)) => AppError::storage(
+            "Chat session context could not be loaded safely",
+            error.to_string(),
+            false,
+        ),
+        error @ (ChatContextError::Budget(_)
+        | ChatContextError::Build(_)
+        | ChatContextError::Adapter(_)
+        | ChatContextError::Serialization(_)) => AppError::internal(error.to_string()),
+        ChatContextError::Prompt(ChatPromptError::Cancelled) => {
+            AppError::cancelled("Chat system instruction preparation was cancelled")
+        }
+        ChatContextError::Prompt(error) => AppError::storage(
+            "Chat system instructions could not be loaded safely",
+            error.to_string(),
+            false,
+        ),
+    }
+}
+
+struct ProviderOverflowCompaction {
+    capabilities: ModelContextCapabilities,
+    reasoning_budget_tokens: Option<u32>,
+    provider_id: String,
+    model: String,
+}
+
+async fn compact_after_provider_overflow(
     providers: &Arc<ProviderService>,
-    tools: &ChatToolRuntime,
+    conversation: &ConversationLedger,
+    cancellation: &CancellationToken,
+    overflow: &ProviderOverflowCompaction,
+    budget: &ContextBudgetSnapshot,
+    sink: &mut FrameSink,
+) -> Result<bool, AppError> {
+    compact_context_with_frames(
+        Arc::clone(providers),
+        Arc::clone(&conversation.store),
+        cancellation.child_token(),
+        AutoCompactionRequest {
+            session_id: &conversation.session_id,
+            trigger: "provider_overflow",
+            capabilities: overflow.capabilities.clone(),
+            reasoning_budget_tokens: overflow.reasoning_budget_tokens,
+            provider_id: &overflow.provider_id,
+            model: &overflow.model,
+            required_message_id: &conversation.current_input_message_id,
+        },
+        budget,
+        sink,
+    )
+    .await
+    .map(|result| result.status == CompactionStatus::Completed)
+}
+
+async fn compact_context_with_frames(
+    providers: Arc<ProviderService>,
+    ledger: Arc<ModelLedgerStore>,
+    cancellation: CancellationToken,
+    request: AutoCompactionRequest<'_>,
+    budget: &ContextBudgetSnapshot,
+    sink: &mut FrameSink,
+) -> Result<CompactionResult, AppError> {
+    let trigger = request.trigger.to_string();
+    sink.send_event(ChatStreamFrameEvent::ContextCompactionStarted(
+        ContextCompactionStarted {
+            trigger: trigger.clone(),
+            tokens_before: budget.total_input_tokens,
+            history_version: budget.history_version,
+        },
+    ))
+    .await?;
+
+    let result = compact_active_chat_context(providers, ledger, cancellation, request).await;
+    match result {
+        Ok(result) => {
+            let event = match result.status {
+                CompactionStatus::Completed => {
+                    ChatStreamFrameEvent::ContextCompactionCompleted(ContextCompactionCompleted {
+                        trigger,
+                        tokens_before: result.tokens_before.unwrap_or(budget.total_input_tokens),
+                        tokens_after: result.tokens_after.unwrap_or(budget.total_input_tokens),
+                        history_version: result.history_version.unwrap_or(budget.history_version),
+                    })
+                }
+                CompactionStatus::Failed => {
+                    ChatStreamFrameEvent::ContextCompactionFailed(ContextCompactionFailed {
+                        trigger,
+                        error_code: result
+                            .error_code
+                            .as_ref()
+                            .map_or_else(|| "COMPACTION_FAILED".to_string(), ToString::to_string),
+                        message: result.message.clone().unwrap_or_else(|| {
+                            "Context compaction failed without a durable reason".to_string()
+                        }),
+                        retryable: result.retryable.unwrap_or(false),
+                        history_version: result.history_version,
+                    })
+                }
+            };
+            sink.send_event(event).await?;
+            Ok(result)
+        }
+        Err(error) => {
+            sink.send_event(ChatStreamFrameEvent::ContextCompactionFailed(
+                ContextCompactionFailed {
+                    trigger,
+                    error_code: "COMPACTION_PERSISTENCE_FAILED".to_string(),
+                    message: error.public_message().to_string(),
+                    retryable: error.retryable(),
+                    history_version: Some(budget.history_version),
+                },
+            ))
+            .await?;
+            Err(error)
+        }
+    }
+}
+
+fn context_budget_to_wire(snapshot: &ContextBudgetSnapshot) -> WireContextBudgetSnapshot {
+    WireContextBudgetSnapshot {
+        hard_input_limit: snapshot.hard_input_limit,
+        usable_input_budget: snapshot.usable_input_budget,
+        output_reserve_tokens: snapshot.output_reserve_tokens,
+        safety_margin_tokens: snapshot.safety_margin_tokens,
+        system_prompt_tokens: snapshot.system_prompt_tokens,
+        tool_schema_tokens: snapshot.tool_schema_tokens,
+        instruction_tokens: snapshot.instruction_tokens,
+        protocol_tokens: snapshot.protocol_tokens,
+        summary_tokens: snapshot.summary_tokens,
+        recent_history_tokens: snapshot.recent_history_tokens,
+        raw_history_tokens: snapshot.raw_history_tokens,
+        current_input_tokens: snapshot.current_input_tokens,
+        total_input_tokens: snapshot.total_input_tokens,
+        provider_adjustment_tokens: snapshot.provider_adjustment_tokens,
+        pressure_level: match snapshot.pressure_level {
+            ContextPressureLevel::Normal => WireContextPressureLevel::Normal,
+            ContextPressureLevel::Warning => WireContextPressureLevel::Warning,
+            ContextPressureLevel::Prune => WireContextPressureLevel::Prune,
+            ContextPressureLevel::Compact => WireContextPressureLevel::Compact,
+            ContextPressureLevel::Overflow => WireContextPressureLevel::Overflow,
+        },
+        estimate_source: match snapshot.estimate_source {
+            codez_runtime::context::budget::ContextEstimateSource::Provider => {
+                WireContextEstimateSource::Provider
+            }
+            codez_runtime::context::budget::ContextEstimateSource::Heuristic => {
+                WireContextEstimateSource::Heuristic
+            }
+        },
+        history_version: snapshot.history_version,
+    }
+}
+
+struct ProviderConversationServices<'a> {
+    providers: &'a Arc<ProviderService>,
+    tools: &'a ChatToolRuntime,
+    attachment_service: &'a AttachmentService,
+    prompt: &'a ChatPromptAssembler,
+}
+
+async fn run_provider_conversation(
+    services: ProviderConversationServices<'_>,
     first_config: ResolvedProviderChatConfig,
     cancellation: CancellationToken,
     conversation: &mut ConversationLedger,
     tool_run: Option<&ChatToolRunContext>,
     sink: &mut FrameSink,
 ) -> TerminalOutcome {
+    let ProviderConversationServices {
+        providers,
+        tools,
+        attachment_service,
+        prompt,
+    } = services;
     let provider_id = first_config.provider_id.clone();
     let model_id = first_config.model.id.clone();
     let provider_tools = tool_run.map(|_| tools.provider_tool_definitions());
     let mut next_config = Some(first_config);
     let mut tool_rounds = 0;
+    let mut overflow_retried = false;
+    let prompt_now = Utc::now();
 
     loop {
         let resolved = match next_config.take() {
@@ -1421,9 +3110,62 @@ async fn run_provider_conversation(
                 }
             },
         };
+        let prepared = match prepare_provider_request(
+            PrepareProviderRequestInput {
+                providers,
+                attachment_service,
+                prompt,
+                resolved: &resolved,
+                cancellation: &cancellation,
+                conversation,
+                workspace_root: tool_run.map(ChatToolRunContext::workspace_root),
+                tool_schemas: provider_tools.as_deref().unwrap_or_default(),
+                prompt_now: &prompt_now,
+            },
+            sink,
+        )
+        .await
+        {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                return TerminalOutcome::Failed {
+                    error,
+                    provider_code: None,
+                };
+            }
+        };
+        let PreparedProviderRequest {
+            messages,
+            request_fingerprint,
+            budget,
+        } = prepared;
+        tracing::debug!(
+            session_id = conversation.session_id.as_str(),
+            history_version = budget.history_version,
+            total_input_tokens = budget.total_input_tokens,
+            pressure_level = ?budget.pressure_level,
+            "opening Provider request with prepared context budget"
+        );
+        if let Err(error) = sink
+            .send_event(ChatStreamFrameEvent::ContextBudget(context_budget_to_wire(
+                &budget,
+            )))
+            .await
+        {
+            return TerminalOutcome::Failed {
+                error,
+                provider_code: None,
+            };
+        }
+        let overflow = ProviderOverflowCompaction {
+            capabilities: model_context_capabilities(&resolved),
+            reasoning_budget_tokens: resolved.thinking.budget_tokens,
+            provider_id: resolved.provider_id.clone(),
+            model: resolved.model.id.clone(),
+        };
         let stream = match open_provider_stream(
             resolved,
-            conversation.messages.clone(),
+            messages,
             provider_tools.clone(),
             cancellation.clone(),
         )
@@ -1435,15 +3177,63 @@ async fn run_provider_conversation(
                     reason: "The provider request was cancelled".to_string(),
                 };
             }
+            Err(error @ ChatProviderError::ContextOverflow(_)) if !overflow_retried => {
+                overflow_retried = true;
+                match compact_after_provider_overflow(
+                    providers,
+                    conversation,
+                    &cancellation,
+                    &overflow,
+                    &budget,
+                    sink,
+                )
+                .await
+                {
+                    Ok(true) => continue,
+                    Ok(false) => return provider_failure(error),
+                    Err(compaction_error) => {
+                        return TerminalOutcome::Failed {
+                            error: compaction_error,
+                            provider_code: Some(ChatProviderErrorCode::ContextOverflow),
+                        };
+                    }
+                }
+            }
             Err(error) => return provider_failure(error),
         };
         let turn = consume_provider_turn(stream, cancellation.clone(), sink).await;
-        let (full_content, stop_reason, tool_calls) = match turn {
+        let (full_content, stop_reason, tool_calls, usage) = match turn {
             ProviderTurn::Completed {
                 full_content,
                 stop_reason,
                 tool_calls,
-            } => (full_content, stop_reason, tool_calls),
+                usage,
+            } => (full_content, stop_reason, tool_calls, usage),
+            ProviderTurn::Failed {
+                error: error @ ChatProviderError::ContextOverflow(_),
+                partial_content,
+            } if !overflow_retried && partial_content.is_empty() => {
+                overflow_retried = true;
+                match compact_after_provider_overflow(
+                    providers,
+                    conversation,
+                    &cancellation,
+                    &overflow,
+                    &budget,
+                    sink,
+                )
+                .await
+                {
+                    Ok(true) => continue,
+                    Ok(false) => return provider_failure(error),
+                    Err(compaction_error) => {
+                        return TerminalOutcome::Failed {
+                            error: compaction_error,
+                            provider_code: Some(ChatProviderErrorCode::ContextOverflow),
+                        };
+                    }
+                }
+            }
             ProviderTurn::Failed {
                 error,
                 partial_content,
@@ -1497,7 +3287,7 @@ async fn run_provider_conversation(
             };
             let wire_calls = tool_calls_to_wire(&tool_calls);
             if let Err(error) = conversation
-                .record_assistant_tool_calls(full_content, &tool_calls)
+                .record_assistant_tool_calls(full_content, &tool_calls, usage, request_fingerprint)
                 .await
             {
                 return TerminalOutcome::Failed {
@@ -1551,16 +3341,21 @@ async fn run_provider_conversation(
             return TerminalOutcome::Completed {
                 full_content,
                 stop_reason,
+                usage,
+                request_fingerprint,
             };
         };
-        if let Err(error) = conversation.record_assistant(full_content).await {
+        if let Err(error) = conversation
+            .record_assistant(full_content, usage, request_fingerprint)
+            .await
+        {
             return TerminalOutcome::Failed {
                 error,
                 provider_code: None,
             };
         }
         if let Err(error) = conversation
-            .record_user(steer.text.clone(), false, None)
+            .record_user(steer.text.clone(), None, false, None, Vec::new())
             .await
         {
             return TerminalOutcome::Failed {
@@ -1587,6 +3382,7 @@ enum ProviderTurn {
         full_content: String,
         stop_reason: Option<AgentStopReason>,
         tool_calls: Vec<ProviderToolCall>,
+        usage: Option<ProviderTokenUsage>,
     },
     Failed {
         error: ChatProviderError,
@@ -1605,6 +3401,7 @@ async fn consume_provider_turn(
 ) -> ProviderTurn {
     let mut completed_tool_calls = Vec::new();
     let mut partial_content = String::new();
+    let mut latest_usage = None;
     loop {
         tokio::select! {
             biased;
@@ -1644,6 +3441,7 @@ async fn consume_provider_turn(
                         }
                     }
                     Some(Ok(ProviderChatStreamEvent::Usage(usage))) => {
+                        latest_usage = Some(merge_provider_usage(latest_usage.take(), &usage));
                         if let Err(error) = sink.send_event(ChatStreamFrameEvent::Usage {
                             usage: usage_to_wire(usage),
                         }).await {
@@ -1666,6 +3464,7 @@ async fn consume_provider_turn(
                             },
                             stop_reason: stop_reason.map(stop_reason_to_wire),
                             tool_calls: completed_tool_calls,
+                            usage: latest_usage,
                         };
                     }
                     Some(Err(error)) => {
@@ -1685,6 +3484,39 @@ async fn consume_provider_turn(
                 }
             }
         }
+    }
+}
+
+fn merge_provider_usage(
+    previous: Option<ProviderTokenUsage>,
+    next: &ProviderTokenUsage,
+) -> ProviderTokenUsage {
+    let input_tokens = previous.as_ref().map_or(next.input_tokens, |usage| {
+        usage.input_tokens.max(next.input_tokens)
+    });
+    let output_tokens = previous.as_ref().map_or(next.output_tokens, |usage| {
+        usage.output_tokens.max(next.output_tokens)
+    });
+    let reasoning_tokens = previous
+        .as_ref()
+        .and_then(|usage| usage.reasoning_tokens)
+        .unwrap_or_default()
+        .max(next.reasoning_tokens.unwrap_or_default());
+    let total_tokens = previous
+        .as_ref()
+        .and_then(|usage| usage.total_tokens)
+        .unwrap_or_default()
+        .max(next.total_tokens.unwrap_or_default())
+        .max(
+            input_tokens
+                .saturating_add(output_tokens)
+                .saturating_add(reasoning_tokens),
+        );
+    ProviderTokenUsage {
+        input_tokens,
+        output_tokens,
+        reasoning_tokens: Some(reasoning_tokens),
+        total_tokens: Some(total_tokens),
     }
 }
 
@@ -1779,7 +3611,7 @@ fn tool_result_for_model(result: &ToolPipelineResult) -> (String, &'static str) 
 
 pub(crate) async fn open_provider_stream(
     resolved: ResolvedProviderChatConfig,
-    messages: Vec<ChatMessage>,
+    messages: Vec<ProviderChatMessage>,
     tools: Option<Vec<ToolDefinition>>,
     cancellation: CancellationToken,
 ) -> Result<BoxStream<'static, Result<ProviderChatStreamEvent, ChatProviderError>>, ChatProviderError>
@@ -1789,7 +3621,7 @@ pub(crate) async fn open_provider_stream(
         api_key: resolved.api_key,
         model: resolved.model.name.clone(),
         api_format: Some(api_format_name(resolved.api_format).to_string()),
-        messages: messages.into_iter().map(chat_message_from_wire).collect(),
+        messages,
         tools,
         thinking: Some(resolved.thinking),
         max_output_tokens: resolved.model.max_output_tokens,
@@ -1929,15 +3761,53 @@ pub(crate) fn validate_stream_request(request: &ChatStreamRequest) -> Result<(),
             "The chat input exceeds the safety limit",
         ));
     }
-    if has_attachments {
-        return Err(AppError::unsupported(
-            "Image input is not connected to the Rust Provider adapters yet",
+    if request
+        .input
+        .attachments
+        .as_ref()
+        .is_some_and(|attachments| attachments.len() > MAX_CHAT_IMAGE_ATTACHMENTS)
+    {
+        return Err(AppError::validation(
+            "Too many image attachments were supplied",
         ));
     }
     if let Some(metadata) = request.input.command_metadata.as_ref() {
         validate_command_metadata(metadata)?;
     }
     Ok(())
+}
+
+fn session_attachments_from_input(
+    input: &ChatStreamInput,
+    session_id: &str,
+) -> Result<Vec<SessionImageAttachment>, AppError> {
+    let Some(attachments) = input.attachments.as_deref() else {
+        return Ok(Vec::new());
+    };
+    if attachments.len() > MAX_CHAT_IMAGE_ATTACHMENTS {
+        return Err(AppError::validation(
+            "Too many image attachments were supplied",
+        ));
+    }
+    let mut attachment_ids = HashSet::with_capacity(attachments.len());
+    attachments
+        .iter()
+        .cloned()
+        .map(|attachment| {
+            let attachment = session_from_wire(attachment)?;
+            if attachment.session_id != session_id {
+                return Err(AppError::validation(
+                    "Attachment does not belong to this chat session",
+                ));
+            }
+            if !attachment_ids.insert(attachment.id.clone()) {
+                return Err(AppError::validation(
+                    "The same image attachment cannot be supplied more than once",
+                ));
+            }
+            Ok(attachment)
+        })
+        .collect()
 }
 
 fn validate_command_metadata(metadata: &ChatCommandMetadata) -> Result<(), AppError> {
@@ -2123,59 +3993,6 @@ fn parse_prediction(content: &str) -> String {
         .unwrap_or_default()
 }
 
-fn chat_message_from_ledger(value: &NormalizedModelMessage) -> Result<ChatMessage, AppError> {
-    let role = match value.role.as_str() {
-        "system" => Role::System,
-        "user" => Role::User,
-        "assistant" => Role::Assistant,
-        "tool" => Role::Tool,
-        _ => {
-            return Err(AppError::storage(
-                "Chat session history could not be loaded safely",
-                format!("unknown persisted chat role: {}", value.role),
-                false,
-            ));
-        }
-    };
-    if role == Role::Tool && value.tool_call_id.as_deref().is_none_or(str::is_empty) {
-        return Err(AppError::storage(
-            "Chat session history could not be loaded safely",
-            "a persisted tool result is missing its tool call identifier",
-            false,
-        ));
-    }
-    Ok(ChatMessage {
-        role,
-        content: Some(value.content.clone()),
-        tool_calls: value.tool_calls.as_ref().map(|calls| {
-            calls
-                .iter()
-                .map(|call| codez_contracts::chat::ToolCall {
-                    id: call.id.clone(),
-                    r#type: "function".to_string(),
-                    function: codez_contracts::chat::ToolCallFunction {
-                        name: call.name.clone(),
-                        arguments: call.arguments.clone(),
-                    },
-                    thought_signature: call.thought_signature.clone(),
-                })
-                .collect()
-        }),
-        tool_call_id: value.tool_call_id.clone(),
-        name: value.name.clone(),
-    })
-}
-
-fn history_token_budget(resolved: &ResolvedProviderChatConfig) -> u32 {
-    let context_budget = resolved.model.max_input_tokens.unwrap_or_else(|| {
-        resolved
-            .model
-            .max_context_tokens
-            .saturating_sub(resolved.model.max_output_tokens.unwrap_or_default())
-    });
-    context_budget.clamp(1, MAX_LEDGER_HISTORY_TOKENS)
-}
-
 fn domain_stop_reason(reason: Option<&AgentStopReason>) -> DomainAgentStopReason {
     match reason.unwrap_or(&AgentStopReason::Unknown) {
         AgentStopReason::Stop => DomainAgentStopReason::Stop,
@@ -2324,27 +4141,39 @@ fn take_last_chars(value: &str, limit: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{
+        sync::Arc,
+        task::{Context, Poll},
+    };
 
     use codez_contracts::chat::{
-        AgentStopReason, ChatCommandMetadata, ChatPermissionApprovalScope, ChatSteerInput,
-        ChatSteerRejection, ChatStreamInput, ChatStreamRequest, PromptPredictionContextMessage,
+        AgentStopReason, ChatAskUserOption, ChatAskUserQuestion, ChatAskUserRequest,
+        ChatCommandMetadata, ChatPermissionApprovalScope, ChatSteerInput, ChatSteerRejection,
+        ChatStreamInput, ChatStreamRequest, PromptPredictionContextMessage,
         PromptPredictionRequest, PromptPredictionRole,
     };
     use codez_core::{
         AppErrorKind, AtomicPersistence, SessionId, StreamId,
-        provider::{ToolCall, ToolCallFunction},
+        context::NormalizedModelMessage,
+        provider::{
+            ApiFormat, ModelConfig, ProviderTokenUsage, SecretValue, ThinkingConfig, ThinkingMode,
+            ToolCall, ToolCallFunction, ToolDefinition, ToolDefinitionFunction,
+        },
     };
+    use codez_providers::service::ResolvedProviderChatConfig;
     use codez_runtime::context::ledger::ModelLedgerStore;
     use codez_storage::AtomicFileStore;
 
     use super::{
-        ConversationLedger, MAX_CHAT_INPUT_BYTES, MAX_PREDICTION_INPUT_BYTES,
-        MAX_STEER_INPUT_BYTES, PermissionResponseRegistry, TerminalOutcome, bounded_text,
+        ContextFragments, ConversationLedger, MAX_CHAT_INPUT_BYTES, MAX_PREDICTION_INPUT_BYTES,
+        MAX_STEER_INPUT_BYTES, PendingAskUserRequestGuard, PendingPermissionRequestGuard,
+        PermissionResponseRegistry, TerminalOutcome, bounded_text, build_context_items,
+        context_fragments, merge_provider_usage, model_context_items_to_chat_messages,
         normalize_provider_tool_calls, parse_prediction, permission_response_from_wire,
-        take_utf8_prefix, validate_prediction_request, validate_steer_input,
-        validate_stream_request,
+        provider_usage_baseline, request_fingerprint, take_utf8_prefix,
+        validate_prediction_request, validate_steer_input, validate_stream_request,
     };
+    use crate::chat_interaction::AskUserResponseRegistry;
 
     #[test]
     fn utf8_frame_split_should_not_cut_a_multibyte_character() {
@@ -2378,13 +4207,21 @@ mod tests {
         let mut conversation = conversation_ledger(Arc::clone(&store));
 
         conversation
-            .record_user("inspect the project".to_string(), false, None)
+            .record_user(
+                "inspect the project".to_string(),
+                None,
+                false,
+                None,
+                Vec::new(),
+            )
             .await
             .expect("user turn must persist");
         conversation
             .persist_terminal(&TerminalOutcome::Completed {
                 full_content: "I inspected the project.".to_string(),
                 stop_reason: Some(AgentStopReason::Stop),
+                usage: None,
+                request_fingerprint: "request-fingerprint".to_string(),
             })
             .await
             .expect("completed turn must persist");
@@ -2415,6 +4252,261 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn conversation_ledger_persists_provider_usage_with_its_request_fingerprint() {
+        let directory = tempfile::tempdir().expect("temporary ledger directory must exist");
+        let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
+        let store = Arc::new(ModelLedgerStore::new(directory.path(), persistence));
+        let mut conversation = conversation_ledger(Arc::clone(&store));
+        conversation
+            .record_user(
+                "measure this request".to_string(),
+                None,
+                false,
+                None,
+                Vec::new(),
+            )
+            .await
+            .expect("user input must persist");
+        conversation
+            .record_assistant(
+                "measured response".to_string(),
+                Some(ProviderTokenUsage {
+                    input_tokens: 120,
+                    output_tokens: 30,
+                    reasoning_tokens: Some(5),
+                    total_tokens: Some(155),
+                }),
+                "stable-request-fingerprint".to_string(),
+            )
+            .await
+            .expect("assistant usage must persist");
+
+        let loaded = store
+            .load(&SessionId::parse("session-1").expect("fixture session must parse"))
+            .await
+            .expect("usage ledger must load")
+            .expect("usage ledger must exist");
+        let scope = &loaded.snapshot.scopes["main"];
+
+        assert_eq!(
+            (
+                scope
+                    .last_provider_usage
+                    .as_ref()
+                    .map(|usage| usage.input_tokens),
+                scope.last_provider_usage_message_id.as_deref(),
+                scope.last_provider_usage_request_fingerprint.as_deref(),
+            ),
+            (
+                Some(120),
+                Some("stream-1:1:assistant"),
+                Some("stable-request-fingerprint"),
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_usage_baseline_requires_and_accepts_the_exact_prior_request_fingerprint() {
+        let directory = tempfile::tempdir().expect("temporary ledger directory must exist");
+        let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
+        let store = Arc::new(ModelLedgerStore::new(directory.path(), persistence));
+        let mut conversation = conversation_ledger(Arc::clone(&store));
+        let resolved = ResolvedProviderChatConfig {
+            provider_id: "provider-1".to_string(),
+            base_url: "https://provider.example/v1".to_string(),
+            api_format: ApiFormat::Openai,
+            model: ModelConfig {
+                id: "model-1".to_string(),
+                name: "model-1".to_string(),
+                max_context_tokens: 8_192,
+                max_input_tokens: None,
+                max_output_tokens: Some(512),
+                reasoning_counts_against_context: Some(false),
+                supports_vision: None,
+                api_format: Some(ApiFormat::Openai),
+                thinking_mode: None,
+                thinking_effort: None,
+                thinking_budget_tokens: None,
+            },
+            thinking: ThinkingConfig {
+                enabled: false,
+                mode: ThinkingMode::None,
+                effort: None,
+                budget_tokens: None,
+            },
+            api_key: SecretValue::new("fixture-secret").expect("fixture secret must be valid"),
+        };
+        conversation
+            .record_user("first request".to_string(), None, false, None, Vec::new())
+            .await
+            .expect("first user input must persist");
+        let first = store
+            .load(&conversation.session_id)
+            .await
+            .expect("first request context must load")
+            .expect("first request context must exist");
+        let first_scope = &first.snapshot.scopes["main"];
+        let first_fragments =
+            context_fragments(first_scope).expect("first request fragments must serialize");
+        let first_items = build_context_items(
+            first_scope.active_messages.clone(),
+            &conversation.current_input_message_id,
+            first_fragments,
+            "# fixture system prompt",
+        )
+        .expect("first request context must build");
+        let first_messages = model_context_items_to_chat_messages(&first_items)
+            .expect("first request context must adapt");
+        let fingerprint = request_fingerprint(&resolved, &first_items, &first_messages, &[])
+            .expect("first request must fingerprint");
+        conversation
+            .record_assistant(
+                "first response".to_string(),
+                Some(ProviderTokenUsage {
+                    input_tokens: 80,
+                    output_tokens: 20,
+                    reasoning_tokens: None,
+                    total_tokens: Some(100),
+                }),
+                fingerprint,
+            )
+            .await
+            .expect("first response usage must persist");
+        conversation
+            .record_user("second request".to_string(), None, false, None, Vec::new())
+            .await
+            .expect("second user input must persist");
+        let second = store
+            .load(&conversation.session_id)
+            .await
+            .expect("second request context must load")
+            .expect("second request context must exist");
+        let second_scope = &second.snapshot.scopes["main"];
+        let baseline = provider_usage_baseline(
+            second_scope,
+            &second_scope.active_messages,
+            &conversation.current_input_message_id,
+            &context_fragments(second_scope).expect("second request fragments must serialize"),
+            &resolved,
+            &[],
+            "# fixture system prompt",
+        )
+        .expect("provider baseline validation must not fail")
+        .expect("exact prior request fingerprint must enable Provider calibration");
+
+        assert_eq!(baseline.usage.input_tokens, 80);
+        assert!(baseline.additional_tokens > 0);
+    }
+
+    #[test]
+    fn request_fingerprint_is_stable_until_the_system_prompt_changes() {
+        let resolved = ResolvedProviderChatConfig {
+            provider_id: "provider-prompt-fingerprint".to_string(),
+            base_url: "https://provider.example/v1".to_string(),
+            api_format: ApiFormat::Openai,
+            model: ModelConfig {
+                id: "model-prompt-fingerprint".to_string(),
+                name: "model-prompt-fingerprint".to_string(),
+                max_context_tokens: 8_192,
+                max_input_tokens: None,
+                max_output_tokens: Some(512),
+                reasoning_counts_against_context: Some(false),
+                supports_vision: None,
+                api_format: Some(ApiFormat::Openai),
+                thinking_mode: None,
+                thinking_effort: None,
+                thinking_budget_tokens: None,
+            },
+            thinking: ThinkingConfig {
+                enabled: false,
+                mode: ThinkingMode::None,
+                effort: None,
+                budget_tokens: None,
+            },
+            api_key: SecretValue::new("fixture-secret")
+                .expect("fixture Provider secret must be valid"),
+        };
+        let history = vec![NormalizedModelMessage {
+            id: "current-input".to_string(),
+            client_message_id: None,
+            turn_id: "turn-prompt-fingerprint".to_string(),
+            role: "user".to_string(),
+            content: "same input".to_string(),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+            status: "complete".to_string(),
+            created_at: "2026-07-17T00:00:00Z".to_string(),
+            source_sequence: None,
+            attachments: None,
+            file_references: None,
+        }];
+        let fragments = ContextFragments {
+            summary: None,
+            resume: None,
+            skill_context: None,
+            session_skill_state: None,
+            file_context: None,
+        };
+        let tools = vec![ToolDefinition {
+            r#type: "function".to_string(),
+            function: ToolDefinitionFunction {
+                name: "Read".to_string(),
+                description: "Read a workspace file".to_string(),
+                parameters: serde_json::json!({"type": "object"}),
+            },
+        }];
+        let fingerprint = |system_prompt: &str| {
+            let items = build_context_items(
+                history.clone(),
+                "current-input",
+                fragments.clone(),
+                system_prompt,
+            )
+            .expect("prompt fingerprint context must build");
+            let messages = model_context_items_to_chat_messages(&items)
+                .expect("prompt fingerprint messages must adapt");
+            request_fingerprint(&resolved, &items, &messages, &tools)
+                .expect("prompt fingerprint must hash")
+        };
+
+        let initial = fingerprint("core prompt\nworkspace rule version one");
+        let unchanged = fingerprint("core prompt\nworkspace rule version one");
+        let changed = fingerprint("core prompt\nworkspace rule version two");
+
+        assert_eq!(initial, unchanged);
+        assert_ne!(initial, changed);
+    }
+
+    #[test]
+    fn provider_usage_merge_preserves_segmented_and_cumulative_maxima() {
+        let merged = merge_provider_usage(
+            Some(ProviderTokenUsage {
+                input_tokens: 100,
+                output_tokens: 0,
+                reasoning_tokens: None,
+                total_tokens: Some(100),
+            }),
+            &ProviderTokenUsage {
+                input_tokens: 0,
+                output_tokens: 25,
+                reasoning_tokens: Some(5),
+                total_tokens: None,
+            },
+        );
+
+        assert_eq!(
+            (
+                merged.input_tokens,
+                merged.output_tokens,
+                merged.reasoning_tokens,
+                merged.total_tokens,
+            ),
+            (100, 25, Some(5), Some(130))
+        );
+    }
+
+    #[tokio::test]
     async fn conversation_ledger_marks_partial_output_interrupted_without_a_completed_message() {
         let directory = tempfile::tempdir().expect("temporary ledger directory must exist");
         let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
@@ -2425,7 +4517,7 @@ mod tests {
         let mut conversation = conversation_ledger(Arc::clone(&store));
 
         conversation
-            .record_user("make a change".to_string(), false, None)
+            .record_user("make a change".to_string(), None, false, None, Vec::new())
             .await
             .expect("user turn must persist");
         conversation.record_interrupted_content("partial response".to_string());
@@ -2576,6 +4668,66 @@ mod tests {
     }
 
     #[test]
+    fn permission_pending_guard_drop_should_release_the_pending_request() {
+        let run_id = StreamId::parse("stream-1").expect("fixture stream must be valid");
+        let registry = PermissionResponseRegistry::default();
+        let request_id = "approval-drop".to_string();
+        let mut request_future = Box::pin(async {
+            let _receiver = registry
+                .register(&run_id, &request_id)
+                .expect("fixture permission request must register");
+            let _pending = PendingPermissionRequestGuard {
+                registry: &registry,
+                request_id: &request_id,
+            };
+            std::future::pending::<()>().await;
+        });
+        let mut context = Context::from_waker(futures_util::task::noop_waker_ref());
+
+        assert!(matches!(
+            request_future.as_mut().poll(&mut context),
+            Poll::Pending
+        ));
+        drop(request_future);
+
+        let receiver = registry
+            .register(&run_id, &request_id)
+            .expect("dropping the request future must release its registry entry");
+        registry.deny(&request_id);
+        drop(receiver);
+    }
+
+    #[test]
+    fn ask_user_pending_guard_drop_should_release_the_pending_request() {
+        let run_id = StreamId::parse("stream-1").expect("fixture stream must be valid");
+        let registry = AskUserResponseRegistry::new();
+        let request = ask_user_request();
+        let mut request_future = Box::pin(async {
+            let _receiver = registry
+                .register(&run_id, request.clone())
+                .expect("fixture ask-user request must register");
+            let _pending = PendingAskUserRequestGuard {
+                registry: &registry,
+                request_id: &request.id,
+            };
+            std::future::pending::<()>().await;
+        });
+        let mut context = Context::from_waker(futures_util::task::noop_waker_ref());
+
+        assert!(matches!(
+            request_future.as_mut().poll(&mut context),
+            Poll::Pending
+        ));
+        drop(request_future);
+
+        let receiver = registry
+            .register(&run_id, request.clone())
+            .expect("dropping the request future must release its registry entry");
+        registry.cancel(&request.id);
+        drop(receiver);
+    }
+
+    #[test]
     fn steer_validation_should_bound_the_consumed_frame_payload() {
         let input = ChatSteerInput {
             queue_id: "queue-1".to_string(),
@@ -2635,6 +4787,31 @@ mod tests {
         }
     }
 
+    fn ask_user_request() -> ChatAskUserRequest {
+        ChatAskUserRequest {
+            id: "ask-user-1".to_string(),
+            questions: vec![ChatAskUserQuestion {
+                question: "Which option?".to_string(),
+                header: "Choice".to_string(),
+                options: vec![
+                    ChatAskUserOption {
+                        label: "first".to_string(),
+                        description: None,
+                        detail: None,
+                    },
+                    ChatAskUserOption {
+                        label: "second".to_string(),
+                        description: None,
+                        detail: None,
+                    },
+                ],
+                multi_select: Some(false),
+                ignore_label: None,
+                submit_label: None,
+            }],
+        }
+    }
+
     fn conversation_ledger(store: Arc<ModelLedgerStore>) -> ConversationLedger {
         ConversationLedger {
             store,
@@ -2642,17 +4819,148 @@ mod tests {
             run_id: StreamId::parse("stream-1").expect("fixture stream must be valid"),
             provider_id: "provider-1".to_string(),
             model_id: "model-1".to_string(),
-            messages: Vec::new(),
+            current_input_message_id: String::new(),
             next_record: 0,
             interrupted_content: None,
+        }
+    }
+
+    mod prompt_assembly {
+        use std::{io, path::Path, sync::Arc};
+
+        use codez_core::{AtomicPersistence, CancellationToken, ProcessRunner};
+        use codez_platform::{NativeFileSystem, NativeProcessRunner};
+        use codez_runtime::permission::store::WorkspacePermissionStore;
+        use codez_storage::AtomicFileStore;
+
+        use super::super::{
+            ChatPromptAssembler, ChatPromptError, load_prompt_rule_directory,
+            load_prompt_rule_with_hook,
+        };
+
+        #[tokio::test]
+        async fn prompt_rules_reject_a_parent_directory_redirect() {
+            let authority = tempfile::tempdir().expect("prompt authority must exist");
+            let outside = tempfile::tempdir().expect("outside rule directory must exist");
+            std::fs::write(outside.path().join("escape.md"), "outside-rule")
+                .expect("outside rule must be written");
+            let redirect = authority.path().join(".codez");
+            if let Err(source) = create_directory_symlink(outside.path(), &redirect) {
+                if symlink_permission_unavailable(&source) {
+                    return;
+                }
+                panic!("parent redirect fixture must be created: {source}");
+            }
+            let filesystem = NativeFileSystem::open(authority.path().to_path_buf())
+                .await
+                .expect("prompt authority filesystem must open");
+
+            let error = load_prompt_rule_directory(
+                &filesystem,
+                authority.path(),
+                Path::new(".codez"),
+                &CancellationToken::new(),
+            )
+            .await
+            .expect_err("a redirected rule parent must be rejected");
+
+            assert!(matches!(error, ChatPromptError::SymbolicLink(_)));
+        }
+
+        #[tokio::test]
+        async fn prompt_rule_read_rejects_a_file_swapped_after_validation() {
+            let authority = tempfile::tempdir().expect("prompt authority must exist");
+            let outside = tempfile::tempdir().expect("outside rule directory must exist");
+            let rule = authority.path().join("AGENTS.md");
+            let outside_rule = outside.path().join("outside.md");
+            std::fs::write(&rule, "trusted-rule").expect("trusted rule must be written");
+            std::fs::write(&outside_rule, "outside-rule").expect("outside rule must be written");
+            let probe = authority.path().join("symlink-probe");
+            if let Err(source) = create_file_symlink(&outside_rule, &probe) {
+                if symlink_permission_unavailable(&source) {
+                    return;
+                }
+                panic!("file symlink capability probe failed: {source}");
+            }
+            std::fs::remove_file(&probe).expect("symlink probe must be removed");
+            let filesystem = NativeFileSystem::open(authority.path().to_path_buf())
+                .await
+                .expect("prompt authority filesystem must open");
+
+            let error = load_prompt_rule_with_hook(
+                &filesystem,
+                authority.path(),
+                Path::new("AGENTS.md"),
+                &CancellationToken::new(),
+                || {
+                    std::fs::remove_file(&rule).expect("validated rule must be removed");
+                    create_file_symlink(&outside_rule, &rule)
+                        .expect("validated rule must be redirected");
+                },
+            )
+            .await
+            .expect_err("a read-time rule redirect must be rejected");
+
+            assert!(matches!(error, ChatPromptError::RuleAccess { .. }));
+        }
+
+        #[tokio::test]
+        async fn prompt_assembly_stops_before_rule_io_when_cancelled() {
+            let authority = tempfile::tempdir().expect("prompt authority must exist");
+            let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
+            let permissions = Arc::new(
+                WorkspacePermissionStore::new(authority.path(), persistence)
+                    .expect("prompt permission fixture must compose"),
+            );
+            let process_runner: Arc<dyn ProcessRunner> = Arc::new(NativeProcessRunner::new());
+            let assembler = ChatPromptAssembler::new(
+                authority.path().to_path_buf(),
+                permissions,
+                process_runner,
+            );
+            let cancellation = CancellationToken::new();
+            cancellation.cancel();
+
+            let error = assembler
+                .load_global_rules(&cancellation)
+                .await
+                .expect_err("cancelled prompt preparation must not start rule I/O");
+
+            assert!(matches!(error, ChatPromptError::Cancelled));
+        }
+
+        #[cfg(unix)]
+        fn create_directory_symlink(target: &Path, link: &Path) -> io::Result<()> {
+            std::os::unix::fs::symlink(target, link)
+        }
+
+        #[cfg(windows)]
+        fn create_directory_symlink(target: &Path, link: &Path) -> io::Result<()> {
+            std::os::windows::fs::symlink_dir(target, link)
+        }
+
+        #[cfg(unix)]
+        fn create_file_symlink(target: &Path, link: &Path) -> io::Result<()> {
+            std::os::unix::fs::symlink(target, link)
+        }
+
+        #[cfg(windows)]
+        fn create_file_symlink(target: &Path, link: &Path) -> io::Result<()> {
+            std::os::windows::fs::symlink_file(target, link)
+        }
+
+        fn symlink_permission_unavailable(source: &io::Error) -> bool {
+            source.kind() == io::ErrorKind::PermissionDenied
+                || matches!(source.raw_os_error(), Some(1 | 5 | 1314))
         }
     }
 
     mod local_provider_e2e {
         use std::{
             collections::HashMap,
-            io::{self, Read, Write},
+            io::{self, Cursor, Read, Write},
             net::{TcpListener, TcpStream},
+            path::PathBuf,
             sync::{Arc, Mutex},
             thread::{self, JoinHandle},
             time::Duration,
@@ -2664,8 +4972,12 @@ mod tests {
             ChatPermissionApprovalScope, ChatStreamFrame, ChatStreamFrameEvent, ChatStreamInput,
         };
         use codez_core::{
-            AppError, AppPaths, AtomicPersistence, CancellationToken, PortFuture, SessionId,
-            StreamId, WorkspaceRoot,
+            AppError, AppPaths, AtomicPersistence, CancellationToken, PortFuture, ProcessRunner,
+            SessionId, StreamId, WorkspaceRoot,
+            context::{
+                AssistantMessagePayload, ContextScopeId, LedgerAppendRequest, LedgerEventType,
+                NormalizedModelMessage, UserMessagePayload,
+            },
             provider::{
                 ApiFormat, CredentialError, CredentialFuture, CredentialId, CredentialStore,
                 ModelConfig, ProviderFormData, ProviderRepository, ProvidersFile, SecretValue,
@@ -2675,8 +4987,12 @@ mod tests {
         use codez_providers::service::ProviderService;
         use codez_runtime::{
             CancellationTree,
+            attachment::AttachmentService,
             chat::stream_state::ChatStreamStateMachine,
             context::ledger::ModelLedgerStore,
+            edit_transaction::EditTransactionService,
+            fingerprint::ReadFingerprintStore,
+            mutation_coordinator::FileMutationCoordinator,
             permission::{
                 service::{
                     PermissionApprovalHandler,
@@ -2687,16 +5003,19 @@ mod tests {
             },
         };
         use codez_storage::AtomicFileStore;
+        use image::{ImageFormat, Rgba, RgbaImage};
         use serde_json::{Value, json};
         use tauri::ipc::{Channel, InvokeResponseBody};
         use tokio::sync::mpsc;
 
         use super::super::{
-            CONTROL_CAPACITY, ChatRuntime, ConversationLedger, FrameSink,
-            PermissionResponseRegistry, RunEntry, TerminalOutcome, denied_permission_response,
-            permission_request_to_wire, run_provider_conversation,
+            CONTROL_CAPACITY, ChatPromptAssembler, ChatPromptSources, ChatRuntime,
+            ConversationLedger, FrameSink, PermissionResponseRegistry,
+            ProviderConversationServices, RunControl, RunEntry, TerminalOutcome,
+            denied_permission_response, permission_request_to_wire, run_provider_conversation,
         };
         use crate::{
+            attachment_boundary::session_to_wire,
             chat_interaction::AskUserResponseRegistry,
             chat_tool_runtime::{AskUserHandler, ChatToolRunContext, ChatToolRuntime},
             error::ErrorReporter,
@@ -2705,8 +5024,14 @@ mod tests {
         struct RuntimeFixture {
             _data: tempfile::TempDir,
             workspace: tempfile::TempDir,
+            data_root: PathBuf,
+            attachment: Arc<AttachmentService>,
             tools: Arc<ChatToolRuntime>,
             ledger: Arc<ModelLedgerStore>,
+            edit_transaction: Arc<EditTransactionService>,
+            permissions: Arc<WorkspacePermissionStore>,
+            process_runner: Arc<dyn ProcessRunner>,
+            prompt: Arc<ChatPromptAssembler>,
         }
 
         impl RuntimeFixture {
@@ -2714,7 +5039,7 @@ mod tests {
                 let data = tempfile::tempdir().expect("temporary data directory must be available");
                 let workspace =
                     tempfile::tempdir().expect("temporary workspace directory must be available");
-                let paths = app_paths(data.path());
+                let paths = Arc::new(app_paths(data.path()));
                 std::fs::create_dir_all(paths.data_directory())
                     .expect("fixture application data directory must be created");
                 let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
@@ -2722,19 +5047,41 @@ mod tests {
                     WorkspacePermissionStore::new(paths.data_directory(), Arc::clone(&persistence))
                         .expect("fixture permission store must compose"),
                 );
+                let process_runner: Arc<dyn ProcessRunner> =
+                    Arc::new(codez_platform::NativeProcessRunner::new());
+                let prompt = Arc::new(ChatPromptAssembler::new(
+                    paths.data_directory().to_path_buf(),
+                    Arc::clone(&permissions),
+                    Arc::clone(&process_runner),
+                ));
+                let edit_transaction = Arc::new(EditTransactionService::new(Arc::clone(&paths)));
                 let tools = Arc::new(
-                    ChatToolRuntime::new(&paths, Arc::clone(&persistence), permissions)
-                        .expect("fixture chat tools must compose"),
+                    ChatToolRuntime::new(
+                        paths.as_ref(),
+                        Arc::clone(&persistence),
+                        Arc::clone(&permissions),
+                        Arc::new(ReadFingerprintStore::default()),
+                        Arc::new(FileMutationCoordinator::default()),
+                        Arc::clone(&edit_transaction),
+                    )
+                    .expect("fixture chat tools must compose"),
                 );
                 let ledger = Arc::new(ModelLedgerStore::new(
                     paths.data_directory().join("chat-ledger"),
                     persistence,
                 ));
+                let attachment = Arc::new(AttachmentService::new(Arc::clone(&paths)));
                 Self {
                     _data: data,
                     workspace,
+                    data_root: paths.data_directory().to_path_buf(),
+                    attachment,
                     tools,
                     ledger,
+                    edit_transaction,
+                    permissions,
+                    process_runner,
+                    prompt,
                 }
             }
 
@@ -2755,10 +5102,9 @@ mod tests {
         impl ProviderRepository for MemoryProviderRepository {
             fn load(&self) -> PortFuture<'_, Option<ProvidersFile>> {
                 Box::pin(async move {
-                    self.data
-                        .lock()
-                        .map(|data| data.clone())
-                        .map_err(|_| AppError::storage("Provider fixture is unavailable", "read", true))
+                    self.data.lock().map(|data| data.clone()).map_err(|_| {
+                        AppError::storage("Provider fixture is unavailable", "read", true)
+                    })
                 })
             }
 
@@ -2869,21 +5215,40 @@ mod tests {
 
         impl LocalProviderServer {
             fn start(responses: Vec<String>) -> Self {
-                let listener = TcpListener::bind("127.0.0.1:0")
-                    .expect("local Provider listener must bind");
+                Self::start_inner(responses, None)
+            }
+
+            fn start_with_after_first_request(
+                responses: Vec<String>,
+                after_first_request: impl FnOnce() + Send + 'static,
+            ) -> Self {
+                Self::start_inner(responses, Some(Box::new(after_first_request)))
+            }
+
+            fn start_inner(
+                responses: Vec<String>,
+                mut after_first_request: Option<Box<dyn FnOnce() + Send>>,
+            ) -> Self {
+                let listener =
+                    TcpListener::bind("127.0.0.1:0").expect("local Provider listener must bind");
                 let address = listener
                     .local_addr()
                     .expect("local Provider listener must expose an address");
                 let requests = Arc::new(Mutex::new(Vec::new()));
                 let captured = Arc::clone(&requests);
                 let worker = thread::spawn(move || {
-                    for response in responses {
+                    for (index, response) in responses.into_iter().enumerate() {
                         let (mut stream, _) = listener.accept()?;
                         let request = read_json_request(&mut stream)?;
                         captured
                             .lock()
                             .unwrap_or_else(std::sync::PoisonError::into_inner)
                             .push(request);
+                        if index == 0
+                            && let Some(after_first_request) = after_first_request.take()
+                        {
+                            after_first_request();
+                        }
                         write_sse_response(&mut stream, &response)?;
                     }
                     Ok(())
@@ -2936,7 +5301,9 @@ mod tests {
                             .flatten()
                     })
                 })
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing content length"))?;
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "missing content length")
+                })?;
             while bytes.len() < header_end.saturating_add(content_length) {
                 let count = stream.read(&mut chunk)?;
                 if count == 0 {
@@ -2952,12 +5319,89 @@ mod tests {
         }
 
         fn write_sse_response(stream: &mut TcpStream, body: &str) -> io::Result<()> {
+            if body.starts_with("HTTP/") {
+                stream.write_all(body.as_bytes())?;
+                return stream.flush();
+            }
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()
             );
             stream.write_all(response.as_bytes())?;
             stream.flush()
+        }
+
+        fn context_overflow_response() -> String {
+            let body = json!({
+                "error": { "message": "maximum context length exceeded" }
+            })
+            .to_string();
+            format!(
+                "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+        }
+
+        async fn seed_prior_context(
+            ledger: &ModelLedgerStore,
+            session_id: &SessionId,
+            provider_id: &str,
+        ) {
+            for index in 0..8 {
+                let role = if index % 2 == 0 { "user" } else { "assistant" };
+                let message = NormalizedModelMessage {
+                    id: format!("prior-message-{index}"),
+                    client_message_id: None,
+                    turn_id: format!("prior-turn-{}", index / 2),
+                    role: role.to_string(),
+                    content: format!("prior {role} context {index}: {}", "x".repeat(1_000)),
+                    tool_calls: None,
+                    tool_call_id: None,
+                    name: None,
+                    status: "complete".to_string(),
+                    created_at: "2026-07-17T00:00:00Z".to_string(),
+                    source_sequence: None,
+                    attachments: None,
+                    file_references: None,
+                };
+                let (event_type, payload) = if role == "user" {
+                    (
+                        LedgerEventType::UserMessage,
+                        serde_json::to_value(UserMessagePayload {
+                            message,
+                            provider_id: Some(provider_id.to_string()),
+                            model: Some("local-model".to_string()),
+                            command_metadata: None,
+                        })
+                        .expect("prior user payload must serialize"),
+                    )
+                } else {
+                    (
+                        LedgerEventType::AssistantMessage,
+                        serde_json::to_value(AssistantMessagePayload {
+                            message,
+                            usage: None,
+                            request_fingerprint: None,
+                        })
+                        .expect("prior assistant payload must serialize"),
+                    )
+                };
+                ledger
+                    .append_event_for(
+                        session_id,
+                        LedgerAppendRequest {
+                            event_id: format!("prior-event-{index}"),
+                            session_id: session_id.as_str().to_string(),
+                            context_scope_id: ContextScopeId::Main,
+                            turn_id: Some(format!("prior-turn-{}", index / 2)),
+                            created_at: "2026-07-17T00:00:00Z".to_string(),
+                            r#type: event_type,
+                            payload,
+                        },
+                    )
+                    .await
+                    .expect("prior context must persist");
+            }
         }
 
         struct PermissionUiHarness {
@@ -3066,13 +5510,16 @@ mod tests {
                 Ok(())
             });
             let token = entry.cancellation.token();
-            (FrameSink::new(Arc::clone(&entry), events, control_rx), entry, token)
+            (
+                FrameSink::new(Arc::clone(&entry), events, control_rx),
+                entry,
+                token,
+            )
         }
 
         fn tool_call_turn() -> String {
-            let write_arguments = json!({
-                "file_path": "approved.txt",
-                "content": "written after UI approval"
+            let bash_arguments = json!({
+                "command": "unknown-codez-command-for-approval-test"
             })
             .to_string();
             let ask_user_arguments = json!({
@@ -3088,9 +5535,9 @@ mod tests {
                     "delta": {"tool_calls": [
                         {
                             "index": 0,
-                            "id": "call-write",
+                            "id": "call-bash",
                             "type": "function",
-                            "function": {"name": "Write", "arguments": write_arguments}
+                            "function": {"name": "Bash", "arguments": bash_arguments}
                         },
                         {
                             "index": 1,
@@ -3100,7 +5547,12 @@ mod tests {
                         }
                     ]},
                     "finish_reason": "tool_calls"
-                }]
+                }],
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 5,
+                    "total_tokens": 105
+                }
             });
             format!("data: {payload}\n\ndata: [DONE]\n\n")
         }
@@ -3110,24 +5562,359 @@ mod tests {
                 "choices": [{
                     "delta": {"content": "The approved tool result and user answer were received."},
                     "finish_reason": "stop"
-                }]
+                }],
+                "usage": {
+                    "prompt_tokens": 120,
+                    "completion_tokens": 20,
+                    "total_tokens": 140
+                }
             });
             format!("data: {payload}\n\ndata: [DONE]\n\n")
         }
 
+        fn provider_system_prompt(request: &Value) -> String {
+            request["messages"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|message| message["role"] == "system")
+                .filter_map(|message| message["content"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        }
+
+        fn one_pixel_png() -> Vec<u8> {
+            let image = RgbaImage::from_pixel(1, 1, Rgba([0, 0, 0, 255]));
+            let mut bytes = Vec::new();
+            image
+                .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
+                .expect("fixture image must encode");
+            bytes
+        }
+
         #[tokio::test]
-        async fn local_provider_tool_loop_delivers_ui_responses_and_replays_results() {
-            let server = LocalProviderServer::start(vec![tool_call_turn(), completed_turn()]);
+        async fn local_openai_provider_receives_verified_session_image_content() {
+            let server = LocalProviderServer::start(vec![completed_turn(), completed_turn()]);
             let (providers, provider_id) = local_provider(&server.base_url).await;
             let fixture = RuntimeFixture::new();
+            std::fs::write(
+                fixture.data_root.join("AGENTS.md"),
+                "global-rule-without-workspace",
+            )
+            .expect("global prompt rule must be written");
+            let session_id =
+                SessionId::parse("session-images").expect("fixture session ID must parse");
+            let image_bytes = one_pixel_png();
+            let draft = fixture
+                .attachment
+                .import_draft("fixture.png", Some("image/png"), &image_bytes)
+                .await
+                .expect("fixture image draft must import");
+            let attachments = fixture
+                .attachment
+                .promote_drafts(
+                    session_id.as_str(),
+                    vec![codez_core::ComposerImageAttachment::Draft(draft)],
+                )
+                .await
+                .expect("fixture image must promote to the session");
+            let cancellation_tree = Arc::new(CancellationTree::new());
+            let frames = Arc::new(Mutex::new(Vec::new()));
+            let (mut sink, entry, cancellation) = frame_sink(
+                cancellation_tree.as_ref(),
+                session_id.clone(),
+                StreamId::parse("run-images").expect("fixture run ID must parse"),
+                frames,
+            );
+            let resolved = providers
+                .resolve_chat_config(Some(&provider_id), Some("local-model"))
+                .await
+                .expect("local Provider config must resolve");
+            let mut conversation = ConversationLedger::begin(
+                Arc::clone(&fixture.ledger),
+                &entry,
+                &ChatStreamInput {
+                    text: "Inspect the attached image.".to_string(),
+                    attachments: Some(attachments.iter().cloned().map(session_to_wire).collect()),
+                    is_system: None,
+                    command_metadata: None,
+                },
+                &attachments,
+                fixture.attachment.as_ref(),
+                &resolved,
+            )
+            .await
+            .expect("conversation with a session image must begin");
+
+            let outcome = run_provider_conversation(
+                ProviderConversationServices {
+                    providers: &providers,
+                    tools: &fixture.tools,
+                    attachment_service: &fixture.attachment,
+                    prompt: &fixture.prompt,
+                },
+                resolved,
+                cancellation,
+                &mut conversation,
+                None,
+                &mut sink,
+            )
+            .await;
+            assert!(matches!(outcome, TerminalOutcome::Completed { .. }));
+            conversation
+                .persist_terminal(&outcome)
+                .await
+                .expect("image conversation must persist");
+
+            let replay_cancellation_tree = Arc::new(CancellationTree::new());
+            let (mut replay_sink, replay_entry, replay_cancellation) = frame_sink(
+                replay_cancellation_tree.as_ref(),
+                session_id.clone(),
+                StreamId::parse("run-images-replay").expect("fixture replay run ID must parse"),
+                Arc::new(Mutex::new(Vec::new())),
+            );
+            let replay_resolved = providers
+                .resolve_chat_config(Some(&provider_id), Some("local-model"))
+                .await
+                .expect("local Provider config must resolve for history replay");
+            let mut replay_conversation = ConversationLedger::begin(
+                Arc::clone(&fixture.ledger),
+                &replay_entry,
+                &ChatStreamInput {
+                    text: "Continue the image discussion.".to_string(),
+                    attachments: None,
+                    is_system: None,
+                    command_metadata: None,
+                },
+                &[],
+                fixture.attachment.as_ref(),
+                &replay_resolved,
+            )
+            .await
+            .expect("persisted session image must hydrate for history replay");
+            let replay_outcome = run_provider_conversation(
+                ProviderConversationServices {
+                    providers: &providers,
+                    tools: &fixture.tools,
+                    attachment_service: &fixture.attachment,
+                    prompt: &fixture.prompt,
+                },
+                replay_resolved,
+                replay_cancellation,
+                &mut replay_conversation,
+                None,
+                &mut replay_sink,
+            )
+            .await;
+            assert!(matches!(replay_outcome, TerminalOutcome::Completed { .. }));
+
+            let requests = server.finish();
+            let prompt_without_workspace = provider_system_prompt(&requests[0]);
+            assert!(prompt_without_workspace.contains("global-rule-without-workspace"));
+            assert!(prompt_without_workspace.contains(
+                "Project workspace: unavailable; workspace-scoped tools and instructions are disabled"
+            ));
+            assert!(prompt_without_workspace.contains(
+                "<git_status>unavailable: no project workspace is selected</git_status>"
+            ));
+            assert!(!prompt_without_workspace.contains("<workspace_rules>"));
+            assert!(!prompt_without_workspace.contains(&format!(
+                "Primary working directory: {}",
+                fixture.data_root.to_string_lossy()
+            )));
+            let messages = requests[0]["messages"]
+                .as_array()
+                .expect("OpenAI request must contain messages");
+            let image_message = messages
+                .iter()
+                .find(|message| message["role"] == "user")
+                .expect("OpenAI request must contain the image user message");
+            let content = image_message["content"]
+                .as_array()
+                .expect("image message must use OpenAI multipart content");
+            assert_eq!(
+                content[0],
+                json!({ "type": "text", "text": "Inspect the attached image." })
+            );
+            assert!(
+                content[1]["image_url"]["url"]
+                    .as_str()
+                    .is_some_and(|url| url.starts_with("data:image/png;base64,"))
+            );
+            assert!(!requests[0].to_string().contains("attachment:sessions"));
+            assert!(requests[1]["messages"].as_array().is_some_and(|messages| {
+                messages.iter().any(|message| {
+                    message["content"].as_array().is_some_and(|content| {
+                        content.iter().any(|part| {
+                            part["image_url"]["url"]
+                                .as_str()
+                                .is_some_and(|url| url.starts_with("data:image/png;base64,"))
+                        })
+                    })
+                })
+            }));
+        }
+
+        #[tokio::test]
+        async fn provider_context_overflow_compacts_once_and_retries_without_failed_frames() {
+            let fixture = RuntimeFixture::new();
+            std::fs::write(
+                fixture.workspace.path().join("AGENTS.md"),
+                "overflow-retry-workspace-rule",
+            )
+            .expect("overflow workspace rule must be written");
+            let server = LocalProviderServer::start(vec![
+                context_overflow_response(),
+                completed_turn(),
+                completed_turn(),
+            ]);
+            let (providers, provider_id) = local_provider(&server.base_url).await;
+            let session_id =
+                SessionId::parse("session-overflow").expect("fixture session ID must parse");
+            seed_prior_context(&fixture.ledger, &session_id, &provider_id).await;
+            let cancellation_tree = Arc::new(CancellationTree::new());
+            let frames = Arc::new(Mutex::new(Vec::new()));
+            let (mut sink, entry, cancellation) = frame_sink(
+                cancellation_tree.as_ref(),
+                session_id.clone(),
+                StreamId::parse("run-overflow").expect("fixture run ID must parse"),
+                Arc::clone(&frames),
+            );
+            entry
+                .controls
+                .send(RunControl::Acknowledge(u64::MAX))
+                .await
+                .expect("test renderer must acknowledge context lifecycle frames");
+            let resolved = providers
+                .resolve_chat_config(Some(&provider_id), Some("local-model"))
+                .await
+                .expect("local Provider config must resolve");
+            let mut conversation = ConversationLedger::begin(
+                Arc::clone(&fixture.ledger),
+                &entry,
+                &ChatStreamInput {
+                    text: "Continue after Provider overflow.".to_string(),
+                    attachments: None,
+                    is_system: None,
+                    command_metadata: None,
+                },
+                &[],
+                fixture.attachment.as_ref(),
+                &resolved,
+            )
+            .await
+            .expect("overflow conversation must begin");
+            let tool_context = ChatToolRunContext::new(
+                fixture.workspace_root(),
+                session_id.clone(),
+                entry.run_id.clone(),
+                cancellation.clone(),
+                "main".to_string(),
+                None,
+                None,
+            )
+            .expect("overflow tool context must compose");
+
+            let outcome = run_provider_conversation(
+                ProviderConversationServices {
+                    providers: &providers,
+                    tools: &fixture.tools,
+                    attachment_service: &fixture.attachment,
+                    prompt: &fixture.prompt,
+                },
+                resolved,
+                cancellation,
+                &mut conversation,
+                Some(&tool_context),
+                &mut sink,
+            )
+            .await;
+
+            assert!(matches!(outcome, TerminalOutcome::Completed { .. }));
+            let frames = frames
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            assert_eq!(
+                frames
+                    .iter()
+                    .filter(|frame| matches!(frame.event, ChatStreamFrameEvent::Delta { .. }))
+                    .count(),
+                1
+            );
+            assert!(
+                !frames
+                    .iter()
+                    .any(|frame| matches!(frame.event, ChatStreamFrameEvent::Failed { .. }))
+            );
+            assert!(frames.iter().any(|frame| matches!(
+                &frame.event,
+                ChatStreamFrameEvent::ContextBudget(snapshot)
+                    if snapshot.history_version >= 2 && snapshot.system_prompt_tokens > 0
+            )));
+            assert!(frames.iter().any(|frame| matches!(
+                &frame.event,
+                ChatStreamFrameEvent::ContextCompactionStarted(payload)
+                    if payload.trigger == "provider_overflow"
+            )));
+            assert!(frames.iter().any(|frame| matches!(
+                &frame.event,
+                ChatStreamFrameEvent::ContextCompactionCompleted(payload)
+                    if payload.trigger == "provider_overflow"
+                        && payload.tokens_after < payload.tokens_before
+            )));
+            let durable = fixture
+                .ledger
+                .load(&session_id)
+                .await
+                .expect("compacted overflow ledger must load")
+                .expect("compacted overflow ledger must exist");
+            assert!(durable.snapshot.scopes["main"].latest_compaction.is_some());
+
+            let requests = server.finish();
+            assert_eq!(requests.len(), 3);
+            assert!(requests[1].get("tools").is_none());
+            let initial_prompt = provider_system_prompt(&requests[0]);
+            let retried_prompt = provider_system_prompt(&requests[2]);
+            assert!(initial_prompt.contains("You are CodeZ"));
+            assert!(initial_prompt.contains("overflow-retry-workspace-rule"));
+            assert!(initial_prompt.contains("- Bash:"));
+            assert!(retried_prompt.contains("You are CodeZ"));
+            assert!(retried_prompt.contains("overflow-retry-workspace-rule"));
+            assert!(retried_prompt.contains("<compaction_summary"));
+        }
+
+        #[tokio::test]
+        async fn local_provider_tool_loop_delivers_ui_responses_and_replays_results() {
+            let fixture = RuntimeFixture::new();
+            let workspace_rule = fixture.workspace.path().join("AGENTS.md");
+            std::fs::write(&workspace_rule, "initial-provider-round-rule")
+                .expect("initial workspace rule must be written");
+            let updated_rule = workspace_rule.clone();
+            let server = LocalProviderServer::start_with_after_first_request(
+                vec![tool_call_turn(), completed_turn()],
+                move || {
+                    std::fs::write(updated_rule, "updated-provider-round-rule")
+                        .expect("workspace rule must change between Provider rounds");
+                },
+            );
+            let (providers, provider_id) = local_provider(&server.base_url).await;
             let cancellation_tree = Arc::new(CancellationTree::new());
             let runtime = Arc::new(ChatRuntime::new(
                 Arc::clone(&cancellation_tree),
                 Arc::new(ErrorReporter::default()),
                 Arc::clone(&fixture.ledger),
+                Arc::clone(&fixture.attachment),
                 Arc::clone(&fixture.tools),
+                Arc::clone(&fixture.edit_transaction),
+                ChatPromptSources::new(
+                    fixture.data_root.clone(),
+                    Arc::clone(&fixture.permissions),
+                    Arc::clone(&fixture.process_runner),
+                ),
             ));
-            let session_id = SessionId::parse("session-e2e").expect("fixture session ID must parse");
+            let session_id =
+                SessionId::parse("session-e2e").expect("fixture session ID must parse");
             let run_id = StreamId::parse("run-e2e").expect("fixture run ID must parse");
             let frames = Arc::new(Mutex::new(Vec::new()));
             let (mut sink, entry, cancellation) = frame_sink(
@@ -3141,8 +5928,8 @@ mod tests {
             let tool_context = Arc::new(
                 ChatToolRunContext::new(
                     fixture.workspace_root(),
-                    session_id,
-                    run_id,
+                    session_id.clone(),
+                    run_id.clone(),
                     cancellation.clone(),
                     "main".to_string(),
                     Some(Arc::new(PermissionUiHarness {
@@ -3173,17 +5960,25 @@ mod tests {
                     is_system: None,
                     command_metadata: None,
                 },
+                &[],
+                fixture.attachment.as_ref(),
                 &resolved,
             )
             .await
             .expect("conversation ledger must begin");
             let providers_for_run = Arc::clone(&providers);
             let tools = Arc::clone(&fixture.tools);
+            let attachment = Arc::clone(&fixture.attachment);
+            let prompt = Arc::clone(&fixture.prompt);
             let task = tokio::spawn(async move {
                 let mut conversation = conversation;
                 let outcome = run_provider_conversation(
-                    &providers_for_run,
-                    &tools,
+                    ProviderConversationServices {
+                        providers: &providers_for_run,
+                        tools: &tools,
+                        attachment_service: &attachment,
+                        prompt: &prompt,
+                    },
                     resolved,
                     cancellation,
                     &mut conversation,
@@ -3196,9 +5991,20 @@ mod tests {
 
             let approval = tokio::time::timeout(Duration::from_secs(5), permission_rx.recv())
                 .await
-                .expect("Write permission request must reach the UI")
+                .expect("Bash permission request must reach the UI")
                 .expect("permission UI channel must remain open");
-            assert_eq!(approval.tool_name, "Write");
+            assert_eq!(approval.tool_name, "Bash");
+            let first_fingerprint = fixture
+                .ledger
+                .load(&session_id)
+                .await
+                .expect("first Provider round ledger must load")
+                .expect("first Provider round ledger must exist")
+                .snapshot
+                .scopes["main"]
+                .last_provider_usage_request_fingerprint
+                .clone()
+                .expect("first Provider round fingerprint must persist");
             runtime
                 .respond_permission_approval(
                     &approval.id,
@@ -3208,6 +6014,11 @@ mod tests {
                     },
                 )
                 .expect("renderer approval must resolve the pending permission request");
+            entry
+                .controls
+                .send(RunControl::Acknowledge(u64::MAX))
+                .await
+                .expect("test renderer must acknowledge Provider and tool frames");
 
             let ask_user = tokio::time::timeout(Duration::from_secs(5), ask_user_rx.recv())
                 .await
@@ -3232,10 +6043,31 @@ mod tests {
                 .persist_terminal(&outcome)
                 .await
                 .expect("completed tool loop must persist its terminal ledger state");
+            let durable = fixture
+                .ledger
+                .load(&session_id)
+                .await
+                .expect("completed tool-loop ledger must load")
+                .expect("completed tool-loop ledger must exist");
+            let durable_scope = &durable.snapshot.scopes["main"];
             assert_eq!(
-                std::fs::read_to_string(fixture.workspace.path().join("approved.txt"))
-                    .expect("approved write must create the workspace file"),
-                "written after UI approval"
+                durable_scope
+                    .last_provider_usage
+                    .as_ref()
+                    .map(|usage| usage.input_tokens),
+                Some(120)
+            );
+            assert!(
+                durable_scope
+                    .last_provider_usage_request_fingerprint
+                    .as_deref()
+                    .is_some_and(|fingerprint| fingerprint.len() == 64)
+            );
+            assert_ne!(
+                durable_scope
+                    .last_provider_usage_request_fingerprint
+                    .as_deref(),
+                Some(first_fingerprint.as_str())
             );
 
             let frames = frames
@@ -3245,32 +6077,62 @@ mod tests {
             assert!(frames.iter().any(|frame| matches!(
                 &frame.event,
                 ChatStreamFrameEvent::ToolCalls { calls }
-                    if calls.iter().map(|call| call.function.name.as_str()).eq(["Write", "AskUserQuestion"])
+                    if calls.iter().map(|call| call.function.name.as_str()).eq(["Bash", "AskUserQuestion"])
             )));
             assert!(frames.iter().any(|frame| matches!(
                 &frame.event,
                 ChatStreamFrameEvent::ToolResult { call_id, result }
                     if call_id == "call-ask-user" && result.contains("Yes")
             )));
+            assert!(frames.iter().any(|frame| matches!(
+                &frame.event,
+                ChatStreamFrameEvent::Usage { usage } if usage.input_tokens == 120
+            )));
+            assert!(frames.iter().any(|frame| matches!(
+                &frame.event,
+                ChatStreamFrameEvent::ContextBudget(snapshot)
+                    if snapshot.system_prompt_tokens > 0
+            )));
 
             let requests = server.finish();
             assert_eq!(requests.len(), 2);
+            let first_prompt = provider_system_prompt(&requests[0]);
+            let second_prompt = provider_system_prompt(&requests[1]);
+            let workspace_root = fixture.workspace_root();
+            let workspace_path = workspace_root.as_path().to_string_lossy();
+            assert!(first_prompt.contains("You are CodeZ"));
+            assert!(first_prompt.contains(workspace_path.as_ref()));
+            assert!(first_prompt.contains("initial-provider-round-rule"));
+            assert!(first_prompt.contains("- Bash:"));
+            assert!(first_prompt.contains("- AskUserQuestion:"));
+            assert!(first_prompt.contains("- Permission mode: auto"));
+            assert!(!first_prompt.contains(".agents/brain"));
+            assert!(!first_prompt.contains(".agents\\brain"));
+            assert!(second_prompt.contains("You are CodeZ"));
+            assert!(second_prompt.contains("updated-provider-round-rule"));
+            assert!(second_prompt.contains("- Bash:"));
             let first_tools = requests[0]["tools"]
                 .as_array()
                 .expect("first Provider request must expose tools");
-            assert!(first_tools.iter().any(|tool| tool["function"]["name"] == "Write"));
+            assert!(
+                first_tools
+                    .iter()
+                    .any(|tool| tool["function"]["name"] == "Bash")
+            );
             let second_messages = requests[1]["messages"]
                 .as_array()
                 .expect("second Provider request must contain conversation history");
             assert!(second_messages.iter().any(|message| {
                 message["role"] == "tool"
-                    && message["tool_call_id"] == "call-write"
-                    && message["name"] == "Write"
+                    && message["tool_call_id"] == "call-bash"
+                    && message["name"] == "Bash"
             }));
             assert!(second_messages.iter().any(|message| {
                 message["role"] == "tool"
                     && message["tool_call_id"] == "call-ask-user"
-                    && message["content"].as_str().is_some_and(|content| content.contains("Yes"))
+                    && message["content"]
+                        .as_str()
+                        .is_some_and(|content| content.contains("Yes"))
             }));
         }
     }

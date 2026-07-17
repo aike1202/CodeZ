@@ -11,21 +11,11 @@ import IconMinimize from '../icons/IconMinimize'
 import IconMaximize from '../icons/IconMaximize'
 import IconWindowRestore from '../icons/IconWindowRestore'
 import IconClose from '../icons/IconClose'
-import { IPC_CHANNELS } from '@shared/ipc/channels'
 import { desktopApi } from '../../shared/desktop'
 
 import './TopBar.css'
 import type { TopBarProps } from './types'
 import ProjectSelector from './components/ProjectSelector'
-
-function sendWindowControl(action: 'minimize' | 'maximize' | 'close') {
-  try {
-    const win = window as any
-    if (win.electron?.ipcRenderer) {
-      win.electron.ipcRenderer.send(IPC_CHANNELS.WINDOW_CONTROL, action)
-    }
-  } catch {}
-}
 
 export default function TopBar({
   terminalOpen = false,
@@ -63,70 +53,65 @@ export default function TopBar({
   }, [workspace?.id])
 
   useEffect(() => {
-    const win = window as any
-    if (win.electron?.ipcRenderer) {
-      const handler = (_event: any, state: boolean) => setIsMaximized(state)
-      win.electron.ipcRenderer.on(IPC_CHANNELS.WINDOW_MAXIMIZED_STATE, handler)
+    void desktopApi.theme.get().then((info) => {
+      setThemeSource(info.themeSource)
+    }).catch(() => undefined)
 
-      let cleanup: (() => void) | undefined
-      void desktopApi.theme.get().then((info) => {
-        setThemeSource(info.themeSource)
-      }).catch(() => undefined)
+    const cleanupTheme = desktopApi.theme.onUpdated((info) => {
+      setThemeSource(info.themeSource)
+    })
 
-      cleanup = desktopApi.theme.onUpdated((info) => {
-        setThemeSource(info.themeSource)
-      })
+    desktopApi.workspace
+      .detectInstalledEditors()
+      .then((editors) => {
+        if (editors && editors.length > 0) {
+          setInstalledEditors(editors.map((editor) => ({
+            id: editor.id,
+            name: editor.name,
+            exePath: editor.exePath ?? null,
+            iconPath: editor.iconData ?? null
+          })))
+          const editorIds = editors.map((editor) => editor.id)
 
-      desktopApi.workspace
-        .detectInstalledEditors()
-        .then((editors) => {
-          if (editors && editors.length > 0) {
-            setInstalledEditors(editors.map((editor) => ({
-              id: editor.id,
-              name: editor.name,
-              exePath: editor.exePath ?? null,
-              iconPath: editor.iconData ?? null
-            })))
-            const editorIds = editors.map((e) => e.id)
-
-            let defaultIDE = editors[0].id
-            if (workspace?.id) {
-              const projectStored = localStorage.getItem(
-                `codez_selected_ide_for_project_${workspace.id}`
-              )
-              if (projectStored && editorIds.includes(projectStored)) {
-                defaultIDE = projectStored
-              } else {
-                const globalStored = localStorage.getItem('codez_selected_ide')
-                if (globalStored && editorIds.includes(globalStored)) {
-                  defaultIDE = globalStored
-                }
-              }
+          let defaultIDE = editors[0].id
+          if (workspace?.id) {
+            const projectStored = localStorage.getItem(
+              `codez_selected_ide_for_project_${workspace.id}`
+            )
+            if (projectStored && editorIds.includes(projectStored)) {
+              defaultIDE = projectStored
             } else {
               const globalStored = localStorage.getItem('codez_selected_ide')
               if (globalStored && editorIds.includes(globalStored)) {
                 defaultIDE = globalStored
               }
             }
-
-            setSelectedIDE(defaultIDE)
+          } else {
+            const globalStored = localStorage.getItem('codez_selected_ide')
+            if (globalStored && editorIds.includes(globalStored)) {
+              defaultIDE = globalStored
+            }
           }
-        })
-        .catch(() => {
-          setInstalledEditors([
-            { id: 'VSCode', name: 'VSCode', exePath: null, iconPath: null },
-            { id: 'IntelliJ IDEA', name: 'IntelliJ IDEA', exePath: null, iconPath: null },
-            { id: 'Cursor', name: 'Cursor', exePath: null, iconPath: null }
-          ])
-        })
 
-      return () => {
-        win.electron.ipcRenderer.removeListener(IPC_CHANNELS.WINDOW_MAXIMIZED_STATE, handler)
-        if (cleanup) cleanup()
-      }
-    }
-    return undefined
+          setSelectedIDE(defaultIDE)
+        }
+      })
+      .catch(() => {
+        setInstalledEditors([
+          { id: 'VSCode', name: 'VSCode', exePath: null, iconPath: null },
+          { id: 'IntelliJ IDEA', name: 'IntelliJ IDEA', exePath: null, iconPath: null },
+          { id: 'Cursor', name: 'Cursor', exePath: null, iconPath: null }
+        ])
+      })
+
+    return cleanupTheme
   }, [workspace?.id])
+
+  const toggleMaximize = () => {
+    void desktopApi.window.control('toggleMaximize')
+      .then(() => setIsMaximized((value) => !value))
+      .catch(() => undefined)
+  }
 
   return (
     <header className="topbar">
@@ -162,8 +147,9 @@ export default function TopBar({
               dark: 'system'
             }
             const next = nextMap[themeSource]
-            setThemeSource(next)
-            window.api?.theme?.set(next)
+            void desktopApi.theme.set(next)
+              .then((info) => setThemeSource(info.themeSource))
+              .catch(() => undefined)
           }}
         >
           {themeSource === 'system' && <IconMonitor />}
@@ -204,20 +190,24 @@ export default function TopBar({
         </Button>
 
         <div className="window-controls">
-          <button className="window-control-btn" title="最小化" onClick={() => sendWindowControl('minimize')}>
+          <button
+            className="window-control-btn"
+            title="最小化"
+            onClick={() => void desktopApi.window.control('minimize').catch(() => undefined)}
+          >
             <IconMinimize />
           </button>
           <button
             className="window-control-btn"
             title={isMaximized ? '向下还原' : '最大化'}
-            onClick={() => sendWindowControl('maximize')}
+            onClick={toggleMaximize}
           >
             {isMaximized ? <IconWindowRestore /> : <IconMaximize />}
           </button>
           <button
             className="window-control-btn topbar-window-control-close-btn"
             title="关闭"
-            onClick={() => sendWindowControl('close')}
+            onClick={() => void desktopApi.window.control('close').catch(() => undefined)}
           >
             <IconClose />
           </button>

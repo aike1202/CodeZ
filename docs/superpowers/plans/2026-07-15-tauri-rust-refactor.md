@@ -10,6 +10,8 @@
 
 > 实施状态：已于 2026-07-15 开始；进展与生成清单见 `docs/migration/README.md`。本计划中的 `[x]` 只表示所述局部实现或证据已出现，不表示整个 Phase、用户流程或 Electron 替代已完成；只有各 Phase 出口和 Phase 9 门禁可关闭迁移范围。
 
+> **2026-07-17 执行范围覆盖。** 本计划后文关于 Electron 数据发现/迁移、密钥重录、升级回退演练和 Phase 10 删除的事项已取消。新 Tauri 状态从 `~/.codez` 开始，旧 Electron 数据不导入、不修改；Electron 源码、测试、配置、依赖和安装基线永久保留。Plan 已从实施范围删除：不实现 Rust Plan CRUD、事件、持久化或兼容层，Tauri renderer 只隐藏/隔离相关入口，Electron 旧实现原样保留。本轮优先完成 MCP 和 Plan 之外的所有领域；MCP 仅在其余领域收口后恢复。当前可执行分解、子智能体边界和验收口径见 `docs/migration/current-execution-scope.md`。
+
 ## 1. 目标与约束
 
 **目标：** 以 Tauri v2 + Rust 后端直接替换 Electron 主进程和 preload，保留 React UI 与现有核心行为，安全迁移用户数据，最终发布物不包含 Electron/Node 主进程。
@@ -199,7 +201,7 @@ src/renderer/src/desktop/
 
 ### 8.1 Provider
 
-- 已落地的局部边界：Provider domain types、`CredentialStore`/`ProviderRepository` ports、storage/keychain adapter 和 Tauri wire/domain 显式转换已经存在，`codez-providers` 不再反向依赖 storage 或 contracts。迁移 recovery state 已能安全重录映射后的密钥，但这不是 Provider 用户流程验收：丢失 keychain 条目的真实状态、连接测试和完整迁移恢复仍未完成。
+- 当前边界：Provider domain types、`CredentialStore`/`ProviderRepository` ports、storage/keychain adapter 和 Tauri wire/domain 显式转换已经存在，`codez-providers` 不再反向依赖 storage 或 contracts。Rust Chat runtime 已能执行 Provider 流和工具续轮；本地 OpenAI fixture 已覆盖 `tool_calls`/`tool_call_id` 续轮字段，避免 canonical camelCase 类型泄漏到 OpenAI 协议。迁移 recovery state 已能安全重录映射后的密钥，但这不是 Provider 用户流程验收：三协议真实安装环境、图片附件、连接测试和完整迁移恢复仍未完成。
 - [ ] 迁移 Provider CRUD、模型能力、连接测试和安全凭据引用。
 - [ ] 分别实现 OpenAI、Anthropic、Gemini 请求 adapter 和流解析器。
 - [ ] 覆盖文本、推理、图片、工具调用、Usage、stop reason、错误、超时、取消和 overflow。
@@ -207,7 +209,7 @@ src/renderer/src/desktop/
 
 ### 8.2 Chat 与 Context
 
-- 已落地的局部边界：Context ledger、附件/Git domain types 与 `AtomicPersistence` port 已从 contracts/storage 方向抽离，runtime 可以注入 persistence adapter。它尚未接入启动迁移、会话恢复和 chat compact；当前 `chat_compact` 明确返回 `UNSUPPORTED`，因此不能把 ledger 的 unit/integration 测试写作完整 Context 迁移。
+- 当前边界：Context ledger、附件/Git domain types 与 `AtomicPersistence` port 已从 contracts/storage 方向抽离，runtime 可以注入 persistence adapter。Chat runtime 已持久化 Provider/message/tool 账本并能在运行空闲时按最近 Provider/model 执行无工具 compaction；session-scoped image attachment 会经 metadata/key/symlink/MIME/size 验证后写入账本并在后续 Provider 请求重放。local Provider fixture 覆盖摘要持久化和 OpenAI 图片重放；启动升级、完整会话恢复和三协议真实 E2E 仍未完成，不能把该局部闭环写作完整 Context 迁移。
 - [ ] 迁移 ModelLedgerStore、ModelContextBuilder、消息归一化和 ProviderUsage fingerprint。
 - [ ] 迁移上下文预算、trigger policy、compaction、pruning、file/skill restore 和 crash recovery。
 - [ ] 建立 Chat stream 状态机：starting/running/stopping/completed/failed/interrupted。
@@ -220,7 +222,7 @@ src/renderer/src/desktop/
 
 ### 9.1 工具运行时
 
-> 当前边界：Tool/Permission 领域模块和部分 handler 已在 Rust 中存在，但 Rust chat/provider run 没有 Agent tool loop。`chat_interrupt_tool`、compact、文件 accept/reject/diff 和 approval 仍返回 `UNSUPPORTED`。AskUser 的 typed request/event/response registry 已准备好，但 provider-only runtime 尚未调用等待路径；因此它不是 live AskUser 功能，以下局部实现也不能作为工具或权限用户流程完成的证据。
+> 当前边界：Rust `ChatRuntime` 已将 Read/Write/Edit/Bash/AskUserQuestion 接入 Provider tool loop、账本和 V2 permission pipeline；verified workspace authority 才暴露工具，工具调用有轮次/输入上限，单工具中断不取消兄弟调用。`chat_interrupt_tool`、compact、文件 accept/reject/diff、live approval 与 AskUser 都不再返回占位 `UNSUPPORTED`。session image attachment 经过 fail-closed 文件验证后已映射为 OpenAI data URL、Anthropic base64 block 和 Gemini `inlineData`，并有 local OpenAI 重放 E2E；Web/Task 等完整 catalog、真实 Tauri event emitter E2E、steered attachment 与并行中断仍未完成。
 
 - [x] 迁移 ToolDescriptor/Registry、Schema decoration、input validation 和 exposure planner。
 - [x] 迁移 call assembler、scheduler、hook、journal、large result store 和 result processor。
@@ -234,18 +236,18 @@ src/renderer/src/desktop/
 - [x] 迁移 Bash/PowerShell parser、nested expansion、path impact、command policies 和 critical guard。
 - [x] 完整移植危险命令 corpus、绝对红线、模型审批偏好和 allowed scope 测试。
 - [x] 授权后重验输入/资源身份；MCP/Hook/模型不能绕过 runtime policy。
-- [ ] 接通 UI 审批请求/响应和 live AskUserQuestion 请求/响应，取消或 UI 消失时默认拒绝。AskUser 的 typed response registry、输入校验、超时/取消和 renderer bridge 已准备好，但当前没有 Rust Agent/tool loop 调用或等待它。
+- [x] 接通 UI 审批请求/响应和 live AskUserQuestion 请求/响应，取消或 UI 消失时默认拒绝。`chat:permission-request` 与既有 `chat:ask-user-request` 都使用 one-shot registry、输入校验、10 分钟超时和 run cancellation；renderer bridge 在没有有效 callback 时显式拒绝/忽略。local Provider E2E 已覆盖审批、AskUser、ToolResult 与续轮，真实 AppHandle emitter 覆盖仍留在 Phase 8。
 
 **Phase 5 出口：** Read/Write/Edit/Shell/Web/Task 等工具通过运行时闭环；权限决策矩阵和危险命令语料达到 100% 预期结果；未分类或解析失败操作默认安全。
 
 ## 10. Phase 6：Agent、子 Agent 与并行执行
 
-> 当前边界：`AgentLoop` 已提供 validated session/task identity、有界 step、取消、停止和显式恢复的 typed core；`SubAgentManager` 已提供 validated ID/role、状态转换、bounded mailbox 与 model-profile resolver foundations。这些 core 尚未接入 provider/chat、Tool runtime、Tauri command/event 或持久化恢复，不能作为完整 Agent 或子 Agent 功能计入完成。
+> 当前边界：`AgentLoop` 已提供 validated session/task identity、有界 step、取消、停止和显式恢复的 typed core；`SubAgentManager` 已提供 validated ID/role、状态转换、bounded mailbox 与 model-profile resolver foundations。首个 tool-free SubAgent slice 已通过 Tauri `subagent_run/get_run/cancel_run` 接入真实 OpenAI/Anthropic/Gemini Provider stream、状态事件、取消竞争处理和 `~/.codez/subagent-runs` 原子终态持久化。它不包含工具多轮、候选模型 fallback、父子协作、重启 resume、parallel wave 或 worktree，因此不能作为完整 Agent/子 Agent 功能计入完成。
 
 - [x] 建立可测试的 `AgentLoop` 与 `SubAgentManager` typed core，并覆盖状态转换、取消、邮箱容量和输入校验。
 - [ ] 迁移主 Agent 状态机、provider loop、tool result protocol、重试和停滞保护，并将 `AgentLoop` 接入真实执行器。
 - [ ] 迁移 runtime registry、status、steer、stop、resume 和 session coordination。
-- [ ] 将子 Agent model resolver、生命周期、邮箱、父子取消、等待和恢复接入真实执行器、Tauri 事件和会话持久化。
+- [ ] 完整接入子 Agent model resolver、生命周期、邮箱、父子取消、等待和恢复。当前仅首个 enabled + configured Provider/model candidate 经过 preflight 后进入 tool-free real Provider run；Tauri lifecycle event、取消与终态 persistence 已实现，父子交付、model fallback、重启 resume 和会话级恢复仍未实现。
 - [ ] 迁移 Task/Plan/resume state 及与 session 的持久化一致性。
 - [ ] 迁移 parallel orchestrator、wave、worktree isolation、execution controller、接管、停止和产物状态。
 - [ ] 使用确定性 fake clock/provider/tool runner 对并发状态机做性质测试和故障测试。
@@ -257,12 +259,12 @@ src/renderer/src/desktop/
 
 ### 11.1 MCP
 
-- [ ] 迁移配置合并、校验、项目信任、secret expression 和 managed/dynamic scope。`codez-mcp` 的配置/协议基础不等于 Tauri command 已接线；当前 `McpRuntimeManager`/reconciliation 正在注入 `AppState`，尚未形成 Phase 7 验收证据。
-- [ ] 实现 stdio、Streamable HTTP、SSE、握手超时、重连、session recovery 与状态事件。catalog/reconnect 在整合期间只能走真实 manager/gateway 或返回 `UNSUPPORTED`，不能用空 catalog 或成功空操作伪装 live 状态；必须补 Tauri boundary 与真实 server 集成证据。
+- [ ] 完整迁移配置合并、校验、项目信任、secret expression 和 managed/dynamic scope。`McpRuntimeManager`、reconciliation 和 Tauri commands 已注入 `AppState`；secret expression 保持 fail closed，仍缺 project trust 与完整 managed/dynamic scope 验收。
+- [ ] 完整实现 stdio、Streamable HTTP、SSE、握手超时、重连、session recovery 与状态事件。当前真实 local stdio fixture 已通过握手、tools/resources/prompts catalog 和 force-cleanup 状态收敛；catalog/reconnect 只能走真实 manager/gateway 或返回 `UNSUPPORTED`。legacy SSE、完整 HTTP 用户流和状态事件 E2E 仍未完成。
 - [ ] 实现 tools/resources/prompts、content normalization、resource subscription 和日志。
 - [ ] 实现 OAuth、安全外链/回调、Token 存储、过期授权和 logout。
 - [ ] 实现 sampling/elicitation reverse request policy 与请求防护。
-- [ ] 将现有真实 MCP fixture server 测试迁移为 Rust 集成测试或跨进程测试，并覆盖 Tauri boundary。
+- [ ] 将现有真实 MCP fixture server 测试迁移为 Rust 集成测试或跨进程测试，并覆盖 Tauri boundary。当前 `McpRuntimeManager` unit integration 已用本地 Node stdio fixture 覆盖连接、catalog 和 cleanup；跨进程 HTTP/OAuth 与 Tauri command boundary 证据仍未完成。
 
 ### 11.2 扩展
 
@@ -276,8 +278,8 @@ src/renderer/src/desktop/
 
 ### 12.1 前端迁移
 
-- [ ] 将 preload 中的 API 迁入 `desktopApi`，使用生成类型和稳定错误码；迁移期 adapter 可以共存，但 Electron preload 仍是保留基线，不得据此删除。
-- [ ] 一次性把 stores/components 从 `window.api` 切换到 adapter，并以真实 Tauri command 覆盖验证。
+- [ ] 将 preload 中的 API 迁入 `desktopApi`，使用生成类型和稳定错误码；迁移期 adapter 可以共存，但 Electron preload 仍是保留基线，不得据此删除。Workspace、Provider、Theme、Attachment 和 SubAgent run bridge 已迁入/接线，Electron fallback 只保留在 adapter 边界。
+- [ ] 一次性把 stores/components 从 `window.api` 切换到 adapter，并以真实 Tauri command 覆盖验证。当前 renderer 尚有约 52 个 `window.api` 消费点，主要为 Chat、MCP、Skill 和 Rules；Workspace、Provider、Theme、Attachment、Session 和 Terminal 已迁入 adapter。
 - [ ] 将 Chat 多回调 API 改为单一 typed event stream，集中分发到 Zustand slices；需要先补全 Rust Agent/tool/approval 生命周期。
 - [ ] 将 Terminal、MCP、Theme 等订阅改为显式 dispose，补组件卸载测试。
 - [ ] 保持现有 UI 与文案，仅处理 Tauri WebView/平台差异。

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Image as ImageIcon, LoaderCircle, X } from 'lucide-react'
 import type { ComposerImageAttachment } from '@shared/types/attachment'
 import { createPreviewObjectUrl } from './attachmentPreviewBytes'
+import { desktopApi } from '../../shared/desktop'
 import './ImageAttachmentGrid.css'
 
 interface ImageAttachmentGridProps {
@@ -30,7 +31,7 @@ export default function ImageAttachmentGrid({
 
     void Promise.all(attachments.map(async (attachment) => {
       try {
-        const preview = await window.api.attachment.readPreview(attachment, 'thumbnail')
+        const preview = await desktopApi.attachment.readPreview(attachment, 'thumbnail')
         if (cancelled) return
         const url = createPreviewObjectUrl(preview.bytes, preview.mimeType)
         urls.push(url)

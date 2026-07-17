@@ -11,11 +11,23 @@ pub(crate) struct ErrorReporter {
 impl ErrorReporter {
     #[must_use]
     pub(crate) fn report(&self, error: AppError) -> CommandError {
+        let code = contract_code(error.kind());
+        let retryable = error.retryable();
+        self.report_as(error, code, retryable)
+    }
+
+    #[must_use]
+    pub(crate) fn report_as(
+        &self,
+        error: AppError,
+        code: ErrorCode,
+        retryable: bool,
+    ) -> CommandError {
         let correlation_id = self.record(&error);
         CommandError {
-            code: contract_code(error.kind()),
+            code,
             message: error.public_message().to_string(),
-            retryable: error.retryable(),
+            retryable,
             correlation_id: Some(correlation_id),
         }
     }
@@ -45,6 +57,7 @@ impl ErrorReporter {
             | AppErrorKind::PermissionDenied
             | AppErrorKind::NotFound
             | AppErrorKind::Conflict
+            | AppErrorKind::RunActive
             | AppErrorKind::Cancelled
             | AppErrorKind::Timeout => {
                 tracing::warn!(
@@ -77,6 +90,7 @@ const fn contract_code(kind: AppErrorKind) -> ErrorCode {
         AppErrorKind::PermissionDenied => ErrorCode::PermissionDenied,
         AppErrorKind::NotFound => ErrorCode::NotFound,
         AppErrorKind::Conflict => ErrorCode::Conflict,
+        AppErrorKind::RunActive => ErrorCode::RunActive,
         AppErrorKind::External => ErrorCode::External,
         AppErrorKind::ProcessFailed => ErrorCode::ProcessFailed,
         AppErrorKind::Cancelled => ErrorCode::Cancelled,
@@ -140,6 +154,24 @@ mod tests {
     }
 
     #[test]
+    fn explicit_domain_code_keeps_redaction_and_correlation() {
+        let reporter = ErrorReporter::default();
+        let command_error = reporter.report_as(
+            AppError::conflict("History changed; apiKey=secret-value"),
+            ErrorCode::HistoryRevertStale,
+            true,
+        );
+
+        assert_eq!(command_error.code, ErrorCode::HistoryRevertStale);
+        assert!(command_error.retryable);
+        assert_eq!(
+            command_error.correlation_id.as_deref(),
+            Some("cmd-0000000000000001")
+        );
+        assert!(!command_error.message.contains("secret-value"));
+    }
+
+    #[test]
     fn diagnostic_logging_redacts_credentials() {
         let error = AppError::internal("Authorization: Bearer secret-token");
         let diagnostic = diagnostic_for_log(&error);
@@ -182,6 +214,7 @@ mod tests {
             (AppErrorKind::PermissionDenied, ErrorCode::PermissionDenied),
             (AppErrorKind::NotFound, ErrorCode::NotFound),
             (AppErrorKind::Conflict, ErrorCode::Conflict),
+            (AppErrorKind::RunActive, ErrorCode::RunActive),
             (AppErrorKind::External, ErrorCode::External),
             (AppErrorKind::ProcessFailed, ErrorCode::ProcessFailed),
             (AppErrorKind::Cancelled, ErrorCode::Cancelled),

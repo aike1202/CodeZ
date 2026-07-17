@@ -26,9 +26,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     McpError, McpOperation, McpTransportKind,
-    client::{CodezClientHandler, EventRedactor, McpEvent},
+    client::{CodezClientHandler, EventRedactor, McpEvent, McpReverseRequestPolicy},
     transports::{
-        StderrSummary, StdioServerConfig, StreamableHttpServerConfig, sse,
+        StderrSummary, StdioServerConfig, StreamableHttpServerConfig,
+        sse::{self, LegacySseResources},
         stdio::{self, StdioResources},
     },
 };
@@ -174,6 +175,7 @@ type ClientService = RunningService<RoleClient, CodezClientHandler>;
 enum ConnectionResources {
     Stdio(StdioResources),
     Http,
+    LegacySse(LegacySseResources),
 }
 
 struct ConnectionEntry {
@@ -193,7 +195,7 @@ impl ConnectionEntry {
     fn info(&self) -> McpConnectionInfo {
         let process_id = match &self.resources {
             ConnectionResources::Stdio(resources) => resources.process_id(),
-            ConnectionResources::Http => None,
+            ConnectionResources::Http | ConnectionResources::LegacySse(_) => None,
         };
         McpConnectionInfo {
             server_id: self.id.clone(),
@@ -243,6 +245,10 @@ impl ConnectionEntry {
                 Some(resources.cleanup(self.timeouts.close).await?)
             }
             ConnectionResources::Http => None,
+            ConnectionResources::LegacySse(resources) => {
+                resources.cleanup(self.timeouts.close).await?;
+                None
+            }
         };
         Ok(McpDisconnectReport { stderr })
     }
@@ -254,6 +260,7 @@ pub struct McpGateway {
     root_cancellation: CancellationToken,
     timeouts: McpTimeouts,
     limits: McpGatewayLimits,
+    reverse_requests: McpReverseRequestPolicy,
 }
 
 impl Default for McpGateway {
@@ -270,6 +277,7 @@ impl McpGateway {
             root_cancellation: CancellationToken::new(),
             timeouts: McpTimeouts::default(),
             limits: McpGatewayLimits::default(),
+            reverse_requests: McpReverseRequestPolicy::default(),
         }
     }
 
@@ -280,6 +288,23 @@ impl McpGateway {
             root_cancellation: CancellationToken::new(),
             timeouts,
             limits,
+            reverse_requests: McpReverseRequestPolicy::default(),
+        }
+    }
+
+    /// Creates a gateway with a validated per-server reverse-request policy.
+    #[must_use]
+    pub fn with_config_and_reverse_requests(
+        timeouts: McpTimeouts,
+        limits: McpGatewayLimits,
+        reverse_requests: McpReverseRequestPolicy,
+    ) -> Self {
+        Self {
+            connections: RwLock::new(HashMap::new()),
+            root_cancellation: CancellationToken::new(),
+            timeouts,
+            limits,
+            reverse_requests,
         }
     }
 
@@ -364,10 +389,57 @@ impl McpGateway {
         Ok(entry.info())
     }
 
-    /// Legacy SSE intentionally fails until the ADR-required two-endpoint
-    /// transport is implemented and covered by compatibility tests.
-    pub fn connect_legacy_sse(&self) -> Result<McpConnectionInfo, McpError> {
-        Err(sse::unsupported())
+    /// Initializes a legacy MCP SSE connection after validating its server
+    /// supplied `/messages` endpoint against the configured origin.
+    pub async fn connect_legacy_sse(
+        &self,
+        server_id: McpServerId,
+        config: StreamableHttpServerConfig,
+        cancellation: &CancellationToken,
+    ) -> Result<McpConnectionInfo, McpError> {
+        self.ensure_available(&server_id).await?;
+        let config = config.into_legacy_sse_parts();
+        let redactor = EventRedactor::new(config.redaction_values().iter().cloned());
+        let lifetime = self.root_cancellation.child_token();
+        let (resources, transport) = sse::connect(
+            config,
+            lifetime.clone(),
+            cancellation,
+            self.timeouts.connect,
+            self.limits.http_channel_capacity,
+        )
+        .await?;
+        let initialized = self
+            .initialize(
+                transport,
+                McpTransportKind::LegacySse,
+                redactor,
+                lifetime.clone(),
+                cancellation,
+            )
+            .await;
+        let (service, events, dropped_events, server_info) = match initialized {
+            Ok(initialized) => initialized,
+            Err(error) => {
+                lifetime.cancel();
+                resources.cleanup(self.timeouts.close).await?;
+                return Err(error);
+            }
+        };
+        let entry = Arc::new(ConnectionEntry {
+            id: server_id.clone(),
+            transport: McpTransportKind::LegacySse,
+            server_info,
+            peer: service.peer().clone(),
+            service: Mutex::new(Some(service)),
+            events: Mutex::new(events),
+            dropped_events,
+            lifetime,
+            resources: ConnectionResources::LegacySse(resources),
+            timeouts: self.timeouts,
+        });
+        self.install(server_id, entry.clone(), cancellation).await?;
+        Ok(entry.info())
     }
 
     pub async fn connection_info(
@@ -442,7 +514,7 @@ impl McpGateway {
         let entry = self.entry(server_id).await?;
         self.request(
             &entry,
-            McpOperation::ListPrompts,
+            McpOperation::GetPrompt,
             cancellation,
             entry
                 .peer
@@ -603,8 +675,11 @@ impl McpGateway {
         T: IntoTransport<RoleClient, E, A>,
         E: std::error::Error + Send + Sync + 'static,
     {
-        let (handler, events, dropped_events) =
-            CodezClientHandler::new(self.limits.event_capacity, redactor);
+        let (handler, events, dropped_events) = CodezClientHandler::new(
+            self.limits.event_capacity,
+            redactor,
+            self.reverse_requests.clone(),
+        );
         let serve = handler.serve_with_ct(transport, lifetime.clone());
         let service = tokio::select! {
             _ = cancellation.cancelled() => return Err(McpError::Cancelled {

@@ -12,6 +12,7 @@ codez-core.workspace = true
 dashmap = "6.0"
 dunce.workspace = true
 futures = "0.3.32"
+file-id.workspace = true
 globset.workspace = true
 hex = "0.4.3"
 image = "0.25"
@@ -25,10 +26,8 @@ thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
+tempfile.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 
 [lints]
 workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true

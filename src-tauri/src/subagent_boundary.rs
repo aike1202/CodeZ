@@ -463,7 +463,7 @@ mod tests {
 
     use super::{
         ProviderModelCatalog, SubAgentSettingsDocument, detail_for_subagent, find_known_subagent,
-        list_subagents, validate_model_selections,
+        list_subagents, resolve_run_configuration, validate_model_selections,
     };
 
     fn provider_catalog() -> ProviderModelCatalog {
@@ -656,5 +656,39 @@ mod tests {
                 && duplicate.public_message()
                     == "The same sub-agent model cannot be configured more than once"
         );
+    }
+
+    #[test]
+    fn run_configuration_should_choose_the_first_valid_configured_candidate() {
+        let document = SubAgentSettingsDocument::from_value(json!({
+            "subAgentModels": {
+                "Explore": [
+                    { "providerId": "provider-1", "model": "careful-model" },
+                    { "providerId": "provider-1", "model": "fast-model" }
+                ]
+            }
+        }))
+        .expect("configured settings must parse");
+
+        let configuration = resolve_run_configuration("Explore", document.settings())
+            .expect("an enabled configured agent must resolve");
+
+        assert_eq!(configuration.selection.model, "careful-model");
+    }
+
+    #[test]
+    fn run_configuration_should_reject_disabled_sub_agents() {
+        let document = SubAgentSettingsDocument::from_value(json!({
+            "disabledSubAgents": ["Explore"],
+            "subAgentModels": {
+                "Explore": [{ "providerId": "provider-1", "model": "fast-model" }]
+            }
+        }))
+        .expect("configured settings must parse");
+
+        let error = resolve_run_configuration("Explore", document.settings())
+            .expect_err("disabled agents must not be admitted");
+
+        assert_eq!(error.public_message(), "The selected sub-agent is disabled");
     }
 }

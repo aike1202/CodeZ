@@ -218,6 +218,7 @@ export default function RightWorkspacePanel({
             role="tabpanel"
           >
             <TerminalPanel
+              key={workspace.id}
               workspaceId={workspace.id}
               rootPath={workspace.rootPath}
               onClose={() => onCloseTab(TERMINAL_TAB_ID)}

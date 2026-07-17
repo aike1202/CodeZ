@@ -4,20 +4,11 @@ import IconMinimize from '../../icons/IconMinimize'
 import IconMaximize from '../../icons/IconMaximize'
 import IconWindowRestore from '../../icons/IconWindowRestore'
 import IconClose from '../../icons/IconClose'
-import { IPC_CHANNELS } from '@shared/ipc/channels'
+import { desktopApi } from '../../../shared/desktop'
 
 interface WindowControlsProps {
   isMaximized: boolean
   setIsMaximized: React.Dispatch<React.SetStateAction<boolean>>
-}
-
-function sendWindowControl(action: 'minimize' | 'maximize' | 'close') {
-  try {
-    const win = window as any
-    if (win.electron?.ipcRenderer) {
-      win.electron.ipcRenderer.send(IPC_CHANNELS.WINDOW_CONTROL, action)
-    }
-  } catch {}
 }
 
 export default function WindowControls({
@@ -31,7 +22,7 @@ export default function WindowControls({
         size="none"
         className="window-control-btn btn-minimize"
         title="最小化"
-        onClick={() => sendWindowControl('minimize')}
+        onClick={() => void desktopApi.window.control('minimize').catch(() => undefined)}
       >
         <IconMinimize />
       </Button>
@@ -41,8 +32,9 @@ export default function WindowControls({
         className="window-control-btn btn-maximize"
         title={isMaximized ? '还原' : '最大化'}
         onClick={() => {
-          setIsMaximized(!isMaximized)
-          sendWindowControl('maximize')
+          void desktopApi.window.control('toggleMaximize')
+            .then(() => setIsMaximized((value) => !value))
+            .catch(() => undefined)
         }}
       >
         {isMaximized ? <IconWindowRestore /> : <IconMaximize />}
@@ -52,7 +44,7 @@ export default function WindowControls({
         size="none"
         className="window-control-btn btn-close"
         title="关闭"
-        onClick={() => sendWindowControl('close')}
+        onClick={() => void desktopApi.window.control('close').catch(() => undefined)}
       >
         <IconClose />
       </Button>

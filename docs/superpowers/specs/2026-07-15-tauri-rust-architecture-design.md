@@ -8,6 +8,8 @@
 >
 > 实施计划：`docs/superpowers/plans/2026-07-15-tauri-rust-refactor.md`
 
+> **2026-07-17 范围覆盖。** `~/.codez` 是 Tauri 的唯一运行时数据根，但启动仅初始化和使用该根，绝不读取 Electron `userData`、执行旧数据导入或显示迁移恢复界面。旧迁移实现可以作为未注册历史代码保留；Electron 工程完整保留且不安排删除。Plan 不属于 Tauri/Rust 目标架构：不增加 Plan domain、command、event、storage 或 renderer 兼容桥，Tauri 仅隐藏/隔离相关 UI，Electron 旧实现继续冻结。MCP 作为独立的后续工作项，不得干扰其他 Rust 领域的完成。
+
 ## 1. 文档目的
 
 本文定义 CodeZ 从 Electron/Node 主进程迁移到 Tauri/Rust 后的工程结构和长期边界。迁移不仅替换桌面壳，还要解决当前架构中的几个累积问题：

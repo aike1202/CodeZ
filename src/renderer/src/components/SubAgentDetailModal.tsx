@@ -4,6 +4,7 @@ import type {
   SubAgentModelSelection,
   SubAgentSettingsDetail
 } from '../shared/desktop/generated/contracts'
+import { desktopApi } from '../shared/desktop/api'
 import Button from './ui/Button'
 import Flex from './ui/Flex'
 import Stack from './ui/Stack'
@@ -52,7 +53,7 @@ export default function SubAgentDetailModal({ type, onClose }: Props): React.Rea
   useEffect(() => {
     let alive = true
     setLoading(true)
-    window.api.subAgent
+    desktopApi.subAgent
       .getDetail(type)
       .then((result) => {
         if (alive) setDetail(detailFromBridgeResult(result))
@@ -83,7 +84,7 @@ export default function SubAgentDetailModal({ type, onClose }: Props): React.Rea
     setSavingModel(true)
     setModelError('')
     try {
-      await window.api.subAgent.setModel(detail.type, selections)
+      await desktopApi.subAgent.setModel(detail.type, selections)
       setDetail((current) => current
         ? { ...current, configuredModels: selections.length > 0 ? selections : undefined }
         : current)

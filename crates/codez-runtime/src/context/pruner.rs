@@ -1,8 +1,10 @@
-use crate::context::budget::ContextBudgetService;
+use std::collections::HashSet;
+
 use codez_core::context::NormalizedModelMessage;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+
+use crate::context::budget::{ContextBudgetError, ContextBudgetService};
 
 pub struct ToolOutputPruneOptions {
     pub target_tokens: u32,
@@ -53,117 +55,259 @@ impl ToolOutputPruner {
     pub fn prune(
         source: &[NormalizedModelMessage],
         options: &ToolOutputPruneOptions,
-    ) -> ToolOutputPruneResult {
+    ) -> Result<ToolOutputPruneResult, ContextBudgetError> {
         let mut messages = source.to_vec();
-
-        let estimate_total = |msgs: &[NormalizedModelMessage]| -> u32 {
-            msgs.iter()
-                .map(|m| ContextBudgetService::estimate_string_tokens(&m.content)) // simplified
-                .sum()
-        };
-
-        let tokens_before = estimate_total(&messages);
+        let tokens_before = estimate_total(&messages)?;
         let mut pruned_ids = HashSet::new();
         let mut records = Vec::new();
         let mut current_tokens = tokens_before;
-
-        let protected_tools: HashSet<&str> = ["Skill", "ActivateSkill", "DeactivateSkill"]
-            .iter()
-            .cloned()
-            .collect();
-
-        // Pass 1: Prune tools over single limit
         let max_single = options.max_single_tool_tokens.unwrap_or(u32::MAX);
 
-        for (i, msg) in messages.clone().iter().enumerate() {
-            if current_tokens <= options.target_tokens && msg.role != "tool" {
-                continue;
-            }
-
-            if msg.role == "tool" && msg.status == "complete" {
-                let tool_name = msg.name.as_deref().unwrap_or("");
-                if protected_tools.contains(tool_name) {
-                    continue;
-                }
-
-                if let Some(protected_ids) = &options.protected_message_ids {
-                    if protected_ids.contains(&msg.id) {
-                        continue;
-                    }
-                }
-
-                if is_error_result(&msg.content) {
-                    continue;
-                }
-                if pruned_ids.contains(&msg.id) {
-                    continue;
-                }
-
-                let tokens = ContextBudgetService::estimate_string_tokens(&msg.content);
-
-                // Only prune if we are over target or single tool is over max single limit
-                if current_tokens > options.target_tokens || tokens > max_single {
-                    // PRUNE IT
-                    let content = &msg.content;
-                    let mut hasher = Sha256::new();
-                    hasher.update(content.as_bytes());
-                    let sha256 = format!("{:x}", hasher.finalize());
-
-                    let record = ToolOutputPruneRecord {
-                        message_id: msg.id.clone(),
-                        tool_name: tool_name.to_string(),
-                        original_chars: content.len(),
-                        original_tokens_estimate: tokens,
-                        sha256,
-                    };
-
-                    let head_len = 160.min((content.len() as f32 * 0.6) as usize);
-                    let tail_len = 80.min(content.len().saturating_sub(head_len));
-
-                    let head = content.chars().take(head_len).collect::<String>();
-                    let tail = if tail_len > 0 {
-                        let skip = content.chars().count().saturating_sub(tail_len);
-                        content.chars().skip(skip).collect::<String>()
-                    } else {
-                        String::new()
-                    };
-
-                    let pruned_content = serde_json::json!({
-                        "code": "TOOL_OUTPUT_PRUNED",
-                        "toolName": record.tool_name,
-                        "originalChars": record.original_chars,
-                        "originalTokensEstimate": record.original_tokens_estimate,
-                        "sha256": record.sha256,
-                        "head": head,
-                        "tail": tail
-                    })
-                    .to_string();
-
-                    messages[i].content = pruned_content;
-                    if let Some(refs) = &mut messages[i].file_references {
-                        for r in refs.iter_mut() {
-                            r.content_included = false;
-                        }
-                    }
-
-                    let new_tokens =
-                        ContextBudgetService::estimate_string_tokens(&messages[i].content);
-                    current_tokens =
-                        current_tokens.saturating_sub(tokens.saturating_sub(new_tokens));
-
-                    pruned_ids.insert(msg.id.clone());
-                    records.push(record);
-                }
-            }
+        let mut oversized = candidates(&messages, options, &pruned_ids)
+            .into_iter()
+            .filter(|candidate| candidate.tokens > max_single)
+            .collect::<Vec<_>>();
+        oversized.sort_by_key(|candidate| (std::cmp::Reverse(candidate.tokens), candidate.index));
+        for candidate in oversized {
+            prune_candidate(
+                &mut messages,
+                candidate,
+                &mut current_tokens,
+                &mut pruned_ids,
+                &mut records,
+            )?;
         }
 
-        let tokens_after = estimate_total(&messages);
+        let mut pressure = candidates(&messages, options, &pruned_ids)
+            .into_iter()
+            .filter(|candidate| candidate.index < options.protected_tail_start)
+            .collect::<Vec<_>>();
+        pressure.sort_by_key(|candidate| (std::cmp::Reverse(candidate.tokens), candidate.index));
+        for candidate in pressure {
+            if current_tokens <= options.target_tokens {
+                break;
+            }
+            prune_candidate(
+                &mut messages,
+                candidate,
+                &mut current_tokens,
+                &mut pruned_ids,
+                &mut records,
+            )?;
+        }
 
-        ToolOutputPruneResult {
+        Ok(ToolOutputPruneResult {
             messages,
             records,
             tokens_before,
-            tokens_after,
+            tokens_after: current_tokens,
+        })
+    }
+}
+
+#[derive(Clone, Copy)]
+struct PruneCandidate {
+    index: usize,
+    tokens: u32,
+}
+
+fn candidates(
+    messages: &[NormalizedModelMessage],
+    options: &ToolOutputPruneOptions,
+    pruned_ids: &HashSet<String>,
+) -> Vec<PruneCandidate> {
+    messages
+        .iter()
+        .enumerate()
+        .filter(|(_, message)| eligible(message, options, pruned_ids))
+        .map(|(index, message)| PruneCandidate {
+            index,
+            tokens: ContextBudgetService::estimate_string_tokens(&message.content),
+        })
+        .collect()
+}
+
+fn eligible(
+    message: &NormalizedModelMessage,
+    options: &ToolOutputPruneOptions,
+    pruned_ids: &HashSet<String>,
+) -> bool {
+    message.role == "tool"
+        && message.status == "complete"
+        && !matches!(
+            message.name.as_deref(),
+            Some("Skill" | "ActivateSkill" | "DeactivateSkill")
+        )
+        && options
+            .protected_message_ids
+            .as_ref()
+            .is_none_or(|ids| !ids.contains(&message.id))
+        && !is_error_result(&message.content)
+        && !pruned_ids.contains(&message.id)
+}
+
+fn prune_candidate(
+    messages: &mut [NormalizedModelMessage],
+    candidate: PruneCandidate,
+    current_tokens: &mut u32,
+    pruned_ids: &mut HashSet<String>,
+    records: &mut Vec<ToolOutputPruneRecord>,
+) -> Result<(), ContextBudgetError> {
+    let message = &mut messages[candidate.index];
+    let before = ContextBudgetService::estimate_message_tokens(message)?;
+    let original_chars = message.content.chars().count();
+    let head_len = 160.min(original_chars.saturating_mul(3) / 5);
+    let tail_len = 80.min(original_chars.saturating_sub(head_len));
+    let head = message.content.chars().take(head_len).collect::<String>();
+    let tail = message
+        .content
+        .chars()
+        .skip(original_chars.saturating_sub(tail_len))
+        .collect::<String>();
+    let record = ToolOutputPruneRecord {
+        message_id: message.id.clone(),
+        tool_name: message
+            .name
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string()),
+        original_chars,
+        original_tokens_estimate: candidate.tokens,
+        sha256: format!("{:x}", Sha256::digest(message.content.as_bytes())),
+    };
+    message.content = serde_json::json!({
+        "code": "TOOL_OUTPUT_PRUNED",
+        "toolName": record.tool_name,
+        "originalChars": record.original_chars,
+        "originalTokensEstimate": record.original_tokens_estimate,
+        "sha256": record.sha256,
+        "head": head,
+        "tail": tail
+    })
+    .to_string();
+    if let Some(references) = &mut message.file_references {
+        for reference in references {
+            reference.content_included = false;
         }
+    }
+    let after = ContextBudgetService::estimate_message_tokens(message)?;
+    *current_tokens = current_tokens.saturating_sub(before.saturating_sub(after));
+    pruned_ids.insert(message.id.clone());
+    records.push(record);
+    Ok(())
+}
+
+fn estimate_total(messages: &[NormalizedModelMessage]) -> Result<u32, ContextBudgetError> {
+    messages.iter().try_fold(0_u32, |total, message| {
+        ContextBudgetService::estimate_message_tokens(message)
+            .map(|tokens| total.saturating_add(tokens))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use codez_core::context::NormalizedModelMessage;
+
+    use super::{ToolOutputPruneOptions, ToolOutputPruner};
+
+    fn tool_message(id: &str, content: &str) -> NormalizedModelMessage {
+        NormalizedModelMessage {
+            id: id.to_string(),
+            client_message_id: None,
+            turn_id: "turn-1".to_string(),
+            role: "tool".to_string(),
+            content: content.to_string(),
+            tool_calls: None,
+            tool_call_id: Some(format!("call-{id}")),
+            name: Some("Read".to_string()),
+            status: "complete".to_string(),
+            created_at: "2026-07-17T00:00:00Z".to_string(),
+            source_sequence: Some(1),
+            attachments: None,
+            file_references: None,
+        }
+    }
+
+    #[test]
+    fn pressure_prune_never_rewrites_the_protected_protocol_tail() {
+        let history = vec![
+            tool_message("old", &"a".repeat(8_000)),
+            tool_message("tail", &"b".repeat(8_000)),
+        ];
+
+        let result = ToolOutputPruner::prune(
+            &history,
+            &ToolOutputPruneOptions {
+                target_tokens: 1,
+                protected_tail_start: 1,
+                max_single_tool_tokens: None,
+                protected_message_ids: None,
+            },
+        )
+        .expect("fixed tool output must be measurable");
+
+        assert_eq!(
+            (
+                result
+                    .records
+                    .as_slice()
+                    .first()
+                    .map(|record| record.message_id.as_str()),
+                result.messages[1].content.as_str(),
+            ),
+            (Some("old"), history[1].content.as_str())
+        );
+    }
+
+    #[test]
+    fn emergency_prune_preserves_an_unconsumed_tool_result() {
+        let history = vec![tool_message("active", &"x".repeat(8_000))];
+
+        let result = ToolOutputPruner::prune(
+            &history,
+            &ToolOutputPruneOptions {
+                target_tokens: u32::MAX,
+                protected_tail_start: history.len(),
+                max_single_tool_tokens: Some(10),
+                protected_message_ids: Some(HashSet::from(["active".to_string()])),
+            },
+        )
+        .expect("fixed tool output must be measurable");
+
+        assert!(result.records.is_empty());
+    }
+
+    #[test]
+    fn pruned_output_keeps_unicode_head_and_tail_on_character_boundaries() {
+        let content = "你".repeat(1_000);
+        let history = vec![tool_message("unicode", &content)];
+
+        let result = ToolOutputPruner::prune(
+            &history,
+            &ToolOutputPruneOptions {
+                target_tokens: u32::MAX,
+                protected_tail_start: history.len(),
+                max_single_tool_tokens: Some(1),
+                protected_message_ids: None,
+            },
+        )
+        .expect("Unicode tool output must be measurable");
+        let payload: serde_json::Value =
+            serde_json::from_str(&result.messages[0].content).expect("pruned output must be JSON");
+
+        assert_eq!(
+            (
+                payload["head"]
+                    .as_str()
+                    .map(str::chars)
+                    .map(Iterator::count),
+                payload["tail"]
+                    .as_str()
+                    .map(str::chars)
+                    .map(Iterator::count),
+            ),
+            (Some(160), Some(80))
+        );
     }
 }

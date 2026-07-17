@@ -25,7 +25,7 @@ export default function SettingsSkillsTab({ onCreate }: Props): React.ReactEleme
   const loadSkills = async () => {
     setLoading(true)
     try {
-      const data = await window.api.skill.getAll(workspace?.rootPath || null)
+      const data = await desktopApi.skill.getAll(workspace?.rootPath || null)
       setSkills(data)
     } catch (e) {
       console.error(e)
@@ -34,7 +34,7 @@ export default function SettingsSkillsTab({ onCreate }: Props): React.ReactEleme
     }
 
     try {
-      const checkRes = await window.api.skill.checkExternal()
+      const checkRes = await desktopApi.skill.checkExternal()
       setExternalCheckResult(checkRes)
     } catch (e) {
       console.error('Failed to check external skills', e)
@@ -48,7 +48,7 @@ export default function SettingsSkillsTab({ onCreate }: Props): React.ReactEleme
   const handleToggle = async (id: string, enabled: boolean) => {
     setSkills(skills.map(s => s.id === id ? { ...s, enabled } : s))
     try {
-      await window.api.skill.toggle(workspace?.rootPath || null, id, enabled)
+      await desktopApi.skill.toggle(workspace?.rootPath || null, id, enabled)
     } catch (e) {
       console.error('Failed to toggle skill', e)
       setSkills(skills.map(s => s.id === id ? { ...s, enabled: !enabled } : s))
@@ -60,7 +60,7 @@ export default function SettingsSkillsTab({ onCreate }: Props): React.ReactEleme
     if (!ok) return
     setDeletingId(skill.id)
     try {
-      const success = await window.api.skill.remove(workspace?.rootPath || null, skill.id)
+      const success = await desktopApi.skill.remove(workspace?.rootPath || null, skill.id)
       if (success) {
         setSkills((prev) => prev.filter((s) => s.id !== skill.id))
       }

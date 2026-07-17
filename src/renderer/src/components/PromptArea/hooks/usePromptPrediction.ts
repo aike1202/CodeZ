@@ -5,6 +5,7 @@ import {
   canPredictNextPrompt,
   getPromptPredictionSuffix
 } from '../promptPrediction'
+import { desktopApi } from '../../../shared/desktop'
 
 interface UsePromptPredictionOptions {
   activeSessionId: string | null
@@ -56,7 +57,7 @@ export function usePromptPrediction({
 
     const timer = window.setTimeout(() => {
       lastRequestedKeyRef.current = requestKey
-      void window.api.chat.predictNextInput({
+      void desktopApi.chat.predictNextInput({
         providerId,
         model,
         context,

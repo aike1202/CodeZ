@@ -1,13 +1,18 @@
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::Arc;
 
-use codez_core::CancellationToken;
+use codez_core::{CancellationToken, FileSystem};
 use serde_json::Value;
 
 use crate::tools::types::{
     AgentRole, ToolApprovalMetadata, ToolAvailabilityContext, ToolConcurrency, ToolEffectPlan,
     ToolExecutionResult, ToolExposure, ToolInterruptBehavior, ToolPlanningContext, ToolSource,
+};
+use crate::{
+    edit_transaction::EditTransactionService, fingerprint::ReadFingerprintStore,
+    mutation_coordinator::FileMutationCoordinator,
 };
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -142,13 +147,24 @@ impl ToolDescriptor for DefaultToolDescriptor {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
+pub struct ToolFileServices {
+    pub file_system: Arc<dyn FileSystem>,
+    pub fingerprint_store: Arc<ReadFingerprintStore>,
+    pub mutation_coordinator: Arc<FileMutationCoordinator>,
+    pub edit_transaction_service: Arc<EditTransactionService>,
+}
+
+#[derive(Clone)]
 pub struct ToolContext {
     pub execution_id: String,
     pub session_id: Option<String>,
+    pub context_scope_id: String,
+    pub transaction_id: Option<String>,
     pub workspace_root: PathBuf,
     pub cancellation: CancellationToken,
     pub authorized_effects: ToolEffectPlan,
+    pub file_services: Option<ToolFileServices>,
 }
 
 pub trait ToolHandler: Send + Sync {

@@ -1,8 +1,11 @@
 use std::{sync::Arc, time::Duration};
 
-use codez_contracts::chat::{ChatCompactionResponse, ChatCompactionResult, ChatMessage, Role};
+use codez_contracts::chat::{ChatCompactionResponse, ChatCompactionResult};
 use codez_core::{AppError, CancellationToken, SessionId, redact_sensitive_text};
-use codez_core::{context::ContextScopeId, provider::ChatStreamEvent};
+use codez_core::{
+    context::ContextScopeId,
+    provider::{ChatMessage, ChatStreamEvent, Role},
+};
 use codez_providers::{
     chat::ChatProviderError,
     service::{ProviderService, ResolvedProviderChatConfig},
@@ -15,6 +18,7 @@ use codez_runtime::context::{
     },
     ledger::ModelLedgerStore,
 };
+use codez_runtime::session_maintenance::SessionExclusiveActivityLease;
 use futures_util::StreamExt;
 
 use crate::chat_runtime::open_provider_stream;
@@ -24,6 +28,16 @@ const MAX_MANUAL_INSTRUCTIONS_BYTES: usize = 16 * 1024;
 const MAX_COMPACTION_SOURCE_BYTES: usize = 8 * 1024 * 1024;
 const COMPACTION_SYSTEM_PROMPT: &str = "Summarize the supplied prior conversation for a future coding assistant. Preserve user intent, completed work, unresolved decisions, constraints, concrete file paths, commands and validation evidence. Do not invent facts. Be concise but retain details necessary to resume safely.";
 
+pub(crate) struct AutoCompactionRequest<'a> {
+    pub(crate) session_id: &'a SessionId,
+    pub(crate) trigger: &'static str,
+    pub(crate) capabilities: ModelContextCapabilities,
+    pub(crate) reasoning_budget_tokens: Option<u32>,
+    pub(crate) provider_id: &'a str,
+    pub(crate) model: &'a str,
+    pub(crate) required_message_id: &'a str,
+}
+
 /// Runs an explicit user-requested compaction using the session's most recently used Provider.
 ///
 /// The durable compaction service owns ledger state transitions. This desktop boundary only
@@ -32,36 +46,78 @@ pub(crate) async fn compact_chat_session(
     providers: Arc<ProviderService>,
     ledger: Arc<ModelLedgerStore>,
     application_cancellation: CancellationToken,
-    session_id: SessionId,
+    exclusive_activity: SessionExclusiveActivityLease,
     manual_instructions: Option<String>,
 ) -> Result<ChatCompactionResponse, AppError> {
     validate_manual_instructions(manual_instructions.as_deref())?;
-    let resolved = resolve_compaction_provider(&providers, &ledger, &session_id).await?;
+    let session_id = exclusive_activity.session_id();
+    let resolved = resolve_compaction_provider(&providers, &ledger, session_id).await?;
     let capabilities = ModelContextCapabilities {
         context_window_tokens: Some(resolved.model.max_context_tokens),
         max_output_tokens: resolved.model.max_output_tokens,
         max_input_tokens: resolved.model.max_input_tokens,
         reasoning_counts_against_context: resolved.model.reasoning_counts_against_context,
     };
+    let request = CompactionRequest {
+        session_id: session_id.as_str().to_string(),
+        context_scope_id: ContextScopeId::Main,
+        trigger: "manual".to_string(),
+        capabilities,
+        system_prompt: COMPACTION_SYSTEM_PROMPT.to_string(),
+        manual_instructions,
+        workspace_root: None,
+        reasoning_budget_tokens: resolved.thinking.budget_tokens,
+        provider_id: Some(resolved.provider_id),
+        model: Some(resolved.model.id),
+        required_message_id: None,
+    };
+    let result = run_compaction(providers, ledger, application_cancellation, request).await?;
+    Ok(compaction_response(result))
+}
+
+/// Runs threshold or Provider-overflow compaction as part of an already-active chat turn.
+///
+/// The caller's session activity lease continues to block deletion while the ledger service uses
+/// history-version compare-and-append to reject concurrent context mutations.
+pub(crate) async fn compact_active_chat_context(
+    providers: Arc<ProviderService>,
+    ledger: Arc<ModelLedgerStore>,
+    cancellation: CancellationToken,
+    request: AutoCompactionRequest<'_>,
+) -> Result<CompactionResult, AppError> {
+    run_compaction(
+        providers,
+        ledger,
+        cancellation,
+        CompactionRequest {
+            session_id: request.session_id.as_str().to_string(),
+            context_scope_id: ContextScopeId::Main,
+            trigger: request.trigger.to_string(),
+            capabilities: request.capabilities,
+            system_prompt: COMPACTION_SYSTEM_PROMPT.to_string(),
+            manual_instructions: None,
+            workspace_root: None,
+            reasoning_budget_tokens: request.reasoning_budget_tokens,
+            provider_id: Some(request.provider_id.to_string()),
+            model: Some(request.model.to_string()),
+            required_message_id: Some(request.required_message_id.to_string()),
+        },
+    )
+    .await
+}
+
+async fn run_compaction(
+    providers: Arc<ProviderService>,
+    ledger: Arc<ModelLedgerStore>,
+    cancellation: CancellationToken,
+    request: CompactionRequest,
+) -> Result<CompactionResult, AppError> {
     let summarizer = Arc::new(ProviderCompactionSummarizer {
         providers,
-        cancellation: application_cancellation,
+        cancellation,
     });
-    let service = CompactionService::new(ledger.as_ref().clone(), summarizer);
-    let result = service
-        .compact(CompactionRequest {
-            session_id: session_id.as_str().to_string(),
-            context_scope_id: ContextScopeId::Main,
-            trigger: "manual".to_string(),
-            capabilities,
-            system_prompt: COMPACTION_SYSTEM_PROMPT.to_string(),
-            manual_instructions,
-            workspace_root: None,
-            reasoning_budget_tokens: resolved.thinking.budget_tokens,
-            provider_id: Some(resolved.provider_id),
-            model: Some(resolved.model.id),
-            required_message_id: None,
-        })
+    CompactionService::new(ledger.as_ref().clone(), summarizer)
+        .compact(request)
         .await
         .map_err(|error| {
             AppError::storage(
@@ -69,8 +125,7 @@ pub(crate) async fn compact_chat_session(
                 error.to_string(),
                 true,
             )
-        })?;
-    Ok(compaction_response(result))
+        })
 }
 
 struct ProviderCompactionSummarizer {
@@ -101,6 +156,7 @@ impl CompactionSummarizer for ProviderCompactionSummarizer {
                 tool_calls: None,
                 tool_call_id: None,
                 name: None,
+                images: Vec::new(),
             },
             ChatMessage {
                 role: Role::User,
@@ -108,6 +164,7 @@ impl CompactionSummarizer for ProviderCompactionSummarizer {
                 tool_calls: None,
                 tool_call_id: None,
                 name: None,
+                images: Vec::new(),
             },
         ];
         summarize_with_provider(resolved, messages, self.cancellation.child_token()).await
@@ -254,6 +311,7 @@ fn compaction_response(result: CompactionResult) -> ChatCompactionResponse {
             },
             error_code: result.error_code.map(|code| code.to_string()),
             message: result.message,
+            retryable: result.retryable,
             tokens_before: result.tokens_before,
             tokens_after: result.tokens_after,
             snapshot_status: result.snapshot_status.map(|status| match status {
@@ -290,10 +348,13 @@ mod tests {
         },
     };
     use codez_providers::service::ProviderService;
-    use codez_runtime::context::compaction::{
-        CompactionFailureCode, CompactionResult, CompactionSnapshotStatus, CompactionStatus,
-    };
     use codez_runtime::context::ledger::ModelLedgerStore;
+    use codez_runtime::{
+        context::compaction::{
+            CompactionFailureCode, CompactionResult, CompactionSnapshotStatus, CompactionStatus,
+        },
+        session_maintenance::SessionMaintenanceCoordinator,
+    };
     use codez_storage::AtomicFileStore;
     use serde_json::{Value, json};
 
@@ -371,7 +432,7 @@ mod tests {
         }
     }
 
-    async fn local_provider(base_url: &str) -> Arc<ProviderService> {
+    async fn local_provider(base_url: &str) -> (Arc<ProviderService>, String) {
         let service = Arc::new(
             ProviderService::new(
                 Arc::new(MemoryProviderRepository::default()),
@@ -380,7 +441,7 @@ mod tests {
             .await
             .expect("local Provider service must initialize"),
         );
-        service
+        let provider = service
             .create(ProviderFormData {
                 name: "Local Provider".to_string(),
                 base_url: base_url.to_string(),
@@ -411,7 +472,7 @@ mod tests {
             })
             .await
             .expect("local Provider configuration must persist");
-        service
+        (service, provider.id)
     }
 
     struct LocalProviderServer {
@@ -422,8 +483,8 @@ mod tests {
 
     impl LocalProviderServer {
         fn start(response: String) -> Self {
-            let listener = TcpListener::bind("127.0.0.1:0")
-                .expect("local Provider listener must bind");
+            let listener =
+                TcpListener::bind("127.0.0.1:0").expect("local Provider listener must bind");
             let address = listener
                 .local_addr()
                 .expect("local Provider listener must expose an address");
@@ -497,7 +558,8 @@ mod tests {
             }
             bytes.extend_from_slice(&chunk[..count]);
         }
-        serde_json::from_slice(&bytes[header_end..header_end + content_length]).map_err(io::Error::other)
+        serde_json::from_slice(&bytes[header_end..header_end + content_length])
+            .map_err(io::Error::other)
     }
 
     fn write_sse_response(stream: &mut TcpStream, body: &str) -> io::Result<()> {
@@ -509,7 +571,7 @@ mod tests {
         stream.flush()
     }
 
-    async fn seed_history(store: &ModelLedgerStore) {
+    async fn seed_history(store: &ModelLedgerStore, provider_id: &str) {
         for index in 0..10 {
             let payload = UserMessagePayload {
                 message: NormalizedModelMessage {
@@ -527,7 +589,7 @@ mod tests {
                     attachments: None,
                     file_references: None,
                 },
-                provider_id: Some("configured-local-provider".to_string()),
+                provider_id: Some(provider_id.to_string()),
                 model: Some("local-model".to_string()),
                 command_metadata: None,
             };
@@ -553,6 +615,7 @@ mod tests {
             status: CompactionStatus::Completed,
             error_code: None,
             message: None,
+            retryable: None,
             tokens_before: Some(100),
             tokens_after: Some(40),
             snapshot_status: Some(CompactionSnapshotStatus::Committed),
@@ -568,6 +631,7 @@ mod tests {
             status: CompactionStatus::Failed,
             error_code: Some(CompactionFailureCode::InsufficientHistory),
             message: Some("No session history is available to compact".to_string()),
+            retryable: Some(false),
             tokens_before: None,
             tokens_after: None,
             snapshot_status: None,
@@ -593,17 +657,22 @@ mod tests {
             })
         );
         let server = LocalProviderServer::start(provider_response);
-        let providers = local_provider(&server.base_url).await;
+        let (providers, provider_id) = local_provider(&server.base_url).await;
         let directory = tempfile::tempdir().expect("temporary ledger directory must exist");
         let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
         let ledger = Arc::new(ModelLedgerStore::new(directory.path(), persistence));
-        seed_history(&ledger).await;
+        seed_history(&ledger, &provider_id).await;
+        let session_id = SessionId::parse("session-1").expect("fixture session ID must parse");
+        let session_maintenance = SessionMaintenanceCoordinator::new();
+        let exclusive_activity = session_maintenance
+            .try_begin_exclusive_activity(session_id.clone())
+            .expect("fixture compaction activity must begin");
 
         let response = compact_chat_session(
             providers,
             Arc::clone(&ledger),
             codez_core::CancellationToken::new(),
-            SessionId::parse("session-1").expect("fixture session ID must parse"),
+            exclusive_activity,
             Some("Keep the user decisions.".to_string()),
         )
         .await
@@ -611,7 +680,7 @@ mod tests {
 
         assert!(response.accepted);
         let snapshot = ledger
-            .get_snapshot(&SessionId::parse("session-1").expect("fixture session ID must parse"))
+            .get_snapshot(&session_id)
             .await
             .expect("compaction snapshot must load")
             .expect("compaction snapshot must exist");
@@ -629,8 +698,15 @@ mod tests {
             .as_array()
             .expect("compaction Provider request must contain messages");
         assert_eq!(messages[0]["role"], "system");
-        assert!(messages[1]["content"]
-            .as_str()
-            .is_some_and(|content| content.contains("Keep the user decisions.")));
+        assert!(
+            messages[1]["content"]
+                .as_str()
+                .is_some_and(|content| content.contains("Keep the user decisions."))
+        );
+        assert!(
+            session_maintenance
+                .try_begin_maintenance(session_id)
+                .is_ok()
+        );
     }
 }
