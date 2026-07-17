@@ -7,6 +7,10 @@ use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::permission::ai_classifier::{
+    PermissionAiClassifier, PermissionAiContext, PermissionClassificationRequest,
+    PermissionProjectInstruction,
+};
 use crate::permission::audit::{PermissionAuditError, PermissionAuditLog};
 use crate::permission::contract::{
     PermissionAction, PermissionApprovalScope, PermissionCapability,
@@ -14,9 +18,11 @@ use crate::permission::contract::{
 use crate::permission::decision::{
     PermissionCheck, PermissionDecisionEngine, PermissionDecisionInput, ToolApprovalPreference,
 };
+use crate::permission::shell::effects::{analyze_operation, unwrap_process_wrappers};
 use crate::permission::shell::guard::{CriticalEnforcement, CriticalOperationGuard};
+use crate::permission::shell::impact::PathImpactAnalyzer;
 use crate::permission::shell::parser::ShellCommandParser;
-use crate::permission::shell::policies::classify_known_command;
+use crate::permission::shell::policies::{classify_known_command, normalize_executable_name};
 use crate::permission::shell::types::PermissionShellKind;
 use crate::permission::store::{
     PermissionRuleStore, PermissionStoreError, RememberPermissionRuleInput,
@@ -78,6 +84,7 @@ pub struct PermissionService {
     modes: Arc<WorkspacePermissionStore>,
     rules: Arc<PermissionRuleStore>,
     audit: Arc<PermissionAuditLog>,
+    ai_classifier: Option<Arc<dyn PermissionAiClassifier>>,
 }
 
 impl PermissionService {
@@ -91,7 +98,14 @@ impl PermissionService {
             modes,
             rules,
             audit,
+            ai_classifier: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_ai_classifier(mut self, classifier: Arc<dyn PermissionAiClassifier>) -> Self {
+        self.ai_classifier = Some(classifier);
+        self
     }
 
     /// Removes all in-memory permission rules owned by one session.
@@ -99,6 +113,10 @@ impl PermissionService {
         self.rules.clear_session(session_id).await;
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "permission authorization keeps policy, AI, and approval inputs explicit"
+    )]
     pub async fn authorize(
         &self,
         prepared: &PreparedToolCall,
@@ -106,6 +124,7 @@ impl PermissionService {
         session_id: Option<&str>,
         agent_role: &str,
         approval_preference: Option<ToolApprovalPreference>,
+        ai_context: Option<&PermissionAiContext>,
         approval_handler: Option<&dyn PermissionApprovalHandler>,
     ) -> Result<ToolAuthorizationDecision, PermissionServiceError> {
         let canonical_workspace = tokio::fs::canonicalize(workspace_root)
@@ -120,13 +139,15 @@ impl PermissionService {
                 prepared,
                 &canonical_workspace,
                 session_id,
+                agent_role,
                 mode.clone(),
                 approval_preference.clone(),
+                ai_context,
             )
             .await?;
         if checks.is_empty() || prepared.effects.analysis_status != "parsed" {
-            checks.push(
-                self.evaluate_check(
+            let (fallback, _) = self
+                .evaluate_check(
                     &canonical_workspace,
                     session_id,
                     mode.clone(),
@@ -136,8 +157,8 @@ impl PermissionService {
                     "The tool effect plan could not be completely classified.",
                     false,
                 )
-                .await?,
-            );
+                .await?;
+            checks.push(fallback);
         }
         let action = PermissionDecisionEngine::aggregate(
             &checks
@@ -244,30 +265,61 @@ impl PermissionService {
         }
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "effect evaluation keeps every policy and AI input explicit"
+    )]
     async fn evaluate_effects(
         &self,
         prepared: &PreparedToolCall,
         workspace_root: &Path,
         session_id: Option<&str>,
+        agent_role: &str,
         mode: crate::permission::decision::PermissionMode,
         approval_preference: Option<ToolApprovalPreference>,
+        ai_context: Option<&PermissionAiContext>,
     ) -> Result<Vec<EvaluatedPermissionCheck>, PermissionStoreError> {
         let mut checks = Vec::new();
         for effect in &prepared.effects.effects {
-            for classification in classify_effect(effect, workspace_root) {
-                checks.push(
-                    self.evaluate_check(
+            for classification in classify_effect(effect, workspace_root).await {
+                let (mut check, explicit_rule) = self
+                    .evaluate_check(
                         workspace_root,
                         session_id,
                         mode.clone(),
                         approval_preference.clone(),
-                        classification.permission,
+                        classification.permission.clone(),
                         &classification.pattern,
                         &classification.reason,
                         classification.absolute_redline,
                     )
-                    .await?,
-                );
+                    .await?;
+                if classification.ai_eligible
+                    && explicit_rule.is_none()
+                    && mode == crate::permission::decision::PermissionMode::Auto
+                    && approval_preference != Some(ToolApprovalPreference::User)
+                    && check.action == PermissionAction::Ask
+                    && let Some(classifier) = &self.ai_classifier
+                    && let Some(request) = ai_classification_request(
+                        prepared,
+                        effect,
+                        workspace_root,
+                        session_id,
+                        agent_role,
+                        &classification,
+                        ai_context,
+                    )
+                    .await
+                {
+                    let verdict = classifier.classify(&request).await;
+                    if verdict.can_auto_allow() {
+                        check.action = PermissionAction::Allow;
+                        if let Some(reason) = verdict.reason() {
+                            check.reason = format!("AI classifier: {reason}");
+                        }
+                    }
+                }
+                checks.push(check);
             }
         }
         Ok(checks)
@@ -287,7 +339,7 @@ impl PermissionService {
         pattern: &str,
         reason: &str,
         absolute_redline: bool,
-    ) -> Result<EvaluatedPermissionCheck, PermissionStoreError> {
+    ) -> Result<(EvaluatedPermissionCheck, Option<PermissionAction>), PermissionStoreError> {
         let explicit_rule = self
             .rules
             .resolve(workspace_root, session_id, &permission, pattern)
@@ -295,17 +347,20 @@ impl PermissionService {
         let decision = PermissionDecisionEngine::decide(PermissionDecisionInput {
             mode,
             permission: permission.clone(),
-            explicit_rule,
+            explicit_rule: explicit_rule.clone(),
             approval_preference,
             absolute_redline,
         });
-        Ok(EvaluatedPermissionCheck {
-            permission,
-            pattern: pattern.to_string(),
-            action: decision.action,
-            reason: reason.to_string(),
-            absolute_redline,
-        })
+        Ok((
+            EvaluatedPermissionCheck {
+                permission,
+                pattern: pattern.to_string(),
+                action: decision.action,
+                reason: reason.to_string(),
+                absolute_redline,
+            },
+            explicit_rule,
+        ))
     }
 
     async fn remember_approval(
@@ -341,6 +396,7 @@ struct EffectClassification {
     pattern: String,
     reason: String,
     absolute_redline: bool,
+    ai_eligible: bool,
 }
 
 impl EffectClassification {
@@ -355,11 +411,136 @@ impl EffectClassification {
             pattern: pattern.into(),
             reason: reason.into(),
             absolute_redline,
+            ai_eligible: false,
+        }
+    }
+
+    fn unknown_static(pattern: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            permission: PermissionCapability::ShellUnparsed,
+            pattern: pattern.into(),
+            reason: reason.into(),
+            absolute_redline: false,
+            ai_eligible: true,
         }
     }
 }
 
-fn classify_effect(effect: &ToolEffect, workspace_root: &Path) -> Vec<EffectClassification> {
+const PROJECT_MARKERS: &[&str] = &[
+    ".git",
+    "Cargo.toml",
+    "go.mod",
+    "package.json",
+    "pnpm-lock.yaml",
+    "pyproject.toml",
+    "requirements.txt",
+    "pom.xml",
+    "build.gradle",
+    "settings.gradle",
+    "gradlew",
+    "yarn.lock",
+];
+const PROJECT_INSTRUCTION_PATHS: &[&str] = &["AGENTS.md", ".agents/AGENTS.md"];
+const MAX_PROJECT_INSTRUCTION_BYTES: u64 = 16 * 1024;
+const MAX_AI_USER_INTENT_BYTES: usize = 16 * 1024;
+
+async fn ai_classification_request(
+    prepared: &PreparedToolCall,
+    effect: &ToolEffect,
+    workspace_root: &Path,
+    session_id: Option<&str>,
+    agent_role: &str,
+    classification: &EffectClassification,
+    ai_context: Option<&PermissionAiContext>,
+) -> Option<PermissionClassificationRequest> {
+    let ToolEffect::ExecuteCommand {
+        shell,
+        command,
+        cwd,
+    } = effect
+    else {
+        return None;
+    };
+    let project_markers = project_markers(workspace_root).await;
+    let project_instructions = project_instructions(workspace_root).await;
+    Some(PermissionClassificationRequest {
+        provider_id: ai_context.and_then(|context| context.provider_id.clone()),
+        model: ai_context.and_then(|context| context.model.clone()),
+        tool_name: prepared.canonical_name.clone(),
+        shell: shell.clone(),
+        command: command.clone(),
+        operation: classification.pattern.clone(),
+        workspace_root: workspace_root.to_string_lossy().to_string(),
+        cwd: cwd
+            .clone()
+            .unwrap_or_else(|| workspace_root.to_string_lossy().to_string()),
+        session_id: session_id.map(str::to_string),
+        agent_role: agent_role.to_string(),
+        user_intent: ai_context
+            .and_then(|context| context.user_intent.as_deref())
+            .map(|intent| bounded_utf8(intent, MAX_AI_USER_INTENT_BYTES)),
+        project_markers,
+        project_instructions,
+    })
+}
+
+fn bounded_utf8(value: &str, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value.to_string();
+    }
+    let mut end = max_bytes;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value[..end].to_string()
+}
+
+async fn project_markers(workspace_root: &Path) -> Vec<String> {
+    let mut markers = Vec::new();
+    for marker in PROJECT_MARKERS {
+        if tokio::fs::try_exists(workspace_root.join(marker))
+            .await
+            .unwrap_or(false)
+        {
+            markers.push((*marker).to_string());
+        }
+    }
+    markers
+}
+
+async fn project_instructions(workspace_root: &Path) -> Vec<PermissionProjectInstruction> {
+    let mut instructions = Vec::new();
+    let mut remaining = MAX_PROJECT_INSTRUCTION_BYTES;
+    for relative in PROJECT_INSTRUCTION_PATHS {
+        let path = workspace_root.join(relative);
+        let Ok(canonical) = tokio::fs::canonicalize(&path).await else {
+            continue;
+        };
+        if !canonical.starts_with(workspace_root) {
+            continue;
+        }
+        let Ok(metadata) = tokio::fs::metadata(&canonical).await else {
+            continue;
+        };
+        if !metadata.is_file() || metadata.len() > remaining {
+            continue;
+        }
+        let Ok(content) = tokio::fs::read_to_string(&canonical).await else {
+            continue;
+        };
+        if content.len() as u64 > remaining {
+            continue;
+        }
+        remaining = remaining.saturating_sub(content.len() as u64);
+        instructions.push(PermissionProjectInstruction {
+            path: (*relative).to_string(),
+            content,
+        });
+    }
+    instructions
+}
+
+async fn classify_effect(effect: &ToolEffect, workspace_root: &Path) -> Vec<EffectClassification> {
     match effect {
         ToolEffect::ReadFile { path, .. } => vec![classify_path(
             path,
@@ -385,9 +566,11 @@ fn classify_effect(effect: &ToolEffect, workspace_root: &Path) -> Vec<EffectClas
             PermissionCapability::Delete,
             "Delete a file",
         )],
-        ToolEffect::ExecuteCommand { shell, command } => {
-            classify_command(shell, command, workspace_root)
-        }
+        ToolEffect::ExecuteCommand {
+            shell,
+            command,
+            cwd,
+        } => classify_command(shell, command, workspace_root, cwd.as_deref()).await,
         ToolEffect::Network { target, .. } => vec![EffectClassification::new(
             PermissionCapability::Network,
             target.clone().unwrap_or_else(|| "network:*".to_string()),
@@ -476,10 +659,11 @@ fn classify_path(
     }
 }
 
-fn classify_command(
+async fn classify_command(
     shell: &str,
     command: &str,
     workspace_root: &Path,
+    cwd: Option<&str>,
 ) -> Vec<EffectClassification> {
     if let Some(finding) = CriticalOperationGuard::scan_raw(command) {
         let absolute = finding.enforcement == CriticalEnforcement::AbsoluteRedline;
@@ -510,6 +694,18 @@ fn classify_command(
         )];
     }
 
+    let cwd = cwd.unwrap_or_else(|| workspace_root.to_str().unwrap_or_default());
+    let command_changes_cwd = graph.operations.iter().any(|operation| {
+        matches!(
+            normalize_executable_name(
+                unwrap_process_wrappers(&operation.argv)
+                    .first()
+                    .map_or("", String::as_str)
+            )
+            .as_str(),
+            "cd" | "set-location" | "sl"
+        )
+    });
     let mut classifications = Vec::new();
     for operation in &graph.operations {
         if operation.dynamic {
@@ -521,17 +717,66 @@ fn classify_command(
             ));
             continue;
         }
-        let Some(assessment) = classify_known_command(&operation.argv) else {
+        let generic_effects = analyze_operation(operation);
+        if !generic_effects.incomplete_reasons.is_empty() {
             classifications.push(EffectClassification::new(
                 PermissionCapability::ShellUnparsed,
                 operation.source.clone(),
-                "The shell command is unknown or could not be completely classified.",
+                generic_effects.incomplete_reasons.join(" "),
                 false,
+            ));
+            continue;
+        }
+        if !generic_effects.unsafe_environment_keys.is_empty() {
+            classifications.push(EffectClassification::new(
+                PermissionCapability::ShellUnparsed,
+                operation.source.clone(),
+                format!(
+                    "The command changes execution-affecting environment variables: {}.",
+                    generic_effects.unsafe_environment_keys.join(", ")
+                ),
+                false,
+            ));
+            continue;
+        }
+        for path in generic_effects.read_paths {
+            let permission = if command_changes_cwd && Path::new(&path).is_relative() {
+                PermissionCapability::ExternalDirectory
+            } else {
+                classify_literal_shell_path(&path, workspace_root, cwd, PermissionCapability::Read)
+                    .await
+            };
+            classifications.push(EffectClassification::new(
+                permission,
+                path,
+                "Read a literal path through a shell command",
+                false,
+            ));
+        }
+        for path in generic_effects.write_paths {
+            let permission = if command_changes_cwd && Path::new(&path).is_relative() {
+                PermissionCapability::ExternalDirectory
+            } else {
+                classify_literal_shell_path(&path, workspace_root, cwd, PermissionCapability::Edit)
+                    .await
+            };
+            classifications.push(EffectClassification::new(
+                permission,
+                path,
+                "Write a path through a command output option or operand",
+                false,
+            ));
+        }
+        let arguments = unwrap_process_wrappers(&operation.argv);
+        let Some(assessment) = classify_known_command(arguments) else {
+            classifications.push(EffectClassification::unknown_static(
+                operation.source.clone(),
+                "The shell command is unknown or could not be completely classified.",
             ));
             continue;
         };
         let permission = if assessment.permission == PermissionCapability::Edit {
-            classify_shell_write_scope(&operation.argv, workspace_root)
+            classify_shell_write_scope(arguments, workspace_root, cwd).await
         } else {
             assessment.permission
         };
@@ -548,11 +793,17 @@ fn classify_command(
         if redirect.operator == "<" {
             continue;
         }
-        let permission = classify_literal_shell_path(
-            &redirect.target,
-            workspace_root,
-            PermissionCapability::Edit,
-        );
+        let permission = if command_changes_cwd && Path::new(&redirect.target).is_relative() {
+            PermissionCapability::ExternalDirectory
+        } else {
+            classify_literal_shell_path(
+                &redirect.target,
+                workspace_root,
+                cwd,
+                PermissionCapability::Edit,
+            )
+            .await
+        };
         classifications.push(EffectClassification::new(
             permission,
             redirect.target.clone(),
@@ -591,18 +842,29 @@ fn permission_shell_kind(shell: &str) -> Option<PermissionShellKind> {
     }
 }
 
-fn classify_shell_write_scope(arguments: &[String], workspace_root: &Path) -> PermissionCapability {
-    if arguments.iter().skip(1).any(|argument| {
+async fn classify_shell_write_scope(
+    arguments: &[String],
+    workspace_root: &Path,
+    cwd: &str,
+) -> PermissionCapability {
+    for argument in arguments.iter().skip(1) {
         let candidate = argument.trim_matches(['\'', '"']);
         let path = PathBuf::from(candidate);
-        (path.is_absolute()
+        if (path.is_absolute()
             || path
                 .components()
                 .any(|component| component == std::path::Component::ParentDir))
-            && classify_literal_shell_path(candidate, workspace_root, PermissionCapability::Edit)
+            && classify_literal_shell_path(
+                candidate,
+                workspace_root,
+                cwd,
+                PermissionCapability::Edit,
+            )
+            .await
                 == PermissionCapability::ExternalDirectory
-    }) {
-        return PermissionCapability::ExternalDirectory;
+        {
+            return PermissionCapability::ExternalDirectory;
+        }
     }
     let executable = crate::permission::shell::policies::normalize_executable_name(
         arguments.first().map_or("", String::as_str),
@@ -629,44 +891,24 @@ fn classify_shell_write_scope(arguments: &[String], workspace_root: &Path) -> Pe
             positional.first().copied()
         }
     });
-    target.map_or(PermissionCapability::ExternalDirectory, |target| {
-        classify_literal_shell_path(target, workspace_root, PermissionCapability::Edit)
-    })
+    let Some(target) = target else {
+        return PermissionCapability::ExternalDirectory;
+    };
+    classify_literal_shell_path(target, workspace_root, cwd, PermissionCapability::Edit).await
 }
 
-fn classify_literal_shell_path(
+async fn classify_literal_shell_path(
     target: &str,
     workspace_root: &Path,
+    cwd: &str,
     inside_capability: PermissionCapability,
 ) -> PermissionCapability {
     let target = target.trim_matches(['\'', '"']);
     if target.is_empty() || target.contains(['$', '%', '*', '?']) {
         return PermissionCapability::ExternalDirectory;
     }
-    let requested = PathBuf::from(target);
-    if !requested.is_absolute() {
-        return if requested
-            .components()
-            .any(|component| component == std::path::Component::ParentDir)
-        {
-            PermissionCapability::ExternalDirectory
-        } else {
-            inside_capability
-        };
-    }
-    let normalized_target = requested
-        .to_string_lossy()
-        .replace('\\', "/")
-        .to_ascii_lowercase();
-    let normalized_workspace = workspace_root
-        .to_string_lossy()
-        .replace('\\', "/")
-        .trim_end_matches('/')
-        .to_ascii_lowercase();
-    if (normalized_target == normalized_workspace
-        || normalized_target.starts_with(&format!("{normalized_workspace}/")))
-        && !is_sensitive_path(&requested)
-    {
+    let impact = PathImpactAnalyzer::analyze(target, &workspace_root.to_string_lossy(), cwd).await;
+    if impact.inside_workspace && !impact.sensitive {
         inside_capability
     } else {
         PermissionCapability::ExternalDirectory
@@ -726,17 +968,44 @@ fn mode_name(mode: &crate::permission::decision::PermissionMode) -> &'static str
 mod tests {
     use std::sync::Arc;
 
+    use async_trait::async_trait;
     use codez_core::AtomicPersistence;
     use codez_storage::AtomicFileStore;
 
-    use super::{PermissionService, classify_effect};
+    use super::{
+        EffectClassification, PermissionService, ai_classification_request, classify_effect,
+    };
+    use crate::permission::ai_classifier::{
+        AiCommandCategory, PermissionAiClassifier, PermissionAiContext,
+        PermissionClassificationRequest, PermissionClassifierVerdict,
+    };
     use crate::permission::audit::PermissionAuditLog;
     use crate::permission::contract::PermissionCapability;
     use crate::permission::store::{PermissionRuleStore, WorkspacePermissionStore};
     use crate::tools::builtin::powershell::PowerShellTool;
     use crate::tools::types::{NormalizedToolCall, PreparedToolCall, ToolEffect, ToolEffectPlan};
 
+    #[derive(Clone)]
+    struct FixedAiClassifier(PermissionClassifierVerdict);
+
+    #[async_trait]
+    impl PermissionAiClassifier for FixedAiClassifier {
+        async fn classify(
+            &self,
+            _request: &PermissionClassificationRequest,
+        ) -> PermissionClassifierVerdict {
+            self.0.clone()
+        }
+    }
+
     async fn authorize_in_auto_mode(effect: ToolEffect) -> bool {
+        authorize_in_auto_mode_with_classifier(effect, None).await
+    }
+
+    async fn authorize_in_auto_mode_with_classifier(
+        effect: ToolEffect,
+        classifier: Option<Arc<dyn PermissionAiClassifier>>,
+    ) -> bool {
         let workspace = tempfile::tempdir().expect("temporary workspace must be available");
         let data = tempfile::tempdir().expect("temporary data root must be available");
         let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
@@ -752,6 +1021,11 @@ mod tests {
             PermissionAuditLog::new(data.path(), persistence).expect("audit log must be valid"),
         );
         let service = PermissionService::new(modes, rules, audit);
+        let service = if let Some(classifier) = classifier {
+            service.with_ai_classifier(classifier)
+        } else {
+            service
+        };
         let prepared = PreparedToolCall {
             call: NormalizedToolCall {
                 call_id: "call-1".to_string(),
@@ -778,14 +1052,82 @@ mod tests {
                 "main",
                 None,
                 None,
+                None,
             )
             .await
             .expect("permission evaluation must succeed")
             .authorized
     }
 
-    #[test]
-    fn read_memory_is_not_classified_as_an_external_filesystem_path() {
+    #[tokio::test]
+    async fn ai_request_contains_bounded_user_and_workspace_context() {
+        let workspace = tempfile::tempdir().expect("temporary workspace must be available");
+        std::fs::write(
+            workspace.path().join("Cargo.toml"),
+            "[package]\nname = \"demo\"\n",
+        )
+        .expect("project marker must be written");
+        std::fs::write(
+            workspace.path().join("AGENTS.md"),
+            "Run local verification before reporting completion.",
+        )
+        .expect("project instructions must be written");
+        let canonical_workspace =
+            std::fs::canonicalize(workspace.path()).expect("workspace must canonicalize");
+        let command = "custom-build verify";
+        let effect = ToolEffect::ExecuteCommand {
+            shell: "powershell".to_string(),
+            command: command.to_string(),
+            cwd: Some(canonical_workspace.to_string_lossy().to_string()),
+        };
+        let prepared = PreparedToolCall {
+            call: NormalizedToolCall {
+                call_id: "call-1".to_string(),
+                position: 0,
+                name: "PowerShell".to_string(),
+                raw_arguments: "{}".to_string(),
+                thought_signature: None,
+            },
+            canonical_name: "PowerShell".to_string(),
+            handler: Arc::new(PowerShellTool::new()),
+            input: serde_json::json!({}),
+            effects: ToolEffectPlan {
+                effects: vec![effect.clone()],
+                analysis_status: "parsed".to_string(),
+            },
+            resource_keys: Vec::new(),
+        };
+        let context = PermissionAiContext {
+            provider_id: Some("provider-1".to_string()),
+            model: Some("model-1".to_string()),
+            user_intent: Some("验证这个 Rust 项目".repeat(2_000)),
+        };
+        let request = ai_classification_request(
+            &prepared,
+            &effect,
+            &canonical_workspace,
+            Some("session-1"),
+            "main",
+            &EffectClassification::unknown_static(command, "unknown static command"),
+            Some(&context),
+        )
+        .await
+        .expect("shell command must produce an AI request");
+
+        assert_eq!(request.provider_id.as_deref(), Some("provider-1"));
+        assert_eq!(request.model.as_deref(), Some("model-1"));
+        assert!(request.project_markers.contains(&"Cargo.toml".to_string()));
+        assert_eq!(request.project_instructions[0].path, "AGENTS.md");
+        assert!(
+            request
+                .user_intent
+                .as_ref()
+                .is_some_and(|intent| intent.len() <= super::MAX_AI_USER_INTENT_BYTES)
+        );
+    }
+
+    #[tokio::test]
+    async fn read_memory_is_not_classified_as_an_external_filesystem_path() {
         let workspace = std::path::Path::new("C:\\workspace");
 
         let classified = classify_effect(
@@ -793,14 +1135,15 @@ mod tests {
                 path: "session:session-a:tool-results".to_string(),
             },
             workspace,
-        );
+        )
+        .await;
 
         assert_eq!(classified.len(), 1);
         assert_eq!(classified[0].permission, PermissionCapability::Read);
     }
 
-    #[test]
-    fn internal_runtime_state_uses_the_read_only_permission_capability() {
+    #[tokio::test]
+    async fn internal_runtime_state_uses_the_read_only_permission_capability() {
         let workspace = std::path::Path::new("C:\\workspace");
 
         let classified = classify_effect(
@@ -808,13 +1151,14 @@ mod tests {
                 target: "session:session-a:tool-exposure".to_string(),
             },
             workspace,
-        );
+        )
+        .await;
 
         assert_eq!(classified[0].permission, PermissionCapability::Read);
     }
 
-    #[test]
-    fn restricted_agent_spawn_uses_the_read_only_permission_capability() {
+    #[tokio::test]
+    async fn restricted_agent_spawn_uses_the_read_only_permission_capability() {
         let classified = classify_effect(
             &ToolEffect::SpawnAgent {
                 role: "Explore".to_string(),
@@ -822,13 +1166,14 @@ mod tests {
                 read_only: true,
             },
             std::path::Path::new("C:\\workspace"),
-        );
+        )
+        .await;
 
         assert_eq!(classified[0].permission, PermissionCapability::Read);
     }
 
-    #[test]
-    fn shell_enabled_agent_spawn_remains_an_external_effect() {
+    #[tokio::test]
+    async fn shell_enabled_agent_spawn_remains_an_external_effect() {
         let classified = classify_effect(
             &ToolEffect::SpawnAgent {
                 role: "Explore".to_string(),
@@ -836,7 +1181,8 @@ mod tests {
                 read_only: false,
             },
             std::path::Path::new("C:\\workspace"),
-        );
+        )
+        .await;
 
         assert_eq!(
             classified[0].permission,
@@ -844,15 +1190,17 @@ mod tests {
         );
     }
 
-    #[test]
-    fn cargo_clippy_is_fully_classified() {
+    #[tokio::test]
+    async fn cargo_clippy_is_fully_classified() {
         let classified = classify_effect(
             &ToolEffect::ExecuteCommand {
                 shell: "powershell".to_string(),
                 command: "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings".to_string(),
+                cwd: None,
             },
             std::path::Path::new("C:\\workspace"),
-        );
+        )
+        .await;
 
         assert!(
             !classified.is_empty()
@@ -862,15 +1210,17 @@ mod tests {
         );
     }
 
-    #[test]
-    fn compound_read_only_git_commands_are_fully_classified() {
+    #[tokio::test]
+    async fn compound_read_only_git_commands_are_fully_classified() {
         let classified = classify_effect(
             &ToolEffect::ExecuteCommand {
                 shell: "powershell".to_string(),
                 command: "git status --short; git log -5 --oneline --decorate".to_string(),
+                cwd: None,
             },
             std::path::Path::new("C:\\workspace"),
-        );
+        )
+        .await;
 
         assert!(
             classified.len() == 2
@@ -880,52 +1230,68 @@ mod tests {
         );
     }
 
-    #[test]
-    fn powershell_read_pipeline_is_fully_classified() {
+    #[tokio::test]
+    async fn powershell_read_pipeline_is_fully_classified() {
+        let workspace = tempfile::tempdir().expect("workspace must exist");
         let classified = classify_effect(
             &ToolEffect::ExecuteCommand {
                 shell: "powershell".to_string(),
                 command: "Get-ChildItem -Recurse src,src-tauri/src,src-tauri/tests -File | Select-Object FullName,Length | Format-Table -AutoSize".to_string(),
+                cwd: None,
             },
-            std::path::Path::new("C:\\workspace"),
-        );
+            workspace.path(),
+        )
+        .await;
 
         assert!(
-            classified.len() == 3
-                && classified
-                    .iter()
-                    .all(|item| item.permission == PermissionCapability::Shell)
+            classified.len() >= 3
+                && classified.iter().all(|item| {
+                    matches!(
+                        item.permission,
+                        PermissionCapability::Read | PermissionCapability::Shell
+                    )
+                }),
+            "unexpected classifications: {classified:?}"
         );
     }
 
-    #[test]
-    fn powershell_read_control_flow_is_fully_classified() {
+    #[tokio::test]
+    async fn powershell_read_control_flow_is_fully_classified() {
+        let workspace = tempfile::tempdir().expect("workspace must exist");
         let command = r#"$patterns = @('README*','.github/**/*','scripts/**/*','docs/testing/**/*','src/**/*.css','src/**/*.scss'); foreach ($pattern in $patterns) { "===== $pattern ====="; $matches = @(Get-ChildItem -Path $pattern -File -Recurse -ErrorAction SilentlyContinue); if ($matches.Count -eq 0) { '(none)' } else { $matches | ForEach-Object { $_.FullName.Substring((Get-Location).Path.Length + 1) } } }; "===== root ====="; Get-ChildItem -Force | Select-Object Mode,Name | Format-Table -AutoSize"#;
         let classified = classify_effect(
             &ToolEffect::ExecuteCommand {
                 shell: "powershell".to_string(),
                 command: command.to_string(),
+                cwd: None,
             },
-            std::path::Path::new("C:\\workspace"),
-        );
+            workspace.path(),
+        )
+        .await;
 
         assert!(
             !classified.is_empty()
-                && classified
-                    .iter()
-                    .all(|item| item.permission == PermissionCapability::Shell)
+                && classified.iter().all(|item| {
+                    matches!(
+                        item.permission,
+                        PermissionCapability::Read | PermissionCapability::Shell
+                    )
+                }),
+            "unexpected classifications: {classified:?}"
         );
     }
 
-    #[test]
-    fn mixed_compound_commands_preserve_the_riskiest_operation() {
+    #[tokio::test]
+    async fn mixed_compound_commands_preserve_the_riskiest_operation() {
         let classified = classify_effect(
             &ToolEffect::ExecuteCommand {
                 shell: "powershell".to_string(),
                 command: "git status; npm install react".to_string(),
+                cwd: None,
             },
             std::path::Path::new("C:\\workspace"),
-        );
+        )
+        .await;
 
         assert!(
             classified
@@ -934,15 +1300,17 @@ mod tests {
         );
     }
 
-    #[test]
-    fn compound_commands_do_not_hide_delete_operations() {
+    #[tokio::test]
+    async fn compound_commands_do_not_hide_delete_operations() {
         let classified = classify_effect(
             &ToolEffect::ExecuteCommand {
                 shell: "powershell".to_string(),
                 command: "Get-ChildItem src; Remove-Item -Recurse generated".to_string(),
+                cwd: None,
             },
             std::path::Path::new("C:\\workspace"),
-        );
+        )
+        .await;
 
         assert!(
             classified
@@ -951,17 +1319,19 @@ mod tests {
         );
     }
 
-    #[test]
-    fn output_redirection_to_an_external_path_fails_closed() {
+    #[tokio::test]
+    async fn output_redirection_to_an_external_path_fails_closed() {
         let external = std::env::temp_dir().join("codez-external-output.txt");
         let command = format!("Get-Content README.md > '{}'", external.to_string_lossy());
         let classified = classify_effect(
             &ToolEffect::ExecuteCommand {
                 shell: "powershell".to_string(),
                 command,
+                cwd: None,
             },
             std::path::Path::new("C:\\workspace"),
-        );
+        )
+        .await;
 
         assert!(
             classified
@@ -970,21 +1340,142 @@ mod tests {
         );
     }
 
-    #[test]
-    fn dynamic_powershell_invocations_fail_closed() {
+    #[tokio::test]
+    async fn dynamic_powershell_invocations_fail_closed() {
         let classified = classify_effect(
             &ToolEffect::ExecuteCommand {
                 shell: "powershell".to_string(),
                 command: "& $command --flag".to_string(),
+                cwd: None,
             },
             std::path::Path::new("C:\\workspace"),
-        );
+        )
+        .await;
 
         assert!(
             classified
                 .iter()
                 .any(|item| item.permission == PermissionCapability::ShellUnparsed)
         );
+    }
+
+    #[tokio::test]
+    async fn execution_affecting_environment_fails_closed_before_command_allowlists() {
+        let classified = classify_effect(
+            &ToolEffect::ExecuteCommand {
+                shell: "bash".to_string(),
+                command: "LD_PRELOAD=/tmp/inject.so ls".to_string(),
+                cwd: None,
+            },
+            std::path::Path::new("C:\\workspace"),
+        )
+        .await;
+
+        assert!(classified.iter().any(|item| {
+            item.permission == PermissionCapability::ShellUnparsed && !item.ai_eligible
+        }));
+    }
+
+    #[tokio::test]
+    async fn command_output_option_to_external_path_fails_closed() {
+        let workspace = tempfile::tempdir().expect("workspace must exist");
+        let external = tempfile::tempdir().expect("external directory must exist");
+        let output = external.path().join("sorted.txt");
+        let classified = classify_effect(
+            &ToolEffect::ExecuteCommand {
+                shell: "bash".to_string(),
+                command: format!("sort input.txt -o '{}'", output.to_string_lossy()),
+                cwd: Some(workspace.path().to_string_lossy().to_string()),
+            },
+            workspace.path(),
+        )
+        .await;
+
+        assert!(
+            classified
+                .iter()
+                .any(|item| item.permission == PermissionCapability::ExternalDirectory)
+        );
+    }
+
+    #[tokio::test]
+    async fn read_command_targeting_external_literal_path_fails_closed() {
+        let workspace = tempfile::tempdir().expect("workspace must exist");
+        let external = tempfile::NamedTempFile::new().expect("external file must exist");
+        let classified = classify_effect(
+            &ToolEffect::ExecuteCommand {
+                shell: "powershell".to_string(),
+                command: format!("Get-Content '{}'", external.path().to_string_lossy()),
+                cwd: Some(workspace.path().to_string_lossy().to_string()),
+            },
+            workspace.path(),
+        )
+        .await;
+
+        assert!(
+            classified
+                .iter()
+                .any(|item| item.permission == PermissionCapability::ExternalDirectory)
+        );
+    }
+
+    #[tokio::test]
+    async fn destructive_git_branch_delete_requires_approval() {
+        let classified = classify_effect(
+            &ToolEffect::ExecuteCommand {
+                shell: "powershell".to_string(),
+                command: "git branch -D obsolete".to_string(),
+                cwd: None,
+            },
+            std::path::Path::new("C:\\workspace"),
+        )
+        .await;
+
+        assert!(
+            classified
+                .iter()
+                .any(|item| item.permission == PermissionCapability::Delete)
+        );
+    }
+
+    #[tokio::test]
+    async fn high_confidence_ai_local_build_can_allow_unknown_static_command() {
+        let classifier: Arc<dyn PermissionAiClassifier> =
+            Arc::new(FixedAiClassifier(PermissionClassifierVerdict::Allow {
+                category: AiCommandCategory::LocalBuild,
+                confidence_percent: 95,
+                reason: "matches the requested local verification".to_string(),
+            }));
+        let authorized = authorize_in_auto_mode_with_classifier(
+            ToolEffect::ExecuteCommand {
+                shell: "powershell".to_string(),
+                command: "company-build-tool verify --workspace app".to_string(),
+                cwd: None,
+            },
+            Some(classifier),
+        )
+        .await;
+
+        assert!(authorized);
+    }
+
+    #[tokio::test]
+    async fn ai_block_does_not_allow_unknown_static_command() {
+        let classifier: Arc<dyn PermissionAiClassifier> =
+            Arc::new(FixedAiClassifier(PermissionClassifierVerdict::Block {
+                reason: "cannot prove this is local".to_string(),
+            }));
+        let authorized = authorize_in_auto_mode_with_classifier(
+            ToolEffect::ExecuteCommand {
+                shell: "powershell".to_string(),
+                command: "company-deploy production --force".to_string(),
+                cwd: None,
+            },
+            Some(classifier),
+        )
+        .await;
+
+        assert!(!authorized);
     }
 
     #[tokio::test]
@@ -997,6 +1488,7 @@ mod tests {
                 authorize_in_auto_mode(ToolEffect::ExecuteCommand {
                     shell: "powershell".to_string(),
                     command: command.to_string(),
+                    cwd: None,
                 })
                 .await,
                 "command should be authorized in auto mode: {command}"

@@ -22,6 +22,7 @@ pub struct NormalizedOperation {
     pub source: String,
     pub executable: String,
     pub argv: Vec<String>,
+    pub environment_keys: Vec<String>,
     pub dynamic: bool,
     pub children: Vec<NormalizedOperation>,
 }

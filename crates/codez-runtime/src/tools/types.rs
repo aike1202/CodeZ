@@ -76,6 +76,8 @@ pub enum ToolEffect {
     ExecuteCommand {
         shell: String,
         command: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cwd: Option<String>,
     }, // bash | powershell
     Network {
         target: Option<String>,

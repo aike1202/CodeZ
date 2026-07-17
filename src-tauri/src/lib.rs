@@ -17,6 +17,7 @@ mod mcp_boundary;
 mod mcp_interaction;
 mod mcp_runtime;
 mod notification_tool_runtime;
+mod permission_ai_classifier;
 mod provider_boundary;
 mod session_deletion;
 mod skill_document;

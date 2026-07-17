@@ -30,6 +30,7 @@ use crate::{
     mcp_boundary::StorageMcpSecretStore,
     mcp_runtime::McpRuntimeManager,
     notification_tool_runtime::TauriNotificationPort,
+    permission_ai_classifier::ProviderPermissionAiClassifier,
     provider_boundary::{StorageProviderCredentials, StorageProviderRepository},
     session_deletion::{SessionDeletionDependencies, desktop_session_deletion_operations},
     state::AppState,
@@ -200,6 +201,9 @@ pub(crate) fn compose_app_state(
             agent_runtime: Arc::clone(&agent_runtime),
             process_runner: Arc::clone(&process_runner),
             notification_port: Arc::new(TauriNotificationPort::new(app.handle().clone())),
+            permission_ai_classifier: Some(Arc::new(ProviderPermissionAiClassifier::new(
+                Arc::clone(&provider_service),
+            ))),
         },
     )?);
     let attachment = Arc::new(codez_runtime::attachment::AttachmentService::new(

@@ -218,14 +218,14 @@ fn powershell_invocation_is_pure(node: Node<'_>, source: &str) -> bool {
 
 fn operation(source: &str, shell: PermissionShellKind) -> NormalizedOperation {
     let raw_argv = tokenize_words(source, &shell);
-    let argv = match shell {
-        PermissionShellKind::Bash => strip_leading_bash_assignments(raw_argv),
+    let (environment_keys, argv) = match shell {
+        PermissionShellKind::Bash => split_leading_bash_assignments(raw_argv),
         PermissionShellKind::Powershell
             if matches!(raw_argv.first().map(String::as_str), Some("&" | ".")) =>
         {
-            raw_argv.into_iter().skip(1).collect()
+            (Vec::new(), raw_argv.into_iter().skip(1).collect())
         }
-        PermissionShellKind::Powershell | PermissionShellKind::Cmd => raw_argv,
+        PermissionShellKind::Powershell | PermissionShellKind::Cmd => (Vec::new(), raw_argv),
     };
     let executable = argv.first().cloned().unwrap_or_default();
     let dynamic = argv.is_empty()
@@ -236,6 +236,7 @@ fn operation(source: &str, shell: PermissionShellKind) -> NormalizedOperation {
         source: source.to_string(),
         executable,
         argv,
+        environment_keys,
         dynamic,
         children: Vec::new(),
     }
@@ -297,7 +298,7 @@ fn tokenize_words(source: &str, shell: &PermissionShellKind) -> Vec<String> {
     tokens
 }
 
-fn strip_leading_bash_assignments(arguments: Vec<String>) -> Vec<String> {
+fn split_leading_bash_assignments(arguments: Vec<String>) -> (Vec<String>, Vec<String>) {
     let command_index = arguments.iter().position(|argument| {
         let Some((name, _)) = argument.split_once('=') else {
             return true;
@@ -308,9 +309,13 @@ fn strip_leading_bash_assignments(arguments: Vec<String>) -> Vec<String> {
             .is_none_or(|first| !(first == '_' || first.is_ascii_alphabetic()))
             || characters.any(|character| !(character == '_' || character.is_ascii_alphanumeric()))
     });
-    command_index.map_or_else(Vec::new, |index| {
-        arguments.into_iter().skip(index).collect()
-    })
+    let index = command_index.unwrap_or(arguments.len());
+    let environment_keys = arguments[..index]
+        .iter()
+        .filter_map(|argument| argument.split_once('=').map(|(key, _)| key.to_string()))
+        .collect();
+    let argv = arguments.into_iter().skip(index).collect();
+    (environment_keys, argv)
 }
 
 fn normalized_executable(raw: &str) -> String {

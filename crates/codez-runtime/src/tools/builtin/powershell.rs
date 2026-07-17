@@ -159,14 +159,26 @@ impl ToolHandler for PowerShellTool {
     fn plan_effects<'a>(
         &'a self,
         input: &'a Value,
-        _context: &'a ToolPlanningContext,
+        context: &'a ToolPlanningContext,
     ) -> BoxFuture<'a, ToolEffectPlan> {
         Box::pin(async move {
             if let Some(command) = input.get("command").and_then(Value::as_str) {
+                let cwd = context
+                    .session_id
+                    .as_deref()
+                    .and_then(|session_id| {
+                        self.host.as_ref().and_then(|host| {
+                            host.workspace
+                                .current_directory(session_id, &context.workspace_root)
+                                .ok()
+                        })
+                    })
+                    .unwrap_or_else(|| context.workspace_root.clone());
                 ToolEffectPlan {
                     effects: vec![ToolEffect::ExecuteCommand {
                         shell: "powershell".to_string(),
                         command: command.to_string(),
+                        cwd: Some(cwd.to_string_lossy().to_string()),
                     }],
                     analysis_status: "parsed".to_string(),
                 }
@@ -233,130 +245,147 @@ impl ToolHandler for PowerShellTool {
                 shell: ShellKind::PowerShell,
             };
 
-            let result = match (command, task_id) {
-                (Some(_), Some(_)) => {
-                    return execution_error(
-                        "TOOL_INPUT_INVALID",
-                        "command and task_id cannot be used together",
-                        true,
-                    );
-                }
-                (None, Some(task_id)) => {
-                    if task_id.trim().is_empty() {
+            let result =
+                match (command, task_id) {
+                    (Some(_), Some(_)) => {
                         return execution_error(
                             "TOOL_INPUT_INVALID",
-                            "task_id cannot be empty",
+                            "command and task_id cannot be used together",
                             true,
                         );
                     }
-                    if background {
-                        return execution_error(
-                            "TOOL_INPUT_INVALID",
-                            "run_in_background cannot be used with task_id",
-                            true,
-                        );
-                    }
-                    match action {
-                        Some("wait") => {
-                            host.registry
-                                .wait_or_interrupt(
-                                    access,
-                                    task_id,
-                                    Duration::from_millis(timeout_ms),
-                                    &context.cancellation,
-                                )
-                                .await
-                        }
-                        Some("interrupt") => host.registry.interrupt(access, task_id).await,
-                        Some(_) => {
+                    (None, Some(task_id)) => {
+                        if task_id.trim().is_empty() {
                             return execution_error(
                                 "TOOL_INPUT_INVALID",
-                                "action must be wait or interrupt",
+                                "task_id cannot be empty",
                                 true,
                             );
                         }
-                        None => {
+                        if background {
                             return execution_error(
                                 "TOOL_INPUT_INVALID",
-                                "action is required with task_id",
+                                "run_in_background cannot be used with task_id",
                                 true,
                             );
                         }
-                    }
-                }
-                (Some(command), None) => {
-                    if command.trim().is_empty() {
-                        return execution_error(
-                            "TOOL_INPUT_INVALID",
-                            "command cannot be empty",
-                            true,
-                        );
-                    }
-                    if action.is_some() {
-                        return execution_error(
-                            "TOOL_INPUT_INVALID",
-                            "action requires task_id",
-                            true,
-                        );
-                    }
-                    let approved = context.authorized_effects.effects.iter().any(|effect| {
-                        matches!(effect, ToolEffect::ExecuteCommand { shell, command: approved } if shell == "powershell" && approved == command)
-                    });
-                    if !approved {
-                        return execution_error(
-                            "TOOL_COMMAND_NOT_AUTHORIZED",
-                            "The command changed after authorization.",
-                            false,
-                        );
-                    }
-                    let current_directory = match host
-                        .workspace
-                        .current_directory(session_id, &context.workspace_root)
-                    {
-                        Ok(current_directory) => current_directory,
-                        Err(error) => return workspace_error(error),
-                    };
-                    let executed_command = format!("{UTF8_SETUP}\n{command}");
-                    let result = host
-                        .registry
-                        .run(
-                            CommandRequest {
-                                command: executed_command,
-                                session_id: session_id.to_string(),
-                                shell: ShellKind::PowerShell,
-                                executable: host.executable.clone(),
-                                current_directory: current_directory.clone(),
-                                environment: host.environment.clone(),
-                                wait_window: Duration::from_millis(timeout_ms),
-                                background,
-                            },
-                            &context.cancellation,
-                        )
-                        .await;
-                    if result.as_ref().is_ok_and(|result| {
-                        !background && result.status == CommandTaskStatus::Completed
-                    }) {
-                        if let Some(requested) = literal_location_target(command) {
-                            if let Err(error) = host.workspace.remember_working_directory(
-                                session_id,
-                                &context.workspace_root,
-                                &current_directory,
-                                Path::new(&requested),
-                            ) {
-                                return workspace_error(error);
+                        match action {
+                            Some("wait") => {
+                                host.registry
+                                    .wait_or_interrupt(
+                                        access,
+                                        task_id,
+                                        Duration::from_millis(timeout_ms),
+                                        &context.cancellation,
+                                    )
+                                    .await
+                            }
+                            Some("interrupt") => host.registry.interrupt(access, task_id).await,
+                            Some(_) => {
+                                return execution_error(
+                                    "TOOL_INPUT_INVALID",
+                                    "action must be wait or interrupt",
+                                    true,
+                                );
+                            }
+                            None => {
+                                return execution_error(
+                                    "TOOL_INPUT_INVALID",
+                                    "action is required with task_id",
+                                    true,
+                                );
                             }
                         }
                     }
-                    result
-                }
-                (None, None) => {
-                    return execution_error(
-                        "TOOL_INPUT_INVALID",
-                        "command is required for a new command",
-                        true,
-                    );
-                }
-            };
+                    (Some(command), None) => {
+                        if command.trim().is_empty() {
+                            return execution_error(
+                                "TOOL_INPUT_INVALID",
+                                "command cannot be empty",
+                                true,
+                            );
+                        }
+                        if action.is_some() {
+                            return execution_error(
+                                "TOOL_INPUT_INVALID",
+                                "action requires task_id",
+                                true,
+                            );
+                        }
+                        let approved_cwd = context.authorized_effects.effects.iter().find_map(
+                            |effect| match effect {
+                                ToolEffect::ExecuteCommand {
+                                    shell,
+                                    command: approved,
+                                    cwd,
+                                } if shell == "powershell" && approved == command => cwd.as_deref(),
+                                _ => None,
+                            },
+                        );
+                        if approved_cwd.is_none() {
+                            return execution_error(
+                                "TOOL_COMMAND_NOT_AUTHORIZED",
+                                "The command changed after authorization.",
+                                false,
+                            );
+                        }
+                        let current_directory = match host
+                            .workspace
+                            .current_directory(session_id, &context.workspace_root)
+                        {
+                            Ok(current_directory) => current_directory,
+                            Err(error) => return workspace_error(error),
+                        };
+                        if approved_cwd
+                            .is_none_or(|approved| Path::new(approved) != current_directory)
+                        {
+                            return execution_error(
+                                "TOOL_COMMAND_NOT_AUTHORIZED",
+                                "The shell working directory changed after authorization.",
+                                false,
+                            );
+                        }
+                        let executed_command = format!("{UTF8_SETUP}\n{command}");
+                        let result = host
+                            .registry
+                            .run(
+                                CommandRequest {
+                                    command: executed_command,
+                                    session_id: session_id.to_string(),
+                                    shell: ShellKind::PowerShell,
+                                    executable: host.executable.clone(),
+                                    current_directory: current_directory.clone(),
+                                    environment: host.environment.clone(),
+                                    wait_window: Duration::from_millis(timeout_ms),
+                                    background,
+                                },
+                                &context.cancellation,
+                            )
+                            .await;
+                        if result.as_ref().is_ok_and(|result| {
+                            !background && result.status == CommandTaskStatus::Completed
+                        }) {
+                            if let Some(requested) = literal_location_target(command) {
+                                if let Err(error) = host.workspace.remember_working_directory(
+                                    session_id,
+                                    &context.workspace_root,
+                                    &current_directory,
+                                    Path::new(&requested),
+                                ) {
+                                    return workspace_error(error);
+                                }
+                            }
+                        }
+                        result
+                    }
+                    (None, None) => {
+                        return execution_error(
+                            "TOOL_INPUT_INVALID",
+                            "command is required for a new command",
+                            true,
+                        );
+                    }
+                };
             match result {
                 Ok(result) => command_result(result),
                 Err(CommandTaskError::Cancelled) => cancelled_result(),
@@ -800,10 +829,20 @@ mod tests {
     }
 
     fn context_for_command(root: &Path, session_id: &str, command: &str) -> ToolContext {
-        let mut context = context_path(root, Some(session_id));
+        context_for_command_at(root, root, session_id, command)
+    }
+
+    fn context_for_command_at(
+        workspace_root: &Path,
+        authorized_cwd: &Path,
+        session_id: &str,
+        command: &str,
+    ) -> ToolContext {
+        let mut context = context_path(workspace_root, Some(session_id));
         context.authorized_effects.effects = vec![ToolEffect::ExecuteCommand {
             shell: "powershell".to_string(),
             command: command.to_string(),
+            cwd: Some(authorized_cwd.to_string_lossy().to_string()),
         }];
         context
     }
@@ -856,6 +895,7 @@ mod tests {
             vec![ToolEffect::ExecuteCommand {
                 shell: "powershell".to_string(),
                 command: command.to_string(),
+                cwd: Some(planning.workspace_root.to_string_lossy().to_string()),
             }]
         );
     }
@@ -1173,7 +1213,7 @@ mod tests {
             .tool
             .execute(
                 &serde_json::json!({"command": second_command}),
-                &context_for_command(workspace.path(), "session-a", second_command),
+                &context_for_command_at(workspace.path(), &nested, "session-a", second_command),
             )
             .await;
         let requests = harness

@@ -579,6 +579,7 @@ impl ToolExecutionPipelineContext for TestContext {
                 self.session_id(),
                 self.agent_role(),
                 None,
+                None,
                 self.approval.as_deref(),
             )
             .await

@@ -27,6 +27,7 @@ use codez_runtime::{
     fingerprint::ReadFingerprintStore,
     mutation_coordinator::FileMutationCoordinator,
     permission::{
+        ai_classifier::{PermissionAiClassifier, PermissionAiContext},
         audit::{PermissionAuditError, PermissionAuditLog},
         service::{PermissionApprovalHandler, PermissionService},
         store::{PermissionRuleStore, PermissionStoreError, WorkspacePermissionStore},
@@ -134,6 +135,7 @@ pub(crate) struct ChatToolRunContext {
     context_scope_id: ContextScopeId,
     transaction_id: String,
     agent_policy: Option<AgentToolPolicy>,
+    permission_ai_context: PermissionAiContext,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -150,6 +152,7 @@ struct AgentRunContextInput {
     role: AgentRole,
     context_scope_id: ContextScopeId,
     policy: AgentToolPolicy,
+    permission_ai_context: PermissionAiContext,
 }
 
 #[derive(Default)]
@@ -164,12 +167,17 @@ impl ChatToolRunContext {
     ///
     /// Returns [`ChatToolRunContextError`] when the role cannot safely label audit and journal
     /// entries.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "run authority and interaction dependencies remain explicit at construction"
+    )]
     pub(crate) fn new(
         workspace_root: WorkspaceRoot,
         session_id: SessionId,
         run_id: StreamId,
         cancellation: CancellationToken,
         agent_role: AgentRole,
+        permission_ai_context: PermissionAiContext,
         approval_handler: Option<Arc<dyn PermissionApprovalHandler>>,
         ask_user_handler: Option<Arc<dyn AskUserHandler>>,
     ) -> Result<Self, ChatToolRunContextError> {
@@ -186,6 +194,7 @@ impl ChatToolRunContext {
             context_scope_id: ContextScopeId::Main,
             transaction_id: format!("tx_{}", uuid::Uuid::new_v4()),
             agent_policy: None,
+            permission_ai_context,
         })
     }
 
@@ -198,6 +207,7 @@ impl ChatToolRunContext {
             role,
             context_scope_id,
             policy,
+            permission_ai_context,
         } = input;
         validate_agent_role(&role)?;
         Ok(Self {
@@ -212,6 +222,7 @@ impl ChatToolRunContext {
             context_scope_id,
             transaction_id: format!("tx_{}", uuid::Uuid::new_v4()),
             agent_policy: Some(policy),
+            permission_ai_context,
         })
     }
 
@@ -323,6 +334,7 @@ pub(crate) struct ChatToolRuntimeDependencies {
     pub(crate) agent_runtime: Arc<AgentRuntime>,
     pub(crate) process_runner: Arc<NativeProcessRunner>,
     pub(crate) notification_port: Arc<dyn NotificationPort>,
+    pub(crate) permission_ai_classifier: Option<Arc<dyn PermissionAiClassifier>>,
 }
 
 impl ChatToolRuntime {
@@ -351,6 +363,7 @@ impl ChatToolRuntime {
             agent_runtime,
             process_runner,
             notification_port,
+            permission_ai_classifier,
         } = dependencies;
         let data_root = paths.data_directory();
         let rules = Arc::new(PermissionRuleStore::new(
@@ -361,7 +374,13 @@ impl ChatToolRuntime {
             data_root,
             Arc::clone(&persistence),
         )?);
-        let permission = Arc::new(PermissionService::new(workspace_permissions, rules, audit));
+        let permission = PermissionService::new(workspace_permissions, rules, audit);
+        let permission = if let Some(classifier) = permission_ai_classifier {
+            permission.with_ai_classifier(classifier)
+        } else {
+            permission
+        };
+        let permission = Arc::new(permission);
         let resources = ResourceLocator::new(paths.resource_directory().to_path_buf());
         let web_search = Arc::new(WebTool::search(data_root, Arc::clone(&storage)));
         let web_fetch = Arc::new(WebTool::fetch(data_root, Arc::clone(&storage)));
@@ -453,6 +472,10 @@ impl ChatToolRuntime {
         Arc::clone(&self.skills)
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Agent authority and classifier context remain explicit at the boundary"
+    )]
     pub(crate) fn agent_run_context(
         &self,
         workspace_root: WorkspaceRoot,
@@ -461,6 +484,7 @@ impl ChatToolRuntime {
         cancellation: CancellationToken,
         role: &str,
         context_scope_id: ContextScopeId,
+        permission_ai_context: PermissionAiContext,
     ) -> Result<ChatToolRunContext, AppError> {
         let policy = match role {
             "Explore" => AgentToolPolicy::Explore,
@@ -475,6 +499,7 @@ impl ChatToolRuntime {
             role: role.to_string(),
             context_scope_id,
             policy,
+            permission_ai_context,
         })
         .map_err(|error| AppError::validation(error.to_string()))
     }
@@ -1075,6 +1100,7 @@ impl ToolExecutionPipelineContext for PipelineContext<'_> {
                     Some(self.run.session_id.as_str()),
                     &self.run.agent_role,
                     None,
+                    Some(&self.run.permission_ai_context),
                     self.run.approval_handler.as_deref(),
                 )
                 .await
@@ -1107,7 +1133,7 @@ mod tests {
             AgentAttemptExecutor, AgentAttemptOutput, AgentAttemptRequest, AgentRuntime,
         },
         context::{budget::ContextBudgetService, ledger::ModelLedgerStore},
-        permission::store::WorkspacePermissionStore,
+        permission::{ai_classifier::PermissionAiContext, store::WorkspacePermissionStore},
         tools::large_result::LargeToolResultStore,
         tools::types::{NormalizedToolCall, ToolExecutionResult},
     };
@@ -1190,6 +1216,7 @@ mod tests {
                     agent_runtime,
                     process_runner: Arc::new(codez_platform::NativeProcessRunner::new()),
                     notification_port: Arc::new(UnsupportedNotificationPort),
+                    permission_ai_classifier: None,
                 },
             )
             .expect("fixture tool runtime must compose");
@@ -1259,6 +1286,7 @@ mod tests {
                 StreamId::parse("run-1").expect("fixture run id must be valid"),
                 CancellationToken::new(),
                 "main".to_string(),
+                PermissionAiContext::default(),
                 None,
                 ask_user_handler,
             )
@@ -1280,6 +1308,7 @@ mod tests {
                     CancellationToken::new(),
                     role,
                     ContextScopeId::Subagent(format!("agent-{role}")),
+                    PermissionAiContext::default(),
                 )
                 .expect("fixture Agent context must be valid")
         }
@@ -2182,6 +2211,7 @@ mod tests {
             StreamId::parse("run-1").expect("fixture run id must be valid"),
             CancellationToken::new(),
             "main".to_string(),
+            PermissionAiContext::default(),
             None,
             None,
         )

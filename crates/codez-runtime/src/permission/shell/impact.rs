@@ -77,7 +77,6 @@ impl PathImpactAnalyzer {
             .to_string_lossy()
             .replace("\\", "/")
             .to_lowercase();
-        // Regex isn't matching perfectly without 'estimés' artifacts, fixing regex literal:
         let sensitive = SENSITIVE_PATTERN
             .as_ref()
             .is_ok_and(|pattern| pattern.is_match(&normalized));
@@ -89,5 +88,57 @@ impl PathImpactAnalyzer {
             inside_workspace,
             sensitive,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+    use std::path::Path;
+
+    use super::PathImpactAnalyzer;
+
+    #[cfg(unix)]
+    fn symlink_file(target: &Path, link: &Path) -> io::Result<()> {
+        std::os::unix::fs::symlink(target, link)
+    }
+
+    #[cfg(windows)]
+    fn symlink_file(target: &Path, link: &Path) -> io::Result<()> {
+        std::os::windows::fs::symlink_file(target, link)
+    }
+
+    #[tokio::test]
+    async fn symlink_target_outside_workspace_is_external() {
+        let workspace = tempfile::tempdir().expect("workspace must exist");
+        let external = tempfile::tempdir().expect("external directory must exist");
+        let external_file = external.path().join("outside.txt");
+        std::fs::write(&external_file, "outside").expect("external fixture must be written");
+        let link = workspace.path().join("linked.txt");
+        if let Err(error) = symlink_file(&external_file, &link) {
+            assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+            return;
+        }
+
+        let impact = PathImpactAnalyzer::analyze(
+            &link.to_string_lossy(),
+            &workspace.path().to_string_lossy(),
+            &workspace.path().to_string_lossy(),
+        )
+        .await;
+        assert!(!impact.inside_workspace);
+    }
+
+    #[tokio::test]
+    async fn sensitive_path_inside_workspace_is_still_sensitive() {
+        let workspace = tempfile::tempdir().expect("workspace must exist");
+        let target = workspace.path().join(".ssh").join("config");
+        let impact = PathImpactAnalyzer::analyze(
+            &target.to_string_lossy(),
+            &workspace.path().to_string_lossy(),
+            &workspace.path().to_string_lossy(),
+        )
+        .await;
+        assert!(impact.inside_workspace && impact.sensitive);
     }
 }

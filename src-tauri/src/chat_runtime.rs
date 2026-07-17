@@ -85,6 +85,7 @@ use codez_runtime::{
     edit_transaction::{EditTransactionRegistration, EditTransactionService},
     git::GitService,
     permission::{
+        ai_classifier::PermissionAiContext,
         contract::PermissionApprovalScope as RuntimePermissionApprovalScope,
         decision::PermissionMode,
         service::{
@@ -1513,6 +1514,11 @@ impl ChatRuntime {
             .map_err(|source| AppError::validation(source.to_string()))?;
         let context_scope_id = ContextScopeId::parse(&request.agent.context_scope_id)
             .map_err(|source| AppError::validation(source.to_string()))?;
+        let permission_ai_context = PermissionAiContext {
+            provider_id: Some(resolved.provider_id.clone()),
+            model: Some(resolved.model.id.clone()),
+            user_intent: Some(request.task.clone()),
+        };
         let tool_run = self.tools.agent_run_context(
             request.workspace_root.clone(),
             request.session_id.clone(),
@@ -1520,6 +1526,7 @@ impl ChatRuntime {
             cancellation.clone(),
             &request.agent.role,
             context_scope_id,
+            permission_ai_context,
         )?;
         let mut conversation =
             ConversationLedger::begin_agent(Arc::clone(&self.ledger), &request, &resolved).await?;
@@ -1589,6 +1596,11 @@ impl ChatRuntime {
             cancellation: registered.entry.cancellation.token(),
             registry: Arc::clone(&self.ask_user_responses),
         });
+        let permission_ai_context = PermissionAiContext {
+            provider_id: Some(resolved.provider_id.clone()),
+            model: Some(resolved.model.id.clone()),
+            user_intent: Some(request.input.text.clone()),
+        };
         let tool_run = match workspace_root
             .map(|root| {
                 ChatToolRunContext::new(
@@ -1597,6 +1609,7 @@ impl ChatRuntime {
                     registered.entry.run_id.clone(),
                     registered.entry.cancellation.token(),
                     "main".to_string(),
+                    permission_ai_context,
                     Some(Arc::clone(&permission_handler)),
                     Some(Arc::clone(&ask_user_handler)),
                 )
@@ -5353,6 +5366,7 @@ mod tests {
             fingerprint::ReadFingerprintStore,
             mutation_coordinator::FileMutationCoordinator,
             permission::{
+                ai_classifier::PermissionAiContext,
                 service::{
                     PermissionApprovalHandler,
                     PermissionApprovalRequest as RuntimePermissionApprovalRequest,
@@ -5472,6 +5486,7 @@ mod tests {
                             notification_port: Arc::new(
                                 crate::notification_tool_runtime::UnsupportedNotificationPort,
                             ),
+                            permission_ai_classifier: None,
                         },
                     )
                     .expect("fixture chat tools must compose"),
@@ -6375,6 +6390,7 @@ mod tests {
                 entry.run_id.clone(),
                 cancellation.clone(),
                 "main".to_string(),
+                PermissionAiContext::default(),
                 None,
                 None,
             )
@@ -6866,6 +6882,7 @@ mod tests {
                     run_id.clone(),
                     cancellation.clone(),
                     "main".to_string(),
+                    PermissionAiContext::default(),
                     Some(Arc::new(PermissionUiHarness {
                         registry: Arc::clone(&runtime.permission_responses),
                         run_id: entry.run_id.clone(),

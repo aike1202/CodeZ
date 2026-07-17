@@ -1,3 +1,4 @@
+pub mod ai_classifier;
 pub mod audit;
 pub mod contract;
 pub mod decision;

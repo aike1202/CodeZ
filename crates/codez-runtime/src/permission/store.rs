@@ -279,7 +279,9 @@ impl PermissionRuleStore {
                     && match_permission_pattern(pattern, &rule.pattern)
             })
             .map(|rule| rule.action.clone())
-            .next_back();
+            .fold(None, |current, candidate| {
+                Some(stronger_action(current, candidate))
+            });
         Ok(action)
     }
 
@@ -288,6 +290,28 @@ impl PermissionRuleStore {
             .write()
             .await
             .retain(|rule| rule.session_id.as_deref() != Some(session_id));
+    }
+}
+
+fn stronger_action(
+    current: Option<PermissionAction>,
+    candidate: PermissionAction,
+) -> PermissionAction {
+    let Some(current) = current else {
+        return candidate;
+    };
+    if action_rank(&current) >= action_rank(&candidate) {
+        current
+    } else {
+        candidate
+    }
+}
+
+fn action_rank(action: &PermissionAction) -> u8 {
+    match action {
+        PermissionAction::Deny => 3,
+        PermissionAction::Ask => 2,
+        PermissionAction::Allow => 1,
     }
 }
 
@@ -396,5 +420,80 @@ fn validate_data_root(data_root: &Path) -> Result<(), PermissionStoreError> {
         Ok(())
     } else {
         Err(PermissionStoreError::InvalidDataRoot)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use codez_core::AtomicPersistence;
+    use codez_storage::AtomicFileStore;
+
+    use super::{PermissionRuleStore, RememberPermissionRuleInput, stronger_action};
+    use crate::permission::contract::{
+        PermissionAction, PermissionApprovalScope, PermissionCapability,
+    };
+
+    #[test]
+    fn deny_has_precedence_regardless_of_rule_order() {
+        let allow_then_deny =
+            stronger_action(Some(PermissionAction::Allow), PermissionAction::Deny);
+        let deny_then_allow =
+            stronger_action(Some(PermissionAction::Deny), PermissionAction::Allow);
+        assert_eq!(allow_then_deny, PermissionAction::Deny);
+        assert_eq!(deny_then_allow, PermissionAction::Deny);
+    }
+
+    #[test]
+    fn ask_has_precedence_over_allow() {
+        assert_eq!(
+            stronger_action(Some(PermissionAction::Allow), PermissionAction::Ask),
+            PermissionAction::Ask
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_deny_cannot_be_overridden_by_later_session_allow() {
+        let data = tempfile::tempdir().expect("data directory must exist");
+        let workspace = tempfile::tempdir().expect("workspace must exist");
+        let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
+        let store = PermissionRuleStore::new(data.path(), persistence)
+            .expect("permission store must initialize");
+        store
+            .remember(RememberPermissionRuleInput {
+                workspace_root: workspace.path().to_path_buf(),
+                session_id: None,
+                permission: PermissionCapability::Shell,
+                pattern: "*".to_string(),
+                action: PermissionAction::Deny,
+                scope: PermissionApprovalScope::Workspace,
+                hardline: false,
+            })
+            .await
+            .expect("workspace deny must persist");
+        store
+            .remember(RememberPermissionRuleInput {
+                workspace_root: workspace.path().to_path_buf(),
+                session_id: Some("session-1".to_string()),
+                permission: PermissionCapability::Shell,
+                pattern: "git status".to_string(),
+                action: PermissionAction::Allow,
+                scope: PermissionApprovalScope::Session,
+                hardline: false,
+            })
+            .await
+            .expect("session allow must persist");
+
+        let resolved = store
+            .resolve(
+                workspace.path(),
+                Some("session-1"),
+                &PermissionCapability::Shell,
+                "git status",
+            )
+            .await
+            .expect("rules must resolve");
+        assert_eq!(resolved, Some(PermissionAction::Deny));
     }
 }
