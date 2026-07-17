@@ -2,6 +2,8 @@
    全局设计令牌与 CSS 变量
    ============================================ */
 :root {
+  color-scheme: light;
+
   /* 默认浅色主题变量 */
   --bg-app: #fcfcfc;
   --bg-panel: #ffffff;
@@ -40,6 +42,8 @@
 
 /* 当应用加上 dark class 或是跟随系统主题切换时对应的深色变量 */
 .dark {
+  color-scheme: dark;
+
   --bg-app: #1c1c1c;
   --bg-panel: #232323;
   --bg-sidebar: #222222;

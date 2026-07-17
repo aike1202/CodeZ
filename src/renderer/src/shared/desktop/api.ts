@@ -46,6 +46,10 @@ import type {
   SubAgentRunRequest,
   SubAgentRunState,
   SubAgentSettingsDetail,
+  AgentActiveIdsResult,
+  AgentRuntimeSnapshot,
+  TaskItem as WireTaskItem,
+  TaskSnapshot,
 } from './generated/contracts'
 import type {
   ContextBudgetSnapshot,
@@ -94,6 +98,7 @@ import type {
   McpServerStatus,
 } from '../../components/SettingsMcpTab/types'
 import { normalizeDesktopError } from './errors'
+import { desktopEvents, getLegacyTaskRevision } from './events'
 
 type RendererLogLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -381,6 +386,19 @@ async function taskCommand<T>(
   }
 }
 
+async function agentCommand<T>(
+  name: string,
+  args: Record<string, unknown> | undefined,
+  electron: () => Promise<T>
+): Promise<T> {
+  if (isTauriRuntime()) return command<T>(name, args)
+  try {
+    return await electron()
+  } catch (error) {
+    throw normalizeDesktopError(error)
+  }
+}
+
 async function subAgentCommand<T>(
   name: string,
   args: Record<string, unknown> | undefined,
@@ -464,6 +482,42 @@ function normalizeTaskHistoryRecords(value: unknown): TaskHistoryRecord[] {
     throw new Error('The desktop returned an invalid task list.')
   }
   return value.map(normalizeTaskHistoryRecord)
+}
+
+function legacyTaskItem(task: import('@shared/types/task').TaskItem): WireTaskItem {
+  const requiresApproval = task.requiresApproval === true
+  return {
+    id: task.id,
+    subject: task.subject,
+    description: task.description,
+    status: task.status,
+    files: task.files,
+    activeForm: task.activeForm,
+    groupId: task.groupId,
+    groupTitle: task.groupTitle,
+    groupSubtitle: task.groupSubtitle,
+    riskLevel: task.riskLevel,
+    requiresApproval,
+    approvalStatus: task.approvalStatus ?? (requiresApproval ? 'pending' : 'not_required'),
+    acceptanceCriteria: task.acceptanceCriteria,
+    verificationCommand: task.verificationCommand,
+    contextBundle: task.contextBundle
+  }
+}
+
+async function legacyTaskSnapshot(sessionId: string): Promise<TaskSnapshot> {
+  const session = await legacySession().get(sessionId)
+  return {
+    version: 1,
+    sessionId,
+    revision: getLegacyTaskRevision(sessionId),
+    nextSequence: 0,
+    tasks: (session?.tasks ?? []).map(legacyTaskItem)
+  }
+}
+
+async function unavailableLegacyAgentSnapshot(): Promise<never> {
+  throw new Error('Typed Agent lifecycle snapshots are unavailable in the frozen Electron runtime.')
 }
 
 export interface ChatStreamHandle {
@@ -931,8 +985,13 @@ export interface DesktopApi {
     remove(rootPath: string | null, id: string): Promise<boolean>
   }
   task: {
+    snapshot(sessionId: string): Promise<TaskSnapshot>
     getByProject(projectId: string): Promise<TaskHistoryRecord[]>
     delete(taskId: string): Promise<void>
+  }
+  agent: {
+    snapshot(sessionId: string): Promise<AgentRuntimeSnapshot>
+    activeIds(sessionId: string): Promise<AgentActiveIdsResult>
   }
   subAgent: {
     list(): Promise<SubAgentInfo[]>
@@ -1112,8 +1171,8 @@ export const desktopApi: DesktopApi = {
       if (!isTauriRuntime()) return legacyTheme().onUpdated(callback)
 
       let disposed = false
-      const unlisten = listen<ThemeInfo>('desktop://theme-changed', (event) => {
-        if (!disposed) callback(event.payload)
+      const unlisten = listen<DesktopEvent<ThemeInfo>>('desktop://theme-changed', (event) => {
+        if (!disposed) callback(event.payload.payload)
       })
       return () => {
         disposed = true
@@ -1569,6 +1628,11 @@ export const desktopApi: DesktopApi = {
       skillCommand('skill_remove', { rootPath, id }, () => legacySkill().remove(rootPath, id))
   },
   task: {
+    snapshot: (sessionId) => taskCommand<TaskSnapshot>(
+      'task_list',
+      { request: { sessionId } },
+      () => legacyTaskSnapshot(sessionId)
+    ),
     getByProject: async (projectId) => normalizeTaskHistoryRecords(await taskCommand<unknown>(
       'task_get_by_project',
       { projectId },
@@ -1578,6 +1642,18 @@ export const desktopApi: DesktopApi = {
       'task_delete',
       { taskId },
       () => legacyTask().delete(taskId)
+    )
+  },
+  agent: {
+    snapshot: (sessionId) => agentCommand<AgentRuntimeSnapshot>(
+      'agent_snapshot',
+      { request: { sessionId } },
+      unavailableLegacyAgentSnapshot
+    ),
+    activeIds: (sessionId) => agentCommand<AgentActiveIdsResult>(
+      'agent_active_ids',
+      { request: { sessionId } },
+      unavailableLegacyAgentSnapshot
     )
   },
   subAgent: {
@@ -1617,12 +1693,10 @@ export const desktopApi: DesktopApi = {
       () => legacySubAgent().cancelRun(runId)
     ),
     onState: (callback) => {
-      if (!isTauriRuntime()) return legacySubAgent().onState(callback)
-
       let active = true
       let dispose: (() => void) | null = null
-      void listen<SubAgentRunState>('subagent:state', (event) => {
-        if (active) callback(event.payload)
+      void desktopEvents.subAgent.onState((state) => {
+        if (active) callback(state)
       }).then((unlisten) => {
         if (active) dispose = unlisten
         else unlisten()

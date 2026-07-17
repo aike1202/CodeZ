@@ -1675,6 +1675,73 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "reports a synthetic long-session snapshot size for release validation"]
+    async fn long_session_reports_release_snapshot_metrics() {
+        const TURNS: usize = 100;
+        const USER_CONTENT_BYTES: usize = 1_024;
+        const ASSISTANT_CONTENT_BYTES: usize = 4_096;
+
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let root = directory.path().join("runtime");
+        let store = ledger_store(&root);
+        let session_id = SessionId::parse("release-metrics")
+            .expect("release metric session identity must be valid");
+
+        for message_index in 0..TURNS * 2 {
+            let turn_index = message_index / 2;
+            let assistant = message_index % 2 == 1;
+            let role = if assistant { "assistant" } else { "user" };
+            let content_bytes = if assistant {
+                ASSISTANT_CONTENT_BYTES
+            } else {
+                USER_CONTENT_BYTES
+            };
+            let mut append = request(
+                session_id.as_str(),
+                &format!("event-{message_index}"),
+                &format!("message-{message_index}"),
+            );
+            append.turn_id = Some(format!("turn-{turn_index}"));
+            append.r#type = if assistant {
+                LedgerEventType::AssistantMessage
+            } else {
+                LedgerEventType::UserMessage
+            };
+            append.payload["message"]["turnId"] =
+                serde_json::Value::String(format!("turn-{turn_index}"));
+            append.payload["message"]["role"] = serde_json::Value::String(role.to_string());
+            append.payload["message"]["content"] =
+                serde_json::Value::String("x".repeat(content_bytes));
+            store
+                .append_event(append)
+                .await
+                .expect("release metric event must persist");
+        }
+        store
+            .write_snapshot(&session_id)
+            .await
+            .expect("release metric snapshot must persist");
+
+        let snapshot_bytes = fs::metadata(store.snapshot_path(&session_id))
+            .expect("release metric snapshot metadata must be readable")
+            .len();
+        let ledger_bytes = fs::metadata(store.ledger_path(&session_id))
+            .expect("release metric ledger metadata must be readable")
+            .len();
+        println!(
+            "{}",
+            serde_json::json!({
+                "turns": TURNS,
+                "messages": TURNS * 2,
+                "userContentBytesPerMessage": USER_CONTENT_BYTES,
+                "assistantContentBytesPerMessage": ASSISTANT_CONTENT_BYTES,
+                "snapshotBytes": snapshot_bytes,
+                "ledgerBytes": ledger_bytes,
+            })
+        );
+    }
+
+    #[tokio::test]
     async fn truncated_jsonl_suffix_is_quarantined_and_not_replayed() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
         let root = directory.path().join("runtime");

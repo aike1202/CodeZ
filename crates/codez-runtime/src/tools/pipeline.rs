@@ -591,6 +591,10 @@ impl ToolExecutionPipeline {
         let execution_started = Instant::now();
         let tool_context = ToolContext {
             execution_id: receipt.id().to_string(),
+            call_id: item.call.call_id.clone(),
+            turn_id: identity
+                .as_ref()
+                .and_then(|identity| identity.turn_id.clone()),
             session_id: context.session_id().map(str::to_string),
             context_scope_id: context.context_scope_id().into_owned(),
             transaction_id: context.transaction_id().map(str::to_string),

@@ -269,6 +269,8 @@ mod tests {
     fn context(workspace_root: &std::path::Path, session_id: Option<&str>) -> ToolContext {
         ToolContext {
             execution_id: "execution-1".to_string(),
+            call_id: "call-1".to_string(),
+            turn_id: Some("turn-1".to_string()),
             session_id: session_id.map(str::to_string),
             context_scope_id: "main".to_string(),
             transaction_id: None,

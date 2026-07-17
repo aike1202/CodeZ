@@ -16,7 +16,7 @@
 - MCP 在 M1-M7 完成前保持冻结。
 - 不以编译通过替代行为等价、失败路径、取消和重启恢复测试。
 
-## 已验证基线
+## 已验证初始基线
 
 2026-07-17 在当前混合 staged/unstaged 工作区实跑：
 
@@ -42,8 +42,10 @@
 - 正文抽取：`dom_smoothie`，使用 Readability 和 Markdown 输出。
 - 搜索 HTML：`scraper`；JSON API 使用 `serde`。
 - 桌面通知：Tauri 官方 `tauri-plugin-notification`。
-- Windows test manifest：复用 Tauri 上游同类的 MSVC linker flags，使用
-  `/MANIFEST:EMBED` 与 `/MANIFESTINPUT`；不增加 `embed-resource` 直接依赖。
+- Windows app/test 共用 manifest：通过
+  `tauri_build::WindowsAttributes::new_without_app_manifest()` 关闭 Tauri 默认 manifest，
+  再复用 MSVC `/MANIFEST:EMBED` 与 `/MANIFESTINPUT` 作为唯一 manifest 来源；不增加
+  `embed-resource` 直接依赖。
 - PTY：保持 vendored `portable-pty 0.9.0` 最小 flags 补丁。
 
 ### 不采用
@@ -75,7 +77,8 @@
 
 交付物：
 
-- Windows lib test executable 自动带 Common Controls v6 manifest，不再修改临时 EXE。
+- Windows app 与 lib test executable 自动带同一份 Common Controls v6 manifest，不再修改
+  临时 EXE，也不从 Tauri `resource.lib` 重复嵌入 manifest。
 - `cargo test -p codez-desktop --lib --locked` 可直接运行。
 - `AgentLoop` 的 active step 带 attempt generation。
 - `stop` 只请求取消；旧 step 退出前不能 `resume`。
@@ -92,8 +95,9 @@
 
 - `cargo test -p codez-runtime agent::loop_impl::tests --locked`：7/7 通过。
 - `cargo test -p codez-desktop --lib --locked`：最终源码连续两轮均为 191/191 通过。
-- Windows test executable 由 `build.rs` 自动嵌入 `test.exe.manifest`；仓库根未产生
-  临时测试 EXE 或伴生 manifest。
+- Windows app 与 test executable 由 `build.rs` 自动嵌入同一份 `test.exe.manifest`；
+  `tauri-build` 仍生成图标/版本资源但不再生成第二份 app manifest。仓库根未产生临时
+  测试 EXE 或伴生 manifest。
 - test profile 使用 `debug = 1`，保留行号并避免 MSVC PDB 类型信息触发
   `LNK1318 LIMIT`。
 
@@ -284,7 +288,7 @@ AgentRuntimeSnapshot {
 
 ### P4 Skills、ToolSearch、通知与 Web
 
-状态：待开始
+状态：完成（2026-07-17）
 
 Skills：
 
@@ -321,9 +325,40 @@ Web：
 - 通知 unsupported/permission denied/send failure typed 返回。
 - Web SSRF、DNS/redirect、压缩炸弹、超长 body、错误 charset、Unicode 和 fixture parser 测试。
 
+实现与兼容性决策：
+
+- Skills catalog、Chat prompt 和 Skill/ActivateSkill/DeactivateSkill 共用唯一 bounded
+  `serde_yaml` parser；文档、frontmatter、字段长度、目录深度和条目数量均有上限。
+- Skill 状态通过 `SkillStateUpdated` 写入 Context ledger，event ID 由稳定的
+  `turn_id + call_id` 构成；重复激活幂等，内容 hash 变化会刷新，disabled 状态只有
+  显式 `force` 才能恢复。compaction 继续携带 durable skill states。
+- ToolSearch 只搜索当前 immutable exposure plan 已准入的 deferred summary；激活状态按
+  `session + context scope` 隔离。同一批调用仍返回 `TOOL_NOT_EXPOSED`，下一次 Provider
+  schema 生成才暴露 Web/通知等工具，不能借此绕过 role deny 或 hidden 工具。
+- 通知复用官方 `tauri-plugin-notification 2.3.3`（Apache-2.0 OR MIT）。插件桌面端可查询
+  permission 并同步提交，但不提供可靠的跨平台点击回调或投递确认，因此成功仅返回
+  `delivery: submitted` 和 `clickFocusSupported: false`，不伪造点击聚焦。
+- Web 复用 `reqwest 0.12.28`、`dom_smoothie 0.18.0`（MIT）和 `scraper 0.27.0`
+  （ISC）。每个 redirect hop 重新解析并验证全部地址，再用 `resolve_to_addrs` 固定本次
+  连接；自动 redirect 被禁用，解压后的响应流按 4 MiB 上限中止。
+- Windows 本地 Provider 测试服务器的 accept 改为 5 秒有界等待，并在 accept 后显式把
+  stream 恢复为 blocking，避免前置失败永久挂起和 Windows nonblocking 继承导致误报。
+
+验收记录：
+
+- `cargo test -p codez-runtime --locked`：359/359 通过。
+- `cargo test -p codez-contracts --locked`：28/28 通过。
+- `cargo test -p codez-desktop --lib --locked`：P4 主体为 218/218 通过；补齐通知
+  unsupported 用例后聚焦通知测试为 5/5 通过，当前 Desktop 总数为 219。
+- ToolSearch 聚焦 4/4、Web 聚焦 6/6、Agent 本地 Provider E2E 串行 6/6 通过。
+- `cargo fmt --all -- --check`、`npm run typecheck`、workspace all-target/all-feature 严格
+  Clippy 和 `git diff --check` 全部通过。
+- Windows/macOS/Linux 的通知显示与点击、安装包真机投递 smoke 保留到 P6；当前插件
+  不具备的点击回调不会以单元测试替代。
+
 ### P5 Renderer Typed Events 与 Desktop Facade
 
-状态：待开始
+状态：完成（2026-07-17）
 
 交付物：
 
@@ -338,9 +373,35 @@ Web：
 - adapter/store/hook 的 subscribe gap、乱序、重复、unmount 和 session switch 测试。
 - TypeScript typecheck、Vitest 全量、renderer production build 通过。
 
+实现与兼容性决策：
+
+- `desktopEvents` 是 Task、Agent 和 SubAgent listener 的唯一 renderer 边界；Tauri event
+  envelope 会校验 version、session、revision 与 snapshot 一致性，畸形事件不会进入 store。
+- `desktopLifecycleStore` 按 session 分别保存 Task/Agent full snapshot 和 revision；重复或旧
+  revision 被忽略，event revision 跳号返回 `gap`，authoritative snapshot 可跨 gap 恢复。
+- lifecycle hook 先并行注册 Task/Agent listener，再并行拉当前 session snapshot；gap 回源按
+  session 去重。listener 尚未注册完成时 unmount 也会在 promise resolve 后立即 unlisten。
+- 后台 session Task event 只更新所属 session；只有 event session 等于 active session 时才
+  更新顶层 Task capsule。session switch 会释放上一组 listener 并重新执行 listen-first 流程。
+- Tauri `tauriBridge` 中无调用者的 Task/SubAgent 兼容段已删除；冻结 Electron preload 和
+  fallback 仅保留在统一 facade 内。Tauri Plan capability 固定为 false，未注册 Plan 或
+  Parallel Plan event；Electron 源码与测试仍原样保留。
+- React 实现遵循窄 effect dependency 和显式 cleanup；独立 listener/snapshot 使用并行异步，
+  没有新增全局重复 listener 或基于陈旧闭包的状态更新。
+
+验收记录：
+
+- P5 facade/store/subscription 与既有 session restore 聚焦测试：22/22 通过。
+- `npm test`：199 个 test files、1256/1256 tests 通过。
+- `npm run typecheck`：通过。
+- `npm run build:renderer:tauri`：通过，2646 modules transformed；只保留既有的
+  dynamic/static import 和大 chunk 警告。
+- `git diff --check`：通过；Task/Agent/SubAgent event name 和 `.task.subscribe` 在 renderer
+  facade 外搜索结果为 0。
+
 ### P6 发布验收
 
-状态：待开始
+状态：进行中（2026-07-17；Windows 自动化门禁完成，跨平台与人工真机项未完成）
 
 门禁：
 
@@ -351,6 +412,53 @@ Web：
 - Windows 支持版本重复验证 PTY Ctrl+C、cursor、resize/reflow、reader shutdown 和 process tree。
 - macOS/Linux 构建、安装、PTY、通知和资源打包 smoke。
 - release build 启动时间、常驻内存、长会话 snapshot 大小和 tool schema token 开销记录。
+
+Windows 验收记录：
+
+- `cargo build -p codez-desktop --release --locked`：通过，正式 app 未再出现
+  `CVT1100/LNK1123`；`cargo test -p codez-desktop --lib --locked` 为 219/219 通过。
+- `npm run build:tauri`：通过，生成 24,821,760-byte MSI 和 16,130,669-byte NSIS；最终
+  app 为 60,609,024 bytes。PE subsystem 为 `Windows GUI`，资源中只有一个
+  `MANIFEST\1`，同时包含 Common Controls v6 与 `asInvoker`。
+- MSI administrative image 与 NSIS payload 均包含 20 个 builtin Skill 文件（209,619
+  bytes）和 `rg 15.0.0`（5,429,760 bytes，SHA-256
+  `f9dde63498b3193f098355dbec97af99dc4f6b8fa0df5ed04114a03012c042cb`）。当前账户已有
+  `C:\Users\asus\AppData\Local\Programs\CodeZ`，因此没有覆盖现有安装。
+- `vendor/portable-pty-0.9.0` 的 18 个文件均已被 Git 跟踪，包含 `LICENSE.md` 与
+  `CODEZ_PATCH.md`，干净 checkout 不依赖未跟踪的本地 vendor 内容。
+- Windows Credential Manager 真机 smoke 显式运行 1/1 通过：唯一临时 service/account
+  完成 set/get/delete，删除后读取返回 typed NotFound；该测试默认 ignored，普通测试不会
+  修改 OS credential store。
+- Windows `portable_pty_spike` 串行与 workspace 默认并发均为 10 passed、1 ignored fixture，
+  覆盖 cmd/PowerShell Ctrl+C、resize、reader shutdown、中文 cwd、kill race 与 process tree。
+  cursor/reflow 仍需在真实 renderer 中人工验证。
+- 100 轮/200 条消息（每轮 1 KiB user + 4 KiB assistant）的真实 ledger 测量：snapshot
+  599,561 bytes，JSONL ledger 619,924 bytes。
+- 主 Chat 初始 Provider schema：24 tools、16,019 serialized bytes、4,009 estimated tokens；
+  ToolSearch 激活 WebSearch/WebFetch/PushNotification 后：27 tools、17,677 bytes、4,424
+  estimated tokens。估算复用生产 `ContextBudgetService`。
+
+自动化门禁记录：
+
+- workspace fmt 与 all-target/all-feature 严格 Clippy 通过；依赖方向检查覆盖 8 个 workspace
+  packages，并只显式允许 `codez-runtime -> codez-storage` 的 test-only dev dependency。
+- `cargo test --workspace --all-targets --locked` 通过：Runtime 359 passed/1 metrics ignored，
+  Desktop 219 passed/1 metrics ignored，Contracts 28/28，Platform lib 40/40、PTY 10/1，
+  Storage 59 passed/1 credential smoke ignored，其余 workspace tests 全部通过。
+- `npm run typecheck` 通过；`npm test` 全量复跑为 199 files、1,256/1,256。冻结 MCP 的动态
+  catalog 时序断言首轮出现一次已知偶发失败，单文件 2/2 与随后全量复跑均通过，未修改 MCP。
+- contract generation 无 diff；资源分析为 20 files/209,619 bytes 与 `rg 15.0.0`；Tauri
+  renderer production build 通过（2646 modules）；`git diff --check` 通过。
+
+未完成项：
+
+- Windows 的 Tauri `home_dir` 使用 `FOLDERID_Profile`，修改 `HOME/USERPROFILE` 不能隔离
+  `~/.codez`。当前账户又已有 CodeZ 安装，因此未启动 release app 访问真实 profile；需在
+  临时 Windows 用户、Sandbox 或 VM 中完成全新数据根与安装/升级 smoke。
+- release app 启动时间、常驻内存、renderer cursor/reflow、通知显示/点击仍需隔离真机环境。
+  插件不提供可靠点击回调，不能把 `submitted` 记作投递或点击成功。
+- macOS/Linux 的构建、安装、PTY、通知、credential store 和资源打包尚未执行。P6 在这些
+  项目完成前保持“进行中”，不得标记完成。
 
 ## 状态更新规则
 

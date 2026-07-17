@@ -2,7 +2,7 @@ import React, { ReactNode } from 'react';
 import Stack from '../ui/Stack';
 import { TaskCapsule } from './TaskCapsule';
 import { useParallelExecSubscription } from './hooks/useParallelExecSubscription';
-import { useTaskSubscription } from './hooks/useTaskSubscription';
+import { useDesktopLifecycleSubscription } from './hooks/useDesktopLifecycleSubscription';
 import { useChatStore } from '../../stores/chatStore';
 
 export interface ChatAreaLayoutProps {
@@ -29,7 +29,7 @@ export const ChatAreaLayout: React.FC<ChatAreaLayoutProps> = ({
   onScroll
 }) => {
   useParallelExecSubscription();
-  useTaskSubscription();
+  useDesktopLifecycleSubscription();
   return (
     <>
       <div className="app-chat-scroll-shell">

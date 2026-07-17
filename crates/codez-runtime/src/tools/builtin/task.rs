@@ -459,6 +459,8 @@ mod tests {
     fn context(root: &Path) -> ToolContext {
         ToolContext {
             execution_id: "execution-1".to_string(),
+            call_id: "call-1".to_string(),
+            turn_id: Some("turn-1".to_string()),
             session_id: Some("session-1".to_string()),
             context_scope_id: "main".to_string(),
             transaction_id: None,

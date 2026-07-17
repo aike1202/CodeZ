@@ -29,6 +29,7 @@ use crate::{
     logging::{self, LoggingError},
     mcp_boundary::StorageMcpSecretStore,
     mcp_runtime::McpRuntimeManager,
+    notification_tool_runtime::TauriNotificationPort,
     provider_boundary::{StorageProviderCredentials, StorageProviderRepository},
     session_deletion::{SessionDeletionDependencies, desktop_session_deletion_operations},
     state::AppState,
@@ -188,6 +189,8 @@ pub(crate) fn compose_app_state(
         paths.as_ref(),
         ChatToolRuntimeDependencies {
             persistence: Arc::clone(&persistence),
+            storage: Arc::clone(&storage),
+            model_ledger: Arc::clone(&model_ledger),
             workspace_permissions: Arc::clone(&workspace_permissions),
             fingerprint_store: Arc::clone(&fingerprint),
             mutation_coordinator: Arc::clone(&mutation_coordinator),
@@ -195,6 +198,7 @@ pub(crate) fn compose_app_state(
             task_store: Arc::clone(&task_store),
             agent_runtime: Arc::clone(&agent_runtime),
             process_runner: Arc::clone(&process_runner),
+            notification_port: Arc::new(TauriNotificationPort::new(app.handle().clone())),
         },
     )?);
     let attachment = Arc::new(codez_runtime::attachment::AttachmentService::new(
@@ -205,13 +209,14 @@ pub(crate) fn compose_app_state(
         Arc::clone(&errors),
         Arc::clone(&model_ledger),
         Arc::clone(&attachment),
-        chat_tools,
+        Arc::clone(&chat_tools),
         Arc::clone(&edit_transaction),
         ChatPromptSources::new(
             paths.data_directory().to_path_buf(),
             Arc::clone(&workspace_permissions),
             process_runner.clone(),
-        ),
+        )
+        .with_skills(chat_tools.skill_service()),
     ));
     agent_executor
         .bind_chat_runtime(&chat_runtime)

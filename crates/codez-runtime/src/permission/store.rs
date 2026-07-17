@@ -76,8 +76,11 @@ struct StoredRule {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+// Electron stored the same payload without schema metadata; explicit metadata is validated below.
 struct RulesDocument {
+    #[serde(default = "permission_rules_schema")]
     schema: String,
+    #[serde(default = "permission_rules_schema_version")]
     schema_version: u16,
     rules: Vec<StoredRule>,
 }
@@ -85,17 +88,28 @@ struct RulesDocument {
 impl Default for RulesDocument {
     fn default() -> Self {
         Self {
-            schema: "permission-rules".to_string(),
-            schema_version: RULES_SCHEMA_VERSION,
+            schema: permission_rules_schema(),
+            schema_version: permission_rules_schema_version(),
             rules: Vec::new(),
         }
     }
 }
 
+fn permission_rules_schema() -> String {
+    "permission-rules".to_string()
+}
+
+const fn permission_rules_schema_version() -> u16 {
+    RULES_SCHEMA_VERSION
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+// Electron stored the same payload without schema metadata; explicit metadata is validated below.
 struct WorkspaceModesDocument {
+    #[serde(default = "workspace_modes_schema")]
     schema: String,
+    #[serde(default = "workspace_modes_schema_version")]
     schema_version: u16,
     workspaces: std::collections::BTreeMap<String, PermissionMode>,
 }
@@ -103,11 +117,19 @@ struct WorkspaceModesDocument {
 impl Default for WorkspaceModesDocument {
     fn default() -> Self {
         Self {
-            schema: "workspace-permissions".to_string(),
-            schema_version: MODES_SCHEMA_VERSION,
+            schema: workspace_modes_schema(),
+            schema_version: workspace_modes_schema_version(),
             workspaces: std::collections::BTreeMap::new(),
         }
     }
+}
+
+fn workspace_modes_schema() -> String {
+    "workspace-permissions".to_string()
+}
+
+const fn workspace_modes_schema_version() -> u16 {
+    MODES_SCHEMA_VERSION
 }
 
 #[derive(Debug, Clone)]

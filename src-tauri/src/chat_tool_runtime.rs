@@ -22,6 +22,7 @@ use codez_platform::{
 use codez_runtime::{
     SearchService,
     agent::collaboration::AgentRuntime,
+    context::ledger::ModelLedgerStore,
     edit_transaction::EditTransactionService,
     fingerprint::ReadFingerprintStore,
     mutation_coordinator::FileMutationCoordinator,
@@ -68,8 +69,16 @@ use codez_runtime::{
         validation::ToolInputValidator,
     },
 };
+use codez_storage::AtomicFileStore;
 use serde::Deserialize;
 use thiserror::Error;
+
+use crate::{
+    commands::skills::SkillsService,
+    notification_tool_runtime::{NotificationPort, PushNotificationTool},
+    skill_tool_runtime::SkillTool,
+    web_tool_runtime::WebTool,
+};
 
 const BUILTIN_CATALOG_ID: &str = "chat-builtin-v1";
 const MAX_AGENT_ROLE_BYTES: usize = 160;
@@ -297,12 +306,15 @@ pub(crate) struct ChatToolRuntime {
     edit_transaction_service: Arc<EditTransactionService>,
     command_tasks: Arc<CommandTaskRegistry>,
     exposure_state: Arc<ToolExposureState>,
+    skills: Arc<SkillsService>,
     bash: Option<Arc<BashTool>>,
     powershell: Option<Arc<PowerShellTool>>,
 }
 
 pub(crate) struct ChatToolRuntimeDependencies {
     pub(crate) persistence: Arc<dyn AtomicPersistence>,
+    pub(crate) storage: Arc<AtomicFileStore>,
+    pub(crate) model_ledger: Arc<ModelLedgerStore>,
     pub(crate) workspace_permissions: Arc<WorkspacePermissionStore>,
     pub(crate) fingerprint_store: Arc<ReadFingerprintStore>,
     pub(crate) mutation_coordinator: Arc<FileMutationCoordinator>,
@@ -310,6 +322,7 @@ pub(crate) struct ChatToolRuntimeDependencies {
     pub(crate) task_store: Arc<TaskStore>,
     pub(crate) agent_runtime: Arc<AgentRuntime>,
     pub(crate) process_runner: Arc<NativeProcessRunner>,
+    pub(crate) notification_port: Arc<dyn NotificationPort>,
 }
 
 impl ChatToolRuntime {
@@ -328,6 +341,8 @@ impl ChatToolRuntime {
     ) -> Result<Self, ChatToolRuntimeError> {
         let ChatToolRuntimeDependencies {
             persistence,
+            storage,
+            model_ledger,
             workspace_permissions,
             fingerprint_store,
             mutation_coordinator,
@@ -335,6 +350,7 @@ impl ChatToolRuntime {
             task_store,
             agent_runtime,
             process_runner,
+            notification_port,
         } = dependencies;
         let data_root = paths.data_directory();
         let rules = Arc::new(PermissionRuleStore::new(
@@ -347,6 +363,14 @@ impl ChatToolRuntime {
         )?);
         let permission = Arc::new(PermissionService::new(workspace_permissions, rules, audit));
         let resources = ResourceLocator::new(paths.resource_directory().to_path_buf());
+        let web_search = Arc::new(WebTool::search(data_root, Arc::clone(&storage)));
+        let web_fetch = Arc::new(WebTool::fetch(data_root, Arc::clone(&storage)));
+        let skills = Arc::new(SkillsService::new(
+            data_root.to_path_buf(),
+            resources.root().to_path_buf(),
+            resources.builtin_skills_directory(),
+            storage,
+        ));
         let process_port: Arc<dyn ProcessRunner> = process_runner.clone();
         let search = Arc::new(SearchService::new(
             resources.ripgrep_executable(),
@@ -369,15 +393,20 @@ impl ChatToolRuntime {
         let powershell = compose_powershell_tool(Arc::clone(&command_tasks))?;
         let result_store = Arc::new(LargeToolResultStore::new(data_root.join("tool-results")));
         let exposure_state = Arc::new(ToolExposureState::new());
-        let catalog = builtin_catalog(
+        let catalog = builtin_catalog(BuiltinCatalogDependencies {
             search,
-            bash.clone(),
-            powershell.clone(),
-            Arc::clone(&result_store),
+            bash: bash.clone(),
+            powershell: powershell.clone(),
+            result_store: Arc::clone(&result_store),
             task_store,
             agent_runtime,
-            Arc::clone(&exposure_state),
-        )?;
+            exposure_state: Arc::clone(&exposure_state),
+            skills: Arc::clone(&skills),
+            model_ledger,
+            notification_port,
+            web_search,
+            web_fetch,
+        })?;
         let processor = Arc::new(ToolResultProcessor::new(result_store, None, true));
         let journal = Arc::new(ToolExecutionJournal::new(
             data_root.join("tool-execution.jsonl"),
@@ -400,6 +429,7 @@ impl ChatToolRuntime {
             edit_transaction_service,
             command_tasks,
             exposure_state,
+            skills,
             bash,
             powershell,
         })
@@ -417,6 +447,10 @@ impl ChatToolRuntime {
             definitions.push(ask_user_tool_definition());
         }
         definitions
+    }
+
+    pub(crate) fn skill_service(&self) -> Arc<SkillsService> {
+        Arc::clone(&self.skills)
     }
 
     pub(crate) fn agent_run_context(
@@ -751,7 +785,7 @@ fn compose_powershell_tool(
     Ok(Some(Arc::new(PowerShellTool::with_host(host))))
 }
 
-fn builtin_catalog(
+struct BuiltinCatalogDependencies {
     search: Arc<SearchService>,
     bash: Option<Arc<BashTool>>,
     powershell: Option<Arc<PowerShellTool>>,
@@ -759,7 +793,30 @@ fn builtin_catalog(
     task_store: Arc<TaskStore>,
     agent_runtime: Arc<AgentRuntime>,
     exposure_state: Arc<ToolExposureState>,
+    skills: Arc<SkillsService>,
+    model_ledger: Arc<ModelLedgerStore>,
+    notification_port: Arc<dyn NotificationPort>,
+    web_search: Arc<WebTool>,
+    web_fetch: Arc<WebTool>,
+}
+
+fn builtin_catalog(
+    dependencies: BuiltinCatalogDependencies,
 ) -> Result<ToolCatalogSnapshot, ToolCatalogError> {
+    let BuiltinCatalogDependencies {
+        search,
+        bash,
+        powershell,
+        result_store,
+        task_store,
+        agent_runtime,
+        exposure_state,
+        skills,
+        model_ledger,
+        notification_port,
+        web_search,
+        web_fetch,
+    } = dependencies;
     let mut handlers: Vec<Arc<dyn ToolHandler>> = vec![
         Arc::new(ReadTool::new()),
         Arc::new(WriteTool::new()),
@@ -778,6 +835,18 @@ fn builtin_catalog(
         Arc::new(NotebookEditTool::new()),
         Arc::new(ToolResultReadTool::new(result_store)),
         Arc::new(ToolSearchTool::new(exposure_state)),
+        Arc::new(PushNotificationTool::new(notification_port)),
+        web_search,
+        web_fetch,
+        Arc::new(SkillTool::legacy(
+            Arc::clone(&skills),
+            Arc::clone(&model_ledger),
+        )),
+        Arc::new(SkillTool::activate(
+            Arc::clone(&skills),
+            Arc::clone(&model_ledger),
+        )),
+        Arc::new(SkillTool::deactivate(skills, model_ledger)),
         Arc::new(TaskTool::create(Arc::clone(&task_store))),
         Arc::new(TaskTool::update(Arc::clone(&task_store))),
         Arc::new(TaskTool::get(Arc::clone(&task_store))),
@@ -1037,6 +1106,7 @@ mod tests {
         agent::collaboration::{
             AgentAttemptExecutor, AgentAttemptOutput, AgentAttemptRequest, AgentRuntime,
         },
+        context::{budget::ContextBudgetService, ledger::ModelLedgerStore},
         permission::store::WorkspacePermissionStore,
         tools::large_result::LargeToolResultStore,
         tools::types::{NormalizedToolCall, ToolExecutionResult},
@@ -1044,6 +1114,7 @@ mod tests {
     use codez_storage::AtomicFileStore;
 
     use super::{AskUserHandler, ChatToolRunContext, ChatToolRuntime, ChatToolRuntimeDependencies};
+    use crate::notification_tool_runtime::UnsupportedNotificationPort;
 
     struct UnavailableAgentExecutor;
 
@@ -1062,8 +1133,10 @@ mod tests {
 
     struct Fixture {
         _data: tempfile::TempDir,
+        data_root: std::path::PathBuf,
         workspace: tempfile::TempDir,
         runtime: ChatToolRuntime,
+        model_ledger: Arc<ModelLedgerStore>,
         edit_transaction: Arc<codez_runtime::edit_transaction::EditTransactionService>,
     }
 
@@ -1075,7 +1148,14 @@ mod tests {
             let paths = Arc::new(app_paths(data.path()));
             fs::create_dir_all(paths.data_directory())
                 .expect("fixture application data directory must be created");
-            let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
+            fs::create_dir_all(paths.resource_directory().join("builtin-skills"))
+                .expect("fixture builtin skills directory must be created");
+            let storage = Arc::new(AtomicFileStore::default());
+            let persistence: Arc<dyn AtomicPersistence> = storage.clone();
+            let model_ledger = Arc::new(ModelLedgerStore::new(
+                paths.data_directory().join("session-runtime"),
+                Arc::clone(&persistence),
+            ));
             let modes = Arc::new(
                 WorkspacePermissionStore::new(paths.data_directory(), Arc::clone(&persistence))
                     .expect("fixture permission mode store must be valid"),
@@ -1096,6 +1176,8 @@ mod tests {
                 paths.as_ref(),
                 ChatToolRuntimeDependencies {
                     persistence,
+                    storage,
+                    model_ledger: Arc::clone(&model_ledger),
                     workspace_permissions: modes,
                     fingerprint_store: Arc::new(
                         codez_runtime::fingerprint::ReadFingerprintStore::default(),
@@ -1107,15 +1189,55 @@ mod tests {
                     task_store,
                     agent_runtime,
                     process_runner: Arc::new(codez_platform::NativeProcessRunner::new()),
+                    notification_port: Arc::new(UnsupportedNotificationPort),
                 },
             )
             .expect("fixture tool runtime must compose");
             Self {
                 _data: data,
+                data_root: paths.data_directory().to_path_buf(),
                 workspace,
                 runtime,
+                model_ledger,
                 edit_transaction,
             }
+        }
+
+        fn install_global_skill(&self, body: &str) {
+            let directory = self.data_root.join("skills/review");
+            fs::create_dir_all(&directory).expect("fixture skill directory must be created");
+            fs::write(
+                directory.join("SKILL.md"),
+                format!(
+                    "---\nname: review\ndescription: Review code safely\ntriggers: [review]\n---\n{body}\n"
+                ),
+            )
+            .expect("fixture skill document must be written");
+        }
+
+        async fn main_skill_state(&self, name: &str) -> codez_core::context::SessionSkillState {
+            let session_id =
+                SessionId::parse("session-1").expect("fixture session identity must remain valid");
+            self.model_ledger
+                .get_snapshot(&session_id)
+                .await
+                .expect("fixture ledger must load")
+                .and_then(|snapshot| snapshot.scopes.get("main").cloned())
+                .and_then(|scope| scope.skill_states)
+                .and_then(|states| states.into_iter().find(|state| state.name == name))
+                .expect("requested fixture skill state must exist")
+        }
+
+        async fn main_history_version(&self) -> u32 {
+            let session_id =
+                SessionId::parse("session-1").expect("fixture session identity must remain valid");
+            self.model_ledger
+                .get_snapshot(&session_id)
+                .await
+                .expect("fixture ledger must load")
+                .and_then(|snapshot| snapshot.scopes.get("main").cloned())
+                .map(|scope| scope.history_version)
+                .expect("fixture main scope must exist")
         }
 
         fn run_context(&self) -> ChatToolRunContext {
@@ -1259,6 +1381,9 @@ mod tests {
             "send_message",
             "spawn_agent",
             "wait_agent",
+            "ActivateSkill",
+            "DeactivateSkill",
+            "Skill",
             "ToolResultRead",
             "AskUserQuestion",
         ]);
@@ -1270,7 +1395,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tool_search_exposes_a_deferred_tool_on_the_next_provider_turn() {
+    async fn tool_search_exposes_web_and_notification_only_on_the_next_provider_turn() {
         let fixture = Fixture::new();
         let run = fixture.run_context();
         let before = fixture
@@ -1279,23 +1404,38 @@ mod tests {
             .into_iter()
             .map(|definition| definition.function.name)
             .collect::<HashSet<_>>();
-        assert!(!before.contains("NotebookEdit"));
+        assert!(!before.contains("WebFetch"));
+        assert!(!before.contains("PushNotification"));
 
-        let result = fixture
+        let same_turn = fixture
             .runtime
             .execute(
-                vec![call(
-                    0,
-                    "ToolSearch",
-                    serde_json::json!({"query": "select:NotebookEdit"}),
-                )],
+                vec![
+                    call(
+                        0,
+                        "ToolSearch",
+                        serde_json::json!({"query": "select:WebFetch,PushNotification"}),
+                    ),
+                    call(
+                        1,
+                        "WebFetch",
+                        serde_json::json!({"url": "https://example.com"}),
+                    ),
+                    call(
+                        2,
+                        "PushNotification",
+                        serde_json::json!({"message": "finished"}),
+                    ),
+                ],
                 &run,
             )
             .await;
         assert!(matches!(
-            result[0].result,
+            same_turn[0].result,
             ToolExecutionResult::Success { .. }
         ));
+        assert_eq!(error_code(&same_turn[1].result), Some("TOOL_NOT_EXPOSED"));
+        assert_eq!(error_code(&same_turn[2].result), Some("TOOL_NOT_EXPOSED"));
 
         let after = fixture
             .runtime
@@ -1303,7 +1443,217 @@ mod tests {
             .into_iter()
             .map(|definition| definition.function.name)
             .collect::<HashSet<_>>();
-        assert!(after.contains("NotebookEdit"));
+        assert!(after.contains("WebFetch"));
+        assert!(after.contains("PushNotification"));
+    }
+
+    #[tokio::test]
+    #[ignore = "reports production provider schema size for release validation"]
+    async fn provider_catalog_reports_release_schema_metrics() {
+        let fixture = Fixture::new();
+        let run = fixture.run_context();
+        let initial = fixture.runtime.provider_tool_definitions_for_run(&run);
+        let initial_tokens = initial.iter().fold(0_u32, |total, definition| {
+            total.saturating_add(
+                ContextBudgetService::estimate_value_tokens(definition)
+                    .expect("fixture tool definition must serialize"),
+            )
+        });
+
+        let activation = fixture
+            .runtime
+            .execute(
+                vec![call(
+                    0,
+                    "ToolSearch",
+                    serde_json::json!({
+                        "query": "select:WebSearch,WebFetch,PushNotification"
+                    }),
+                )],
+                &run,
+            )
+            .await;
+        assert!(matches!(
+            activation[0].result,
+            ToolExecutionResult::Success { .. }
+        ));
+
+        let activated = fixture.runtime.provider_tool_definitions_for_run(&run);
+        let activated_tokens = activated.iter().fold(0_u32, |total, definition| {
+            total.saturating_add(
+                ContextBudgetService::estimate_value_tokens(definition)
+                    .expect("fixture tool definition must serialize"),
+            )
+        });
+        println!(
+            "{}",
+            serde_json::json!({
+                "initialTools": initial.len(),
+                "initialSerializedBytes": serde_json::to_vec(&initial)
+                    .expect("initial definitions must serialize")
+                    .len(),
+                "initialEstimatedTokens": initial_tokens,
+                "activatedTools": activated.len(),
+                "activatedSerializedBytes": serde_json::to_vec(&activated)
+                    .expect("activated definitions must serialize")
+                    .len(),
+                "activatedEstimatedTokens": activated_tokens,
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn activate_skill_persists_state_and_duplicate_activation_is_idempotent() {
+        let fixture = Fixture::new();
+        fixture.install_global_skill("Use Read before reviewing.");
+        let run = fixture.run_context();
+        let first = fixture
+            .runtime
+            .execute(
+                vec![call(
+                    0,
+                    "ActivateSkill",
+                    serde_json::json!({"skill": "global-review"}),
+                )],
+                &run,
+            )
+            .await;
+        assert!(
+            matches!(first[0].result, ToolExecutionResult::Success { .. }),
+            "unexpected skill activation result: {:?}",
+            first[0].result
+        );
+        let version = fixture.main_history_version().await;
+
+        let duplicate = fixture
+            .runtime
+            .execute(
+                vec![call(
+                    0,
+                    "ActivateSkill",
+                    serde_json::json!({"skill": "global-review"}),
+                )],
+                &run,
+            )
+            .await;
+        assert!(matches!(
+            duplicate[0].result,
+            ToolExecutionResult::Success { .. }
+        ));
+        assert_eq!(fixture.main_history_version().await, version);
+        assert_eq!(fixture.main_skill_state("review").await.status, "active");
+    }
+
+    #[tokio::test]
+    async fn activate_skill_refreshes_when_the_document_hash_changes() {
+        let fixture = Fixture::new();
+        fixture.install_global_skill("First version.");
+        let run = fixture.run_context();
+        let first = fixture
+            .runtime
+            .execute(
+                vec![call(
+                    0,
+                    "ActivateSkill",
+                    serde_json::json!({"skill": "global-review"}),
+                )],
+                &run,
+            )
+            .await;
+        assert!(
+            matches!(first[0].result, ToolExecutionResult::Success { .. }),
+            "unexpected skill activation result: {:?}",
+            first[0].result
+        );
+        let previous_hash = fixture.main_skill_state("review").await.content_hash;
+
+        fixture.install_global_skill("Second version.");
+        let refreshed = fixture
+            .runtime
+            .execute(
+                vec![call(
+                    1,
+                    "ActivateSkill",
+                    serde_json::json!({"skill": "global-review"}),
+                )],
+                &run,
+            )
+            .await;
+        assert!(matches!(
+            refreshed[0].result,
+            ToolExecutionResult::Success { .. }
+        ));
+        assert_ne!(
+            fixture.main_skill_state("review").await.content_hash,
+            previous_hash
+        );
+    }
+
+    #[tokio::test]
+    async fn disabled_skill_requires_force_before_reactivation() {
+        let fixture = Fixture::new();
+        fixture.install_global_skill("Review carefully.");
+        let run = fixture.run_context();
+        let activated = fixture
+            .runtime
+            .execute(
+                vec![call(
+                    0,
+                    "ActivateSkill",
+                    serde_json::json!({"skill": "global-review"}),
+                )],
+                &run,
+            )
+            .await;
+        assert!(
+            matches!(activated[0].result, ToolExecutionResult::Success { .. }),
+            "unexpected skill activation result: {:?}",
+            activated[0].result
+        );
+        let disabled = fixture
+            .runtime
+            .execute(
+                vec![call(
+                    1,
+                    "DeactivateSkill",
+                    serde_json::json!({"skill": "review", "mode": "disabled"}),
+                )],
+                &run,
+            )
+            .await;
+        assert!(matches!(
+            disabled[0].result,
+            ToolExecutionResult::Success { .. }
+        ));
+
+        let rejected = fixture
+            .runtime
+            .execute(
+                vec![call(
+                    2,
+                    "ActivateSkill",
+                    serde_json::json!({"skill": "global-review"}),
+                )],
+                &run,
+            )
+            .await;
+        assert_eq!(error_code(&rejected[0].result), Some("SKILL_DISABLED"));
+
+        let forced = fixture
+            .runtime
+            .execute(
+                vec![call(
+                    3,
+                    "ActivateSkill",
+                    serde_json::json!({"skill": "global-review", "force": true}),
+                )],
+                &run,
+            )
+            .await;
+        assert!(matches!(
+            forced[0].result,
+            ToolExecutionResult::Success { .. }
+        ));
     }
 
     #[test]

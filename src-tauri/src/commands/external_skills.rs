@@ -7,7 +7,7 @@ use std::{
 
 use codez_core::{AppError, RecentProjectRepository, WorkspaceRoot};
 use same_file::Handle;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 #[cfg(not(windows))]
 use tempfile::Builder;
 use tokio::sync::Mutex;
@@ -16,7 +16,7 @@ use super::path_security::{
     SafeFileName, authorize_workspace, ensure_secure_path, metadata_is_link_or_reparse,
     parse_untrusted_absolute_path, path_io_error, paths_equal, workspace_path,
 };
-use crate::state::AppState;
+use crate::{skill_document::parse_skill_document_bytes, state::AppState};
 
 const CODEX_SOURCE_NAME: &str = "Codex";
 const CLAUDE_SOURCE_NAME: &str = "Claude";
@@ -149,14 +149,6 @@ struct SkillSnapshot {
     name: String,
     description: String,
     tree: TreeSnapshot,
-}
-
-#[derive(Debug, Deserialize)]
-struct SkillFrontmatter {
-    #[serde(default)]
-    name: Option<String>,
-    #[serde(default)]
-    description: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -894,20 +886,13 @@ fn read_tree_file(
 }
 
 fn parse_skill_metadata(bytes: &[u8], fallback_name: &str) -> Result<(String, String), AppError> {
-    let content = std::str::from_utf8(bytes)
-        .map_err(|_| AppError::validation("External SKILL.md must be valid UTF-8"))?;
-    let frontmatter = extract_frontmatter(content)?;
-    let parsed: SkillFrontmatter = serde_yaml::from_str(frontmatter).map_err(|source| {
-        AppError::validation(format!(
-            "External SKILL.md frontmatter is invalid: {source}"
-        ))
-    })?;
-    let name = parsed
+    let document = parse_skill_document_bytes(bytes)?;
+    let name = document
         .name
         .unwrap_or_else(|| fallback_name.to_string())
         .trim()
         .to_string();
-    let description = parsed.description.unwrap_or_default().trim().to_string();
+    let description = document.description.unwrap_or_default();
     if name.is_empty() || name.len() > MAX_METADATA_NAME_BYTES {
         return Err(AppError::validation(
             "External skill name is empty or too long",
@@ -919,32 +904,6 @@ fn parse_skill_metadata(bytes: &[u8], fallback_name: &str) -> Result<(String, St
         ));
     }
     Ok((name, description))
-}
-
-fn extract_frontmatter(content: &str) -> Result<&str, AppError> {
-    let content = content.strip_prefix('\u{feff}').unwrap_or(content);
-    let mut lines = content.split_inclusive('\n');
-    let first = lines
-        .next()
-        .ok_or_else(|| AppError::validation("External SKILL.md is empty"))?;
-    if first.trim_end_matches(['\r', '\n']) != "---" {
-        return Err(AppError::validation(
-            "External SKILL.md is missing YAML frontmatter",
-        ));
-    }
-    let start = first.len();
-    let mut offset = start;
-    for line in lines {
-        if line.trim_end_matches(['\r', '\n']) == "---" {
-            return Ok(&content[start..offset]);
-        }
-        offset = offset
-            .checked_add(line.len())
-            .ok_or_else(|| AppError::validation("External SKILL.md is too large"))?;
-    }
-    Err(AppError::validation(
-        "External SKILL.md frontmatter is not terminated",
-    ))
 }
 
 fn destination_status(

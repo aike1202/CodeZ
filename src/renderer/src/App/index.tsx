@@ -111,14 +111,15 @@ function ActiveApp(): React.ReactElement {
       ? useChatStore.getState().initPlanStateListener()
       : () => undefined
 
-    void desktopApi.theme.get().then((info) => {
-      if (info.shouldUseDarkColors) document.documentElement.classList.add('dark')
-      else document.documentElement.classList.remove('dark')
-    }).catch(() => undefined)
-    const cleanupTheme = desktopApi.theme.onUpdated((info) => {
-      if (info.shouldUseDarkColors) document.documentElement.classList.add('dark')
-      else document.documentElement.classList.remove('dark')
-    })
+    const applyTheme = (shouldUseDarkColors: boolean): void => {
+      document.documentElement.classList.toggle('dark', shouldUseDarkColors)
+    }
+    void desktopApi.settings.get()
+      .then((settings) => desktopApi.theme.set(settings.appTheme))
+      .catch(() => desktopApi.theme.get())
+      .then((info) => applyTheme(info.shouldUseDarkColors))
+      .catch(() => undefined)
+    const cleanupTheme = desktopApi.theme.onUpdated((info) => applyTheme(info.shouldUseDarkColors))
     return () => {
       cleanupTheme()
       cleanupPlanStateListener()

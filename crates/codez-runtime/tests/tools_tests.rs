@@ -18,6 +18,7 @@ use codez_runtime::permission::service::{
 };
 use codez_runtime::permission::store::{
     PermissionRuleStore, RememberPermissionRuleInput, WorkspacePermissionStore,
+    normalize_workspace_key,
 };
 use codez_runtime::tools::authorization::AuthorizationBinding;
 use codez_runtime::tools::builtin::bash::BashTool;
@@ -1366,6 +1367,73 @@ async fn permission_mode_and_workspace_rule_survive_store_recreation() {
         (mode, action),
         (PermissionMode::FullAccess, Some(PermissionAction::Deny))
     );
+}
+
+#[tokio::test]
+async fn permission_mode_loads_the_legacy_unversioned_document() {
+    let workspace = tempfile::tempdir().expect("temporary workspace must be available");
+    let data = tempfile::tempdir().expect("temporary data root must be available");
+    let persistence: Arc<dyn AtomicPersistence> = Arc::new(MemoryAtomicPersistence::default());
+    let workspace_key = normalize_workspace_key(workspace.path())
+        .await
+        .expect("fixture workspace key must normalize");
+    let document = serde_json::to_vec(&serde_json::json!({
+        "workspaces": std::collections::BTreeMap::from([(
+            workspace_key,
+            PermissionMode::FullAccess,
+        )]),
+    }))
+    .expect("legacy mode document must serialize");
+    persistence
+        .replace(&data.path().join("workspace-permissions.json"), &document)
+        .await
+        .expect("legacy mode document must persist");
+    let modes =
+        WorkspacePermissionStore::new(data.path(), persistence).expect("mode store must be valid");
+
+    let mode = modes
+        .get_mode(workspace.path())
+        .await
+        .expect("legacy mode must load");
+
+    assert_eq!(mode, PermissionMode::FullAccess);
+}
+
+#[tokio::test]
+async fn permission_rules_load_the_legacy_unversioned_document() {
+    let workspace = tempfile::tempdir().expect("temporary workspace must be available");
+    let data = tempfile::tempdir().expect("temporary data root must be available");
+    let persistence: Arc<dyn AtomicPersistence> = Arc::new(MemoryAtomicPersistence::default());
+    let workspace_key = normalize_workspace_key(workspace.path())
+        .await
+        .expect("fixture workspace key must normalize");
+    let document = serde_json::to_vec(&serde_json::json!({
+        "rules": [{
+            "workspace": workspace_key,
+            "permission": "network",
+            "pattern": "https://example.test/*",
+            "action": "allow",
+        }],
+    }))
+    .expect("legacy rule document must serialize");
+    persistence
+        .replace(&data.path().join("permission-rules.json"), &document)
+        .await
+        .expect("legacy rule document must persist");
+    let rules =
+        PermissionRuleStore::new(data.path(), persistence).expect("rule store must be valid");
+
+    let action = rules
+        .resolve(
+            workspace.path(),
+            None,
+            &PermissionCapability::Network,
+            "https://example.test/path",
+        )
+        .await
+        .expect("legacy rule must load");
+
+    assert_eq!(action, Some(PermissionAction::Allow));
 }
 
 #[tokio::test]

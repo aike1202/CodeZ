@@ -31,7 +31,10 @@ export default function TauriBootstrap(): React.ReactElement {
     let disposed = false
     let unlisten: (() => void) | undefined
     const applyTheme = (theme: ThemeInfo): void => {
-      document.documentElement.dataset.theme = theme.shouldUseDarkColors ? 'dark' : 'light'
+      const root = document.documentElement
+      const resolvedTheme = theme.shouldUseDarkColors ? 'dark' : 'light'
+      root.classList.toggle('dark', theme.shouldUseDarkColors)
+      root.dataset.theme = resolvedTheme
     }
 
     void desktopApi.theme.get().then(applyTheme).catch(() => undefined)

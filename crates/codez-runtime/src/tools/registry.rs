@@ -159,6 +159,8 @@ pub struct ToolFileServices {
 #[derive(Clone)]
 pub struct ToolContext {
     pub execution_id: String,
+    pub call_id: String,
+    pub turn_id: Option<String>,
     pub session_id: Option<String>,
     pub context_scope_id: String,
     pub transaction_id: Option<String>,

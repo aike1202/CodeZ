@@ -129,6 +129,39 @@ describe('desktop task and sub-agent adapter', () => {
     ])
   })
 
+  it('maps typed Task and Agent lifecycle snapshots to their Tauri commands', async () => {
+    setWindow({ __TAURI_INTERNALS__: {} })
+    const taskSnapshot = {
+      version: 1,
+      sessionId: 'session-1',
+      revision: 2,
+      nextSequence: 3,
+      tasks: []
+    }
+    const agentSnapshot = {
+      version: 1,
+      sessionId: 'session-1',
+      revision: 4,
+      agents: [],
+      messages: []
+    }
+    const activeIds = { agentIds: ['agent-1'], revision: 4 }
+    tauriMocks.invoke
+      .mockResolvedValueOnce(taskSnapshot)
+      .mockResolvedValueOnce(agentSnapshot)
+      .mockResolvedValueOnce(activeIds)
+
+    await expect(desktopApi.task.snapshot('session-1')).resolves.toEqual(taskSnapshot)
+    await expect(desktopApi.agent.snapshot('session-1')).resolves.toEqual(agentSnapshot)
+    await expect(desktopApi.agent.activeIds('session-1')).resolves.toEqual(activeIds)
+
+    expect(tauriMocks.invoke.mock.calls).toEqual([
+      ['task_list', { request: { sessionId: 'session-1' } }],
+      ['agent_snapshot', { request: { sessionId: 'session-1' } }],
+      ['agent_active_ids', { request: { sessionId: 'session-1' } }]
+    ])
+  })
+
   it('contains frozen Electron fallbacks inside the adapter boundary', async () => {
     const legacyTask = {
       getByProject: vi.fn().mockResolvedValue([task]),

@@ -16,11 +16,15 @@ mod logging;
 mod mcp_boundary;
 mod mcp_interaction;
 mod mcp_runtime;
+mod notification_tool_runtime;
 mod provider_boundary;
 mod session_deletion;
+mod skill_document;
+mod skill_tool_runtime;
 mod state;
 mod subagent_boundary;
 mod subagent_runtime;
+mod web_tool_runtime;
 
 use codez_core::{AppError, RedactedText};
 use tauri::{Emitter, Manager, WebviewWindow};
@@ -95,6 +99,7 @@ pub fn run() -> Result<(), tauri::Error> {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![

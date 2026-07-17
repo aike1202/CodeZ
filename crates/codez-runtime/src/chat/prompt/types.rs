@@ -13,6 +13,7 @@ pub enum PromptLayer {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptSkillSummary {
+    pub id: Option<String>,
     pub name: String,
     pub description: Option<String>,
 }
@@ -35,6 +36,7 @@ pub struct PromptContext {
     pub thinking_enabled: Option<bool>,
     pub available_tools: Option<Vec<PromptToolSummary>>,
     pub deferred_tools: Option<Vec<PromptToolSummary>>,
+    pub available_skills: Option<Vec<PromptSkillSummary>>,
     pub active_skills: Option<Vec<PromptSkillSummary>>,
     pub global_rules: Option<String>,
     pub workspace_rules: Option<String>,

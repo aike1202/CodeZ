@@ -110,6 +110,7 @@ use crate::{
     chat_compaction::{AutoCompactionRequest, compact_active_chat_context},
     chat_interaction::AskUserResponseRegistry,
     chat_tool_runtime::{AskUserHandler, ChatToolRunContext, ChatToolRuntime},
+    commands::skills::SkillsService,
     error::ErrorReporter,
     provider_boundary::{chat_message_from_wire, stop_reason_to_wire, usage_to_wire},
 };
@@ -166,6 +167,7 @@ struct ChatPromptAssembler {
     data_root: PathBuf,
     workspace_permissions: Arc<WorkspacePermissionStore>,
     process_runner: Arc<dyn ProcessRunner>,
+    skills: Option<Arc<SkillsService>>,
     pipeline: PromptPipeline,
 }
 
@@ -173,6 +175,7 @@ pub(crate) struct ChatPromptSources {
     data_root: PathBuf,
     workspace_permissions: Arc<WorkspacePermissionStore>,
     process_runner: Arc<dyn ProcessRunner>,
+    skills: Option<Arc<SkillsService>>,
 }
 
 impl ChatPromptSources {
@@ -185,7 +188,13 @@ impl ChatPromptSources {
             data_root,
             workspace_permissions,
             process_runner,
+            skills: None,
         }
+    }
+
+    pub(crate) fn with_skills(mut self, skills: Arc<SkillsService>) -> Self {
+        self.skills = Some(skills);
+        self
     }
 }
 
@@ -256,6 +265,8 @@ enum ChatPromptError {
     InvalidFileName(PathBuf),
     #[error("the default system prompt pipeline produced an empty prompt")]
     EmptyPrompt,
+    #[error("skill catalog preparation failed: {0}")]
+    SkillCatalog(AppError),
 }
 
 #[derive(Debug, Deserialize)]
@@ -263,21 +274,18 @@ struct RuleFrontmatter {
     enabled: Option<bool>,
 }
 
-#[derive(Debug, Deserialize)]
-struct SkillFrontmatter {
-    description: Option<String>,
-}
-
 impl ChatPromptAssembler {
     fn new(
         data_root: PathBuf,
         workspace_permissions: Arc<WorkspacePermissionStore>,
         process_runner: Arc<dyn ProcessRunner>,
+        skills: Option<Arc<SkillsService>>,
     ) -> Self {
         Self {
             data_root,
             workspace_permissions,
             process_runner,
+            skills,
             pipeline: create_default_pipeline(),
         }
     }
@@ -288,8 +296,14 @@ impl ChatPromptAssembler {
         let workspace_rules = self.load_workspace_rules(input.workspace_root, input.cancellation);
         let permission_mode = self.permission_mode(input.workspace_root, input.cancellation);
         let git_status = self.git_status(input.workspace_root, input.cancellation);
-        let (global_rules, workspace_rules, permission_mode, git_status) =
-            tokio::join!(global_rules, workspace_rules, permission_mode, git_status);
+        let available_skills = self.available_skills(input.workspace_root, input.cancellation);
+        let (global_rules, workspace_rules, permission_mode, git_status, available_skills) = tokio::join!(
+            global_rules,
+            workspace_rules,
+            permission_mode,
+            git_status,
+            available_skills
+        );
         ensure_prompt_not_cancelled(input.cancellation)?;
 
         let context = PromptContext {
@@ -305,6 +319,7 @@ impl ChatPromptAssembler {
             thinking_enabled: Some(input.resolved.thinking.enabled),
             available_tools: Some(prompt_tool_summaries(input.tool_schemas)),
             deferred_tools: Some(Vec::new()),
+            available_skills: available_skills?,
             active_skills: active_prompt_skills(input.scope),
             global_rules: global_rules?,
             workspace_rules: workspace_rules?,
@@ -321,6 +336,32 @@ impl ChatPromptAssembler {
             prompt.push_str(addendum);
         }
         Ok(prompt)
+    }
+
+    async fn available_skills(
+        &self,
+        workspace_root: Option<&WorkspaceRoot>,
+        cancellation: &CancellationToken,
+    ) -> Result<Option<Vec<PromptSkillSummary>>, ChatPromptError> {
+        let Some(skills) = &self.skills else {
+            return Ok(None);
+        };
+        ensure_prompt_not_cancelled(cancellation)?;
+        let definitions = skills
+            .list(workspace_root)
+            .await
+            .map_err(ChatPromptError::SkillCatalog)?;
+        ensure_prompt_not_cancelled(cancellation)?;
+        let available = definitions
+            .into_iter()
+            .filter(|skill| skill.enabled)
+            .map(|skill| PromptSkillSummary {
+                id: Some(skill.id),
+                name: skill.name,
+                description: (!skill.description.trim().is_empty()).then_some(skill.description),
+            })
+            .collect::<Vec<_>>();
+        Ok((!available.is_empty()).then_some(available))
     }
 
     async fn load_global_rules(
@@ -469,22 +510,12 @@ fn active_prompt_skills(scope: &SessionRuntimeScopeSnapshot) -> Option<Vec<Promp
         .iter()
         .filter(|state| state.status == "active")
         .map(|state| PromptSkillSummary {
+            id: None,
             name: state.name.clone(),
-            description: state
-                .content
-                .as_deref()
-                .and_then(skill_description_from_content),
+            description: None,
         })
         .collect::<Vec<_>>();
     (!active.is_empty()).then_some(active)
-}
-
-fn skill_description_from_content(content: &str) -> Option<String> {
-    let frontmatter = yaml_frontmatter(content)?;
-    serde_yaml::from_str::<SkillFrontmatter>(frontmatter)
-        .ok()?
-        .description
-        .filter(|description| !description.trim().is_empty())
 }
 
 async fn load_prompt_rule(
@@ -1450,6 +1481,7 @@ impl ChatRuntime {
             data_root,
             workspace_permissions,
             process_runner,
+            skills,
         } = prompt_sources;
         Self {
             cancellation,
@@ -1462,6 +1494,7 @@ impl ChatRuntime {
                 data_root,
                 workspace_permissions,
                 process_runner,
+                skills,
             )),
             registry: Mutex::new(RegistryState::default()),
             ask_user_responses: Arc::new(AskUserResponseRegistry::new()),
@@ -5099,7 +5132,7 @@ mod tests {
     mod prompt_assembly {
         use std::{io, path::Path, sync::Arc};
 
-        use codez_core::{AtomicPersistence, CancellationToken, ProcessRunner};
+        use codez_core::{AtomicPersistence, CancellationToken, ProcessRunner, WorkspaceRoot};
         use codez_platform::{NativeFileSystem, NativeProcessRunner};
         use codez_runtime::permission::store::WorkspacePermissionStore;
         use codez_storage::AtomicFileStore;
@@ -5108,6 +5141,7 @@ mod tests {
             ChatPromptAssembler, ChatPromptError, load_prompt_rule_directory,
             load_prompt_rule_with_hook,
         };
+        use crate::commands::skills::SkillsService;
 
         #[tokio::test]
         async fn prompt_rules_reject_a_parent_directory_redirect() {
@@ -5188,6 +5222,7 @@ mod tests {
                 authority.path().to_path_buf(),
                 permissions,
                 process_runner,
+                None,
             );
             let cancellation = CancellationToken::new();
             cancellation.cancel();
@@ -5198,6 +5233,54 @@ mod tests {
                 .expect_err("cancelled prompt preparation must not start rule I/O");
 
             assert!(matches!(error, ChatPromptError::Cancelled));
+        }
+
+        #[tokio::test]
+        async fn prompt_skill_catalog_uses_the_shared_bounded_service() {
+            let root = tempfile::tempdir().expect("prompt fixture root must exist");
+            let data_root = root.path().join("data");
+            let resources = root.path().join("resources");
+            let workspace = root.path().join("workspace");
+            std::fs::create_dir_all(data_root.join("skills/review"))
+                .expect("global skill directory must be created");
+            std::fs::create_dir_all(resources.join("builtin-skills"))
+                .expect("builtin skill directory must be created");
+            std::fs::create_dir_all(&workspace).expect("workspace must be created");
+            std::fs::write(
+                data_root.join("skills/review/SKILL.md"),
+                "---\nname: review\ndescription: Review safely\n---\nUse Read first.\n",
+            )
+            .expect("skill document must be written");
+            let storage = Arc::new(AtomicFileStore::default());
+            let persistence: Arc<dyn AtomicPersistence> = storage.clone();
+            let permissions = Arc::new(
+                WorkspacePermissionStore::new(&data_root, persistence)
+                    .expect("prompt permission fixture must compose"),
+            );
+            let skills = Arc::new(SkillsService::new(
+                data_root.clone(),
+                resources.clone(),
+                resources.join("builtin-skills"),
+                storage,
+            ));
+            let assembler = ChatPromptAssembler::new(
+                data_root,
+                permissions,
+                Arc::new(NativeProcessRunner::new()),
+                Some(skills),
+            );
+            let workspace = WorkspaceRoot::from_canonical(
+                std::fs::canonicalize(workspace).expect("workspace must canonicalize"),
+            )
+            .expect("workspace authority must be valid");
+
+            let catalog = assembler
+                .available_skills(Some(&workspace), &CancellationToken::new())
+                .await
+                .expect("skill catalog must load")
+                .expect("installed skill must be available");
+
+            assert_eq!(catalog[0].id.as_deref(), Some("global-review"));
         }
 
         #[cfg(unix)]
@@ -5234,7 +5317,7 @@ mod tests {
             path::PathBuf,
             sync::{Arc, Mutex},
             thread::{self, JoinHandle},
-            time::Duration,
+            time::{Duration, Instant},
         };
 
         use codez_contracts::chat::{
@@ -5342,7 +5425,10 @@ mod tests {
                 let paths = Arc::new(app_paths(data.path()));
                 std::fs::create_dir_all(paths.data_directory())
                     .expect("fixture application data directory must be created");
-                let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
+                std::fs::create_dir_all(paths.resource_directory())
+                    .expect("fixture resource directory must be created");
+                let storage = Arc::new(AtomicFileStore::default());
+                let persistence: Arc<dyn AtomicPersistence> = storage.clone();
                 let permissions = Arc::new(
                     WorkspacePermissionStore::new(paths.data_directory(), Arc::clone(&persistence))
                         .expect("fixture permission store must compose"),
@@ -5353,6 +5439,7 @@ mod tests {
                     paths.data_directory().to_path_buf(),
                     Arc::clone(&permissions),
                     Arc::clone(&process_runner),
+                    None,
                 ));
                 let edit_transaction = Arc::new(EditTransactionService::new(Arc::clone(&paths)));
                 let task_store = Arc::new(codez_runtime::task::TaskStore::new(
@@ -5364,11 +5451,17 @@ mod tests {
                     Arc::clone(&persistence),
                     Arc::new(FixtureAgentExecutor),
                 ));
+                let ledger = Arc::new(ModelLedgerStore::new(
+                    paths.data_directory().join("chat-ledger"),
+                    Arc::clone(&persistence),
+                ));
                 let tools = Arc::new(
                     ChatToolRuntime::new(
                         paths.as_ref(),
                         ChatToolRuntimeDependencies {
                             persistence: Arc::clone(&persistence),
+                            storage,
+                            model_ledger: Arc::clone(&ledger),
                             workspace_permissions: Arc::clone(&permissions),
                             fingerprint_store: Arc::new(ReadFingerprintStore::default()),
                             mutation_coordinator: Arc::new(FileMutationCoordinator::default()),
@@ -5376,14 +5469,13 @@ mod tests {
                             task_store,
                             agent_runtime: Arc::clone(&agent_runtime),
                             process_runner: native_process_runner,
+                            notification_port: Arc::new(
+                                crate::notification_tool_runtime::UnsupportedNotificationPort,
+                            ),
                         },
                     )
                     .expect("fixture chat tools must compose"),
                 );
-                let ledger = Arc::new(ModelLedgerStore::new(
-                    paths.data_directory().join("chat-ledger"),
-                    persistence,
-                ));
                 let attachment = Arc::new(AttachmentService::new(Arc::clone(&paths)));
                 Self {
                     _data: data,
@@ -5607,7 +5699,7 @@ mod tests {
                 let captured = Arc::clone(&requests);
                 let worker = thread::spawn(move || {
                     for (index, response) in responses.into_iter().enumerate() {
-                        let (mut stream, _) = listener.accept()?;
+                        let (mut stream, _) = accept_with_timeout(&listener)?;
                         let request = read_json_request(&mut stream)?;
                         captured
                             .lock()
@@ -5640,6 +5732,34 @@ mod tests {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .clone()
+            }
+        }
+
+        fn accept_with_timeout(
+            listener: &TcpListener,
+        ) -> io::Result<(TcpStream, std::net::SocketAddr)> {
+            listener.set_nonblocking(true)?;
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                match listener.accept() {
+                    Ok((stream, address)) => {
+                        stream.set_nonblocking(false)?;
+                        return Ok((stream, address));
+                    }
+                    Err(error)
+                        if error.kind() == io::ErrorKind::WouldBlock
+                            && Instant::now() < deadline =>
+                    {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::TimedOut,
+                            "local Provider did not receive the scripted request within 5 seconds",
+                        ));
+                    }
+                    Err(error) => return Err(error),
+                }
             }
         }
 
@@ -6357,7 +6477,8 @@ mod tests {
                     fixture.data_root.clone(),
                     Arc::clone(&fixture.permissions),
                     Arc::clone(&fixture.process_runner),
-                ),
+                )
+                .with_skills(fixture.tools.skill_service()),
             ));
             let session_id =
                 SessionId::parse("session-agent-e2e").expect("Agent session ID must parse");
@@ -6507,7 +6628,8 @@ mod tests {
                     fixture.data_root.clone(),
                     Arc::clone(&fixture.permissions),
                     Arc::clone(&fixture.process_runner),
-                ),
+                )
+                .with_skills(fixture.tools.skill_service()),
             );
             let session_id =
                 SessionId::parse("session-agent-cancel").expect("Agent session ID must parse");
@@ -6535,11 +6657,15 @@ mod tests {
                 .await
                 .expect("cancelled Agent ledger must load")
                 .expect("cancelled Agent ledger must exist");
+            assert_eq!(
+                error.kind(),
+                codez_core::AppErrorKind::Cancelled,
+                "unexpected Agent cancellation error: {error:?}"
+            );
             let requests = server.finish();
 
             assert!(
-                error.kind() == codez_core::AppErrorKind::Cancelled
-                    && requests.len() == 1
+                requests.len() == 1
                     && durable
                         .snapshot
                         .scopes
@@ -6643,7 +6769,8 @@ mod tests {
                     fixture.data_root.clone(),
                     Arc::clone(&fixture.permissions),
                     Arc::clone(&fixture.process_runner),
-                ),
+                )
+                .with_skills(fixture.tools.skill_service()),
             );
             let now = chrono::Utc::now();
             let request = AgentAttemptRequest {
@@ -6717,7 +6844,8 @@ mod tests {
                     fixture.data_root.clone(),
                     Arc::clone(&fixture.permissions),
                     Arc::clone(&fixture.process_runner),
-                ),
+                )
+                .with_skills(fixture.tools.skill_service()),
             ));
             let session_id =
                 SessionId::parse("session-e2e").expect("fixture session ID must parse");

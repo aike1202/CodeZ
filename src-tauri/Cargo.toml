@@ -31,6 +31,7 @@ serde_yaml.workspace = true
 tauri = { version = "2.11.5", features = [] }
 tauri-plugin-dialog = "2.7.1"
 tauri-plugin-global-shortcut = "2.3.2"
+tauri-plugin-notification = "2.3.3"
 tauri-plugin-opener = "2.5.4"
 tauri-plugin-single-instance = "2.4.3"
 tracing.workspace = true
@@ -39,11 +40,16 @@ tracing-appender.workspace = true
 tracing-subscriber.workspace = true
 thiserror.workspace = true
 url = "2.5.8"
-tokio = { workspace = true, features = ["process"] }
+tokio = { workspace = true, features = ["process", "net"] }
 tokio-util.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 tempfile.workspace = true
 chrono = { version = "0.4.45", features = ["serde"] }
+dom_smoothie = "0.18.0"
+encoding_rs = "0.8.35"
+reqwest.workspace = true
+scraper = "0.27.0"
 uuid.workspace = true
 rmcp = { version = "=2.2.0", default-features = false, features = ["client", "elicitation"] }
 

@@ -6,19 +6,7 @@ import type {
   MigrationCredentialInput,
   MigrationRecoveryStatus,
   PermissionMode,
-  SubAgentModelSelection,
-  SubAgentRunCancelResult,
-  SubAgentRunRequest,
-  SubAgentRunState,
 } from '../shared/desktop/generated/contracts'
-
-const subAgentRunSessions = new Map<string, string>()
-
-function subAgentSessionForRun(runId: string): string {
-  const sessionId = subAgentRunSessions.get(runId)
-  if (!sessionId) throw new Error('The sub-agent run session is unavailable.')
-  return sessionId
-}
 import type {
   McpListPayload,
   McpPromptGetResult,
@@ -327,20 +315,13 @@ export const tauriBridge: any = {
     onExit: (callback: (workspaceId: string) => void) =>
       desktopApi.terminal.onExit(({ workspaceId }) => callback(workspaceId)),
   },
-  task: {
-    list: async () => invoke('task_list'),
-    get: async (taskId: string) => invoke('task_get', { taskId }),
-    getByProject: (projectId: string) => desktopApi.task.getByProject(projectId),
-    save: async (task: any) => invoke('task_save', { task }),
-    delete: (taskId: string) => desktopApi.task.delete(taskId),
-  },
   theme: {
     get: () => invoke('theme_get'),
     set: (source: string) => invoke('theme_set', { source }),
     onUpdated: (callback: any) => {
       let active = true;
       const unlisten = listen('desktop://theme-changed', (event: any) => {
-        if (active) callback(event.payload);
+        if (active) callback(event.payload.payload);
       });
       return () => { active = false; unlisten.then((f) => f()); };
     },
@@ -431,28 +412,6 @@ export const tauriBridge: any = {
         if (active) callback(event.payload);
       });
       return () => { active = false; void unlisten.then((dispose) => dispose()).catch(() => undefined); };
-    },
-  },
-  subAgent: {
-    list: () => desktopApi.subAgent.list(),
-    toggle: (type: string, enabled: boolean) => desktopApi.subAgent.toggle(type, enabled),
-    getDetail: (type: string) => desktopApi.subAgent.getDetail(type),
-    setModel: (type: string, selections: SubAgentModelSelection[]) =>
-      desktopApi.subAgent.setModel(type, selections),
-    run: async (request: SubAgentRunRequest): Promise<SubAgentRunState> => {
-      const state = await desktopApi.subAgent.run(request)
-      subAgentRunSessions.set(state.runId, state.sessionId)
-      return state
-    },
-    getRun: async (runId: string): Promise<SubAgentRunState> =>
-      desktopApi.subAgent.getRun(subAgentSessionForRun(runId), runId),
-    cancelRun: async (runId: string): Promise<SubAgentRunCancelResult> =>
-      desktopApi.subAgent.cancelRun(subAgentSessionForRun(runId), runId),
-    onState: (callback: (state: SubAgentRunState) => void) => {
-      return desktopApi.subAgent.onState((state) => {
-        subAgentRunSessions.set(state.runId, state.sessionId)
-        callback(state)
-      })
     },
   },
   logger: {

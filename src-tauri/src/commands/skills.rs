@@ -19,7 +19,11 @@ use super::path_security::{
     SafeFileName, authorize_workspace, ensure_secure_path, path_io_error, secure_directory_exists,
     workspace_path,
 };
-use crate::{error::command_result, state::AppState};
+use crate::{
+    error::command_result,
+    skill_document::{MAX_SKILL_DOCUMENT_BYTES, parse_skill_document_bytes},
+    state::AppState,
+};
 
 const MAX_SKILL_TREE_DEPTH: usize = 16;
 const MAX_SKILL_TREE_ENTRIES: usize = 4_096;
@@ -76,16 +80,16 @@ impl SkillId {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SkillDefinition {
-    id: String,
-    name: String,
-    description: String,
-    triggers: Vec<String>,
-    content: String,
-    path: String,
-    enabled: bool,
-    is_global: bool,
-    builtin: bool,
+pub(crate) struct SkillDefinition {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) triggers: Vec<String>,
+    pub(crate) content: String,
+    pub(crate) path: String,
+    pub(crate) enabled: bool,
+    pub(crate) is_global: bool,
+    pub(crate) builtin: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,14 +106,6 @@ struct SkillCandidate {
     removal_kind: RemovalKind,
 }
 
-#[derive(Debug)]
-struct ParsedSkillDocument {
-    name: Option<String>,
-    description: Option<String>,
-    triggers: Vec<String>,
-    content: String,
-}
-
 #[derive(Debug, Error)]
 enum SkillDirectoryRemovalError {
     #[error("skill directory contains a symbolic link: {0}")]
@@ -124,7 +120,8 @@ enum SkillDirectoryRemovalError {
     },
 }
 
-struct SkillsService {
+#[derive(Clone)]
+pub(crate) struct SkillsService {
     data_root: PathBuf,
     resource_root: PathBuf,
     builtin_skills_root: PathBuf,
@@ -132,7 +129,7 @@ struct SkillsService {
 }
 
 impl SkillsService {
-    fn new(
+    pub(crate) fn new(
         data_root: PathBuf,
         resource_root: PathBuf,
         builtin_skills_root: PathBuf,
@@ -146,7 +143,7 @@ impl SkillsService {
         }
     }
 
-    async fn list(
+    pub(crate) async fn list(
         &self,
         workspace: Option<&WorkspaceRoot>,
     ) -> Result<Vec<SkillDefinition>, AppError> {
@@ -280,25 +277,18 @@ impl SkillsService {
             else {
                 continue;
             };
-            let content = String::from_utf8(bytes).map_err(|source| {
-                AppError::storage(
-                    "A skill file is not valid UTF-8",
-                    format!(
-                        "decode skill file {}: {source}",
-                        candidate.document_path.display()
-                    ),
-                    false,
-                )
-            })?;
-            let Some(document) = parse_skill_document(&content) else {
-                continue;
-            };
+            if bytes.len() > MAX_SKILL_DOCUMENT_BYTES {
+                return Err(AppError::validation(
+                    "SKILL.md exceeds the document size limit",
+                ));
+            }
+            let document = parse_skill_document_bytes(&bytes)?;
             let id = candidate.id.value();
             definitions.push(SkillDefinition {
                 name: document.name.unwrap_or_else(|| id.clone()),
                 description: document.description.unwrap_or_default(),
                 triggers: document.triggers,
-                content: document.content,
+                content: document.body,
                 path: candidate.document_path.to_string_lossy().into_owned(),
                 enabled: config.get(&id).copied().unwrap_or(true),
                 is_global: scope != SkillScope::Workspace,
@@ -611,61 +601,6 @@ async fn authorize_optional_workspace(
     authorize_workspace(root_path, None, &registered)
         .await
         .map(Some)
-}
-
-fn parse_skill_document(content: &str) -> Option<ParsedSkillDocument> {
-    let content = content.strip_prefix('\u{feff}').unwrap_or(content);
-    let remainder = content
-        .strip_prefix("---\r\n")
-        .or_else(|| content.strip_prefix("---\n"))?;
-    let (frontmatter, body) = remainder
-        .split_once("\r\n---\r\n")
-        .or_else(|| remainder.split_once("\n---\n"))?;
-    let mut name = None;
-    let mut description = None;
-    let mut triggers = Vec::new();
-    for line in frontmatter.lines() {
-        let Some((key, value)) = line.split_once(':') else {
-            continue;
-        };
-        let value = value.trim();
-        match key.trim() {
-            "name" => name = Some(trim_yaml_scalar(value).to_string()),
-            "description" => description = Some(trim_yaml_scalar(value).to_string()),
-            "triggers" => {
-                let list = value
-                    .strip_prefix('[')
-                    .and_then(|value| value.strip_suffix(']'))
-                    .unwrap_or(value);
-                triggers = list
-                    .split(',')
-                    .map(str::trim)
-                    .map(trim_yaml_scalar)
-                    .filter(|trigger| !trigger.is_empty())
-                    .map(str::to_string)
-                    .collect();
-            }
-            _ => {}
-        }
-    }
-    Some(ParsedSkillDocument {
-        name,
-        description,
-        triggers,
-        content: body.trim().to_string(),
-    })
-}
-
-fn trim_yaml_scalar(value: &str) -> &str {
-    value
-        .strip_prefix('"')
-        .and_then(|value| value.strip_suffix('"'))
-        .or_else(|| {
-            value
-                .strip_prefix('\'')
-                .and_then(|value| value.strip_suffix('\''))
-        })
-        .unwrap_or(value)
 }
 
 async fn remove_skill_directory(path: PathBuf) -> Result<(), AppError> {

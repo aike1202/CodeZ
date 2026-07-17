@@ -651,6 +651,8 @@ mod tests {
     fn context(root: &std::path::Path, context_scope_id: &str) -> ToolContext {
         ToolContext {
             execution_id: "execution-1".to_string(),
+            call_id: "call-1".to_string(),
+            turn_id: Some("turn-1".to_string()),
             session_id: Some("session-1".to_string()),
             context_scope_id: context_scope_id.to_string(),
             transaction_id: None,

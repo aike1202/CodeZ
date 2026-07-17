@@ -4,6 +4,7 @@ import { join, relative, resolve } from 'node:path'
 
 type CargoDependency = {
   name: string
+  kind: 'dev' | 'build' | null
 }
 
 type CargoPackage = {
@@ -32,6 +33,9 @@ const allowedInternalDependencies: Record<string, Set<string>> = {
   'codez-mcp': new Set(['codez-core']),
   'codez-storage': new Set(['codez-core'])
 }
+const allowedInternalDevDependencies: Record<string, Set<string>> = {
+  'codez-runtime': new Set(['codez-storage'])
+}
 const tauriForbidden = new Set(Object.keys(allowedInternalDependencies))
 const violations: string[] = []
 
@@ -47,8 +51,12 @@ for (const pkg of metadata.packages) {
   const allowed = allowedInternalDependencies[pkg.name]
   if (allowed) {
     for (const dependency of pkg.dependencies) {
-      if (internalPackages.has(dependency.name) && !allowed.has(dependency.name)) {
-        violations.push(`${pkg.name} must not depend on ${dependency.name}`)
+      const allowedForKind = dependency.kind === 'dev'
+        ? allowedInternalDevDependencies[pkg.name] ?? new Set<string>()
+        : allowed
+      if (internalPackages.has(dependency.name) && !allowedForKind.has(dependency.name)) {
+        const kind = dependency.kind === 'dev' ? 'dev-depend on' : 'depend on'
+        violations.push(`${pkg.name} must not ${kind} ${dependency.name}`)
       }
     }
   }
