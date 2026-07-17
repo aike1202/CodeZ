@@ -173,6 +173,7 @@ pub(crate) fn compose_app_state(
         paths.data_directory().to_path_buf(),
         Arc::clone(&storage),
         Arc::clone(&provider_service),
+        Arc::clone(&model_ledger),
     ));
     let agent_executor_port: Arc<dyn AgentAttemptExecutor> = agent_executor.clone();
     let agent_events: Arc<dyn AgentRuntimeEventSink> =

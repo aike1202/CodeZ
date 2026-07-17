@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "electron-vite dev",
     "dev:renderer:tauri": "vite --config vite.tauri.config.ts",
-    "dev:tauri": "tauri dev",
+    "dev:tauri": "tauri dev --no-watch",
+    "dev:tauri:watch": "tauri dev",
     "analyze:rust-shell-parser": "vite-node scripts/tauri/generate-shell-parser-diff.ts",
     "analyze:shell-corpus": "vite-node scripts/analyze-shell-command-corpus.ts",
     "analyze:tauri-resources": "vite-node scripts/tauri/analyze-resource-bundle.ts",

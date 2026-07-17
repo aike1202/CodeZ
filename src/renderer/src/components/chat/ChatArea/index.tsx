@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useMemo, useCallback, useState } from 'react'
-import { createPortal } from 'react-dom'
 import type { WorkspaceInfo } from '@shared/types/workspace'
 import type { PermissionApprovalResponse } from '@shared/types/permission'
 import HomePage from '../../../pages/HomePage'
@@ -15,17 +14,9 @@ import { useSendMessage } from '../hooks/useSendMessage'
 import { ChatMessageList } from './components/ChatMessageList'
 import ConversationNavigator from '../ConversationNavigator'
 import { desktopApi } from '../../../shared/desktop'
+import { getScrollFollowDecision, shouldPauseForWheel } from './scrollFollowing'
 
-/** 距底部小于视口高度的此比例算"在底部" */
-const SCROLL_BOTTOM_RATIO = 0.15
-/** "在底部"阈值的最小像素值(小视口保护) */
-const SCROLL_BOTTOM_MIN_PX = 100
 const EMPTY_QUEUED_PROMPTS: never[] = []
-
-function isNearBottom(container: HTMLElement): boolean {
-  const distance = container.scrollHeight - container.scrollTop - container.clientHeight
-  return distance < Math.max(container.clientHeight * SCROLL_BOTTOM_RATIO, SCROLL_BOTTOM_MIN_PX)
-}
 
 export function extractMessageEdits(msg: ChatMessage) {
   if (!msg.txId) return { edits: [], tools: [] }
@@ -138,13 +129,19 @@ export default function ChatArea({
   const contentRef = useRef<HTMLDivElement>(null)
   const prevSessionIdRef = useRef<string | null>(null)
   const scrollFrameRef = useRef<number | null>(null)
+  const lastScrollTopRef = useRef<number | null>(null)
+  const isFollowingRef = useRef(true)
   const [isFollowing, setIsFollowing] = useState(true)
-  const [containerMounted, setContainerMounted] = useState(false)
 
-  // containerRef.current 存在后才渲染 portal 按钮
-  useEffect(() => {
-    if (containerRef.current) {
-      setContainerMounted(true)
+  const updateFollowing = useCallback((following: boolean) => {
+    isFollowingRef.current = following
+    setIsFollowing(following)
+  }, [])
+
+  const cancelPendingScroll = useCallback(() => {
+    if (scrollFrameRef.current !== null) {
+      cancelAnimationFrame(scrollFrameRef.current)
+      scrollFrameRef.current = null
     }
   }, [])
 
@@ -153,24 +150,37 @@ export default function ChatArea({
     if (!container || scrollFrameRef.current !== null) return
     scrollFrameRef.current = requestAnimationFrame(() => {
       scrollFrameRef.current = null
+      if (!isFollowingRef.current) return
       container.scrollTop = container.scrollHeight
+      lastScrollTopRef.current = container.scrollTop
     })
   }, [])
 
-  useEffect(() => () => {
-    if (scrollFrameRef.current !== null) {
-      cancelAnimationFrame(scrollFrameRef.current)
-    }
-  }, [])
+  useEffect(() => cancelPendingScroll, [cancelPendingScroll])
+
+  const pauseFollowing = useCallback(() => {
+    updateFollowing(false)
+    cancelPendingScroll()
+  }, [cancelPendingScroll, updateFollowing])
 
   const handleScroll = useCallback(() => {
     const container = containerRef.current
     if (!container) return
-    setIsFollowing(isNearBottom(container))
-  }, [])
 
-  // We no longer need handleWheel or handleTouchStart to break following,
-  // because handleScroll accurately reflects the current position.
+    const decision = getScrollFollowDecision(container, lastScrollTopRef.current)
+    lastScrollTopRef.current = container.scrollTop
+    if (decision === 'pause') {
+      pauseFollowing()
+    } else if (decision === 'resume') {
+      updateFollowing(true)
+    }
+  }, [pauseFollowing, updateFollowing])
+
+  const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    if (shouldPauseForWheel(event.deltaY)) {
+      pauseFollowing()
+    }
+  }, [pauseFollowing])
 
   const resolvePermissionRequest = useChatStore((s) => s.resolvePermissionRequest)
   const resolveAskUserRequest = useChatStore((s) => s.resolveAskUserRequest)
@@ -279,10 +289,10 @@ export default function ChatArea({
     prevSessionIdRef.current = activeSessionId
 
     if (isUserLast || isSessionChanged) {
-      setIsFollowing(true)
+      updateFollowing(true)
       scrollToBottom()
     }
-  }, [messages, activeSessionId, scrollToBottom])
+  }, [messages, activeSessionId, scrollToBottom, updateFollowing])
 
   // Observe content height changes
   useEffect(() => {
@@ -290,14 +300,14 @@ export default function ChatArea({
     if (!content) return
 
     const observer = new ResizeObserver(() => {
-      if (isFollowing) {
+      if (isFollowingRef.current) {
         scrollToBottom()
       }
     })
     
     observer.observe(content)
     return () => observer.disconnect()
-  }, [isFollowing, scrollToBottom])
+  }, [scrollToBottom])
 
   const hasMessages = messages.length > 0
 
@@ -325,7 +335,7 @@ export default function ChatArea({
       type="button"
       className={`scroll-to-bottom-btn ${!isFollowing && hasMessages ? 'visible' : ''}`}
       onClick={() => {
-        setIsFollowing(true)
+        updateFollowing(true)
         scrollToBottom()
       }}
       aria-label="回到最新"
@@ -340,6 +350,7 @@ export default function ChatArea({
         containerRef={containerRef}
         panelOpen={panelOpen}
         onScroll={handleScroll}
+        onWheel={handleWheel}
         navigationRail={
           hasMessages ? (
             <ConversationNavigator

@@ -6453,7 +6453,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn explore_agent_reuses_the_main_multi_turn_loop_and_durable_subagent_scope() {
+        async fn explore_agent_inherits_the_main_model_and_reuses_the_multi_turn_loop() {
             let fixture = RuntimeFixture::new();
             std::fs::write(
                 fixture.workspace.path().join("evidence.txt"),
@@ -6482,6 +6482,7 @@ mod tests {
             ));
             let session_id =
                 SessionId::parse("session-agent-e2e").expect("Agent session ID must parse");
+            seed_prior_context(&fixture.ledger, &session_id, &provider_id).await;
             let agent_id = "agent_00000000-0000-4000-8000-000000000101".to_string();
             let attempt_id = "attempt_00000000-0000-4000-8000-000000000102".to_string();
             let mailbox_id = "amsg_00000000-0000-4000-8000-000000000103".to_string();
@@ -6526,14 +6527,7 @@ mod tests {
             settings_storage
                 .write_json(
                     &fixture.data_root.join("settings.json"),
-                    &json!({
-                        "subAgentModels": {
-                            "Explore": [{
-                                "providerId": provider_id,
-                                "model": "local-model"
-                            }]
-                        }
-                    }),
+                    &json!({ "subAgentModels": {} }),
                 )
                 .await
                 .expect("Agent model settings must persist");
@@ -6541,6 +6535,7 @@ mod tests {
                 fixture.data_root.clone(),
                 settings_storage,
                 Arc::clone(&providers),
+                Arc::clone(&fixture.ledger),
             );
             executor
                 .bind_chat_runtime(&runtime)
@@ -6594,7 +6589,12 @@ mod tests {
                         message["role"] == "tool"
                             && message.to_string().contains("durable-agent-evidence")
                     }),
-                    !before_retry.snapshot.scopes.contains_key("main"),
+                    before_retry.snapshot.scopes["main"]
+                        .last_provider_id
+                        .as_deref()
+                        == Some(provider_id.as_str())
+                        && before_retry.snapshot.scopes["main"].last_model.as_deref()
+                            == Some("local-model"),
                     after_retry.snapshot.scopes[&scope_key].history_version == history_version,
                     after_retry.snapshot.scopes[&scope_key]
                         .active_messages

@@ -962,6 +962,9 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "tree-sitter",
+ "tree-sitter-bash",
+ "tree-sitter-powershell",
  "uuid",
 ]
 

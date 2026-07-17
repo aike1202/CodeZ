@@ -13,8 +13,9 @@ use crate::{
     error::command_result,
     state::AppState,
     subagent_boundary::{
-        detail_for_subagent, find_known_subagent, list_subagents, provider_model_catalog,
-        read_settings, resolve_run_configuration, save_settings, validate_model_selections,
+        default_model_selection, detail_for_subagent, find_known_subagent,
+        has_configured_run_model, list_subagents, provider_model_catalog, read_settings,
+        resolve_run_configuration, save_settings, validate_model_selections,
     },
     subagent_runtime::TauriSubAgentEventSink,
 };
@@ -103,7 +104,17 @@ pub async fn subagent_run(
             .try_begin_activity(session_id)
             .map_err(AppError::from)?;
         let settings = read_settings(&state).await?;
-        let configuration = resolve_run_configuration(&request.subagent_type, settings.settings())?;
+        let default_selection =
+            if has_configured_run_model(&request.subagent_type, settings.settings())? {
+                None
+            } else {
+                Some(default_model_selection(&state.provider_service).await?)
+            };
+        let configuration = resolve_run_configuration(
+            &request.subagent_type,
+            settings.settings(),
+            default_selection,
+        )?;
         // Resolve before admission so a missing credential or disabled model does not create a
         // run that can only fail asynchronously. The runtime resolves again when it owns the
         // request, avoiding persistence or cross-task transfer of credentials.

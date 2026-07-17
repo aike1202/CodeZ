@@ -164,14 +164,26 @@ impl AgentTool {
 
     fn effect(&self, input: &Value, session_id: Option<&str>) -> ToolEffect {
         match self.kind {
-            AgentToolKind::Spawn => ToolEffect::SpawnAgent {
-                role: input
+            AgentToolKind::Spawn => {
+                let role = input
                     .get("role")
                     .and_then(Value::as_str)
                     .unwrap_or("unavailable")
-                    .to_string(),
-                isolation: Some("session".to_string()),
-            },
+                    .to_string();
+                ToolEffect::SpawnAgent {
+                    read_only: role == "Explore"
+                        && !input
+                            .get("allowShell")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false)
+                        && input
+                            .get("allowedWriteFiles")
+                            .and_then(Value::as_array)
+                            .is_none_or(Vec::is_empty),
+                    role,
+                    isolation: Some("session".to_string()),
+                }
+            }
             AgentToolKind::List | AgentToolKind::Wait => ToolEffect::ReadMemory {
                 path: agent_resource(session_id),
             },
@@ -628,7 +640,7 @@ mod tests {
         },
         tools::{
             registry::{ToolContext, ToolHandler},
-            types::{ToolEffectPlan, ToolExecutionResult},
+            types::{ToolEffect, ToolEffectPlan, ToolExecutionResult, ToolPlanningContext},
         },
     };
 
@@ -665,6 +677,78 @@ mod tests {
             file_services: None,
             deferred_tools: Vec::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn spawn_planning_marks_shell_disabled_agents_without_write_files_as_read_only() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let runtime = Arc::new(AgentRuntime::new(
+            directory.path(),
+            Arc::new(AtomicFileStore::default()),
+            Arc::new(ImmediateExecutor),
+        ));
+        let spawn = AgentTool::spawn(runtime);
+        let input = serde_json::json!({
+            "role": "Explore",
+            "taskName": "architecture_analysis",
+            "message": "Inspect without modifying files",
+            "allowShell": false
+        });
+        let plan = spawn
+            .plan_effects(
+                &input,
+                &ToolPlanningContext {
+                    workspace_root: directory.path().to_path_buf(),
+                    session_id: Some("session-1".to_string()),
+                    agent_role: "main".to_string(),
+                },
+            )
+            .await;
+
+        assert!(matches!(
+            plan.effects.as_slice(),
+            [ToolEffect::SpawnAgent {
+                role,
+                read_only: true,
+                ..
+            }] if role == "Explore"
+        ));
+    }
+
+    #[tokio::test]
+    async fn spawn_planning_does_not_call_reviewer_read_only_when_its_role_exposes_shell() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let runtime = Arc::new(AgentRuntime::new(
+            directory.path(),
+            Arc::new(AtomicFileStore::default()),
+            Arc::new(ImmediateExecutor),
+        ));
+        let spawn = AgentTool::spawn(runtime);
+        let input = serde_json::json!({
+            "role": "Reviewer",
+            "taskName": "review",
+            "message": "Review the workspace",
+            "allowShell": false
+        });
+        let plan = spawn
+            .plan_effects(
+                &input,
+                &ToolPlanningContext {
+                    workspace_root: directory.path().to_path_buf(),
+                    session_id: Some("session-1".to_string()),
+                    agent_role: "main".to_string(),
+                },
+            )
+            .await;
+
+        assert!(matches!(
+            plan.effects.as_slice(),
+            [ToolEffect::SpawnAgent {
+                role,
+                read_only: false,
+                ..
+            }] if role == "Reviewer"
+        ));
     }
 
     #[tokio::test]

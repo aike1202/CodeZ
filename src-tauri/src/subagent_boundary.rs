@@ -8,6 +8,7 @@ use codez_contracts::subagent::{
     SubAgentOutputSpec, SubAgentSettingsDetail, SubAgentUnavailableDetail,
 };
 use codez_core::AppError;
+use codez_providers::service::ProviderService;
 use codez_runtime::agent::{
     registry::{self, SubAgentDefinition},
     sub_agent::{SubAgentModelId, SubAgentRole},
@@ -329,6 +330,7 @@ pub(crate) fn detail_for_subagent(
 pub(crate) fn resolve_run_configuration(
     subagent_type: &str,
     settings: &SubAgentSettings,
+    default_selection: Option<SubAgentModelSelection>,
 ) -> Result<SubAgentRunConfiguration, AppError> {
     let agent = find_known_subagent(subagent_type)?;
     if !settings.is_enabled(agent.role()) {
@@ -337,6 +339,7 @@ pub(crate) fn resolve_run_configuration(
     let selection = settings
         .models_for(agent.role())
         .and_then(|mut selections| selections.drain(..).next())
+        .or(default_selection)
         .ok_or_else(|| {
             AppError::validation(
                 "Configure at least one valid Provider and model before running this sub-agent",
@@ -345,6 +348,27 @@ pub(crate) fn resolve_run_configuration(
     Ok(SubAgentRunConfiguration {
         role: agent.role().clone(),
         selection,
+    })
+}
+
+pub(crate) fn has_configured_run_model(
+    subagent_type: &str,
+    settings: &SubAgentSettings,
+) -> Result<bool, AppError> {
+    let agent = find_known_subagent(subagent_type)?;
+    if !settings.is_enabled(agent.role()) {
+        return Err(AppError::conflict("The selected sub-agent is disabled"));
+    }
+    Ok(settings.models_for(agent.role()).is_some())
+}
+
+pub(crate) async fn default_model_selection(
+    providers: &ProviderService,
+) -> Result<SubAgentModelSelection, AppError> {
+    let resolved = providers.resolve_chat_config(None, None).await?;
+    Ok(SubAgentModelSelection {
+        provider_id: resolved.provider_id,
+        model: resolved.model.id,
     })
 }
 
@@ -700,8 +724,15 @@ mod tests {
         }))
         .expect("configured settings must parse");
 
-        let configuration = resolve_run_configuration("Explore", document.settings())
-            .expect("an enabled configured agent must resolve");
+        let configuration = resolve_run_configuration(
+            "Explore",
+            document.settings(),
+            Some(SubAgentModelSelection {
+                provider_id: "provider-main".to_string(),
+                model: "model-main".to_string(),
+            }),
+        )
+        .expect("an enabled configured agent must resolve");
 
         assert_eq!(configuration.selection.model, "careful-model");
     }
@@ -716,9 +747,33 @@ mod tests {
         }))
         .expect("configured settings must parse");
 
-        let error = resolve_run_configuration("Explore", document.settings())
+        let error = resolve_run_configuration("Explore", document.settings(), None)
             .expect_err("disabled agents must not be admitted");
 
         assert_eq!(error.public_message(), "The selected sub-agent is disabled");
+    }
+
+    #[test]
+    fn run_configuration_should_use_the_default_model_when_no_candidate_is_configured() {
+        let document = SubAgentSettingsDocument::from_value(json!({
+            "subAgentModels": {}
+        }))
+        .expect("empty model settings must parse");
+        let default_selection = SubAgentModelSelection {
+            provider_id: "provider-main".to_string(),
+            model: "model-main".to_string(),
+        };
+
+        let configuration =
+            resolve_run_configuration("Explore", document.settings(), Some(default_selection))
+                .expect("an enabled agent must inherit the default model");
+
+        assert_eq!(
+            (
+                configuration.selection.provider_id.as_str(),
+                configuration.selection.model.as_str(),
+            ),
+            ("provider-main", "model-main")
+        );
     }
 }
