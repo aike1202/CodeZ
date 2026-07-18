@@ -67,8 +67,8 @@ use codez_runtime::{
         scheduler::ToolScheduler,
         spawn::{CommandTaskError, CommandTaskRegistry},
         types::{
-            AgentRole, NormalizedToolCall, PreparedToolCall, ToolEffect, ToolExecutionError,
-            ToolExecutionResult, ToolPipelineResult,
+            AgentRole, DeferredToolSummary, NormalizedToolCall, PreparedToolCall, ToolEffect,
+            ToolExecutionError, ToolExecutionResult, ToolPipelineResult,
         },
         validation::ToolInputValidator,
     },
@@ -328,6 +328,11 @@ pub(crate) struct ChatToolRuntime {
     powershell: Option<Arc<PowerShellTool>>,
 }
 
+pub(crate) struct ProviderToolSurface {
+    pub(crate) definitions: Vec<ToolDefinition>,
+    pub(crate) deferred_tools: Vec<DeferredToolSummary>,
+}
+
 pub(crate) struct ChatToolRuntimeDependencies {
     pub(crate) persistence: Arc<dyn AtomicPersistence>,
     pub(crate) storage: Arc<AtomicFileStore>,
@@ -467,12 +472,24 @@ impl ChatToolRuntime {
         &self,
         run: &ChatToolRunContext,
     ) -> Vec<ToolDefinition> {
+        self.provider_tool_surface_for_run(run).definitions
+    }
+
+    /// Resolves the eager Provider schemas and deferred capability directory from one plan.
+    #[must_use]
+    pub(crate) fn provider_tool_surface_for_run(
+        &self,
+        run: &ChatToolRunContext,
+    ) -> ProviderToolSurface {
         let exposure = self.exposure_for_run(run);
         let mut definitions = provider_definitions(exposure.eager_tools.iter());
         if run.agent_policy.is_none() {
             definitions.push(ask_user_tool_definition());
         }
-        definitions
+        ProviderToolSurface {
+            definitions,
+            deferred_tools: exposure.deferred_tools,
+        }
     }
 
     pub(crate) fn skill_service(&self) -> Arc<SkillsService> {

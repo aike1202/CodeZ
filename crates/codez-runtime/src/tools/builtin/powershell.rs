@@ -30,8 +30,15 @@ const MAX_TIMEOUT_MS: u64 = 120_000;
 const UTF8_SETUP: &str = concat!(
     "[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false); ",
     "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); ",
-    "$OutputEncoding = [System.Text.UTF8Encoding]::new($false);"
+    "$OutputEncoding = [System.Text.UTF8Encoding]::new($false); ",
+    "chcp 65001 > $null"
 );
+const UTF8_SETUP_STATEMENTS: [&str; 4] = [
+    "[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)",
+    "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
+    "$OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
+    "chcp 65001 > $null",
+];
 
 pub struct PowerShellTool {
     descriptor: DefaultToolDescriptor,
@@ -156,6 +163,20 @@ impl ToolHandler for PowerShellTool {
         &self.descriptor
     }
 
+    fn normalize_input(&self, mut input: Value) -> Value {
+        let normalized = input
+            .get("command")
+            .and_then(Value::as_str)
+            .and_then(|command| {
+                let normalized = normalize_user_command(command);
+                (normalized != command).then(|| normalized.to_string())
+            });
+        if let Some(command) = normalized {
+            input["command"] = Value::String(command);
+        }
+        input
+    }
+
     fn plan_effects<'a>(
         &'a self,
         input: &'a Value,
@@ -163,6 +184,7 @@ impl ToolHandler for PowerShellTool {
     ) -> BoxFuture<'a, ToolEffectPlan> {
         Box::pin(async move {
             if let Some(command) = input.get("command").and_then(Value::as_str) {
+                let command = normalize_user_command(command);
                 let cwd = context
                     .session_id
                     .as_deref()
@@ -221,7 +243,10 @@ impl ToolHandler for PowerShellTool {
                     false,
                 );
             };
-            let command = arguments.get("command").and_then(Value::as_str);
+            let command = arguments
+                .get("command")
+                .and_then(Value::as_str)
+                .map(normalize_user_command);
             let task_id = arguments.get("task_id").and_then(Value::as_str);
             let action = arguments.get("action").and_then(Value::as_str);
             let background = arguments
@@ -395,6 +420,43 @@ impl ToolHandler for PowerShellTool {
             }
         })
     }
+}
+
+fn normalize_user_command(command: &str) -> &str {
+    strip_utf8_setup(command).unwrap_or(command)
+}
+
+fn strip_utf8_setup(command: &str) -> Option<&str> {
+    let mut remainder = command.trim_start();
+    for statement in &UTF8_SETUP_STATEMENTS[..3] {
+        remainder = strip_ascii_case_prefix(remainder, statement)?;
+        remainder = strip_powershell_statement_separator(remainder)?;
+    }
+    if let Some(after_code_page) = strip_ascii_case_prefix(remainder, UTF8_SETUP_STATEMENTS[3]) {
+        remainder = strip_powershell_statement_separator(after_code_page)?;
+    }
+    Some(remainder.trim_start())
+}
+
+fn strip_ascii_case_prefix<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
+    let candidate = value.get(..prefix.len())?;
+    candidate
+        .eq_ignore_ascii_case(prefix)
+        .then(|| &value[prefix.len()..])
+}
+
+fn strip_powershell_statement_separator(value: &str) -> Option<&str> {
+    let value = value.trim_start_matches([' ', '\t']);
+    if value.is_empty() {
+        return Some(value);
+    }
+    if let Some(remainder) = value.strip_prefix(';') {
+        return Some(remainder.trim_start());
+    }
+    value
+        .strip_prefix("\r\n")
+        .or_else(|| value.strip_prefix(['\r', '\n']))
+        .map(str::trim_start)
 }
 
 fn literal_location_target(command: &str) -> Option<String> {
@@ -624,7 +686,10 @@ mod tests {
     use serde_json::Value;
     use tokio::sync::{Mutex, Notify};
 
-    use super::{PowerShellHost, PowerShellTool, UTF8_SETUP, literal_location_target};
+    use super::{
+        PowerShellHost, PowerShellTool, UTF8_SETUP, UTF8_SETUP_STATEMENTS, literal_location_target,
+        normalize_user_command,
+    };
     use crate::tools::{
         registry::{ToolContext, ToolHandler},
         spawn::{CommandRequest, CommandTaskRegistry, ShellKind},
@@ -860,6 +925,10 @@ mod tests {
         }
     }
 
+    fn command_with_legacy_utf8_setup(command: &str) -> String {
+        format!("{}\n{command}", UTF8_SETUP.replace("; ", "\n"))
+    }
+
     #[test]
     fn descriptor_exposes_the_complete_command_task_schema() {
         let tool = PowerShellTool::new();
@@ -898,6 +967,84 @@ mod tests {
                 cwd: Some(planning.workspace_root.to_string_lossy().to_string()),
             }]
         );
+    }
+
+    #[test]
+    fn input_normalization_removes_standard_utf8_setup_before_authorization() {
+        let command = "npm run typecheck";
+        let input = PowerShellTool::new().normalize_input(serde_json::json!({
+            "command": command_with_legacy_utf8_setup(command),
+            "timeout": 120_000
+        }));
+
+        assert_eq!(input["command"], command);
+    }
+
+    #[tokio::test]
+    async fn planning_normalizes_semicolon_setup_before_compound_git_inspection() {
+        let tool = PowerShellTool::new();
+        let planning = ToolPlanningContext {
+            workspace_root: std::env::temp_dir(),
+            session_id: Some("session-a".to_string()),
+            agent_role: "main".to_string(),
+        };
+        let command = "git status --short --branch; git log -5 --oneline --decorate";
+        let submitted = format!("{UTF8_SETUP}; {command}");
+
+        let effects = tool
+            .plan_effects(&serde_json::json!({"command": submitted}), &planning)
+            .await;
+
+        assert_eq!(
+            effects.effects,
+            vec![ToolEffect::ExecuteCommand {
+                shell: "powershell".to_string(),
+                command: command.to_string(),
+                cwd: Some(planning.workspace_root.to_string_lossy().to_string()),
+            }]
+        );
+    }
+
+    #[test]
+    fn normalization_accepts_standard_setup_without_code_page_command() {
+        let setup = UTF8_SETUP_STATEMENTS[..3].join("\r\n");
+        let submitted = format!("{setup}\r\nnpm run typecheck");
+
+        assert_eq!(normalize_user_command(&submitted), "npm run typecheck");
+    }
+
+    #[test]
+    fn normalization_does_not_strip_a_modified_encoding_setup() {
+        let submitted = command_with_legacy_utf8_setup("npm run typecheck").replacen(
+            "[System.Text.UTF8Encoding]",
+            "[System.Text.UnicodeEncoding]",
+            1,
+        );
+
+        assert_eq!(normalize_user_command(&submitted), submitted);
+    }
+
+    #[tokio::test]
+    async fn planning_keeps_a_dangerous_command_after_standard_setup_visible() {
+        let tool = PowerShellTool::new();
+        let planning = ToolPlanningContext {
+            workspace_root: std::env::temp_dir(),
+            session_id: Some("session-a".to_string()),
+            agent_role: "main".to_string(),
+        };
+        let command = "Remove-Item -Recurse -Force generated";
+
+        let effects = tool
+            .plan_effects(
+                &serde_json::json!({"command": command_with_legacy_utf8_setup(command)}),
+                &planning,
+            )
+            .await;
+
+        assert!(matches!(
+            effects.effects.as_slice(),
+            [ToolEffect::ExecuteCommand { command: planned, .. }] if planned == command
+        ));
     }
 
     #[tokio::test]
@@ -1002,6 +1149,39 @@ mod tests {
                     && !model_content.contains(UTF8_SETUP))
                 && executed == format!("{UTF8_SETUP}\n{command}")
                 && request.environment.len() == 1
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_utf8_setup_is_injected_exactly_once_and_not_reported() {
+        let workspace = tempfile::tempdir().expect("workspace must be available");
+        let harness = Harness::completing();
+        let command = "npm run typecheck";
+        let submitted = command_with_legacy_utf8_setup(command);
+
+        let result = harness
+            .tool
+            .execute(
+                &serde_json::json!({"command": submitted}),
+                &context_for_command(workspace.path(), "session-a", command),
+            )
+            .await;
+        let requests = harness
+            .runner
+            .requests
+            .lock()
+            .expect("fake request list must remain available");
+        let executed = requests[0]
+            .arguments
+            .last()
+            .map(|argument| argument.to_string_lossy())
+            .expect("PowerShell command argument must be present");
+
+        assert!(
+            matches!(result, ToolExecutionResult::Success { data: Some(ref data), .. }
+                if data["command"] == command)
+                && executed == format!("{UTF8_SETUP}\n{command}")
+                && executed.matches("[Console]::InputEncoding").count() == 1
         );
     }
 

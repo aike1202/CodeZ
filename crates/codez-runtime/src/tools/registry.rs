@@ -174,6 +174,10 @@ pub struct ToolContext {
 pub trait ToolHandler: Send + Sync {
     fn descriptor(&self) -> &dyn ToolDescriptor;
 
+    fn normalize_input(&self, input: Value) -> Value {
+        input
+    }
+
     fn plan_effects<'a>(
         &'a self,
         input: &'a Value,

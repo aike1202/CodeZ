@@ -1,0 +1,85 @@
+{
+  "product": "Claude Code",
+  "generated_at": "2026-07-18",
+  "source_revision": "b78dd22a091b717c8938ab98c736bc04825a8ee8",
+  "source_repository_status": "Unofficial TypeScript restoration from public npm source maps",
+  "runtime_versions": {
+    "selected_transcript": "2.1.197",
+    "installed_cli_at_research_time": "2.1.207"
+  },
+  "sources": [
+    {
+      "kind": "runtime_transcript",
+      "path": "C:\\Users\\asus\\.claude\\projects\\F--MyProjectF-CodeZ\\fa503702-bb54-4c50-af71-1d5bd15fd0c7.jsonl",
+      "session_id": "fa503702-bb54-4c50-af71-1d5bd15fd0c7",
+      "evidence": ["user message", "agent_listing_delta", "skill_listing", "Agent tool input", "usage", "version", "entrypoint"],
+      "confidence": "A"
+    },
+    {
+      "kind": "runtime_subagent_transcript",
+      "path": "C:\\Users\\asus\\.claude\\projects\\F--MyProjectF-CodeZ\\fa503702-bb54-4c50-af71-1d5bd15fd0c7\\subagents\\agent-a1bfeaf20c9e0b1e7.jsonl",
+      "agent_id": "a1bfeaf20c9e0b1e7",
+      "agent_type": "Explore",
+      "confidence": "A"
+    },
+    {
+      "kind": "source",
+      "path": "F:\\MyProjectF\\Claude-Code\\src\\constants\\prompts.ts",
+      "symbols": ["getSystemPrompt", "getSessionSpecificGuidanceSection", "computeSimpleEnvInfo", "DEFAULT_AGENT_PROMPT", "enhanceSystemPromptWithEnvDetails"],
+      "confidence": "B"
+    },
+    {
+      "kind": "source",
+      "path": "F:\\MyProjectF\\Claude-Code\\src\\utils\\systemPrompt.ts",
+      "symbols": ["buildEffectiveSystemPrompt"],
+      "confidence": "B"
+    },
+    {
+      "kind": "source",
+      "path": "F:\\MyProjectF\\Claude-Code\\src\\tools\\AgentTool\\prompt.ts",
+      "symbols": ["getPrompt"],
+      "confidence": "B"
+    },
+    {
+      "kind": "source",
+      "path": "F:\\MyProjectF\\Claude-Code\\src\\tools\\AgentTool\\builtInAgents.ts",
+      "symbols": ["getBuiltInAgents", "areExplorePlanAgentsEnabled"],
+      "confidence": "B"
+    },
+    {
+      "kind": "source",
+      "path": "F:\\MyProjectF\\Claude-Code\\src\\tools\\AgentTool\\built-in\\exploreAgent.ts",
+      "symbols": ["EXPLORE_AGENT", "EXPLORE_AGENT_MIN_QUERIES", "getExploreSystemPrompt"],
+      "confidence": "B"
+    },
+    {
+      "kind": "source_group",
+      "path": "F:\\MyProjectF\\Claude-Code\\src\\tools",
+      "topics": ["FileReadTool", "FileEditTool", "FileWriteTool", "GrepTool", "GlobTool", "BashTool", "AgentTool", "Task tools", "SkillTool"],
+      "confidence": "B"
+    },
+    {
+      "kind": "source",
+      "path": "F:\\MyProjectF\\Claude-Code\\src\\utils\\fileStateCache.ts",
+      "symbols": ["readFileState", "FileState", "LRU limits"],
+      "confidence": "B"
+    },
+    {
+      "kind": "source_group",
+      "path": "F:\\MyProjectF\\Claude-Code\\src\\services\\compact",
+      "topics": ["full compaction", "microcompact", "session memory compaction", "post-compact file restoration"],
+      "confidence": "B"
+    },
+    {
+      "kind": "source",
+      "path": "F:\\MyProjectF\\Claude-Code\\src\\utils\\attachments.ts",
+      "symbols": ["dynamic attachments", "changed files", "system reminders"],
+      "confidence": "B"
+    }
+  ],
+  "limitations": [
+    "The transcript does not store the hidden system prompt verbatim.",
+    "The restored source revision is not proven byte-identical to runtime 2.1.197.",
+    "Full tool schemas are reconstructed from source, not present in the transcript."
+  ]
+}

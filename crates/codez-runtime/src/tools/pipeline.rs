@@ -321,6 +321,7 @@ impl ToolExecutionPipeline {
                     continue;
                 }
             };
+            let input = handler.normalize_input(input);
             let (effects, resource_keys) = tokio::join!(
                 handler.plan_effects(&input, &planning_context),
                 handler.resource_keys(&input, &planning_context)

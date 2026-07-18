@@ -51,7 +51,7 @@ pub fn get_builtin_subagents() -> Vec<SubAgentDefinition> {
                 "The task requires modifying files, implementing changes, or running state-changing commands.",
                 "The task is to review or verify completed changes; use Reviewer instead."
             ].join("\n")),
-            cost_hint: Some("Uses configured candidate models and otherwise follows the main Agent. Budgets: quick 8, normal 16, default 24, exhaustive 32 loops.".to_string()),
+            cost_hint: Some("Uses configured candidate models and otherwise follows the main Agent. Runtime budgets: quick 6 rounds/12 calls, normal 12 rounds/30 calls, exhaustive 20 rounds/60 calls.".to_string()),
             max_loops: 24,
             can_run_in_background: None,
             isolation: None,

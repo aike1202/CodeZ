@@ -1,0 +1,45 @@
+{
+  "product": "OpenAI Codex",
+  "generated_at": "2026-07-18",
+  "sources": [
+    {
+      "kind": "runtime_rollout",
+      "path": "C:\\Users\\asus\\.codex\\sessions\\2026\\07\\16\\rollout-2026-07-16T16-08-21-019f69f8-1394-71b3-a0e3-2821d2e79fcf.jsonl",
+      "session_id": "019f69f8-1394-71b3-a0e3-2821d2e79fcf",
+      "cli_version": "0.144.2",
+      "evidence": ["base_instructions", "developer messages", "environment", "turn context", "user messages", "tool calls"],
+      "confidence": "A"
+    },
+    {
+      "kind": "runtime_rollout",
+      "path": "C:\\Users\\asus\\.codex\\sessions\\2026\\07\\17\\rollout-2026-07-17T14-36-19-019f6eca-384b-7c21-991c-31cd664493c7.jsonl",
+      "evidence": ["child agent example"],
+      "confidence": "A"
+    },
+    {
+      "kind": "official_manual_cache",
+      "path": "C:\\Users\\asus\\AppData\\Local\\Temp\\openai-docs-cache\\codex-manual.md",
+      "retrieved_at": "2026-07-18",
+      "topics": ["subagents", "agents.max_threads", "agents.max_depth", "built-in agent profiles"],
+      "confidence": "A"
+    },
+    {
+      "kind": "runtime_rollout",
+      "path": "C:\\Users\\asus\\.codex\\sessions\\2026\\07\\17\\rollout-2026-07-17T14-36-42-019f6eca-9f05-7b43-968a-7ecd742bf8a5.jsonl",
+      "evidence": ["additional child agent example", "tool calls", "child lifecycle"],
+      "confidence": "A"
+    },
+    {
+      "kind": "current_runtime_contract",
+      "captured_at": "2026-07-18",
+      "evidence": ["exec", "exec_command", "apply_patch", "write_stdin", "update_plan", "collaboration tools"],
+      "confidence": "A"
+    }
+  ],
+  "limitations": [
+    "A rollout snapshot is runtime-specific and not a universal Codex prompt.",
+    "Some spawned-agent message payloads may be encrypted in rollout storage.",
+    "Tool schemas vary with plugins, MCP servers, app features, and host version.",
+    "No local source was available for Codex core tool implementations."
+  ]
+}

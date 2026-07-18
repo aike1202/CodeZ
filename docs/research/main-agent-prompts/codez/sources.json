@@ -1,0 +1,31 @@
+{
+  "product": "CodeZ",
+  "revision": "f76537bb6d4f7b066f4a6519e44fff1c9833b533",
+  "branch": "codex/test_rs",
+  "worktree": "dirty",
+  "snapshotDate": "2026-07-18",
+  "primaryRuntime": "tauri-rust",
+  "sources": [
+    { "path": "crates/codez-runtime/src/chat/prompt/builder.rs", "symbols": ["create_default_pipeline"], "evidence": "B" },
+    { "path": "crates/codez-runtime/src/chat/prompt/pipeline.rs", "symbols": ["PromptPipeline::run", "SYSTEM_PROMPT_DYNAMIC_BOUNDARY"], "evidence": "B" },
+    { "path": "crates/codez-runtime/src/chat/prompt/modules", "symbols": ["all prompt modules"], "evidence": "B" },
+    { "path": "src-tauri/src/chat_runtime.rs", "symbols": ["ChatPromptAssembler", "prepare_provider_request", "agent_system_addendum"], "evidence": "B" },
+    { "path": "src-tauri/src/chat_tool_runtime.rs", "symbols": ["builtin_catalog", "agent_tool_allowlist", "reviewer_verification_command"], "evidence": "B" },
+    { "path": "crates/codez-runtime/src/tools", "symbols": ["ToolDescriptor", "ToolExposurePlanner", "ToolExecutionPipeline", "builtin handlers"], "evidence": "B" },
+    { "path": "crates/codez-runtime/src/agent/registry.rs", "symbols": ["get_builtin_subagents"], "evidence": "B" },
+    { "path": "crates/codez-runtime/src/agent/collaboration.rs", "symbols": ["AgentRuntime", "AgentAttemptRequest", "AgentAttemptOutput"], "evidence": "B" },
+    { "path": "src/main/agent/definitions", "symbols": ["legacy Electron Agent definitions"], "evidence": "B" },
+    { "path": "src/main/services/prompts/SubAgentPrompts.ts", "symbols": ["buildSharedToolUsePrompt", "buildExecutorSharedPrompt"], "evidence": "B" },
+    { "path": "C:/Users/asus/.codez/session-runtime/1784299678287_8eao9s/ledger.jsonl", "symbols": ["real main and Explore history"], "evidence": "A" },
+    { "path": "C:/Users/asus/.codez/session-runtime/1784299678287_8eao9s/snapshot.json", "symbols": ["durable scopes and usage"], "evidence": "A" },
+    { "path": "C:/Users/asus/.codez/agent-runtime/1784299678287_8eao9s.json", "symbols": ["three real Explore records and mailbox"], "evidence": "A" },
+    { "path": "C:/Users/asus/.codez/logs/codez.2026-07-17.jsonl", "symbols": ["provider/model stream evidence"], "evidence": "A" },
+    { "path": "C:/Users/asus/.codez/providers.json", "symbols": ["local provider/model metadata; secrets excluded"], "evidence": "A" }
+  ],
+  "limitations": [
+    "The selected ledger does not persist the complete outbound System Prompt or Provider tools array.",
+    "proxy_logs.db does not contain a request aligned with the selected current Rust session.",
+    "The reconstructed request is not a byte-for-byte network capture.",
+    "Credential values and API keys are intentionally excluded."
+  ]
+}

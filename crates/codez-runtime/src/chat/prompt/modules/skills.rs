@@ -114,6 +114,7 @@ mod tests {
                 summary: "Activate a skill".to_string(),
             }]),
             deferred_tools: None,
+            available_agents: None,
             available_skills: Some(vec![PromptSkillSummary {
                 id: Some("global-review".to_string()),
                 name: "review".to_string(),

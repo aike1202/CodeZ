@@ -1,0 +1,83 @@
+{
+  "product": "Grok Build",
+  "generated_at": "2026-07-18",
+  "source_revision": "8adf9013a0929e5c7f1d4e849492d2387837a28d",
+  "sources": [
+    {
+      "kind": "source_template",
+      "path": "F:\\MyProjectF\\grok-build\\crates\\codegen\\xai-grok-agent\\templates\\prompt.md",
+      "layer": "primary system prompt",
+      "confidence": "B"
+    },
+    {
+      "kind": "source_template",
+      "path": "F:\\MyProjectF\\grok-build\\crates\\codegen\\xai-grok-agent\\templates\\subagent_prompt.md",
+      "layer": "subagent system base",
+      "confidence": "B"
+    },
+    {
+      "kind": "source",
+      "path": "F:\\MyProjectF\\grok-build\\crates\\codegen\\xai-grok-agent\\src\\prompt\\context.rs",
+      "symbols": ["PromptContext::placeholders", "PromptContext::render"],
+      "confidence": "B"
+    },
+    {
+      "kind": "source",
+      "path": "F:\\MyProjectF\\grok-build\\crates\\codegen\\xai-grok-agent\\src\\prompt\\template.rs",
+      "symbols": ["base_template", "subagent_template", "apply_patch_template", "COMPACT_SYSTEM_PROMPT"],
+      "confidence": "B"
+    },
+    {
+      "kind": "source",
+      "path": "F:\\MyProjectF\\grok-build\\crates\\codegen\\xai-grok-shell\\src\\session\\user_message.rs",
+      "symbols": ["construct_user_message_minimal", "construct_user_message", "user_query"],
+      "confidence": "B"
+    },
+    {
+      "kind": "source",
+      "path": "F:\\MyProjectF\\grok-build\\crates\\common\\xai-tool-types\\src\\task.rs",
+      "symbols": ["GENERAL_PURPOSE_PROMPT", "EXPLORE_PROMPT", "PLAN_PROMPT", "BuiltinSubagent"],
+      "confidence": "B"
+    },
+    {
+      "kind": "source",
+      "path": "F:\\MyProjectF\\grok-build\\crates\\codegen\\xai-grok-shell\\src\\agent\\subagent\\handle_request.rs",
+      "symbols": ["resolve_effective_overrides", "persona system_reminder insertion", "spawn_session_on_thread role/persona arguments"],
+      "confidence": "B"
+    },
+    {
+      "kind": "source",
+      "path": "F:\\MyProjectF\\grok-build\\crates\\codegen\\xai-grok-tools\\src\\bridge.rs",
+      "symbols": ["ToolBridge::render_prompt", "ToolBridge::tool_definitions"],
+      "confidence": "B"
+    },
+    {
+      "kind": "source_group",
+      "path": "F:\\MyProjectF\\grok-build\\crates\\codegen\\xai-grok-tools\\src\\implementations\\grok_build",
+      "topics": ["read_file", "search_replace", "grep", "list_dir", "bash", "task", "task_output", "kill_task", "plan mode", "todo"],
+      "confidence": "B"
+    },
+    {
+      "kind": "source",
+      "path": "F:\\MyProjectF\\grok-build\\crates\\common\\xai-tool-types\\src\\task.rs",
+      "symbols": ["TaskToolInput", "SubagentCompletedOutput", "build_task_description", "BUILTIN_SUBAGENTS"],
+      "confidence": "B"
+    },
+    {
+      "kind": "source",
+      "path": "F:\\MyProjectF\\grok-build\\crates\\codegen\\xai-grok-agent\\src\\prompt\\agents_md.rs",
+      "symbols": ["format_agents_md_section", "LEGACY_AGENTS_MD_REMINDER_PREFIX"],
+      "confidence": "B"
+    },
+    {
+      "kind": "source_group",
+      "path": "F:\\MyProjectF\\grok-build\\crates\\codegen\\xai-grok-shell\\src\\session",
+      "topics": ["deferred user prefix", "MCP reminders", "date rollover", "compaction", "resume", "tool result projection"],
+      "confidence": "B"
+    }
+  ],
+  "limitations": [
+    "No matching local Grok runtime transcript was found for this revision.",
+    "The context request example is source-derived simulation, not a captured network request."
+  ]
+}

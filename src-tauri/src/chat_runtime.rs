@@ -54,15 +54,20 @@ use codez_providers::{
 use codez_runtime::attachment::{AttachmentService, ResolvedSessionImage};
 use codez_runtime::{
     CancellationTree,
-    agent::collaboration::{
-        AgentAttemptOutput, AgentAttemptRequest, AgentMailboxMessage, AgentMessageType,
+    agent::{
+        collaboration::{
+            AgentAttemptOutput, AgentAttemptRequest, AgentMailboxMessage, AgentMessageType,
+        },
+        registry::get_builtin_subagents,
     },
     cancellation::SessionCancellation,
     chat::{
         prompt::{
             builder::create_default_pipeline,
             pipeline::PromptPipeline,
-            types::{PromptContext, PromptSkillSummary, PromptToolSummary},
+            types::{
+                PromptAgentSummary, PromptContext, PromptSkillSummary, PromptToolSummary,
+            },
         },
         stream_state::{ChatStreamState, ChatStreamStateMachine},
     },
@@ -99,7 +104,8 @@ use codez_runtime::{
     },
     session_maintenance::SessionActivityLease,
     tools::types::{
-        NormalizedToolCall as RuntimeToolCall, ToolExecutionResult, ToolPipelineResult,
+        DeferredToolSummary, NormalizedToolCall as RuntimeToolCall, ToolExecutionResult,
+        ToolPipelineResult,
     },
 };
 use futures_util::{StreamExt, stream::BoxStream};
@@ -209,6 +215,7 @@ struct ChatPromptBuildInput<'a> {
     session_id: &'a SessionId,
     workspace_root: Option<&'a WorkspaceRoot>,
     tool_schemas: &'a [ToolDefinition],
+    deferred_tools: &'a [DeferredToolSummary],
     scope: &'a SessionRuntimeScopeSnapshot,
     now: &'a DateTime<Utc>,
     cancellation: &'a CancellationToken,
@@ -324,7 +331,8 @@ impl ChatPromptAssembler {
             permission_mode: permission_mode?,
             thinking_enabled: Some(input.resolved.thinking.enabled),
             available_tools: Some(prompt_tool_summaries(input.tool_schemas)),
-            deferred_tools: Some(Vec::new()),
+            deferred_tools: Some(prompt_deferred_tool_summaries(input.deferred_tools)),
+            available_agents: prompt_agent_summaries(input.tool_schemas),
             available_skills: available_skills?,
             active_skills: active_prompt_skills(input.scope),
             global_rules: global_rules?,
@@ -506,6 +514,38 @@ fn prompt_tool_summaries(tool_schemas: &[ToolDefinition]) -> Vec<PromptToolSumma
             summary: schema.function.description.clone(),
         })
         .collect()
+}
+
+fn prompt_deferred_tool_summaries(
+    deferred_tools: &[DeferredToolSummary],
+) -> Vec<PromptToolSummary> {
+    deferred_tools
+        .iter()
+        .map(|tool| PromptToolSummary {
+            name: tool.name.clone(),
+            summary: tool.summary.clone(),
+        })
+        .collect()
+}
+
+fn prompt_agent_summaries(tool_schemas: &[ToolDefinition]) -> Option<Vec<PromptAgentSummary>> {
+    if !tool_schemas
+        .iter()
+        .any(|schema| schema.function.name == "spawn_agent")
+    {
+        return None;
+    }
+    let agents = get_builtin_subagents()
+        .into_iter()
+        .map(|agent| PromptAgentSummary {
+            role: agent.r#type,
+            description: agent.description,
+            when_to_use: agent.when_to_use,
+            when_not_to_use: agent.when_not_to_use,
+            cost_hint: agent.cost_hint,
+        })
+        .collect::<Vec<_>>();
+    (!agents.is_empty()).then_some(agents)
 }
 
 fn active_prompt_skills(scope: &SessionRuntimeScopeSnapshot) -> Option<Vec<PromptSkillSummary>> {
@@ -2700,6 +2740,7 @@ struct PrepareProviderRequestInput<'a> {
     conversation: &'a ConversationLedger,
     workspace_root: Option<&'a WorkspaceRoot>,
     tool_schemas: &'a [ToolDefinition],
+    deferred_tools: &'a [DeferredToolSummary],
     prompt_now: &'a DateTime<Utc>,
 }
 
@@ -2757,6 +2798,7 @@ async fn prepare_provider_request(
         conversation,
         workspace_root,
         tool_schemas,
+        deferred_tools,
         prompt_now,
     } = input;
     for attempt in 0..MAX_CONTEXT_PREPARATION_ATTEMPTS {
@@ -2806,6 +2848,7 @@ async fn prepare_provider_request(
                 session_id: &conversation.session_id,
                 workspace_root,
                 tool_schemas,
+                deferred_tools,
                 scope: &scope,
                 now: prompt_now,
                 cancellation,
@@ -3412,7 +3455,6 @@ async fn run_provider_conversation(
     } = services;
     let provider_id = first_config.provider_id.clone();
     let model_id = first_config.model.id.clone();
-    let provider_tools = tool_run.map(|run| tools.provider_tool_definitions_for_run(run));
     let mut next_config = Some(first_config);
     let mut tool_rounds = 0;
     let mut overflow_retried = false;
@@ -3434,6 +3476,14 @@ async fn run_provider_conversation(
                 }
             },
         };
+        let provider_surface =
+            tool_run.map(|run| tools.provider_tool_surface_for_run(run));
+        let provider_tools = provider_surface
+            .as_ref()
+            .map_or(&[][..], |surface| surface.definitions.as_slice());
+        let deferred_tools = provider_surface
+            .as_ref()
+            .map_or(&[][..], |surface| surface.deferred_tools.as_slice());
         let prepared = match prepare_provider_request(
             PrepareProviderRequestInput {
                 providers,
@@ -3443,7 +3493,8 @@ async fn run_provider_conversation(
                 cancellation: &cancellation,
                 conversation,
                 workspace_root: tool_run.map(ChatToolRunContext::workspace_root),
-                tool_schemas: provider_tools.as_deref().unwrap_or_default(),
+                tool_schemas: provider_tools,
+                deferred_tools,
                 prompt_now: &prompt_now,
             },
             sink,
@@ -3508,7 +3559,9 @@ async fn run_provider_conversation(
             match open_provider_stream(
                 attempt_config,
                 messages.clone(),
-                provider_tools.clone(),
+                provider_surface
+                    .as_ref()
+                    .map(|surface| surface.definitions.clone()),
                 cancellation.clone(),
             )
             .await

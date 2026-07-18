@@ -683,6 +683,7 @@ async fn classify_command(
             false,
         )];
     };
+    let is_powershell = shell_kind == PermissionShellKind::Powershell;
     let graph = ShellCommandParser::parse(shell_kind, command);
     if let Some(finding) = CriticalOperationGuard::scan_graph(&graph) {
         let absolute = finding.enforcement == CriticalEnforcement::AbsoluteRedline;
@@ -790,7 +791,9 @@ async fn classify_command(
     }
 
     for redirect in &graph.redirects {
-        if redirect.operator == "<" {
+        if redirect.operator == "<"
+            || is_powershell && redirect.target.eq_ignore_ascii_case("$null")
+        {
             continue;
         }
         let permission = if command_changes_cwd && Path::new(&redirect.target).is_relative() {
@@ -1277,6 +1280,28 @@ mod tests {
                         PermissionCapability::Read | PermissionCapability::Shell
                     )
                 }),
+            "unexpected classifications: {classified:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn powershell_null_redirection_does_not_create_a_file_write_effect() {
+        let workspace = tempfile::tempdir().expect("workspace must exist");
+        let classified = classify_effect(
+            &ToolEffect::ExecuteCommand {
+                shell: "powershell".to_string(),
+                command: "git status > $null".to_string(),
+                cwd: Some(workspace.path().to_string_lossy().to_string()),
+            },
+            workspace.path(),
+        )
+        .await;
+
+        assert!(
+            !classified.is_empty()
+                && classified
+                    .iter()
+                    .all(|item| item.permission == PermissionCapability::Shell),
             "unexpected classifications: {classified:?}"
         );
     }
