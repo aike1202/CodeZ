@@ -6,16 +6,14 @@ import {
   ChevronUp,
   CircleAlert,
   CircleDashed,
-  GitMerge,
   ListTodo,
   Loader2,
-  Pause,
-  UserCheck,
   XCircle,
 } from 'lucide-react'
 import type { TaskItem } from '../../../../shared/types/task'
 import { getRemainingTaskCount, getTaskDisplayTasks } from './TaskCapsule.order'
 import {
+  getTaskBlockReason,
   getTaskDisplayStatus,
   getTaskStatusLabel,
   isTaskDisplayActive,
@@ -27,28 +25,15 @@ const TASK_ICON_PROPS = { size: 18, strokeWidth: 2.25, 'aria-hidden': true as co
 
 function TaskStatusIcon({ status }: { status: TaskDisplayStatus }): React.ReactElement {
   switch (status) {
-    case 'running':
     case 'in_progress':
-    case 'stopping':
-    case 'integrating':
       return <Loader2 className={`step-icon ${status} spin`} {...TASK_ICON_PROPS} />
-    case 'paused':
-      return <Pause className="step-icon paused" {...TASK_ICON_PROPS} />
-    case 'succeeded':
-      return <GitMerge className="step-icon succeeded" {...TASK_ICON_PROPS} />
     case 'completed':
       return <CheckCircle2 className="step-icon completed" {...TASK_ICON_PROPS} />
-    case 'failed':
-    case 'interrupted':
-    case 'lost':
+    case 'blocked':
       return <CircleAlert className={`step-icon ${status}`} {...TASK_ICON_PROPS} />
-    case 'taken_over':
-      return <UserCheck className="step-icon taken-over" {...TASK_ICON_PROPS} />
-    case 'stopped':
     case 'cancelled':
       return <XCircle className={`step-icon ${status}`} {...TASK_ICON_PROPS} />
     case 'pending':
-    case 'queued':
       return <CircleDashed className="step-icon pending" {...TASK_ICON_PROPS} />
   }
 }
@@ -79,7 +64,11 @@ export const TaskCapsule: React.FC = () => {
   }
 
   const remaining = getRemainingTaskCount(displayTasks)
-  const taskViews = displayTasks.map(task => ({ task, displayStatus: getTaskDisplayStatus(task) }))
+  const taskViews = displayTasks.map(task => ({
+    task,
+    displayStatus: getTaskDisplayStatus(task, displayTasks),
+    blockReason: getTaskBlockReason(task, displayTasks),
+  }))
   const activeTasks = taskViews.filter(({ displayStatus }) => isTaskDisplayActive(displayStatus))
 
   // 从 tasks 里取第一个 TaskGroup 元数据作为清单头，兼容旧 title/subtitle
@@ -126,7 +115,7 @@ export const TaskCapsule: React.FC = () => {
           </div>
           <div className="plan-capsule-body">
             <ul className="plan-steps-list">
-              {taskViews.map(({ task, displayStatus }) => (
+              {taskViews.map(({ task, displayStatus, blockReason }) => (
                 <li key={task.id} className={`step-item status-${displayStatus}`}>
                   <TaskStatusIcon status={displayStatus} />
                   <div className="step-info">
@@ -134,12 +123,14 @@ export const TaskCapsule: React.FC = () => {
                       <span className="step-title">{task.subject}</span>
                       <span
                         className={`task-status-label status-${displayStatus}`}
-                        title={task.executorRuntime?.error}
+                        title={blockReason}
                       >
                         {getTaskStatusLabel(displayStatus)}
                       </span>
                     </div>
-                    {task.acceptanceCriteria && task.acceptanceCriteria.length > 0 ? (
+                    {blockReason ? (
+                      <span className="step-desc task-block-reason">{blockReason}</span>
+                    ) : task.acceptanceCriteria && task.acceptanceCriteria.length > 0 ? (
                       <span className="step-desc">{task.acceptanceCriteria.join(' / ')}</span>
                     ) : null}
                   </div>

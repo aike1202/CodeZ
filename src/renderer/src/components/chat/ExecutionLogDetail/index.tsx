@@ -380,8 +380,9 @@ export default function ExecutionLogDetail({
       )
     }
 
-    // TaskCreate / TaskUpdate
-    if (item.toolName === 'TaskCreate' || item.toolName === 'TaskUpdate') {
+    const isTodoCreate = item.toolName === 'TodoCreate' || item.toolName === 'TaskCreate'
+    const isTodoUpdate = item.toolName === 'TodoUpdate' || item.toolName === 'TaskUpdate'
+    if (isTodoCreate || isTodoUpdate) {
       let parsedArgs: any = null
       try {
         if (item.args) parsedArgs = JSON.parse(item.args)
@@ -392,7 +393,7 @@ export default function ExecutionLogDetail({
         if (item.detail) parsedResult = JSON.parse(item.detail)
       } catch {}
 
-      const taskUpdateDetail = item.toolName === 'TaskUpdate'
+      const taskUpdateDetail = isTodoUpdate
         ? parseTaskUpdateDetail(item.detail)
         : null
       const task = taskUpdateDetail?.task
@@ -401,7 +402,7 @@ export default function ExecutionLogDetail({
 
       return (
         <div className="exe-log-cmd-details-box">
-          {item.toolName === 'TaskUpdate' && task && isTerminalTask && (
+          {isTodoUpdate && task && isTerminalTask && (
             <div className="exe-log-task-detail">
               <div className="exe-log-task-detail-row">
                 <span className="exe-log-param-key">最终状态</span>
@@ -433,9 +434,9 @@ export default function ExecutionLogDetail({
               )}
             </div>
           )}
-          {item.toolName === 'TaskCreate' && parsedResult?.data?.created && (
+          {isTodoCreate && parsedResult?.data?.created && (
             <div className="exe-log-params-section">
-              <span className="exe-log-params-label">Created Tasks:</span>
+              <span className="exe-log-params-label">Created Todos:</span>
               <div className="exe-log-params-box">
                 {parsedResult.data.created.map((t: any, i: number) => (
                   <div key={i} className="exe-log-param-row">
@@ -446,7 +447,7 @@ export default function ExecutionLogDetail({
               </div>
             </div>
           )}
-          {item.toolName === 'TaskUpdate' && parsedArgs && (
+          {isTodoUpdate && parsedArgs && (
             <div className="exe-log-params-section">
               <span className="exe-log-params-label">Update Request:</span>
               <div className="exe-log-params-box">

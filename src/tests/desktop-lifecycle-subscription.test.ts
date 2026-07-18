@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from 'vitest'
 import type {
   AgentRuntimeSnapshot,
   AgentUpdatedEvent,
-  TaskSnapshot,
-  TaskUpdatedEvent
+  TodoListSnapshot as TaskSnapshot,
+  TodoUpdatedEvent as TaskUpdatedEvent
 } from '../renderer/src/shared/desktop/generated/contracts'
 import {
   startDesktopLifecycleSubscription,
@@ -13,7 +13,7 @@ import {
 } from '../renderer/src/components/chat/hooks/useDesktopLifecycleSubscription'
 
 function taskSnapshot(sessionId: string, revision: number): TaskSnapshot {
-  return { version: 1, sessionId, revision, nextSequence: 1, tasks: [] }
+  return { version: 1, sessionId, revision, nextSequence: 1, items: [] }
 }
 
 function agentSnapshot(sessionId: string, revision: number): AgentRuntimeSnapshot {

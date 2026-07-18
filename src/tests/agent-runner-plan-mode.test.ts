@@ -24,7 +24,7 @@ describe('ToolManager.getReadOnlyTools()', () => {
     expect(names.has('Write')).toBe(false)
     expect(names.has('Bash')).toBe(false)
     expect(names.has('PowerShell')).toBe(false)
-    expect(names.has('TaskCreate')).toBe(false)
+    expect(names.has('TodoCreate')).toBe(false)
   })
 
   it('应返回合法的 ToolDefinition 结构', () => {
@@ -41,15 +41,17 @@ describe('ToolManager.getReadOnlyTools()', () => {
 })
 
 describe('Plan mode 工具一致性', () => {
-  it('默认工具集应使用 Task 系统而不是暴露 Plan 入口', () => {
+  it('默认工具集只暴露 TodoCreate 和 TodoUpdate', () => {
     const tm = new ToolManager()
     const names = new Set(tm.getToolDefinitions().map(t => t.function.name))
 
-    expect(names.has('TaskCreate')).toBe(true)
-    expect(names.has('TaskUpdate')).toBe(true)
-    expect(names.has('TaskGet')).toBe(true)
-    expect(names.has('TaskList')).toBe(true)
-    expect(names.has('DelegateTasks')).toBe(true)
+    expect(names.has('TodoCreate')).toBe(true)
+    expect(names.has('TodoUpdate')).toBe(true)
+    expect(names.has('TaskGet')).toBe(false)
+    expect(names.has('TaskList')).toBe(false)
+    expect(names.has('DelegateTasks')).toBe(false)
+    expect(names.has('ExecutionInspect')).toBe(false)
+    expect(names.has('ExecutionControl')).toBe(false)
 
     expect(names.has('EnterPlanMode')).toBe(false)
     expect(names.has('ExitPlanMode')).toBe(false)

@@ -4,8 +4,8 @@ import { desktopApi, desktopEvents } from '../../../shared/desktop'
 import type {
   AgentRuntimeSnapshot,
   AgentUpdatedEvent,
-  TaskSnapshot,
-  TaskUpdatedEvent
+  TodoListSnapshot as TaskSnapshot,
+  TodoUpdatedEvent as TaskUpdatedEvent
 } from '../../../shared/desktop/generated/contracts'
 import { useChatStore } from '../../../stores/chatStore'
 import {
@@ -40,14 +40,14 @@ const desktopLifecycleSink: DesktopLifecycleSink = {
   taskEvent: (snapshot) => {
     const result = useDesktopLifecycleStore.getState().applyTaskEvent(snapshot)
     if (result === 'applied') {
-      useChatStore.getState().setSessionTasks(snapshot.sessionId, snapshot.tasks)
+      useChatStore.getState().setSessionTasks(snapshot.sessionId, snapshot.items)
     }
     return result
   },
   taskSnapshot: (snapshot) => {
     const result = useDesktopLifecycleStore.getState().applyTaskSnapshot(snapshot)
     if (result === 'applied') {
-      useChatStore.getState().setSessionTasks(snapshot.sessionId, snapshot.tasks)
+      useChatStore.getState().setSessionTasks(snapshot.sessionId, snapshot.items)
     }
     return result
   },

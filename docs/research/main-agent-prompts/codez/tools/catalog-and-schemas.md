@@ -10,8 +10,7 @@
 | Grep | Always | Safe | Cancel | 35s | 100k |
 | PowerShell | Always, Windows | Exclusive | Cancel | 126s | 100k |
 | Read | Always | Safe | Cancel | 30s | 100k |
-| TaskCreate/TaskUpdate | Always | ResourceLocked | Cancel | 30s | 64k |
-| TaskGet/TaskList | Always | Safe | Cancel | 30s | 64k |
+| TodoCreate/TodoUpdate | Always | ResourceLocked | Cancel | 30s | 64k |
 | ToolSearch | Always | Safe | Cancel | 5s | 32k |
 | Write | Always | ResourceLocked | Block | 无 | 100k |
 | Agent spawn/followup/send/wait/interrupt | Always | ResourceLocked | Cancel | 30s；wait 305s | 512k |
@@ -301,14 +300,14 @@ Schema 用组合约束之外的执行解析保证两种合法模式：提交 `co
 }
 ```
 
-`TaskCreate`：
+`TodoCreate`：
 
 ```json
 {
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "tasks": {
+    "items": {
       "type": "array",
       "minItems": 1,
       "maxItems": 256,
@@ -344,19 +343,27 @@ Schema 用组合约束之外的执行解析保证两种合法模式：提交 `co
       }
     }
   },
-  "required": ["tasks"]
+  "required": ["items"]
 }
 ```
 
-`TaskUpdate` 使用上述全部 fields，再增加：
+`TodoUpdate` 在顶层接受 revision 和 batch：
 
 ```json
 {
-  "taskId": { "type": "string", "pattern": "^t[1-9][0-9]*$" }
+  "expectedRevision": { "type": "integer", "minimum": 0 },
+  "updates": {
+    "type": "array",
+    "minItems": 1,
+    "items": {
+      "todoId": { "type": "string", "pattern": "^t[1-9][0-9]*$" },
+      "status": { "type": "string", "enum": ["pending", "in_progress", "completed", "cancelled"] }
+    }
+  }
 }
 ```
 
-顶层 `required` 只有 `taskId`。`TaskGet` 只接受同一 `taskId`。`TaskList` 是空 object schema。
+顶层 `required` 只有 `updates`。同一 batch 重复 todoId 会整体失败。TodoGet/TodoList 只存在于内部 IPC，不是模型工具。
 
 ## Agent 工具
 

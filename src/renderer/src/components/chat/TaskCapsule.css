@@ -53,7 +53,8 @@
 
 .step-icon.failed,
 .step-icon.interrupted,
-.step-icon.lost {
+.step-icon.lost,
+.step-icon.blocked {
   color: var(--color-danger, #dc2626);
 }
 
@@ -197,7 +198,9 @@
 
 .task-status-label.status-failed,
 .task-status-label.status-interrupted,
-.task-status-label.status-lost {
+.task-status-label.status-lost,
+.task-status-label.status-blocked,
+.task-block-reason {
   color: var(--color-danger, #dc2626);
 }
 

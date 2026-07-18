@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import type {
   AgentRuntimeSnapshot,
-  TaskSnapshot
+  TodoListSnapshot as TaskSnapshot
 } from '../renderer/src/shared/desktop/generated/contracts'
 import { useDesktopLifecycleStore } from '../renderer/src/stores/desktopLifecycleStore'
 
@@ -12,7 +12,7 @@ function taskSnapshot(sessionId: string, revision: number, taskId = `task-${revi
     sessionId,
     revision,
     nextSequence: revision + 1,
-    tasks: [{
+    items: [{
       id: taskId,
       subject: 'Verify lifecycle',
       description: '',
@@ -53,8 +53,8 @@ describe('desktop lifecycle store', () => {
     expect(store.applyAgentSnapshot(agentSnapshot('session-b', 2))).toBe('applied')
 
     const next = useDesktopLifecycleStore.getState()
-    expect(next.taskSnapshots['session-a']?.tasks[0].id).toBe('task-1')
-    expect(next.taskSnapshots['session-b']?.tasks[0].id).toBe('task-1')
+    expect(next.taskSnapshots['session-a']?.items[0].id).toBe('task-1')
+    expect(next.taskSnapshots['session-b']?.items[0].id).toBe('task-1')
     expect(next.agentSnapshots['session-a']?.revision).toBe(1)
     expect(next.agentSnapshots['session-b']?.revision).toBe(2)
   })

@@ -1,47 +1,48 @@
 use codez_contracts::{
     CommandError,
     task::{
-        TASK_EVENT_VERSION, TASK_UPDATED_EVENT, TaskApprovalStatus, TaskContextBundle,
-        TaskCreateInput, TaskCreateRequest, TaskGetRequest, TaskItem, TaskListRequest,
-        TaskMutationResult, TaskRiskLevel, TaskSnapshot, TaskStatus, TaskUpdateInput,
-        TaskUpdateRequest, TaskUpdatedEvent,
+        TODO_EVENT_VERSION, TODO_UPDATED_EVENT, TodoApprovalStatus, TodoContextBundle,
+        TodoCreateInput, TodoCreateRequest, TodoGetRequest, TodoItem, TodoItemUpdate,
+        TodoListRequest, TodoListSnapshot, TodoMutationResult, TodoRiskLevel, TodoStatus,
+        TodoUpdateRequest, TodoUpdatedEvent,
     },
 };
 use codez_core::{AppError, SessionId};
 use codez_runtime::task::{
     TaskApprovalStatus as RuntimeApprovalStatus, TaskContextBundle as RuntimeContextBundle,
     TaskCreateInput as RuntimeCreateInput, TaskEventSink, TaskItem as RuntimeTaskItem,
-    TaskRiskLevel as RuntimeRiskLevel, TaskSnapshot as RuntimeSnapshot,
-    TaskStatus as RuntimeStatus, TaskUpdateInput as RuntimeUpdateInput,
+    TaskItemUpdate as RuntimeItemUpdate, TaskRiskLevel as RuntimeRiskLevel,
+    TaskSnapshot as RuntimeSnapshot, TaskStatus as RuntimeStatus,
+    TaskUpdateInput as RuntimeUpdateInput,
 };
 use tauri::{AppHandle, Emitter, State, command};
 
 use crate::{error::command_result, state::AppState};
 
-pub(crate) struct DesktopTaskEventSink {
+pub(crate) struct DesktopTodoEventSink {
     app: AppHandle,
 }
 
-impl DesktopTaskEventSink {
+impl DesktopTodoEventSink {
     #[must_use]
     pub(crate) fn new(app: AppHandle) -> Self {
         Self { app }
     }
 }
 
-impl TaskEventSink for DesktopTaskEventSink {
+impl TaskEventSink for DesktopTodoEventSink {
     fn emit(&self, snapshot: &RuntimeSnapshot) -> Result<(), AppError> {
         let snapshot = snapshot_contract(snapshot);
-        let event = TaskUpdatedEvent {
-            version: TASK_EVENT_VERSION,
+        let event = TodoUpdatedEvent {
+            version: TODO_EVENT_VERSION,
             session_id: snapshot.session_id.clone(),
             revision: snapshot.revision,
             snapshot,
         };
-        self.app.emit(TASK_UPDATED_EVENT, event).map_err(|source| {
+        self.app.emit(TODO_UPDATED_EVENT, event).map_err(|source| {
             AppError::external(
-                "The task update event could not be delivered",
-                format!("emit {TASK_UPDATED_EVENT}: {source}"),
+                "The Todo update event could not be delivered",
+                format!("emit {TODO_UPDATED_EVENT}: {source}"),
                 true,
             )
         })
@@ -49,10 +50,10 @@ impl TaskEventSink for DesktopTaskEventSink {
 }
 
 #[command]
-pub async fn task_list(
+pub async fn todo_list(
     state: State<'_, AppState>,
-    request: TaskListRequest,
-) -> Result<TaskSnapshot, CommandError> {
+    request: TodoListRequest,
+) -> Result<TodoListSnapshot, CommandError> {
     let result = async {
         let session_id = parse_session_id(request.session_id)?;
         state
@@ -66,15 +67,15 @@ pub async fn task_list(
 }
 
 #[command]
-pub async fn task_get(
+pub async fn todo_get(
     state: State<'_, AppState>,
-    request: TaskGetRequest,
-) -> Result<TaskItem, CommandError> {
+    request: TodoGetRequest,
+) -> Result<TodoItem, CommandError> {
     let result = async {
         let session_id = parse_session_id(request.session_id)?;
         state
             .task_store
-            .get(&session_id, &request.task_id)
+            .get(&session_id, &request.todo_id)
             .await
             .map(|task| task_contract(&task))
     }
@@ -83,16 +84,15 @@ pub async fn task_get(
 }
 
 #[command]
-pub async fn task_create(
+pub async fn todo_create(
     state: State<'_, AppState>,
-    request: TaskCreateRequest,
-) -> Result<TaskMutationResult, CommandError> {
+    request: TodoCreateRequest,
+) -> Result<TodoMutationResult, CommandError> {
     let result = async {
         let session_id = parse_session_id(request.session_id)?;
-        let tasks = request.tasks.into_iter().map(create_input).collect();
-        let snapshot = state.task_store.create(&session_id, tasks).await?;
-        Ok(TaskMutationResult {
-            task: None,
+        let items = request.items.into_iter().map(create_input).collect();
+        let snapshot = state.task_store.create(&session_id, items).await?;
+        Ok(TodoMutationResult {
             snapshot: snapshot_contract(&snapshot),
         })
     }
@@ -101,23 +101,21 @@ pub async fn task_create(
 }
 
 #[command]
-pub async fn task_update(
+pub async fn todo_update(
     state: State<'_, AppState>,
-    request: TaskUpdateRequest,
-) -> Result<TaskMutationResult, CommandError> {
+    request: TodoUpdateRequest,
+) -> Result<TodoMutationResult, CommandError> {
     let result = async {
         let session_id = parse_session_id(request.session_id)?;
         let snapshot = state
             .task_store
-            .update(&session_id, &request.task_id, update_input(request.patch))
+            .update_batch(
+                &session_id,
+                request.expected_revision,
+                request.updates.into_iter().map(update_input).collect(),
+            )
             .await?;
-        let task = snapshot
-            .tasks
-            .iter()
-            .find(|task| task.id == request.task_id)
-            .map(task_contract);
-        Ok(TaskMutationResult {
-            task,
+        Ok(TodoMutationResult {
             snapshot: snapshot_contract(&snapshot),
         })
     }
@@ -126,16 +124,16 @@ pub async fn task_update(
 }
 
 #[command(rename_all = "camelCase")]
-pub async fn task_delete(
+pub async fn todo_delete(
     state: State<'_, AppState>,
     session_id: String,
-    task_id: String,
-) -> Result<TaskSnapshot, CommandError> {
+    todo_id: String,
+) -> Result<TodoListSnapshot, CommandError> {
     let result = async {
         let session_id = parse_session_id(session_id)?;
         state
             .task_store
-            .delete(&session_id, &task_id)
+            .delete(&session_id, &todo_id)
             .await
             .map(|snapshot| snapshot_contract(&snapshot))
     }
@@ -145,10 +143,10 @@ pub async fn task_delete(
 
 fn parse_session_id(value: String) -> Result<SessionId, AppError> {
     SessionId::parse(value)
-        .map_err(|source| AppError::validation(format!("The task session is invalid: {source}")))
+        .map_err(|source| AppError::validation(format!("The Todo session is invalid: {source}")))
 }
 
-fn create_input(input: TaskCreateInput) -> RuntimeCreateInput {
+fn create_input(input: TodoCreateInput) -> RuntimeCreateInput {
     RuntimeCreateInput {
         subject: input.subject,
         description: input.description.unwrap_or_default(),
@@ -166,26 +164,32 @@ fn create_input(input: TaskCreateInput) -> RuntimeCreateInput {
     }
 }
 
-fn update_input(input: TaskUpdateInput) -> RuntimeUpdateInput {
-    RuntimeUpdateInput {
-        subject: input.subject,
-        description: input.description,
-        status: input.status.map(status_runtime),
-        files: input.files,
-        active_form: input.active_form,
-        group_id: input.group_id,
-        group_title: input.group_title,
-        group_subtitle: input.group_subtitle,
-        risk_level: input.risk_level.map(risk_runtime),
-        requires_approval: input.requires_approval,
-        approval_status: input.approval_status.map(approval_runtime),
-        acceptance_criteria: input.acceptance_criteria,
-        verification_command: input.verification_command,
-        context_bundle: input.context_bundle.map(context_runtime),
+fn update_input(input: TodoItemUpdate) -> RuntimeItemUpdate {
+    RuntimeItemUpdate {
+        task_id: input.todo_id,
+        patch: RuntimeUpdateInput {
+            expected_revision: None,
+            subject: input.subject,
+            description: input.description,
+            status: input.status.map(status_runtime),
+            add_blocked_by: input.add_blocked_by.unwrap_or_default(),
+            remove_blocked_by: input.remove_blocked_by.unwrap_or_default(),
+            files: input.files,
+            active_form: input.active_form,
+            group_id: input.group_id,
+            group_title: input.group_title,
+            group_subtitle: input.group_subtitle,
+            risk_level: input.risk_level.map(risk_runtime),
+            requires_approval: input.requires_approval,
+            approval_status: input.approval_status.map(approval_runtime),
+            acceptance_criteria: input.acceptance_criteria,
+            verification_command: input.verification_command,
+            context_bundle: input.context_bundle.map(context_runtime),
+        },
     }
 }
 
-fn context_runtime(context: TaskContextBundle) -> RuntimeContextBundle {
+fn context_runtime(context: TodoContextBundle) -> RuntimeContextBundle {
     RuntimeContextBundle {
         known_facts: context.known_facts.unwrap_or_default(),
         decisions: context.decisions.unwrap_or_default(),
@@ -195,22 +199,23 @@ fn context_runtime(context: TaskContextBundle) -> RuntimeContextBundle {
     }
 }
 
-fn snapshot_contract(snapshot: &RuntimeSnapshot) -> TaskSnapshot {
-    TaskSnapshot {
+fn snapshot_contract(snapshot: &RuntimeSnapshot) -> TodoListSnapshot {
+    TodoListSnapshot {
         version: snapshot.version,
         session_id: snapshot.session_id.as_str().to_string(),
         revision: snapshot.revision,
         next_sequence: snapshot.next_sequence,
-        tasks: snapshot.tasks.iter().map(task_contract).collect(),
+        items: snapshot.tasks.iter().map(task_contract).collect(),
     }
 }
 
-fn task_contract(task: &RuntimeTaskItem) -> TaskItem {
-    TaskItem {
+fn task_contract(task: &RuntimeTaskItem) -> TodoItem {
+    TodoItem {
         id: task.id.clone(),
         subject: task.subject.clone(),
         description: task.description.clone(),
         status: status_contract(task.status),
+        blocked_by: non_empty(task.blocked_by.clone()),
         files: non_empty(task.files.clone()),
         active_form: task.active_form.clone(),
         group_id: task.group_id.clone(),
@@ -225,8 +230,8 @@ fn task_contract(task: &RuntimeTaskItem) -> TaskItem {
     }
 }
 
-fn context_contract(context: &RuntimeContextBundle) -> TaskContextBundle {
-    TaskContextBundle {
+fn context_contract(context: &RuntimeContextBundle) -> TodoContextBundle {
+    TodoContextBundle {
         known_facts: non_empty(context.known_facts.clone()),
         decisions: non_empty(context.decisions.clone()),
         constraints: non_empty(context.constraints.clone()),
@@ -239,57 +244,57 @@ fn non_empty(values: Vec<String>) -> Option<Vec<String>> {
     (!values.is_empty()).then_some(values)
 }
 
-const fn status_contract(status: RuntimeStatus) -> TaskStatus {
+const fn status_contract(status: RuntimeStatus) -> TodoStatus {
     match status {
-        RuntimeStatus::Pending => TaskStatus::Pending,
-        RuntimeStatus::InProgress => TaskStatus::InProgress,
-        RuntimeStatus::Completed => TaskStatus::Completed,
-        RuntimeStatus::Cancelled => TaskStatus::Cancelled,
+        RuntimeStatus::Pending => TodoStatus::Pending,
+        RuntimeStatus::InProgress => TodoStatus::InProgress,
+        RuntimeStatus::Completed => TodoStatus::Completed,
+        RuntimeStatus::Cancelled => TodoStatus::Cancelled,
     }
 }
 
-const fn status_runtime(status: TaskStatus) -> RuntimeStatus {
+const fn status_runtime(status: TodoStatus) -> RuntimeStatus {
     match status {
-        TaskStatus::Pending => RuntimeStatus::Pending,
-        TaskStatus::InProgress => RuntimeStatus::InProgress,
-        TaskStatus::Completed => RuntimeStatus::Completed,
-        TaskStatus::Cancelled => RuntimeStatus::Cancelled,
+        TodoStatus::Pending => RuntimeStatus::Pending,
+        TodoStatus::InProgress => RuntimeStatus::InProgress,
+        TodoStatus::Completed => RuntimeStatus::Completed,
+        TodoStatus::Cancelled => RuntimeStatus::Cancelled,
     }
 }
 
-const fn risk_contract(risk: RuntimeRiskLevel) -> TaskRiskLevel {
+const fn risk_contract(risk: RuntimeRiskLevel) -> TodoRiskLevel {
     match risk {
-        RuntimeRiskLevel::Low => TaskRiskLevel::Low,
-        RuntimeRiskLevel::Medium => TaskRiskLevel::Medium,
-        RuntimeRiskLevel::High => TaskRiskLevel::High,
+        RuntimeRiskLevel::Low => TodoRiskLevel::Low,
+        RuntimeRiskLevel::Medium => TodoRiskLevel::Medium,
+        RuntimeRiskLevel::High => TodoRiskLevel::High,
     }
 }
 
-const fn risk_runtime(risk: TaskRiskLevel) -> RuntimeRiskLevel {
+const fn risk_runtime(risk: TodoRiskLevel) -> RuntimeRiskLevel {
     match risk {
-        TaskRiskLevel::Low => RuntimeRiskLevel::Low,
-        TaskRiskLevel::Medium => RuntimeRiskLevel::Medium,
-        TaskRiskLevel::High => RuntimeRiskLevel::High,
+        TodoRiskLevel::Low => RuntimeRiskLevel::Low,
+        TodoRiskLevel::Medium => RuntimeRiskLevel::Medium,
+        TodoRiskLevel::High => RuntimeRiskLevel::High,
     }
 }
 
-const fn approval_contract(status: RuntimeApprovalStatus) -> TaskApprovalStatus {
+const fn approval_contract(status: RuntimeApprovalStatus) -> TodoApprovalStatus {
     match status {
-        RuntimeApprovalStatus::NotRequired => TaskApprovalStatus::NotRequired,
-        RuntimeApprovalStatus::Pending => TaskApprovalStatus::Pending,
-        RuntimeApprovalStatus::Approved => TaskApprovalStatus::Approved,
-        RuntimeApprovalStatus::ChangesRequested => TaskApprovalStatus::ChangesRequested,
-        RuntimeApprovalStatus::Rejected => TaskApprovalStatus::Rejected,
+        RuntimeApprovalStatus::NotRequired => TodoApprovalStatus::NotRequired,
+        RuntimeApprovalStatus::Pending => TodoApprovalStatus::Pending,
+        RuntimeApprovalStatus::Approved => TodoApprovalStatus::Approved,
+        RuntimeApprovalStatus::ChangesRequested => TodoApprovalStatus::ChangesRequested,
+        RuntimeApprovalStatus::Rejected => TodoApprovalStatus::Rejected,
     }
 }
 
-const fn approval_runtime(status: TaskApprovalStatus) -> RuntimeApprovalStatus {
+const fn approval_runtime(status: TodoApprovalStatus) -> RuntimeApprovalStatus {
     match status {
-        TaskApprovalStatus::NotRequired => RuntimeApprovalStatus::NotRequired,
-        TaskApprovalStatus::Pending => RuntimeApprovalStatus::Pending,
-        TaskApprovalStatus::Approved => RuntimeApprovalStatus::Approved,
-        TaskApprovalStatus::ChangesRequested => RuntimeApprovalStatus::ChangesRequested,
-        TaskApprovalStatus::Rejected => RuntimeApprovalStatus::Rejected,
+        TodoApprovalStatus::NotRequired => RuntimeApprovalStatus::NotRequired,
+        TodoApprovalStatus::Pending => RuntimeApprovalStatus::Pending,
+        TodoApprovalStatus::Approved => RuntimeApprovalStatus::Approved,
+        TodoApprovalStatus::ChangesRequested => RuntimeApprovalStatus::ChangesRequested,
+        TodoApprovalStatus::Rejected => RuntimeApprovalStatus::Rejected,
     }
 }
 
@@ -312,6 +317,7 @@ mod tests {
                 subject: "Implement task events".to_string(),
                 description: String::new(),
                 status: TaskStatus::Pending,
+                blocked_by: Vec::new(),
                 files: Vec::new(),
                 active_form: None,
                 group_id: None,
@@ -332,7 +338,7 @@ mod tests {
             (
                 contract.session_id.as_str(),
                 contract.revision,
-                contract.tasks[0].files.as_ref()
+                contract.items[0].files.as_ref()
             ),
             ("session-1", 4, None)
         );

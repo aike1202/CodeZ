@@ -24,7 +24,7 @@ use crate::{
     agent_runtime::DesktopAgentAttemptExecutor,
     chat_runtime::{ChatPromptSources, ChatRuntime},
     chat_tool_runtime::{ChatToolRuntime, ChatToolRuntimeDependencies},
-    commands::{agent::DesktopAgentEventSink, task::DesktopTaskEventSink},
+    commands::{agent::DesktopAgentEventSink, task::DesktopTodoEventSink},
     error::ErrorReporter,
     logging::{self, LoggingError},
     mcp_boundary::StorageMcpSecretStore,
@@ -125,7 +125,7 @@ pub(crate) fn compose_app_state(
     let mutation_coordinator =
         Arc::new(codez_runtime::mutation_coordinator::FileMutationCoordinator::default());
     let task_events: Arc<dyn TaskEventSink> =
-        Arc::new(DesktopTaskEventSink::new(app.handle().clone()));
+        Arc::new(DesktopTodoEventSink::new(app.handle().clone()));
     let task_store = Arc::new(TaskStore::with_event_sink(
         paths.data_directory(),
         Arc::clone(&persistence),

@@ -11,19 +11,14 @@ import { PowerShellTool } from './builtin/PowerShellTool'
 import { AskUserQuestionTool } from './builtin/AskUserQuestionTool'
 import { PushNotificationTool } from './builtin/PushNotificationTool'
 import { SubAgentRunnerTool } from './builtin/SubAgentRunnerTool'
-import { TaskCreateTool } from './builtin/TaskCreateTool'
-import { TaskGetTool } from './builtin/TaskGetTool'
-import { TaskUpdateTool } from './builtin/TaskUpdateTool'
-import { TaskListTool } from './builtin/TaskListTool'
-import { DelegateTasksTool } from './builtin/DelegateTasksTool'
+import { TodoCreateTool } from './builtin/TaskCreateTool'
+import { TodoUpdateTool } from './builtin/TaskUpdateTool'
 import { ActivateSkillTool, SkillTool } from './builtin/SkillTool'
 import { DeactivateSkillTool } from './builtin/DeactivateSkillTool'
 import { RollbackLastEditTool } from './builtin/RollbackLastEditTool'
 import { UpdateResumeStateTool } from './builtin/UpdateResumeStateTool'
 import { WebSearchTool } from './builtin/WebSearchTool'
 import { WebFetchTool } from './builtin/WebFetchTool'
-import { ExecutionInspectTool } from './builtin/ExecutionInspectTool'
-import { ExecutionControlTool } from './builtin/ExecutionControlTool'
 import { ToolSearchTool } from './builtin/ToolSearchTool'
 import { ToolResultReadTool } from './builtin/ToolResultReadTool'
 import { ListMcpResourcesTool } from './builtin/ListMcpResourcesTool'
@@ -101,13 +96,8 @@ export class ToolManager {
       new ListAgentsTool(),
       new InterruptAgentTool(),
       new SubAgentRunnerTool(),
-      new TaskCreateTool(),
-      new TaskGetTool(),
-      new TaskUpdateTool(),
-      new TaskListTool(),
-      new DelegateTasksTool(),
-      new ExecutionInspectTool(),
-      new ExecutionControlTool()
+      new TodoCreateTool(),
+      new TodoUpdateTool()
     ]
     
     for (const tool of builtinTools) {

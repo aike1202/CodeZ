@@ -40,74 +40,53 @@ describe('TaskCapsule session state', () => {
     expect(expanded).toContain('Keep Task state session-scoped')
   })
 
-  it('renders concurrent Executor runtime states for individual TaskItems', () => {
-    const runtimeBase = {
-      executionId: 'exec-1',
-      executionCreatedAt: 1,
-      waveIndex: 0,
-      isolation: 'shared' as const,
-      attemptCount: 1,
-      updatedAt: 2,
-    }
+  it('renders Todo status without deriving it from Executor state', () => {
     mockChatState.tasks = [
       {
         id: 't1',
-        subject: 'Run first Executor',
+        subject: 'Implement the active Todo',
         description: '',
         status: 'in_progress',
-        executorRuntime: {
-          ...runtimeBase,
-          executorId: 'executor-1',
-          status: 'running',
-        },
       },
       {
         id: 't2',
-        subject: 'Await worktree acceptance',
-        description: '',
-        status: 'in_progress',
-        executorRuntime: {
-          ...runtimeBase,
-          executorId: 'executor-2',
-          status: 'succeeded',
-          artifactStatus: 'ready',
-        },
-      },
-      {
-        id: 't3',
-        subject: 'Show failed Executor',
+        subject: 'Keep the next Todo pending',
         description: '',
         status: 'pending',
-        executorRuntime: {
-          ...runtimeBase,
-          executorId: 'executor-3',
-          status: 'failed',
-          error: 'Provider request failed',
-        },
-      },
-      {
-        id: 't4',
-        subject: 'Merge accepted artifact',
-        description: '',
-        status: 'in_progress',
-        executorRuntime: {
-          ...runtimeBase,
-          executorId: 'executor-4',
-          isolation: 'worktree',
-          status: 'succeeded',
-          artifactStatus: 'merging',
-        },
       },
     ]
     mockChatState.expandedCapsule = 'task'
 
     const rendered = renderToStaticMarkup(React.createElement(TaskCapsule))
 
-    expect(rendered).toContain('3 项任务执行中')
+    expect(rendered).toContain('Implement the active Todo')
     expect(rendered).toContain('执行中')
-    expect(rendered).toContain('待接纳')
-    expect(rendered).toContain('正在整合')
-    expect(rendered).toContain('失败')
-    expect(rendered).toContain('Provider request failed')
+    expect(rendered).toContain('待执行')
+  })
+
+  it('renders dependency and approval blockers separately from ready tasks', () => {
+    mockChatState.tasks = [
+      {
+        id: 't1',
+        subject: 'Complete prerequisite',
+        description: '',
+        status: 'pending',
+      },
+      {
+        id: 't2',
+        subject: 'Run dependent task',
+        description: '',
+        status: 'pending',
+        blockedBy: ['t1'],
+        requiresApproval: true,
+        approvalStatus: 'pending',
+      },
+    ]
+    mockChatState.expandedCapsule = 'task'
+
+    const rendered = renderToStaticMarkup(React.createElement(TaskCapsule))
+
+    expect(rendered).toContain('已阻塞')
+    expect(rendered).toContain('等待审批 · 等待: Complete prerequisite')
   })
 })

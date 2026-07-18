@@ -4,13 +4,13 @@ import type {
   AgentUpdatedEvent,
   DesktopEvent,
   SubAgentRunState,
-  TaskItem,
-  TaskUpdatedEvent,
+  TodoItem as TaskItem,
+  TodoUpdatedEvent as TaskUpdatedEvent,
   ThemeInfo
 } from './generated/contracts'
 
 const THEME_CHANGED_EVENT = 'desktop://theme-changed'
-const TASK_UPDATED_EVENT = 'task:updated'
+const TASK_UPDATED_EVENT = 'todo:updated'
 const AGENT_UPDATED_EVENT = 'agent:updated'
 const SUBAGENT_STATE_EVENT = 'subagent:state'
 
@@ -40,7 +40,7 @@ export function isTaskUpdatedEvent(value: unknown): value is TaskUpdatedEvent {
     && value.snapshot.sessionId === value.sessionId
     && value.snapshot.revision === value.revision
     && isNonNegativeInteger(value.snapshot.nextSequence)
-    && Array.isArray(value.snapshot.tasks)
+    && Array.isArray(value.snapshot.items)
 }
 
 export function isAgentUpdatedEvent(value: unknown): value is AgentUpdatedEvent {
@@ -111,7 +111,7 @@ function legacyTaskListener(callback: (event: TaskUpdatedEvent) => void): Unlist
         sessionId: payload.sessionId,
         revision,
         nextSequence: 0,
-        tasks: legacyTaskItems(payload.tasks)
+        items: legacyTaskItems(payload.tasks)
       }
     })
   })

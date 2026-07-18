@@ -156,7 +156,7 @@ describe('desktop task and sub-agent adapter', () => {
     await expect(desktopApi.agent.activeIds('session-1')).resolves.toEqual(activeIds)
 
     expect(tauriMocks.invoke.mock.calls).toEqual([
-      ['task_list', { request: { sessionId: 'session-1' } }],
+      ['todo_list', { request: { sessionId: 'session-1' } }],
       ['agent_snapshot', { request: { sessionId: 'session-1' } }],
       ['agent_active_ids', { request: { sessionId: 'session-1' } }]
     ])

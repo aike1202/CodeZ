@@ -2,7 +2,7 @@ import { create } from 'zustand'
 
 import type {
   AgentRuntimeSnapshot,
-  TaskSnapshot
+  TodoListSnapshot as TaskSnapshot
 } from '../shared/desktop/generated/contracts'
 
 export type SnapshotApplyResult = 'applied' | 'ignored' | 'gap'

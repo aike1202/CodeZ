@@ -37,7 +37,6 @@ describe('PermissionManager', () => {
   })
 
   it.each([
-    ['DelegateTasks', 'tool.delegation.execute'],
     ['PushNotification', 'tool.notification.send']
   ] as const)('recognizes %s as a known external effect', async (toolName, ruleId) => {
     const decision = await manager.evaluateToolCall(toolName, {}, context('auto'))

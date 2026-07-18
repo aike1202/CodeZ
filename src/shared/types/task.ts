@@ -1,45 +1,15 @@
-import type {
-  ArtifactRuntimeStatus,
-  ExecutorFailureReason,
-  ExecutorRuntimeStatus,
-} from './parallel'
-
 /**
- * 轻量 Task（待办）类型定义。
+ * 会话级 Todo 类型定义。
  *
- * Task 是会话级执行追踪单元，会随 SessionData.tasks 落盘并在会话恢复时加载。
- * 统一 Task 系统承担：
- * - 简单任务：直接执行，不创建 Task
- * - 多步任务：创建 TaskGroup 并持续更新状态
- * - 高风险任务：TaskGroup 标记 requiresApproval，先审批再执行
- * - 独立任务：通过 DelegateTasks 并行委派
- *
- * Legacy Plan 仍可兼容读取，但默认执行路径应优先使用 Task。
+ * `SessionData.tasks` 仅保留为旧会话的持久化字段名。Todo 描述工作状态，
+ * 不拥有 Agent 或 Executor 生命周期。
  */
 
-export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
-export type TaskRiskLevel = 'low' | 'medium' | 'high'
-export type TaskApprovalStatus = 'not_required' | 'pending' | 'approved' | 'changes_requested' | 'rejected'
+export type TodoStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
+export type TodoRiskLevel = 'low' | 'medium' | 'high'
+export type TodoApprovalStatus = 'not_required' | 'pending' | 'approved' | 'changes_requested' | 'rejected'
 
-/** Executor 权威生命周期在逻辑 Task 上的持久化投影。 */
-export interface TaskExecutorRuntime {
-  executionId: string
-  executionCreatedAt: number
-  executorId: string
-  waveIndex: number
-  isolation: 'shared' | 'worktree'
-  status: ExecutorRuntimeStatus
-  attemptCount: number
-  updatedAt: number
-  summary?: string
-  error?: string
-  failureReason?: ExecutorFailureReason
-  artifactStatus?: ArtifactRuntimeStatus
-  /** 主 Agent 手动推进 Task 后，不再接受该 execution 的后续投影。 */
-  detached?: boolean
-}
-
-export interface TaskContextBundle {
+export interface TodoContextBundle {
   /** 研究阶段已经确认、执行阶段可直接使用的事实。 */
   knownFacts?: string[]
   /** 主 Agent 在 Plan 阶段确定的实现决策。 */
@@ -52,8 +22,8 @@ export interface TaskContextBundle {
   sourceReferences?: string[]
 }
 
-export interface TaskItem {
-  /** 稳定短 ID（t1 / t2 ...）；委派 Worker 时按此引用 */
+export interface TodoItem {
+  /** 稳定短 ID（t1 / t2 ...） */
   id: string
   /** 祈使句标题，如 "提取 useAuth hook" */
   subject: string
@@ -63,7 +33,9 @@ export interface TaskItem {
   subtitle?: string
   /** 详细描述：目标 + 验收标准 */
   description: string
-  status: TaskStatus
+  status: TodoStatus
+  /** 当前 Todo 必须等待完成的其他 Todo ID；反向 blocks 由此派生。 */
+  blockedBy?: string[]
   /** TaskGroup 标识；同一组任务共享审批与目标上下文 */
   groupId?: string
   /** TaskGroup 展示标题；前端优先使用该字段作为清单头 */
@@ -71,27 +43,33 @@ export interface TaskItem {
   /** TaskGroup 副标题/摘要 */
   groupSubtitle?: string
   /** 风险等级：high 通常需要用户审批后再执行 */
-  riskLevel?: TaskRiskLevel
+  riskLevel?: TodoRiskLevel
   /** 是否要求用户审批该 TaskGroup */
   requiresApproval?: boolean
   /** 审批状态；requiresApproval=false 时为 not_required */
-  approvalStatus?: TaskApprovalStatus
+  approvalStatus?: TodoApprovalStatus
   /** 结构化验收标准，避免只把验收条件塞进 description */
   acceptanceCriteria?: string[]
   /** 推荐验证命令，完成任务前优先运行 */
   verificationCommand?: string
   /** 从研究与 Plan 阶段传递给执行智能体的任务专属上下文。 */
-  contextBundle?: TaskContextBundle
-  /** 涉及文件路径列表（相对 workspaceRoot）；委派 Worker 时用于冲突校验与共享工作区写权限范围 */
+  contextBundle?: TodoContextBundle
+  /** 涉及文件路径列表（相对 workspaceRoot） */
   files?: string[]
   /** 进行时文案，给进度条显示，如 "提取 useAuth hook 中" */
   activeForm?: string
-  /** DelegateTasks/ExecutionControl 的实时执行状态；逻辑 status 仍用于待办流转。 */
-  executorRuntime?: TaskExecutorRuntime
 }
 
-/** IPC TASK_UPDATED 事件 payload：某会话的全量 Task 清单。 */
-export interface TaskUpdatePayload {
+/** IPC TODO_UPDATED 事件 payload：某会话的全量 Todo 清单。 */
+export interface TodoUpdatePayload {
   sessionId: string
-  tasks: TaskItem[]
+  items: TodoItem[]
 }
+
+// Persisted Electron sessions and older renderer code still use these type names.
+export type TaskStatus = TodoStatus
+export type TaskRiskLevel = TodoRiskLevel
+export type TaskApprovalStatus = TodoApprovalStatus
+export type TaskContextBundle = TodoContextBundle
+export type TaskItem = TodoItem
+export type TaskUpdatePayload = { sessionId: string; tasks: TodoItem[] }

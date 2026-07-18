@@ -51,7 +51,7 @@ describe('AgentRunner canonical ledger path', () => {
       streamChat: vi.fn(async (_config: unknown, callbacks: any) => {
         sample++
         if (sample === 1) {
-          callbacks.onChunk('', '', [{ index: 0, id: 'c1', function: { name: 'TaskList', arguments: '{}' } }])
+          callbacks.onChunk('', '', [{ index: 0, id: 'c1', function: { name: 'TodoUpdate', arguments: '{"updates":[{"todoId":"t1","status":"completed"}]}' } }])
           callbacks.onDone('', 'tool_calls')
         } else {
           callbacks.onChunk('done', '')
@@ -77,7 +77,7 @@ describe('AgentRunner canonical ledger path', () => {
 
     await runner.run({
       baseUrl: 'https://example.test', apiKey: 'key', model: 'm1', workspaceRoot: root,
-      tools: [{ type: 'function', function: { name: 'TaskList', description: 'list', parameters: { type: 'object' } } }],
+      tools: [{ type: 'function', function: { name: 'TodoUpdate', description: 'update', parameters: { type: 'object' } } }],
       providerId: 'p1', runtimeTurn: turn, runtimeCoordinator: runtime, contextBuilder: builder,
       contextCapabilities: { contextWindowTokens: 10_000, maxOutputTokens: 2_000 },
       systemPrompt: 'system'
@@ -110,6 +110,10 @@ describe('AgentRunner canonical ledger path', () => {
     const turn = await runtime.beginTurn({
       sessionId: 'unbounded-s1', contextScopeId: 'main', text: 'inspect repeatedly', providerId: 'p1', model: 'm1'
     })
+    taskSessions.push('unbounded-s1')
+    TaskStore.getInstance().restore('unbounded-s1', [{
+      id: 't1', subject: 'Exercise long tool loop', description: '', status: 'pending'
+    }])
     let sample = 0
     const chatService = {
       streamChat: vi.fn(async (_config: unknown, callbacks: any) => {
@@ -118,7 +122,16 @@ describe('AgentRunner canonical ledger path', () => {
           callbacks.onChunk('', '', [{
             index: 0,
             id: `call-${sample}`,
-            function: { name: 'TaskList', arguments: '{}' }
+            function: {
+              name: 'TodoUpdate',
+              arguments: JSON.stringify({
+                updates: [{
+                  todoId: 't1',
+                  subject: `Exercise long tool loop ${sample}`,
+                  ...(sample === 31 ? { status: 'completed' } : {})
+                }]
+              })
+            }
           }])
           callbacks.onDone('', 'tool_calls')
         } else {
@@ -141,11 +154,12 @@ describe('AgentRunner canonical ledger path', () => {
       } as any
     })
     const toolEnds: string[] = []
+    const toolResults: string[] = []
     const onDone = vi.fn()
 
     await runner.run({
       baseUrl: 'https://example.test', apiKey: 'key', model: 'm1', workspaceRoot: root,
-      tools: [{ type: 'function', function: { name: 'TaskList', description: 'list', parameters: { type: 'object' } } }],
+      tools: [{ type: 'function', function: { name: 'TodoUpdate', description: 'update', parameters: { type: 'object' } } }],
       providerId: 'p1', runtimeTurn: turn, runtimeCoordinator: runtime,
       contextBuilder: new ModelContextBuilder(ledger),
       contextCapabilities: { contextWindowTokens: 100_000, maxOutputTokens: 2_000 },
@@ -154,10 +168,13 @@ describe('AgentRunner canonical ledger path', () => {
       onChunk: () => undefined,
       onDone,
       onError: (error) => { throw new Error(error) },
-      onToolEnd: (callId) => toolEnds.push(callId)
+      onToolEnd: (callId, result) => {
+        toolEnds.push(callId)
+        toolResults.push(result)
+      }
     })
 
-    expect(chatService.streamChat).toHaveBeenCalledTimes(32)
+    expect(chatService.streamChat, toolResults[0]).toHaveBeenCalledTimes(32)
     expect(toolEnds).toHaveLength(31)
     expect(toolEnds.at(-1)).toBe('call-31')
     expect(onDone).toHaveBeenCalledWith('done after 31 tool rounds', 'stop', 'tx-unbounded')

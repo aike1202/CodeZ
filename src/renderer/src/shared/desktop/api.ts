@@ -48,8 +48,8 @@ import type {
   SubAgentSettingsDetail,
   AgentActiveIdsResult,
   AgentRuntimeSnapshot,
-  TaskItem as WireTaskItem,
-  TaskSnapshot,
+  TodoItem as WireTaskItem,
+  TodoListSnapshot as TaskSnapshot,
 } from './generated/contracts'
 import type {
   ContextBudgetSnapshot,
@@ -512,7 +512,7 @@ async function legacyTaskSnapshot(sessionId: string): Promise<TaskSnapshot> {
     sessionId,
     revision: getLegacyTaskRevision(sessionId),
     nextSequence: 0,
-    tasks: (session?.tasks ?? []).map(legacyTaskItem)
+    items: (session?.tasks ?? []).map(legacyTaskItem)
   }
 }
 
@@ -1629,7 +1629,7 @@ export const desktopApi: DesktopApi = {
   },
   task: {
     snapshot: (sessionId) => taskCommand<TaskSnapshot>(
-      'task_list',
+      'todo_list',
       { request: { sessionId } },
       () => legacyTaskSnapshot(sessionId)
     ),

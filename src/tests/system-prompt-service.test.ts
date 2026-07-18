@@ -86,7 +86,7 @@ const mockCtx: PromptContext = {
     { name: 'Edit', summary: 'Edit files' },
     { name: 'Bash', summary: 'Run shell commands' },
     { name: 'Skill', summary: 'Load skills' },
-    { name: 'TaskCreate', summary: 'Track tasks' },
+    { name: 'TodoCreate', summary: 'Track Todo items' },
     { name: 'SubAgentRunner', summary: 'Run specialists' },
     { name: 'update_resume_state', summary: 'Persist handoff state' }
   ],
@@ -122,7 +122,7 @@ describe('SystemPromptService', () => {
     expect(prompt).toContain('# Using tools')
     expect(prompt).toContain('set it to `auto` for routine operations')
     expect(prompt).toContain('Set it to `user` only for irreversible actions')
-    expect(prompt).toContain('# Task tracking')
+    expect(prompt).toContain('# Todo tracking')
     expect(prompt).toContain('# Subagents')
     expect(prompt).toContain('brainstorming')
     expect(prompt).toContain('WebSearch: Search the web')

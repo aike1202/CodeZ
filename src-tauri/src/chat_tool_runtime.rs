@@ -48,7 +48,7 @@ use codez_runtime::{
             notebook_edit::NotebookEditTool,
             powershell::{PowerShellHost, PowerShellTool},
             read::ReadTool,
-            task::TaskTool,
+            task::TodoTool,
             tool_result_read::ToolResultReadTool,
             tool_search::ToolSearchTool,
             write::WriteTool,
@@ -67,8 +67,8 @@ use codez_runtime::{
         scheduler::ToolScheduler,
         spawn::{CommandTaskError, CommandTaskRegistry},
         types::{
-            AgentRole, DeferredToolSummary, NormalizedToolCall, PreparedToolCall, ToolEffect,
-            ToolExecutionError, ToolExecutionResult, ToolPipelineResult,
+            AgentRole, NormalizedToolCall, PreparedToolCall, ToolEffect, ToolExecutionError,
+            ToolExecutionResult, ToolPipelineResult,
         },
         validation::ToolInputValidator,
     },
@@ -324,13 +324,9 @@ pub(crate) struct ChatToolRuntime {
     exposure_state: Arc<ToolExposureState>,
     skills: Arc<SkillsService>,
     agent_runtime: Arc<AgentRuntime>,
+    task_store: Arc<TaskStore>,
     bash: Option<Arc<BashTool>>,
     powershell: Option<Arc<PowerShellTool>>,
-}
-
-pub(crate) struct ProviderToolSurface {
-    pub(crate) definitions: Vec<ToolDefinition>,
-    pub(crate) deferred_tools: Vec<DeferredToolSummary>,
 }
 
 pub(crate) struct ChatToolRuntimeDependencies {
@@ -428,7 +424,7 @@ impl ChatToolRuntime {
             bash: bash.clone(),
             powershell: powershell.clone(),
             result_store: Arc::clone(&result_store),
-            task_store,
+            task_store: Arc::clone(&task_store),
             agent_runtime: Arc::clone(&agent_runtime),
             exposure_state: Arc::clone(&exposure_state),
             skills: Arc::clone(&skills),
@@ -461,6 +457,7 @@ impl ChatToolRuntime {
             exposure_state,
             skills,
             agent_runtime,
+            task_store,
             bash,
             powershell,
         })
@@ -472,28 +469,26 @@ impl ChatToolRuntime {
         &self,
         run: &ChatToolRunContext,
     ) -> Vec<ToolDefinition> {
-        self.provider_tool_surface_for_run(run).definitions
-    }
-
-    /// Resolves the eager Provider schemas and deferred capability directory from one plan.
-    #[must_use]
-    pub(crate) fn provider_tool_surface_for_run(
-        &self,
-        run: &ChatToolRunContext,
-    ) -> ProviderToolSurface {
         let exposure = self.exposure_for_run(run);
         let mut definitions = provider_definitions(exposure.eager_tools.iter());
         if run.agent_policy.is_none() {
             definitions.push(ask_user_tool_definition());
         }
-        ProviderToolSurface {
-            definitions,
-            deferred_tools: exposure.deferred_tools,
-        }
+        definitions
     }
 
     pub(crate) fn skill_service(&self) -> Arc<SkillsService> {
         Arc::clone(&self.skills)
+    }
+
+    pub(crate) async fn todo_prompt_state(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<String>, AppError> {
+        self.task_store
+            .snapshot(session_id)
+            .await
+            .map(|snapshot| codez_runtime::task::todo_prompt_state(&snapshot))
     }
 
     /// Waits for direct root Agents that still owe the main conversation mailbox updates.
@@ -953,10 +948,8 @@ fn builtin_catalog(
             Arc::clone(&model_ledger),
         )),
         Arc::new(SkillTool::deactivate(skills, model_ledger)),
-        Arc::new(TaskTool::create(Arc::clone(&task_store))),
-        Arc::new(TaskTool::update(Arc::clone(&task_store))),
-        Arc::new(TaskTool::get(Arc::clone(&task_store))),
-        Arc::new(TaskTool::list(task_store)),
+        Arc::new(TodoTool::create(Arc::clone(&task_store))),
+        Arc::new(TodoTool::update(task_store)),
         Arc::new(AgentTool::spawn(Arc::clone(&agent_runtime))),
         Arc::new(AgentTool::followup(Arc::clone(&agent_runtime))),
         Arc::new(AgentTool::send(Arc::clone(&agent_runtime))),
@@ -1478,10 +1471,8 @@ mod tests {
         }
         expected.sort_unstable();
         expected.extend([
-            "TaskCreate",
-            "TaskGet",
-            "TaskList",
-            "TaskUpdate",
+            "TodoCreate",
+            "TodoUpdate",
             "ToolSearch",
             "Write",
             "followup_task",
@@ -1796,7 +1787,7 @@ mod tests {
             explore == expected_explore
                 && reviewer.is_superset(&expected_explore)
                 && !reviewer.contains("Write")
-                && !reviewer.contains("TaskUpdate")
+                && !reviewer.contains("TodoUpdate")
                 && !reviewer.contains("spawn_agent")
         );
     }
@@ -1916,7 +1907,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_create_is_auto_allowed_without_an_approval_handler() {
+    async fn todo_create_is_auto_allowed_without_an_approval_handler() {
         let fixture = Fixture::new();
 
         let created = fixture
@@ -1924,35 +1915,30 @@ mod tests {
             .execute(
                 vec![call(
                     0,
-                    "TaskCreate",
+                    "TodoCreate",
                     serde_json::json!({
-                        "tasks": [{ "subject": "Verify task pipeline authorization" }]
+                        "items": [{ "subject": "Verify Todo pipeline authorization" }]
                     }),
                 )],
                 &fixture.run_context(),
             )
             .await;
-        let listed = fixture
+        let state = fixture
             .runtime
-            .execute(
-                vec![call(1, "TaskList", serde_json::json!({}))],
-                &fixture.run_context(),
+            .todo_prompt_state(
+                &SessionId::parse("session-1").expect("fixture session id must parse"),
             )
-            .await;
+            .await
+            .expect("Todo state must load");
 
         assert!(
             matches!(
-                (created.as_slice(), listed.as_slice()),
-                ([created], [listed])
-                    if matches!(&created.result, ToolExecutionResult::Success { .. })
-                        && matches!(
-                            &listed.result,
-                            ToolExecutionResult::Success { data: Some(data), .. }
-                                if data["snapshot"]["tasks"][0]["id"] == "t1"
-                        )
+                created.as_slice(),
+                [created] if matches!(&created.result, ToolExecutionResult::Success { .. })
             ),
-            "unexpected task pipeline results: created={created:#?}, listed={listed:#?}"
+            "unexpected Todo pipeline result: created={created:#?}"
         );
+        assert!(state.is_some_and(|value| value.contains("Verify Todo pipeline authorization")));
     }
 
     #[tokio::test]

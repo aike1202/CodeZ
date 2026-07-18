@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type {
   AgentUpdatedEvent,
-  TaskUpdatedEvent
+  TodoUpdatedEvent as TaskUpdatedEvent
 } from '../renderer/src/shared/desktop/generated/contracts'
 
 const tauriMocks = vi.hoisted(() => ({
@@ -30,7 +30,7 @@ const taskEvent: TaskUpdatedEvent = {
     sessionId: 'session-1',
     revision: 1,
     nextSequence: 2,
-    tasks: []
+    items: []
   }
 }
 
@@ -84,8 +84,8 @@ describe('desktop lifecycle event facade', () => {
     const unlistenTask = await desktopEvents.task.onUpdated(taskCallback)
     const unlistenAgent = await desktopEvents.agent.onUpdated(agentCallback)
 
-    tauriMocks.listeners.get('task:updated')?.({ payload: taskEvent })
-    tauriMocks.listeners.get('task:updated')?.({
+    tauriMocks.listeners.get('todo:updated')?.({ payload: taskEvent })
+    tauriMocks.listeners.get('todo:updated')?.({
       payload: { ...taskEvent, revision: 2 }
     })
     tauriMocks.listeners.get('agent:updated')?.({ payload: agentEvent })

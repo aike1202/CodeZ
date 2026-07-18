@@ -13,7 +13,7 @@ export const SubAgentsModule: PromptModule = {
     const hasTool = (
       ctx.availableTools === undefined && ctx.deferredTools === undefined
     ) || exposedTools.some(tool =>
-      tool.name === 'SubAgentRunner' || tool.name === 'DelegateTasks' || tool.name === 'spawn_agent')
+      tool.name === 'SubAgentRunner' || tool.name === 'spawn_agent')
     return hasTool && SubAgentManager.listEnabledDefinitions().length > 0
   },
   build: () => {

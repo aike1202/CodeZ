@@ -24,11 +24,11 @@
 
 ## 首轮目录
 
-主 Agent 首轮 Provider tools 共 24 个：23 个 eager catalog tools，加上单独追加的 `AskUserQuestion`。
+主 Agent 的 Todo 工具面只保留 Create/Update；内部 Get/List 不进入 Provider schema。Executor 控制工具当前也不进入目录。
 
 ```text
 Bash, Edit, Glob, Grep, PowerShell, Read,
-TaskCreate, TaskGet, TaskList, TaskUpdate, ToolSearch, Write,
+TodoCreate, TodoUpdate, ToolSearch, Write,
 followup_task, interrupt_agent, list_agents, list_files,
 send_message, spawn_agent, wait_agent,
 ActivateSkill, DeactivateSkill, Skill, ToolResultRead,

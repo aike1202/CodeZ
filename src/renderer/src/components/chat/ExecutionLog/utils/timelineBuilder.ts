@@ -456,42 +456,42 @@ export function buildUnifiedTimeline(
           }
         }
 
-        // TaskCreate
-        if (tc.name === 'TaskCreate') {
+        // TodoCreate (TaskCreate is retained for historical logs)
+        if (tc.name === 'TodoCreate' || tc.name === 'TaskCreate') {
           try {
             const res = JSON.parse(tc.result || '{}')
-            const created = res.data?.created || []
+            const created = res.data?.created || res.snapshot?.items || res.data?.snapshot?.items || []
             if (created.length > 0) {
               const firstTask = created[0].subject
-              targetDisplay = created.length > 1 ? `创建 ${created.length} 个任务 (如: ${firstTask})` : `创建任务: ${firstTask}`
+              targetDisplay = created.length > 1 ? `创建 ${created.length} 个待办 (如: ${firstTask})` : `创建待办: ${firstTask}`
             } else {
-              targetDisplay = '创建任务'
+              targetDisplay = '创建待办'
             }
           } catch {
-            targetDisplay = '创建任务'
+            targetDisplay = '创建待办'
           }
         }
 
-        // TaskUpdate
-        if (tc.name === 'TaskUpdate') {
+        // TodoUpdate (TaskUpdate is retained for historical logs)
+        if (tc.name === 'TodoUpdate' || tc.name === 'TaskUpdate') {
           try {
             const res = JSON.parse(tc.result || '{}')
-            const task = res.data?.task
+            const task = res.data?.updated?.[0] || res.data?.task
             if (task) {
               if (task.status === 'completed') {
-                targetDisplay = `完成任务：${task.subject}`
+                targetDisplay = `完成待办：${task.subject}`
               } else if (task.status === 'in_progress') {
                 targetDisplay = `开始执行: ${task.subject}`
               } else if (task.status === 'cancelled') {
-                targetDisplay = `取消任务：${task.subject}`
+                targetDisplay = `取消待办：${task.subject}`
               } else {
-                targetDisplay = `更新任务: ${task.subject}`
+                targetDisplay = `更新待办: ${task.subject}`
               }
             } else {
-              targetDisplay = '更新任务状态'
+              targetDisplay = '更新待办状态'
             }
           } catch {
-            targetDisplay = '更新任务状态'
+            targetDisplay = '更新待办状态'
           }
         }
 
@@ -545,7 +545,7 @@ export function buildUnifiedTimeline(
                   : `取消任务：${task.subject}`,
                 args: JSON.stringify({ taskId: task.id, status: task.status }),
                 detail,
-                toolName: 'TaskUpdate'
+                toolName: 'TodoUpdate'
               })
             })
           } catch {

@@ -3,8 +3,6 @@ import { interceptAskUser } from '../../tools/builtin/AskUserQuestionTool'
 import type { EditTransactionService } from '../../services/EditTransactionService'
 import type { AgentRunConfig, AgentRunnerCallbacks } from './types'
 import { handleSubAgentRunnerSpawn } from './subAgentRunnerHelper'
-import { handleDelegateTasks } from './delegateTasksHelper'
-import { handleExecutionControl } from './executionControlHelper'
 import { SubAgentManager } from '../SubAgentManager'
 import { getAgentCollaborationRuntime } from '../../services/agents'
 
@@ -104,26 +102,6 @@ export function createAgentRuntimeToolInvoker(input: {
         input.config,
         callbacks,
         input.parentSignal
-      )
-    )],
-    ['DelegateTasks', async (args, context) => outputFromMessage(
-      await handleDelegateTasks(
-        context.toolCallId || 'unknown',
-        JSON.stringify(args),
-        input.config,
-        callbacks,
-        input.parentSignal,
-        input.parentTransaction
-      )
-    )],
-    ['ExecutionControl', async (args, context) => outputFromMessage(
-      await handleExecutionControl(
-        context.toolCallId || 'unknown',
-        JSON.stringify(args),
-        input.config,
-        callbacks,
-        input.parentSignal,
-        input.parentTransaction
       )
     )],
     ['AskUserQuestion', async (args, context) => {

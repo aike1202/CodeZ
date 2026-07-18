@@ -7,8 +7,7 @@ import {
   type PermissionToolAuthorization
 } from '../../services/PermissionManager'
 import { normalizeAskUserTextFallback } from '../../tools/builtin/AskUserQuestionTool'
-import { TaskStore } from '../../services/TaskStore'
-import { getExecutionController } from '../../services/execution/ExecutionController'
+import { TodoStore } from '../../services/TaskStore'
 import { SubAgentManager } from '../SubAgentManager'
 import { RulesResolver } from '../RulesResolver'
 import type { ChatProviderErrorCode, ProviderTokenUsage, ToolDefinition } from '../../../shared/types/provider'
@@ -141,8 +140,8 @@ export function updateConsecutiveIdleTurns(input: {
   return input.toolCallCount === 0 ? input.previous + 1 : input.previous
 }
 
-function createTaskStatusSnapshot(taskStore: TaskStore, sessionId: string): string {
-  return taskStore.list(sessionId).map(task => `${task.id}:${task.status}`).join('|')
+function createTodoStatusSnapshot(todoStore: TodoStore, sessionId: string): string {
+  return todoStore.list(sessionId).map(todo => `${todo.id}:${todo.status}`).join('|')
 }
 
 export class AgentRunner {
@@ -216,7 +215,7 @@ export class AgentRunner {
     let verificationRetryCount = 0
     const MAX_VERIFICATION_RETRIES = 3
 
-    const taskStore = TaskStore.getInstance()
+    const todoStore = TodoStore.getInstance()
     const configuredTools: ToolDefinition[] = config.tools || this.toolManager.getToolDefinitions()
     let availableTools: ToolDefinition[] = configuredTools
 
@@ -232,33 +231,9 @@ export class AgentRunner {
 
       // ─── 恢复 Task 状态到会话内存 ──────────────────
       if (session && session.tasks && session.tasks.length > 0) {
-        if (taskStore.list(sessionId).length === 0) {
-          taskStore.restore(sessionId, session.tasks)
+        if (todoStore.list(sessionId).length === 0) {
+          todoStore.restore(sessionId, session.tasks)
         }
-      }
-      if (taskStore.list(sessionId).some(task => task.executorRuntime)) {
-        getExecutionController().restoreSession(config.workspaceRoot, sessionId)
-      }
-
-      // ─── 注入 active_tasks ─────────────────────────
-      const activeTasks = taskStore.list(sessionId)
-      if (activeTasks.length > 0) {
-        const taskLines = activeTasks
-          .map((t: any) => `- [${t.status}] ${t.id} ${t.subject}`)
-          .join('\n')
-        const inProgress = activeTasks.find((t: any) => t.status === 'in_progress')
-        const group = activeTasks.find((t: any) => t.groupTitle || t.groupId || t.requiresApproval || t.approvalStatus)
-        const taskMsg = [
-          '<active_tasks>',
-          `Total: ${activeTasks.length} tasks | Completed: ${activeTasks.filter((t: any) => t.status === 'completed').length}`,
-          group ? `TaskGroup: ${group.groupTitle || group.groupId || 'untitled'} | Risk: ${group.riskLevel || 'unspecified'} | Approval: ${group.approvalStatus || (group.requiresApproval ? 'pending' : 'not_required')}` : 'TaskGroup: none',
-          inProgress ? `Current: ${inProgress.id} ${inProgress.subject}` : 'No task in progress',
-          'Tasks:',
-          taskLines,
-          '</active_tasks>'
-        ].join('\n')
-
-        runtimeInstructions.push(taskMsg)
       }
     } catch (e) {
       console.error('[AgentRunner] Failed to load active plan:', e)
@@ -287,7 +262,7 @@ export class AgentRunner {
     }
 
     let consecutiveIdleTurns = 0
-    let lastTaskStatusSnapshot = createTaskStatusSnapshot(taskStore, sessionId)
+    let lastTodoStatusSnapshot = createTodoStatusSnapshot(todoStore, sessionId)
     let currentState = AgentState.Running
     const contextBudgetService = new ContextBudgetService()
     const runtimeToolManager = typeof (this.toolManager as any).createCatalogSnapshot === 'function'
@@ -369,6 +344,7 @@ export class AgentRunner {
           activatedDeferredTools
         })
         availableTools = runtimeToolManager.getToolDefinitionsForExposure(exposurePlan)
+        const todoStateInstruction = todoStore.promptState(sessionId)
 
         const built = await config.contextBuilder!.build({
           sessionId,
@@ -378,7 +354,11 @@ export class AgentRunner {
           capabilities: config.contextCapabilities!,
           systemPrompt: config.systemPrompt!,
           toolSchemas: availableTools,
-          instructions: [...runtimeInstructions, agentRuntimeInstruction],
+          instructions: [
+            ...runtimeInstructions,
+            ...(todoStateInstruction ? [todoStateInstruction] : []),
+            agentRuntimeInstruction
+          ],
           providerRequestProfile: {
             providerId: config.providerId,
             model: config.model,
@@ -846,9 +826,9 @@ export class AgentRunner {
           }
         }
 
-        const currentTaskStatusSnapshot = createTaskStatusSnapshot(taskStore, sessionId)
-        const taskStatusChanged = currentTaskStatusSnapshot !== lastTaskStatusSnapshot
-        const hasPendingTasks = taskStore.list(sessionId).some(t => t.status === 'pending' || t.status === 'in_progress')
+        const currentTodoStatusSnapshot = createTodoStatusSnapshot(todoStore, sessionId)
+        const taskStatusChanged = currentTodoStatusSnapshot !== lastTodoStatusSnapshot
+        const hasPendingTasks = todoStore.list(sessionId).some(t => t.status === 'pending' || t.status === 'in_progress')
         consecutiveIdleTurns = updateConsecutiveIdleTurns({
           previous: consecutiveIdleTurns,
           toolCallCount: toolCallsArray.length,
@@ -856,7 +836,7 @@ export class AgentRunner {
           taskStatusChanged,
           hadSuccessfulToolExecution
         })
-        lastTaskStatusSnapshot = currentTaskStatusSnapshot
+        lastTodoStatusSnapshot = currentTodoStatusSnapshot
 
         const isVerificationFailure = filesModifiedInSession && lastVerificationResult && !lastVerificationResult.success;
         
@@ -927,8 +907,8 @@ export class AgentRunner {
         if (transitionEvent === TransitionEvent.SchedulerContinue) {
           const continuationMessage = [
             '<internal_continuation>',
-            `Active tasks remain (${taskStore.summary(sessionId)}).`,
-            'Continue the task with the available tools, update task status when work changes, or use AskUserQuestion only when required user input is the actual blocker.',
+            `Active Todo items remain (${todoStore.summary(sessionId)}).`,
+            'Continue the work with the available tools, update Todo state when work changes, or use AskUserQuestion only when required user input is the actual blocker.',
             '</internal_continuation>'
           ].join('\n')
           await runtimeCoordinator!.recordUserContinuation(runtimeTurn!, continuationMessage)

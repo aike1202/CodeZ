@@ -125,6 +125,7 @@ mod tests {
                 name: "review".to_string(),
                 description: None,
             }]),
+            todo_state: None,
             global_rules: None,
             workspace_rules: None,
             directory_rules: None,

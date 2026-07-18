@@ -11,6 +11,6 @@ export const WorkerDelegationModule: PromptModule = {
   layer: 'dynamic',
   priority: 7,
   isEnabled: (ctx: PromptContext) => !ctx.availableTools ||
-    ctx.availableTools.some(tool => tool.name === 'SubAgentRunner' || tool.name === 'DelegateTasks'),
+    ctx.availableTools.some(tool => tool.name === 'SubAgentRunner' || tool.name === 'spawn_agent'),
   build: () => TEXT,
 }

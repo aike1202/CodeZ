@@ -1,183 +1,159 @@
 import { Tool, ToolContext } from '../Tool'
-import { TaskStore } from '../../services/TaskStore'
-import type { TaskApprovalStatus, TaskContextBundle, TaskRiskLevel, TaskStatus } from '../../../shared/types/task'
+import { TodoStore, type TodoPatch } from '../../services/TaskStore'
+import type {
+  TodoApprovalStatus,
+  TodoContextBundle,
+  TodoRiskLevel,
+  TodoStatus
+} from '../../../shared/types/task'
 
-const VALID_STATUSES: TaskStatus[] = ['pending', 'in_progress', 'completed', 'cancelled']
-const VALID_RISK_LEVELS: TaskRiskLevel[] = ['low', 'medium', 'high']
-const VALID_APPROVAL_STATUSES: TaskApprovalStatus[] = ['not_required', 'pending', 'approved', 'changes_requested', 'rejected']
+const VALID_STATUSES: TodoStatus[] = ['pending', 'in_progress', 'completed', 'cancelled']
+const VALID_RISK_LEVELS: TodoRiskLevel[] = ['low', 'medium', 'high']
+const VALID_APPROVAL_STATUSES: TodoApprovalStatus[] = [
+  'not_required',
+  'pending',
+  'approved',
+  'changes_requested',
+  'rejected'
+]
 
-/**
- * 更新单个 Task 的状态或字段。
- *
- * 推进流程：pending → in_progress → completed。同一时刻至多 1 个 in_progress。
- * 完成一项后立即标 completed，再开始下一项。
- */
-export class TaskUpdateTool extends Tool {
+type TodoUpdateItem = TodoPatch & { todoId: string }
+
+export class TodoUpdateTool extends Tool {
   get name() {
-    return 'TaskUpdate'
+    return 'TodoUpdate'
   }
 
   get summary() {
-    return 'Update task status or fields.'
+    return 'Atomically update one or more Todo items.'
   }
 
   get description() {
     return [
-      'Update a task by id: change its status or edit its fields.',
-      '',
-      'Rules:',
-      '- Progress a task through pending → in_progress → completed.',
-      '- Keep at most ONE task in_progress at a time.',
-      '- Mark a task completed as soon as it is done, before starting the next.',
-      '- If you cannot finish a task, set status to "cancelled".'
+      'Apply all Todo patches as one transaction.',
+      'Use expectedRevision from the injected todo_state when available.',
+      'Use one call to complete the current item and start the next.',
+      'The final state must have at most one in_progress item and satisfy dependencies and approval.'
     ].join('\n')
   }
 
   get parameters_schema() {
+    const updateProperties = {
+      todoId: { type: 'string', pattern: '^t[1-9][0-9]*$' },
+      status: { type: 'string', enum: VALID_STATUSES },
+      subject: { type: 'string' },
+      description: { type: 'string' },
+      addBlockedBy: { type: 'array', items: { type: 'string', pattern: '^t[1-9][0-9]*$' }, uniqueItems: true },
+      removeBlockedBy: { type: 'array', items: { type: 'string', pattern: '^t[1-9][0-9]*$' }, uniqueItems: true },
+      files: { type: 'array', items: { type: 'string' } },
+      activeForm: { type: 'string' },
+      groupId: { type: 'string' },
+      groupTitle: { type: 'string' },
+      groupSubtitle: { type: 'string' },
+      riskLevel: { type: 'string', enum: VALID_RISK_LEVELS },
+      requiresApproval: { type: 'boolean' },
+      approvalStatus: { type: 'string', enum: VALID_APPROVAL_STATUSES },
+      acceptanceCriteria: { type: 'array', items: { type: 'string' } },
+      verificationCommand: { type: 'string' },
+      contextBundle: {
+        type: 'object',
+        properties: {
+          knownFacts: { type: 'array', items: { type: 'string' } },
+          decisions: { type: 'array', items: { type: 'string' } },
+          constraints: { type: 'array', items: { type: 'string' } },
+          excludedDirections: { type: 'array', items: { type: 'string' } },
+          sourceReferences: { type: 'array', items: { type: 'string' } }
+        },
+        additionalProperties: false
+      }
+    }
     return {
       type: 'object',
+      additionalProperties: false,
       properties: {
-        taskId: {
-          type: 'string',
-          description: 'The id of the task to update (e.g. "t2").'
-        },
-        status: {
-          type: 'string',
-          enum: VALID_STATUSES,
-          description: 'New status.'
-        },
-        subject: { type: 'string', description: 'New title.' },
-        description: { type: 'string', description: 'New description.' },
-        files: {
+        expectedRevision: { type: 'integer', minimum: 0 },
+        updates: {
           type: 'array',
-          items: { type: 'string' },
-          description: 'Replace the declared file set.'
-        },
-        activeForm: { type: 'string', description: 'New progress-spinner label.' },
-        riskLevel: {
-          type: 'string',
-          enum: VALID_RISK_LEVELS,
-          description: 'New TaskGroup risk level.'
-        },
-        requiresApproval: {
-          type: 'boolean',
-          description: 'Whether the TaskGroup requires user approval before implementation.'
-        },
-        approvalStatus: {
-          type: 'string',
-          enum: VALID_APPROVAL_STATUSES,
-          description: 'New TaskGroup approval status.'
-        },
-        acceptanceCriteria: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Replace the task acceptance criteria.'
-        },
-        verificationCommand: {
-          type: 'string',
-          description: 'Replace the recommended verification command.'
-        },
-        contextBundle: {
-          type: 'object',
-          description: 'Replace the task research/Plan context bundle.',
-          properties: {
-            knownFacts: { type: 'array', items: { type: 'string' } },
-            decisions: { type: 'array', items: { type: 'string' } },
-            constraints: { type: 'array', items: { type: 'string' } },
-            excludedDirections: { type: 'array', items: { type: 'string' } },
-            sourceReferences: { type: 'array', items: { type: 'string' } }
-          },
-          additionalProperties: false
+          minItems: 1,
+          maxItems: 256,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            properties: updateProperties,
+            required: ['todoId'],
+            anyOf: Object.keys(updateProperties)
+              .filter(key => key !== 'todoId')
+              .map(key => ({ required: [key] }))
+          }
         }
       },
-      required: ['taskId']
+      required: ['updates']
     }
   }
 
   async execute(args: string, context: ToolContext): Promise<string> {
     const sessionId = context.sessionId
     if (!sessionId) {
-      return JSON.stringify({ ok: false, error: 'TaskUpdate requires an active session.' })
+      return JSON.stringify({ ok: false, error: 'TodoUpdate requires an active session.' })
     }
 
-    let parsed: {
-      taskId?: string
-      status?: string
-      subject?: string
-      description?: string
-      files?: string[]
-      activeForm?: string
-      riskLevel?: string
-      requiresApproval?: boolean
-      approvalStatus?: string
-      acceptanceCriteria?: string[]
-      verificationCommand?: string
-      contextBundle?: TaskContextBundle
-    }
+    let parsed: { expectedRevision?: number; updates?: TodoUpdateItem[] }
     try {
       parsed = JSON.parse(args || '{}')
     } catch {
-      return JSON.stringify({ ok: false, error: 'Invalid JSON arguments for TaskUpdate.' })
+      return JSON.stringify({ ok: false, error: 'Invalid JSON arguments for TodoUpdate.' })
+    }
+    if (!Array.isArray(parsed.updates) || parsed.updates.length === 0) {
+      return JSON.stringify({ ok: false, error: 'TodoUpdate requires a non-empty `updates` array.' })
+    }
+    for (const update of parsed.updates) {
+      const error = validateUpdate(update)
+      if (error) return JSON.stringify({ ok: false, error })
     }
 
-    if (!parsed.taskId) {
-      return JSON.stringify({ ok: false, error: 'TaskUpdate requires a `taskId`.' })
-    }
-    if (parsed.status && !VALID_STATUSES.includes(parsed.status as TaskStatus)) {
+    const store = TodoStore.getInstance()
+    try {
+      const result = store.updateBatch(sessionId, parsed.expectedRevision, parsed.updates)
+      const updatedIds = new Set(parsed.updates.map(update => update.todoId))
+      return JSON.stringify({
+        ok: true,
+        data: {
+          revision: result.revision,
+          updated: result.items.filter(item => updatedIds.has(item.id)),
+          summary: store.summary(sessionId)
+        }
+      })
+    } catch (error) {
       return JSON.stringify({
         ok: false,
-        error: `Invalid status '${parsed.status}'. Must be one of: ${VALID_STATUSES.join(', ')}.`
+        error: error instanceof Error ? error.message : String(error),
+        latest: {
+          revision: store.revision(sessionId),
+          state: store.promptState(sessionId)
+        }
       })
     }
-    if (parsed.riskLevel && !VALID_RISK_LEVELS.includes(parsed.riskLevel as TaskRiskLevel)) {
-      return JSON.stringify({
-        ok: false,
-        error: `Invalid riskLevel '${parsed.riskLevel}'. Must be one of: ${VALID_RISK_LEVELS.join(', ')}.`
-      })
-    }
-    if (parsed.approvalStatus && !VALID_APPROVAL_STATUSES.includes(parsed.approvalStatus as TaskApprovalStatus)) {
-      return JSON.stringify({
-        ok: false,
-        error: `Invalid approvalStatus '${parsed.approvalStatus}'. Must be one of: ${VALID_APPROVAL_STATUSES.join(', ')}.`
-      })
-    }
-
-    const store = TaskStore.getInstance()
-    const existing = store.getById(sessionId, parsed.taskId)
-    if (!existing) {
-      return JSON.stringify({ ok: false, error: `Task '${parsed.taskId}' not found.` })
-    }
-    const previous = { ...existing }
-
-    const updated = store.update(sessionId, parsed.taskId, {
-      status: parsed.status as TaskStatus | undefined,
-      subject: parsed.subject,
-      description: parsed.description,
-      files: parsed.files,
-      activeForm: parsed.activeForm,
-      riskLevel: parsed.riskLevel as TaskRiskLevel | undefined,
-      requiresApproval: parsed.requiresApproval,
-      approvalStatus: parsed.approvalStatus as TaskApprovalStatus | undefined,
-      acceptanceCriteria: parsed.acceptanceCriteria,
-      verificationCommand: parsed.verificationCommand,
-      contextBundle: parsed.contextBundle
-    })
-
-    // 单一 in_progress 校验：越界则回滚该次状态变更
-    if (parsed.status === 'in_progress' && !store.hasAtMostOneInProgress(sessionId)) {
-      store.update(sessionId, parsed.taskId, previous)
-      return JSON.stringify({
-        ok: false,
-        error: 'Another task is already in_progress. Complete or cancel it before starting a new one.'
-      })
-    }
-
-    return JSON.stringify({
-      ok: true,
-      data: {
-        task: updated ? { ...updated } : null,
-        summary: store.summary(sessionId)
-      }
-    })
   }
 }
+
+function validateUpdate(update: TodoUpdateItem): string | undefined {
+  if (!update || typeof update.todoId !== 'string' || !/^t[1-9][0-9]*$/.test(update.todoId)) {
+    return 'Each TodoUpdate item requires a valid `todoId`.'
+  }
+  if (update.status && !VALID_STATUSES.includes(update.status)) {
+    return `Invalid status '${update.status}'.`
+  }
+  if (update.riskLevel && !VALID_RISK_LEVELS.includes(update.riskLevel)) {
+    return `Invalid riskLevel '${update.riskLevel}'.`
+  }
+  if (update.approvalStatus && !VALID_APPROVAL_STATUSES.includes(update.approvalStatus)) {
+    return `Invalid approvalStatus '${update.approvalStatus}'.`
+  }
+  const contextBundle: TodoContextBundle | undefined = update.contextBundle
+  if (contextBundle !== undefined && (typeof contextBundle !== 'object' || contextBundle === null)) {
+    return 'Invalid contextBundle.'
+  }
+  return undefined
+}
+
+export { TodoUpdateTool as TaskUpdateTool }

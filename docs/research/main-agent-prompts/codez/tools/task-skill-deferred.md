@@ -1,67 +1,49 @@
-# Task、Skill 与 Deferred Tools
+# Todo、Skill 与 Deferred Tools
 
-## Task
+## Todo
 
-TaskStore 以 session 为作用域保存 typed snapshot。Create 一次可建 1-256 项，自动产生 `t1`、`t2` 等 ID 和 pending 状态。Update 按 taskId 做 partial update；Get/List 是只读。
+Todo 是 session 级 durable collaboration state，只描述工作，不拥有 Agent 或 Executor 生命周期。现有 `tasks/` 持久化目录与 Electron `SessionData.tasks` 字段作为历史数据兼容层保留；模型和新桌面契约统一使用 Todo 命名。
 
-Task effect：
+模型工具面只有：
 
 ```text
-Create/Update -> MutateTaskState(session)
-Get/List      -> ReadMemory(session tasks)
+TodoCreate { items[] }
+TodoUpdate { expectedRevision?, updates[] }
 ```
 
-Create/Update 对同一 session 使用 ResourceLocked，避免并发丢更新。Prompt 的“at most one in_progress”是行为指导，store 也应维持版本化 snapshot；Task 工具不是工作执行器，只是 durable bookkeeping。
+`TodoUpdate` 在同一 session mutex 内执行完整事务：
+
+1. 检查 revision、空 batch 和重复 todoId。
+2. 克隆权威 snapshot，并在副本上应用全部 patch。
+3. 校验最终依赖图、审批门、未完成依赖和唯一 `in_progress`。
+4. 全部通过后只增加一次 revision、持久化一次、发送一次事件。
+5. 冲突时返回最新有界 Todo state，模型无需也不能调用 Get/List。
+
+`blockedBy` 是唯一持久依赖方向；`blocks`、ready/blocked 和 unfinished dependencies 都从 snapshot 派生。内部 `todo_list`/`todo_get` IPC 仅供 UI、恢复和故障处理。
+
+每个 Provider round 都从同一 Store 重新生成：
+
+```text
+<todo_state revision="N">
+summary + bounded active item details + compact item list
+</todo_state>
+```
+
+投影限制项目数量和字段长度，并 JSON 编码 Todo 文本。工具结果历史不是 Todo 权威来源。
+
+Executor 暂时停用模型入口：`DelegateTasks`、`ExecutionInspect`、`ExecutionControl` 不进入工具目录；TodoStore 不订阅 ExecutionController，AgentRunner 也不通过 Todo 恢复执行状态。Executor 实现保留，等待后续独立升级。
 
 ## Skill
 
-```text
-resolve requested exact name or ID from current bounded catalog
--> require enabled catalog item
--> read full trusted SKILL.md body
--> append [Skill Location] for supporting files
--> hash content
--> read latest session/context skill state
--> enforce disabled + force rule
--> append skill_state_updated ledger event
--> return full instructions as model-visible tool result
-```
+`Skill` 是兼容入口；`ActivateSkill` 表达 persistent active state 和 `force`。激活流程解析当前 bounded catalog、读取完整可信 `SKILL.md`、记录内容 hash 与 session/context state。重复激活相同内容返回 `already_active`。
 
-`Skill` 是兼容入口；`ActivateSkill` 才会清楚表达 persistent active state和 `force`。重复激活相同 args/content hash 返回 `already_active`，避免重复把大段 instructions 注入历史。
-
-Deactivate：
+Deactivate 状态：
 
 - `inactive`：允许之后普通激活。
 - `disabled`：必须有显式用户请求并用 `force=true` 才能恢复。
 
 ## Deferred exposure
 
-Catalog 先把 exposure=Deferred 且尚未 activated 的 descriptor 放入 `deferred_tools`：
+Deferred descriptors 由当前 exposure plan 传给 ToolSearch。激活写入 `<session>:<contextScope>`，只对下一 Provider round 生效；同一批紧接调用仍返回 `TOOL_NOT_EXPOSED`。
 
-```text
-NotebookEdit
-PushNotification
-WebFetch
-WebSearch
-```
-
-ToolSearch 支持：
-
-```text
-select:WebFetch,WebSearch   exact multi-select
-WebFetch                    exact name
-mcp__docs                   MCP prefix match if such tools are in catalog
-+documentation product      required/optional keyword scoring
-```
-
-匹配后将名称写入 `ToolExposureState` 的 `<session>:<contextScope>` key。激活只对下一 Provider turn 生效；同一批中紧接着调用 deferred tool 会得到 `TOOL_NOT_EXPOSED`。
-
-## 当前 Prompt 漏洞
-
-`ToolExecutionPipeline` 正确把 exposure plan 的 deferred summaries 传给 ToolSearch；但 `ChatPromptAssembler` 构建 PromptContext 时使用：
-
-```rust
-deferred_tools: Some(Vec::new())
-```
-
-因此 `<deferred_tools>` System 段永远空。模型只能看到 ToolSearch description，不知道具体有哪 4 个候选。修复应把本轮 `ToolExposurePlan.deferred_tools` 同时传给 prompt builder，不要另建一份目录。
+当前工作树仍有一个独立问题：`ChatPromptAssembler` 把 deferred summaries 设为空，且 Provider tool surface 在循环外缓存，导致 ToolSearch 激活与下一轮 schema/prompt 不一致。它不属于 Todo 改造，应在 capability snapshot slice 中单独修复。

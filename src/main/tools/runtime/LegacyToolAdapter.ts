@@ -13,12 +13,12 @@ import type {
 import { fingerprint } from './canonicalJson'
 
 const READ_ONLY = new Set([
-  'Read', 'list_files', 'Glob', 'Grep', 'Skill', 'ActivateSkill', 'DeactivateSkill', 'TaskGet', 'TaskList',
-  'ExecutionInspect', 'update_resume_state', 'AskUserQuestion', 'ToolSearch', 'ToolResultRead',
+  'Read', 'list_files', 'Glob', 'Grep', 'Skill', 'ActivateSkill', 'DeactivateSkill',
+  'TodoCreate', 'TodoUpdate', 'update_resume_state', 'AskUserQuestion', 'ToolSearch', 'ToolResultRead',
   'ListMcpResourcesTool', 'ReadMcpResourceTool', 'GetMcpPrompt', 'wait_agent', 'list_agents'
 ])
 const APPROVAL_NOT_APPLICABLE = new Set([
-  'Read', 'list_files', 'Glob', 'Grep', 'TaskGet', 'TaskList', 'ExecutionInspect',
+  'Read', 'list_files', 'Glob', 'Grep', 'TodoCreate', 'TodoUpdate',
   'AskUserQuestion', 'ToolSearch', 'ToolResultRead', 'ListMcpResourcesTool',
   'ReadMcpResourceTool', 'GetMcpPrompt', 'send_message', 'wait_agent', 'list_agents',
   'interrupt_agent'
@@ -29,14 +29,13 @@ const ALWAYS = new Set([
 ])
 const DEFERRED = new Set([
   'NotebookEdit', 'PushNotification', 'WebSearch', 'WebFetch',
-  'rollback_last_edit', 'SubAgentRunner', 'DelegateTasks',
-  'ExecutionControl', 'ExecutionInspect',
+  'rollback_last_edit', 'SubAgentRunner',
   'ListMcpResourcesTool', 'ReadMcpResourceTool', 'GetMcpPrompt', 'McpAuth',
   'followup_task', 'send_message', 'wait_agent', 'list_agents', 'interrupt_agent'
 ])
 const EXCLUSIVE = new Set(['AskUserQuestion'])
-const TASK_TOOLS = new Set(['TaskCreate', 'TaskGet', 'TaskList', 'TaskUpdate'])
-const MUTATING_TASK_TOOLS = new Set(['TaskCreate', 'TaskUpdate'])
+const TODO_TOOLS = new Set(['TodoCreate', 'TodoUpdate'])
+const MUTATING_TODO_TOOLS = new Set(['TodoCreate', 'TodoUpdate'])
 const COMPATIBILITY_ALIASES: Readonly<Record<string, readonly string[]>> = Object.freeze({
   ListMcpResourcesTool: ['ListMcpResources'],
   ReadMcpResourceTool: ['ReadMcpResource']
@@ -165,10 +164,8 @@ async function planLegacyEffects(
       executionId: String(input.execution_id || ''),
       action: String(input.action || '')
     })
-  } else if (MUTATING_TASK_TOOLS.has(name) || name === 'update_resume_state') {
+  } else if (MUTATING_TODO_TOOLS.has(name) || name === 'update_resume_state') {
     effects.push({ kind: 'mutate-task-state', sessionId: context.sessionId })
-  } else if (name === 'TaskGet' || name === 'TaskList') {
-    effects.push({ kind: 'read-memory', path: `session:${context.sessionId || 'unknown'}:tasks` })
   } else if (name === 'AskUserQuestion') {
     effects.push({ kind: 'user-interaction', channel: 'ask-user' })
   } else if (
@@ -214,7 +211,7 @@ async function resourceKeysFor(
     const access = ['Edit', 'Write', 'NotebookEdit'].includes(name) ? 'write' : 'read'
     return [`file:${resolvePath(filePath, context.workspaceRoot)}:${access}`]
   }
-  if (TASK_TOOLS.has(name)) return [`session:${context.sessionId || 'unknown'}:tasks`]
+  if (TODO_TOOLS.has(name)) return [`session:${context.sessionId || 'unknown'}:todos`]
   if (name === 'Skill' || name === 'ActivateSkill' || name === 'DeactivateSkill') {
     return [`session:${context.sessionId || 'unknown'}:skills`]
   }
@@ -257,7 +254,7 @@ export class LegacyToolAdapter implements ToolHandler<Record<string, unknown>, u
         concurrency: EXCLUSIVE.has(legacyTool.name)
           ? 'exclusive'
           : [
-              'Edit', 'Write', 'NotebookEdit', 'TaskCreate', 'TaskUpdate', 'ExecutionControl',
+              'Edit', 'Write', 'NotebookEdit', 'TodoCreate', 'TodoUpdate',
               'Skill', 'ActivateSkill', 'DeactivateSkill', 'spawn_agent', 'followup_task',
               'send_message', 'interrupt_agent'
             ].includes(legacyTool.name)

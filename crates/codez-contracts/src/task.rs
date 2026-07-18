@@ -1,13 +1,13 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-pub const TASK_UPDATED_EVENT: &str = "task:updated";
-pub const TASK_EVENT_VERSION: u16 = 1;
+pub const TODO_UPDATED_EVENT: &str = "todo:updated";
+pub const TODO_EVENT_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(rename_all = "snake_case")]
-pub enum TaskStatus {
+pub enum TodoStatus {
     Pending,
     InProgress,
     Completed,
@@ -17,7 +17,7 @@ pub enum TaskStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 #[ts(rename_all = "lowercase")]
-pub enum TaskRiskLevel {
+pub enum TodoRiskLevel {
     Low,
     Medium,
     High,
@@ -26,7 +26,7 @@ pub enum TaskRiskLevel {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(rename_all = "snake_case")]
-pub enum TaskApprovalStatus {
+pub enum TodoApprovalStatus {
     NotRequired,
     Pending,
     Approved,
@@ -37,7 +37,7 @@ pub enum TaskApprovalStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase", optional_fields)]
-pub struct TaskContextBundle {
+pub struct TodoContextBundle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub known_facts: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -53,11 +53,13 @@ pub struct TaskContextBundle {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase", optional_fields)]
-pub struct TaskItem {
+pub struct TodoItem {
     pub id: String,
     pub subject: String,
     pub description: String,
-    pub status: TaskStatus,
+    pub status: TodoStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_by: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub files: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -69,34 +71,34 @@ pub struct TaskItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_subtitle: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub risk_level: Option<TaskRiskLevel>,
+    pub risk_level: Option<TodoRiskLevel>,
     pub requires_approval: bool,
-    pub approval_status: TaskApprovalStatus,
+    pub approval_status: TodoApprovalStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acceptance_criteria: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verification_command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context_bundle: Option<TaskContextBundle>,
+    pub context_bundle: Option<TodoContextBundle>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
-pub struct TaskSnapshot {
+pub struct TodoListSnapshot {
     pub version: u16,
     pub session_id: String,
     #[ts(type = "number")]
     pub revision: u64,
     #[ts(type = "number")]
     pub next_sequence: u64,
-    pub tasks: Vec<TaskItem>,
+    pub items: Vec<TodoItem>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase", optional_fields)]
-pub struct TaskCreateInput {
+pub struct TodoCreateInput {
     pub subject: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -111,29 +113,34 @@ pub struct TaskCreateInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_subtitle: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub risk_level: Option<TaskRiskLevel>,
+    pub risk_level: Option<TodoRiskLevel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requires_approval: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub approval_status: Option<TaskApprovalStatus>,
+    pub approval_status: Option<TodoApprovalStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acceptance_criteria: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verification_command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context_bundle: Option<TaskContextBundle>,
+    pub context_bundle: Option<TodoContextBundle>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase", optional_fields)]
-pub struct TaskUpdateInput {
+pub struct TodoItemUpdate {
+    pub todo_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub status: Option<TaskStatus>,
+    pub status: Option<TodoStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub add_blocked_by: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remove_blocked_by: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub files: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -145,91 +152,91 @@ pub struct TaskUpdateInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_subtitle: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub risk_level: Option<TaskRiskLevel>,
+    pub risk_level: Option<TodoRiskLevel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requires_approval: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub approval_status: Option<TaskApprovalStatus>,
+    pub approval_status: Option<TodoApprovalStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acceptance_criteria: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verification_command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context_bundle: Option<TaskContextBundle>,
+    pub context_bundle: Option<TodoContextBundle>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
-pub struct TaskCreateRequest {
+pub struct TodoCreateRequest {
     pub session_id: String,
-    pub tasks: Vec<TaskCreateInput>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(rename_all = "camelCase")]
-pub struct TaskUpdateRequest {
-    pub session_id: String,
-    pub task_id: String,
-    pub patch: TaskUpdateInput,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(rename_all = "camelCase")]
-pub struct TaskGetRequest {
-    pub session_id: String,
-    pub task_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(rename_all = "camelCase")]
-pub struct TaskListRequest {
-    pub session_id: String,
+    pub items: Vec<TodoCreateInput>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase", optional_fields)]
-pub struct TaskMutationResult {
+pub struct TodoUpdateRequest {
+    pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub task: Option<TaskItem>,
-    pub snapshot: TaskSnapshot,
+    #[ts(type = "number")]
+    pub expected_revision: Option<u64>,
+    pub updates: Vec<TodoItemUpdate>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
-pub struct TaskUpdatedEvent {
+pub struct TodoGetRequest {
+    pub session_id: String,
+    pub todo_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct TodoListRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct TodoMutationResult {
+    pub snapshot: TodoListSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct TodoUpdatedEvent {
     pub version: u16,
     pub session_id: String,
     #[ts(type = "number")]
     pub revision: u64,
-    pub snapshot: TaskSnapshot,
+    pub snapshot: TodoListSnapshot,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{TASK_EVENT_VERSION, TaskSnapshot, TaskUpdatedEvent};
+    use super::{TODO_EVENT_VERSION, TodoListSnapshot, TodoUpdatedEvent};
 
     #[test]
-    fn task_events_repeat_the_session_and_revision_for_gap_detection() {
-        let snapshot = TaskSnapshot {
+    fn todo_events_repeat_the_session_and_revision_for_gap_detection() {
+        let snapshot = TodoListSnapshot {
             version: 1,
             session_id: "session-1".to_string(),
             revision: 3,
             next_sequence: 1,
-            tasks: Vec::new(),
+            items: Vec::new(),
         };
-        let event = TaskUpdatedEvent {
-            version: TASK_EVENT_VERSION,
+        let event = TodoUpdatedEvent {
+            version: TODO_EVENT_VERSION,
             session_id: snapshot.session_id.clone(),
             revision: snapshot.revision,
             snapshot,
         };
-        let value = serde_json::to_value(event).expect("task event fixture must serialize");
+        let value = serde_json::to_value(event).expect("Todo event fixture must serialize");
 
         assert_eq!(
             (value["sessionId"].as_str(), value["revision"].as_u64()),

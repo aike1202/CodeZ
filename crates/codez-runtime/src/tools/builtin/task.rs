@@ -4,7 +4,10 @@ use codez_core::{AppError, AppErrorKind, SessionId};
 use serde_json::{Map, Value};
 
 use crate::{
-    task::{TaskCreateInput, TaskSnapshot, TaskStatus, TaskStore, TaskUpdateInput},
+    task::{
+        TodoCreateInput, TodoItem, TodoItemPatch, TodoItemUpdate, TodoListSnapshot, TodoStatus,
+        TodoStore,
+    },
     tools::{
         registry::{
             BoxFuture, DefaultToolDescriptor, ToolAvailability, ToolBehavior, ToolContext,
@@ -19,90 +22,55 @@ use crate::{
 };
 
 #[derive(Clone, Copy)]
-enum TaskToolKind {
+enum TodoToolKind {
     Create,
     Update,
-    Get,
-    List,
 }
 
-/// One of the four typed session-task handlers exposed to model tool loops.
-pub struct TaskTool {
+/// Model-facing handlers for durable session Todo state.
+pub struct TodoTool {
     descriptor: DefaultToolDescriptor,
-    kind: TaskToolKind,
-    store: Arc<TaskStore>,
+    kind: TodoToolKind,
+    store: Arc<TodoStore>,
 }
 
-impl TaskTool {
+impl TodoTool {
     #[must_use]
-    pub fn create(store: Arc<TaskStore>) -> Self {
+    pub fn create(store: Arc<TodoStore>) -> Self {
         Self::new(
-            TaskToolKind::Create,
-            "TaskCreate",
-            "Create session-scoped tracking tasks.",
-            "Creates one or more durable tasks in pending state for multi-step work.",
+            TodoToolKind::Create,
+            "TodoCreate",
+            "Create session-scoped Todo items.",
+            "Creates one or more durable Todo items in pending state for substantial multi-step work.",
             create_schema(),
             store,
         )
     }
 
     #[must_use]
-    pub fn update(store: Arc<TaskStore>) -> Self {
+    pub fn update(store: Arc<TodoStore>) -> Self {
         Self::new(
-            TaskToolKind::Update,
-            "TaskUpdate",
-            "Update one session task.",
-            "Updates a task by ID. Keep at most one task in_progress and mark completed work promptly.",
+            TodoToolKind::Update,
+            "TodoUpdate",
+            "Atomically update one or more Todo items.",
+            "Applies all updates to the latest Todo snapshot as one transaction. Use expectedRevision from the injected todo_state when available. The final state must keep at most one item in_progress and satisfy dependency and approval gates.",
             update_schema(),
             store,
         )
     }
 
-    #[must_use]
-    pub fn get(store: Arc<TaskStore>) -> Self {
-        Self::new(
-            TaskToolKind::Get,
-            "TaskGet",
-            "Read one session task.",
-            "Returns the complete typed task identified by taskId for the active session.",
-            task_id_schema(),
-            store,
-        )
-    }
-
-    #[must_use]
-    pub fn list(store: Arc<TaskStore>) -> Self {
-        Self::new(
-            TaskToolKind::List,
-            "TaskList",
-            "List session tasks and progress.",
-            "Returns the active session's complete task snapshot and progress summary.",
-            serde_json::json!({
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {}
-            }),
-            store,
-        )
-    }
-
     fn new(
-        kind: TaskToolKind,
+        kind: TodoToolKind,
         name: &'static str,
         summary: &str,
         description: &str,
         input_schema: Value,
-        store: Arc<TaskStore>,
+        store: Arc<TodoStore>,
     ) -> Self {
-        let concurrency = if matches!(kind, TaskToolKind::Create | TaskToolKind::Update) {
-            ToolConcurrency::ResourceLocked
-        } else {
-            ToolConcurrency::Safe
-        };
         Self {
             descriptor: DefaultToolDescriptor {
                 name,
-                version: "1.0.0",
+                version: "1.1.0",
                 source: ToolSource::Builtin,
                 source_id: format!("builtin:{}", name.to_ascii_lowercase()),
                 summary: summary.to_string(),
@@ -117,7 +85,7 @@ impl TaskTool {
                     exposure: ToolExposure::Always,
                 },
                 behavior: ToolBehavior {
-                    concurrency,
+                    concurrency: ToolConcurrency::ResourceLocked,
                     interrupt: ToolInterruptBehavior::Cancel,
                     max_result_chars: 64 * 1024,
                     timeout_ms: Some(30_000),
@@ -130,17 +98,14 @@ impl TaskTool {
 
     fn effect(&self, session_id: Option<&str>) -> ToolEffect {
         match self.kind {
-            TaskToolKind::Create | TaskToolKind::Update => ToolEffect::MutateTaskState {
+            TodoToolKind::Create | TodoToolKind::Update => ToolEffect::MutateTaskState {
                 session_id: session_id.map(str::to_string),
-            },
-            TaskToolKind::Get | TaskToolKind::List => ToolEffect::ReadMemory {
-                path: task_resource(session_id),
             },
         }
     }
 }
 
-impl ToolHandler for TaskTool {
+impl ToolHandler for TodoTool {
     fn descriptor(&self) -> &dyn ToolDescriptor {
         &self.descriptor
     }
@@ -178,101 +143,123 @@ impl ToolHandler for TaskTool {
             let session_id = match parse_session_id(context.session_id.as_deref()) {
                 Ok(session_id) => session_id,
                 Err(error) => {
-                    return error_result(error, self.effect(context.session_id.as_deref()));
+                    return error_result(error, self.effect(context.session_id.as_deref()), None);
                 }
             };
             let result = match self.kind {
-                TaskToolKind::Create => execute_create(&self.store, &session_id, input).await,
-                TaskToolKind::Update => execute_update(&self.store, &session_id, input).await,
-                TaskToolKind::Get => execute_get(&self.store, &session_id, input).await,
-                TaskToolKind::List => execute_list(&self.store, &session_id).await,
+                TodoToolKind::Create => execute_create(&self.store, &session_id, input).await,
+                TodoToolKind::Update => execute_update(&self.store, &session_id, input).await,
             };
             match result {
                 Ok(value) => success_result(value, self.effect(Some(session_id.as_str()))),
-                Err(error) => error_result(error, self.effect(Some(session_id.as_str()))),
+                Err(error) => {
+                    let latest = if error.kind() == AppErrorKind::Conflict {
+                        self.store
+                            .snapshot(&session_id)
+                            .await
+                            .ok()
+                            .map(snapshot_result)
+                    } else {
+                        None
+                    };
+                    error_result(error, self.effect(Some(session_id.as_str())), latest)
+                }
             }
         })
     }
 }
 
 fn parse_session_id(value: Option<&str>) -> Result<SessionId, AppError> {
-    let value = value.ok_or_else(|| AppError::validation("The task tool requires a session"))?;
+    let value = value.ok_or_else(|| AppError::validation("The Todo tool requires a session"))?;
     SessionId::parse(value.to_string())
-        .map_err(|source| AppError::validation(format!("The task session is invalid: {source}")))
+        .map_err(|source| AppError::validation(format!("The Todo session is invalid: {source}")))
 }
 
 async fn execute_create(
-    store: &TaskStore,
+    store: &TodoStore,
     session_id: &SessionId,
     input: &Value,
 ) -> Result<Value, AppError> {
-    let tasks = input
-        .get("tasks")
+    let items = input
+        .get("items")
         .cloned()
-        .ok_or_else(|| AppError::validation("TaskCreate requires tasks"))?;
-    let tasks: Vec<TaskCreateInput> = serde_json::from_value(tasks)
-        .map_err(|source| AppError::validation(format!("TaskCreate input is invalid: {source}")))?;
-    store.create(session_id, tasks).await.map(snapshot_result)
+        .ok_or_else(|| AppError::validation("TodoCreate requires items"))?;
+    let items: Vec<TodoCreateInput> = serde_json::from_value(items)
+        .map_err(|source| AppError::validation(format!("TodoCreate input is invalid: {source}")))?;
+    store.create(session_id, items).await.map(snapshot_result)
 }
 
 async fn execute_update(
-    store: &TaskStore,
+    store: &TodoStore,
     session_id: &SessionId,
     input: &Value,
 ) -> Result<Value, AppError> {
-    let task_id = input
-        .get("taskId")
-        .and_then(Value::as_str)
-        .ok_or_else(|| AppError::validation("TaskUpdate requires taskId"))?;
-    let mut patch = input.clone();
-    patch
-        .as_object_mut()
-        .ok_or_else(|| AppError::validation("TaskUpdate input must be an object"))?
-        .remove("taskId");
-    let patch: TaskUpdateInput = serde_json::from_value(patch)
-        .map_err(|source| AppError::validation(format!("TaskUpdate input is invalid: {source}")))?;
-    let snapshot = store.update(session_id, task_id, patch).await?;
-    let task = snapshot
-        .tasks
-        .iter()
-        .find(|task| task.id == task_id)
-        .cloned()
-        .ok_or_else(|| AppError::internal("updated task disappeared from its snapshot"))?;
+    let expected_revision = input.get("expectedRevision").and_then(Value::as_u64);
+    let updates = input
+        .get("updates")
+        .and_then(Value::as_array)
+        .ok_or_else(|| AppError::validation("TodoUpdate requires updates"))?;
+    let mut parsed_updates = Vec::with_capacity(updates.len());
+    for update in updates {
+        let mut patch = update
+            .as_object()
+            .cloned()
+            .ok_or_else(|| AppError::validation("TodoUpdate updates must be objects"))?;
+        let todo_id = patch
+            .remove("todoId")
+            .and_then(|value| value.as_str().map(str::to_string))
+            .ok_or_else(|| AppError::validation("Each TodoUpdate item requires todoId"))?;
+        let patch: TodoItemPatch =
+            serde_json::from_value(Value::Object(patch)).map_err(|source| {
+                AppError::validation(format!("TodoUpdate input is invalid: {source}"))
+            })?;
+        parsed_updates.push(TodoItemUpdate {
+            task_id: todo_id,
+            patch,
+        });
+    }
+    let snapshot = store
+        .update_batch(session_id, expected_revision, parsed_updates)
+        .await?;
     Ok(serde_json::json!({
-        "task": task,
-        "summary": task_summary(&snapshot),
-        "snapshot": snapshot
+        "summary": todo_summary(&snapshot),
+        "todoStates": todo_states(&snapshot),
+        "snapshot": todo_snapshot_value(&snapshot)
     }))
 }
 
-async fn execute_get(
-    store: &TaskStore,
-    session_id: &SessionId,
-    input: &Value,
-) -> Result<Value, AppError> {
-    let task_id = input
-        .get("taskId")
-        .and_then(Value::as_str)
-        .ok_or_else(|| AppError::validation("TaskGet requires taskId"))?;
-    let task = store.get(session_id, task_id).await?;
-    Ok(serde_json::json!({ "task": task }))
-}
-
-async fn execute_list(store: &TaskStore, session_id: &SessionId) -> Result<Value, AppError> {
-    store.snapshot(session_id).await.map(snapshot_result)
-}
-
-fn snapshot_result(snapshot: TaskSnapshot) -> Value {
+fn snapshot_result(snapshot: TodoListSnapshot) -> Value {
     serde_json::json!({
-        "summary": task_summary(&snapshot),
-        "snapshot": snapshot
+        "summary": todo_summary(&snapshot),
+        "todoStates": todo_states(&snapshot),
+        "snapshot": todo_snapshot_value(&snapshot)
     })
 }
 
-fn task_summary(snapshot: &TaskSnapshot) -> String {
-    let completed = count_status(snapshot, TaskStatus::Completed);
-    let in_progress = count_status(snapshot, TaskStatus::InProgress);
-    let cancelled = count_status(snapshot, TaskStatus::Cancelled);
+fn todo_snapshot_value(snapshot: &TodoListSnapshot) -> Value {
+    serde_json::json!({
+        "version": snapshot.version,
+        "sessionId": snapshot.session_id,
+        "revision": snapshot.revision,
+        "nextSequence": snapshot.next_sequence,
+        "items": snapshot.tasks
+    })
+}
+
+fn todo_summary(snapshot: &TodoListSnapshot) -> String {
+    let completed = count_status(snapshot, TodoStatus::Completed);
+    let in_progress = count_status(snapshot, TodoStatus::InProgress);
+    let cancelled = count_status(snapshot, TodoStatus::Cancelled);
+    let ready = snapshot
+        .tasks
+        .iter()
+        .filter(|task| task_is_ready(snapshot, task))
+        .count();
+    let blocked = snapshot
+        .tasks
+        .iter()
+        .filter(|task| task_is_blocked(snapshot, task))
+        .count();
     let mut parts = vec![format!("{completed}/{} completed", snapshot.tasks.len())];
     if in_progress > 0 {
         parts.push(format!("{in_progress} in progress"));
@@ -280,10 +267,77 @@ fn task_summary(snapshot: &TaskSnapshot) -> String {
     if cancelled > 0 {
         parts.push(format!("{cancelled} cancelled"));
     }
+    if ready > 0 {
+        parts.push(format!("{ready} ready"));
+    }
+    if blocked > 0 {
+        parts.push(format!("{blocked} blocked"));
+    }
     parts.join(", ")
 }
 
-fn count_status(snapshot: &TaskSnapshot, status: TaskStatus) -> usize {
+fn todo_states(snapshot: &TodoListSnapshot) -> Value {
+    let states = snapshot
+        .tasks
+        .iter()
+        .map(|task| (task.id.clone(), todo_state(snapshot, task)))
+        .collect::<Map<_, _>>();
+    Value::Object(states)
+}
+
+fn todo_state(snapshot: &TodoListSnapshot, task: &TodoItem) -> Value {
+    let unfinished_dependencies = task
+        .blocked_by
+        .iter()
+        .filter(|dependency| {
+            snapshot
+                .tasks
+                .iter()
+                .find(|candidate| candidate.id == dependency.as_str())
+                .is_none_or(|candidate| candidate.status != TodoStatus::Completed)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let blocks = snapshot
+        .tasks
+        .iter()
+        .filter(|candidate| candidate.blocked_by.contains(&task.id))
+        .map(|candidate| candidate.id.clone())
+        .collect::<Vec<_>>();
+    let waiting_for_approval = task_waits_for_approval(task);
+    let blocked = task.status == TodoStatus::Pending
+        && (waiting_for_approval || !unfinished_dependencies.is_empty());
+    let ready = task.status == TodoStatus::Pending && !blocked;
+    serde_json::json!({
+        "ready": ready,
+        "blocked": blocked,
+        "unfinishedDependencies": unfinished_dependencies,
+        "blocks": blocks,
+        "waitingForApproval": waiting_for_approval
+    })
+}
+
+fn task_is_ready(snapshot: &TodoListSnapshot, task: &TodoItem) -> bool {
+    task.status == TodoStatus::Pending && !task_is_blocked(snapshot, task)
+}
+
+fn task_is_blocked(snapshot: &TodoListSnapshot, task: &TodoItem) -> bool {
+    task.status == TodoStatus::Pending
+        && (task_waits_for_approval(task)
+            || task.blocked_by.iter().any(|dependency| {
+                snapshot
+                    .tasks
+                    .iter()
+                    .find(|candidate| candidate.id == dependency.as_str())
+                    .is_none_or(|candidate| candidate.status != TodoStatus::Completed)
+            }))
+}
+
+fn task_waits_for_approval(task: &TodoItem) -> bool {
+    task.requires_approval && task.approval_status != crate::task::TodoApprovalStatus::Approved
+}
+
+fn count_status(snapshot: &TodoListSnapshot, status: TodoStatus) -> usize {
     snapshot
         .tasks
         .iter()
@@ -292,7 +346,7 @@ fn count_status(snapshot: &TaskSnapshot, status: TaskStatus) -> usize {
 }
 
 fn task_resource(session_id: Option<&str>) -> String {
-    format!("session:{}:tasks", session_id.unwrap_or("unavailable"))
+    format!("session:{}:todos", session_id.unwrap_or("unavailable"))
 }
 
 fn success_result(value: Value, effect: ToolEffect) -> ToolExecutionResult {
@@ -305,25 +359,31 @@ fn success_result(value: Value, effect: ToolEffect) -> ToolExecutionResult {
     }
 }
 
-fn error_result(error: AppError, effect: ToolEffect) -> ToolExecutionResult {
+fn error_result(error: AppError, effect: ToolEffect, latest: Option<Value>) -> ToolExecutionResult {
     let (code, recoverable) = match error.kind() {
-        AppErrorKind::Validation => ("TASK_INPUT_INVALID", true),
-        AppErrorKind::NotFound => ("TASK_NOT_FOUND", true),
-        AppErrorKind::Conflict => ("TASK_CONFLICT", true),
-        AppErrorKind::Storage => ("TASK_STORAGE_FAILED", error.retryable()),
-        _ => ("TASK_OPERATION_FAILED", false),
+        AppErrorKind::Validation => ("TODO_INPUT_INVALID", true),
+        AppErrorKind::NotFound => ("TODO_NOT_FOUND", true),
+        AppErrorKind::Conflict => ("TODO_CONFLICT", true),
+        AppErrorKind::Storage => ("TODO_STORAGE_FAILED", error.retryable()),
+        _ => ("TODO_OPERATION_FAILED", false),
     };
     let message = error.public_message().to_string();
+    let model_content = latest.as_ref().map_or_else(
+        || format!("Error: {message}"),
+        |snapshot| format!("Error: {message}\nLatest Todo state: {snapshot}"),
+    );
     ToolExecutionResult::Error {
         error: ToolExecutionError {
             code: code.to_string(),
             message: message.clone(),
             recoverable,
-            suggestion: None,
+            suggestion: latest
+                .as_ref()
+                .map(|_| "Retry once with the latest revision shown in this result.".to_string()),
             retry_after_ms: None,
-            details: None,
+            details: latest,
         },
-        model_content: Some(format!("Error: {message}")),
+        model_content: Some(model_content),
         ui_content: None,
         effects: Some(vec![effect]),
     }
@@ -332,8 +392,8 @@ fn error_result(error: AppError, effect: ToolEffect) -> ToolExecutionResult {
 fn cancelled_result(effect: ToolEffect) -> ToolExecutionResult {
     ToolExecutionResult::Cancelled {
         error: ToolExecutionError {
-            code: "TASK_CANCELLED".to_string(),
-            message: "The task operation was cancelled".to_string(),
+            code: "TODO_CANCELLED".to_string(),
+            message: "The Todo operation was cancelled".to_string(),
             recoverable: true,
             suggestion: None,
             retry_after_ms: None,
@@ -350,39 +410,65 @@ fn create_schema() -> Value {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-            "tasks": {
+            "items": {
                 "type": "array",
                 "minItems": 1,
                 "maxItems": 256,
                 "items": task_fields_schema(true)
             }
         },
-        "required": ["tasks"]
+        "required": ["items"]
     })
 }
 
 fn update_schema() -> Value {
-    let mut properties = task_properties();
-    properties.insert(
-        "taskId".to_string(),
-        serde_json::json!({ "type": "string", "pattern": "^t[1-9][0-9]*$" }),
-    );
-    serde_json::json!({
-        "type": "object",
-        "additionalProperties": false,
-        "properties": properties,
-        "required": ["taskId"]
-    })
-}
-
-fn task_id_schema() -> Value {
     serde_json::json!({
         "type": "object",
         "additionalProperties": false,
         "properties": {
-            "taskId": { "type": "string", "pattern": "^t[1-9][0-9]*$" }
+            "expectedRevision": { "type": "integer", "minimum": 0 },
+            "updates": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 256,
+                "items": todo_update_item_schema()
+            }
         },
-        "required": ["taskId"]
+        "required": ["updates"]
+    })
+}
+
+fn todo_update_item_schema() -> Value {
+    let mut properties = task_properties();
+    properties.insert(
+        "todoId".to_string(),
+        serde_json::json!({ "type": "string", "pattern": "^t[1-9][0-9]*$" }),
+    );
+    properties.insert("addBlockedBy".to_string(), task_id_list_schema());
+    properties.insert("removeBlockedBy".to_string(), task_id_list_schema());
+    serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": properties,
+        "required": ["todoId"],
+        "anyOf": [
+            { "required": ["subject"] },
+            { "required": ["description"] },
+            { "required": ["status"] },
+            { "required": ["addBlockedBy"] },
+            { "required": ["removeBlockedBy"] },
+            { "required": ["files"] },
+            { "required": ["activeForm"] },
+            { "required": ["groupId"] },
+            { "required": ["groupTitle"] },
+            { "required": ["groupSubtitle"] },
+            { "required": ["riskLevel"] },
+            { "required": ["requiresApproval"] },
+            { "required": ["approvalStatus"] },
+            { "required": ["acceptanceCriteria"] },
+            { "required": ["verificationCommand"] },
+            { "required": ["contextBundle"] }
+        ]
     })
 }
 
@@ -435,8 +521,18 @@ fn task_properties() -> Map<String, Value> {
 fn string_list_schema() -> Value {
     serde_json::json!({
         "type": "array",
+        "minItems": 1,
         "maxItems": 128,
         "items": { "type": "string", "minLength": 1, "maxLength": 4096 }
+    })
+}
+
+fn task_id_list_schema() -> Value {
+    serde_json::json!({
+        "type": "array",
+        "maxItems": 128,
+        "uniqueItems": true,
+        "items": { "type": "string", "pattern": "^t[1-9][0-9]*$" }
     })
 }
 
@@ -447,7 +543,7 @@ mod tests {
     use codez_core::{AtomicPersistence, CancellationToken};
     use codez_storage::AtomicFileStore;
 
-    use super::TaskTool;
+    use super::TodoTool;
     use crate::{
         task::TaskStore,
         tools::{
@@ -478,27 +574,104 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_handlers_share_one_durable_store() {
+    async fn todo_create_returns_items_from_the_shared_store() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
         let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
         let store = Arc::new(TaskStore::new(directory.path(), persistence));
-        let create = TaskTool::create(Arc::clone(&store));
-        let list = TaskTool::list(store);
+        let create = TodoTool::create(Arc::clone(&store));
         let context = context(directory.path());
 
         let created = create
             .execute(
-                &serde_json::json!({ "tasks": [{ "subject": "Implement task store" }] }),
+                &serde_json::json!({ "items": [{ "subject": "Implement Todo store" }] }),
                 &context,
             )
             .await;
-        let listed = list.execute(&serde_json::json!({}), &context).await;
-
-        assert!(matches!(created, ToolExecutionResult::Success { .. }));
         assert!(matches!(
-            listed,
+            created,
             ToolExecutionResult::Success { data: Some(ref value), .. }
-                if value["snapshot"]["tasks"][0]["id"] == "t1"
+                if value["snapshot"]["items"][0]["id"] == "t1"
+        ));
+    }
+
+    #[tokio::test]
+    async fn todo_update_commits_a_complete_and_start_transition_atomically() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
+        let store = Arc::new(TaskStore::new(directory.path(), persistence));
+        let create = TodoTool::create(Arc::clone(&store));
+        let update = TodoTool::update(Arc::clone(&store));
+        let context = context(directory.path());
+        create
+            .execute(
+                &serde_json::json!({
+                    "items": [{ "subject": "first" }, { "subject": "second" }]
+                }),
+                &context,
+            )
+            .await;
+        update
+            .execute(
+                &serde_json::json!({
+                    "expectedRevision": 1,
+                    "updates": [{ "todoId": "t1", "status": "in_progress" }]
+                }),
+                &context,
+            )
+            .await;
+
+        let updated = update
+            .execute(
+                &serde_json::json!({
+                    "expectedRevision": 2,
+                    "updates": [
+                        { "todoId": "t1", "status": "completed" },
+                        { "todoId": "t2", "status": "in_progress" }
+                    ]
+                }),
+                &context,
+            )
+            .await;
+
+        assert!(matches!(
+            updated,
+            ToolExecutionResult::Success { data: Some(ref value), .. }
+                if value["snapshot"]["revision"] == 3
+                    && value["snapshot"]["items"][0]["status"] == "completed"
+                    && value["snapshot"]["items"][1]["status"] == "in_progress"
+        ));
+    }
+
+    #[tokio::test]
+    async fn todo_update_conflict_returns_the_latest_snapshot() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
+        let store = Arc::new(TaskStore::new(directory.path(), persistence));
+        let create = TodoTool::create(Arc::clone(&store));
+        let update = TodoTool::update(store);
+        let context = context(directory.path());
+        create
+            .execute(
+                &serde_json::json!({ "items": [{ "subject": "first" }] }),
+                &context,
+            )
+            .await;
+
+        let conflicted = update
+            .execute(
+                &serde_json::json!({
+                    "expectedRevision": 0,
+                    "updates": [{ "todoId": "t1", "status": "in_progress" }]
+                }),
+                &context,
+            )
+            .await;
+
+        assert!(matches!(
+            conflicted,
+            ToolExecutionResult::Error { error, .. }
+                if error.code == "TODO_CONFLICT"
+                    && error.details.as_ref().is_some_and(|value| value["snapshot"]["revision"] == 1)
         ));
     }
 }

@@ -4,7 +4,7 @@ use crate::chat::prompt::modules::{
     environment::EnvironmentModule, git_status::GitStatusModule, identity::IdentityModule,
     memory::MemoryModule, output_policy::OutputPolicyModule,
     repository_rules::RepositoryRulesModule, skills::SkillsModule, sub_agents::SubAgentsModule,
-    task_management::TaskManagementModule, verification::VerificationModule,
+    task_management::TodoManagementModule, verification::VerificationModule,
     verification_strategy::VerificationStrategyModule, worker_delegation::WorkerDelegationModule,
 };
 use crate::chat::prompt::pipeline::PromptPipeline;
@@ -26,7 +26,7 @@ pub fn create_default_pipeline() -> PromptPipeline {
         .register(EditingModule)
         .register(VerificationModule)
         // Layer 3: Execution — Workflow Gates
-        .register(TaskManagementModule)
+        .register(TodoManagementModule)
         .register(WorkerDelegationModule)
         // Layer 3: Execution — Support
         .register(OutputPolicyModule)

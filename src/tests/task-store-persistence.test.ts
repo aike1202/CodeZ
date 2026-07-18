@@ -139,8 +139,8 @@ describe('TaskStore persistence', () => {
     }))
   })
 
-  it('returns the complete updated task snapshot for execution-log persistence', async () => {
-    const { TaskUpdateTool } = await import('../main/tools/builtin/TaskUpdateTool')
+  it('returns the complete updated Todo items for execution-log persistence', async () => {
+    const { TodoUpdateTool } = await import('../main/tools/builtin/TaskUpdateTool')
     const { TaskStore } = await import('../main/services/TaskStore')
     const store = TaskStore.getInstance()
     store.create('s1', [{
@@ -151,12 +151,15 @@ describe('TaskStore persistence', () => {
       verificationCommand: 'npm test -- task-store-persistence'
     }])
 
-    const result = JSON.parse(await new TaskUpdateTool().execute(
-      JSON.stringify({ taskId: 't1', status: 'completed' }),
+    const result = JSON.parse(await new TodoUpdateTool().execute(
+      JSON.stringify({
+        expectedRevision: 1,
+        updates: [{ todoId: 't1', status: 'completed' }]
+      }),
       { workspaceRoot: process.cwd(), sessionId: 's1' } as any
     ))
 
-    expect(result.data.task).toMatchObject({
+    expect(result.data.updated[0]).toMatchObject({
       id: 't1',
       subject: 'Verify lifecycle',
       description: 'Confirm terminal Task logging',
@@ -167,8 +170,8 @@ describe('TaskStore persistence', () => {
     })
   })
 
-  it('restores the original status when rejecting a second in_progress task', async () => {
-    const { TaskUpdateTool } = await import('../main/tools/builtin/TaskUpdateTool')
+  it('atomically completes the current Todo and starts the next', async () => {
+    const { TodoUpdateTool } = await import('../main/tools/builtin/TaskUpdateTool')
     const { TaskStore } = await import('../main/services/TaskStore')
     const store = TaskStore.getInstance()
     store.create('s1', [
@@ -176,29 +179,22 @@ describe('TaskStore persistence', () => {
       { subject: 'Second task' }
     ])
     store.update('s1', 't1', { status: 'in_progress' })
-    store.update('s1', 't2', {
-      status: 'completed',
-      executorRuntime: {
-        executionId: 'exec-old',
-        executionCreatedAt: 1,
-        executorId: 'executor-old',
-        waveIndex: 0,
-        isolation: 'shared',
-        status: 'completed',
-        attemptCount: 1,
-        updatedAt: 2,
-      }
-    })
 
-    const tool = new TaskUpdateTool()
-    const result = JSON.parse(await tool.execute(JSON.stringify({ taskId: 't2', status: 'in_progress' }), {
+    const tool = new TodoUpdateTool()
+    const result = JSON.parse(await tool.execute(JSON.stringify({
+      expectedRevision: 2,
+      updates: [
+        { todoId: 't1', status: 'completed' },
+        { todoId: 't2', status: 'in_progress' }
+      ]
+    }), {
       workspaceRoot: process.cwd(),
       sessionId: 's1'
     } as any))
 
-    expect(result.ok).toBe(false)
-    expect(store.getById('s1', 't2')?.status).toBe('completed')
-    expect(store.getById('s1', 't2')?.executorRuntime?.executionId).toBe('exec-old')
+    expect(result.ok).toBe(true)
+    expect(result.data.revision).toBe(3)
+    expect(store.list('s1').map(item => item.status)).toEqual(['completed', 'in_progress'])
   })
 
   it('clears persisted session tasks when the task list is cleared', async () => {

@@ -1,9 +1,9 @@
 import { Tool, ToolContext } from '../Tool'
-import { TaskStore } from '../../services/TaskStore'
-import type { TaskApprovalStatus, TaskContextBundle, TaskRiskLevel } from '../../../shared/types/task'
+import { TodoStore } from '../../services/TaskStore'
+import type { TodoApprovalStatus, TodoContextBundle, TodoRiskLevel } from '../../../shared/types/task'
 
-const VALID_RISK_LEVELS: TaskRiskLevel[] = ['low', 'medium', 'high']
-const VALID_APPROVAL_STATUSES: TaskApprovalStatus[] = ['not_required', 'pending', 'approved', 'changes_requested', 'rejected']
+const VALID_RISK_LEVELS: TodoRiskLevel[] = ['low', 'medium', 'high']
+const VALID_APPROVAL_STATUSES: TodoApprovalStatus[] = ['not_required', 'pending', 'approved', 'changes_requested', 'rejected']
 
 /**
  * 创建一个或多个轻量 Task（待办）。
@@ -11,9 +11,9 @@ const VALID_APPROVAL_STATUSES: TaskApprovalStatus[] = ['not_required', 'pending'
  * Task 仅存于会话内存，随会话生命周期存活；模型自主创建，无需用户批准。
  * 适用于"多于 2-3 步、值得追踪进度"的中等任务。简单任务直接做，不要建 Task。
  */
-export class TaskCreateTool extends Tool {
+export class TodoCreateTool extends Tool {
   get name() {
-    return 'TaskCreate'
+    return 'TodoCreate'
   }
 
   get summary() {
@@ -31,12 +31,8 @@ export class TaskCreateTool extends Tool {
       'When NOT to use:',
       '- A single, trivial change — just do it directly, do not create tasks.',
       '',
-      'Each task gets a stable id (t1, t2 ...) you can later reference in TaskUpdate or DelegateTasks.',
-      'Tasks start as "pending". Declare `files` if you know which files a task will touch — this enables',
-      'parallel delegation with conflict checking.',
-      'When tasks follow research or a written Plan, populate each task `contextBundle` with the relevant',
-      'known facts, decisions, constraints, excluded directions, and source references. DelegateTasks',
-      'passes this bundle to the Executor so it does not repeat completed repository exploration.',
+      'Each item gets a stable id (t1, t2 ...) you can later reference in TodoUpdate.',
+      'Items start as "pending". Declare `files` and `contextBundle` when they help later work.',
       '',
       'Use `groupTitle`/`groupSubtitle` as internal display metadata for multi-step work, but describe it',
       'to the user as steps, phases, or current progress — do not expose the term "TaskGroup".',
@@ -85,9 +81,9 @@ export class TaskCreateTool extends Tool {
           enum: VALID_APPROVAL_STATUSES,
           description: 'Approval status for this work. Use pending when approval is required but not granted.'
         },
-        tasks: {
+        items: {
           type: 'array',
-          description: 'The tasks to create, in execution order.',
+          description: 'The Todo items to create, in execution order.',
           items: {
             type: 'object',
             properties: {
@@ -119,7 +115,7 @@ export class TaskCreateTool extends Tool {
               },
               contextBundle: {
                 type: 'object',
-                description: 'Important research and Plan context the Executor should reuse instead of rediscovering.',
+                description: 'Important research and Plan context later work should reuse instead of rediscovering.',
                 properties: {
                   knownFacts: { type: 'array', items: { type: 'string' } },
                   decisions: { type: 'array', items: { type: 'string' } },
@@ -134,14 +130,14 @@ export class TaskCreateTool extends Tool {
           }
         }
       },
-      required: ['tasks']
+      required: ['items']
     }
   }
 
   async execute(args: string, context: ToolContext): Promise<string> {
     const sessionId = context.sessionId
     if (!sessionId) {
-      return JSON.stringify({ ok: false, error: 'TaskCreate requires an active session.' })
+      return JSON.stringify({ ok: false, error: 'TodoCreate requires an active session.' })
     }
 
     let parsed: {
@@ -153,35 +149,35 @@ export class TaskCreateTool extends Tool {
       riskLevel?: string
       requiresApproval?: boolean
       approvalStatus?: string
-      tasks?: Array<{
+      items?: Array<{
         subject?: string
         description?: string
         files?: string[]
         activeForm?: string
         acceptanceCriteria?: string[]
         verificationCommand?: string
-        contextBundle?: TaskContextBundle
+        contextBundle?: TodoContextBundle
       }>
     }
     try {
       parsed = JSON.parse(args || '{}')
     } catch {
-      return JSON.stringify({ ok: false, error: 'Invalid JSON arguments for TaskCreate.' })
+      return JSON.stringify({ ok: false, error: 'Invalid JSON arguments for TodoCreate.' })
     }
 
-    const items = (parsed.tasks || []).filter(t => t && typeof t.subject === 'string' && t.subject.trim())
+    const items = (parsed.items || []).filter(t => t && typeof t.subject === 'string' && t.subject.trim())
     if (items.length === 0) {
-      return JSON.stringify({ ok: false, error: 'TaskCreate requires a non-empty `tasks` array with subjects.' })
+      return JSON.stringify({ ok: false, error: 'TodoCreate requires a non-empty `items` array with subjects.' })
     }
-    if (parsed.riskLevel && !VALID_RISK_LEVELS.includes(parsed.riskLevel as TaskRiskLevel)) {
+    if (parsed.riskLevel && !VALID_RISK_LEVELS.includes(parsed.riskLevel as TodoRiskLevel)) {
       return JSON.stringify({ ok: false, error: `Invalid riskLevel '${parsed.riskLevel}'. Must be one of: ${VALID_RISK_LEVELS.join(', ')}.` })
     }
-    if (parsed.approvalStatus && !VALID_APPROVAL_STATUSES.includes(parsed.approvalStatus as TaskApprovalStatus)) {
+    if (parsed.approvalStatus && !VALID_APPROVAL_STATUSES.includes(parsed.approvalStatus as TodoApprovalStatus)) {
       return JSON.stringify({ ok: false, error: `Invalid approvalStatus '${parsed.approvalStatus}'. Must be one of: ${VALID_APPROVAL_STATUSES.join(', ')}.` })
     }
 
-    const store = TaskStore.getInstance()
-    const approvalStatus: TaskApprovalStatus = parsed.approvalStatus as TaskApprovalStatus
+    const store = TodoStore.getInstance()
+    const approvalStatus: TodoApprovalStatus = parsed.approvalStatus as TodoApprovalStatus
       || (parsed.requiresApproval ? 'pending' : 'not_required')
     const created = store.create(
       sessionId,
@@ -193,7 +189,7 @@ export class TaskCreateTool extends Tool {
         groupId: parsed.groupId,
         groupTitle: parsed.groupTitle || parsed.title,
         groupSubtitle: parsed.groupSubtitle || parsed.subtitle,
-        riskLevel: parsed.riskLevel as TaskRiskLevel | undefined,
+        riskLevel: parsed.riskLevel as TodoRiskLevel | undefined,
         requiresApproval: parsed.requiresApproval,
         approvalStatus,
         acceptanceCriteria: t.acceptanceCriteria,
@@ -214,3 +210,5 @@ export class TaskCreateTool extends Tool {
     })
   }
 }
+
+export { TodoCreateTool as TaskCreateTool }

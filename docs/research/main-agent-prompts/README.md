@@ -9,6 +9,7 @@ main-agent-prompts/
 |-- README.md
 |-- context-layer-comparison.md
 |-- cross-product-analysis.md
+|-- codez-optimization-blueprint.md
 |-- subagent-io-and-interaction.md
 |-- claude-code/
 |   |-- README.md
@@ -87,6 +88,8 @@ main-agent-prompts/
 SubAgent 启动参数、完成 envelope、运行中消息和恢复协议见 `subagent-io-and-interaction.md`。四个平台的工具 schema 与源码算法分别保存在各自 `tools/` 目录。
 
 基础 system、运行时指令、工具、项目规则、环境权限、目录、历史、提醒/压缩和当前请求的逐层对照见 `context-layer-comparison.md`，具体内容位于每个平台的 `context-layers/`。
+
+面向 CodeZ 的分阶段落地方案见 [codez-optimization-blueprint.md](codez-optimization-blueprint.md)。该文档把三家机制映射为 P0/P1/P2 工作项、代码落点、验收条件和回归评测，不把竞品的版本相关 prompt 直接当成 CodeZ 产品常量。
 
 ## 更新规则
 

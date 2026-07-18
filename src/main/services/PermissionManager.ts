@@ -53,11 +53,10 @@ export interface PermissionToolAuthorization {
   permissionMode?: PermissionMode
 }
 
-const READ_ONLY_TOOLS = new Set(['Read', 'list_files', 'Glob', 'Grep', 'Skill', 'ActivateSkill', 'DeactivateSkill', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet', 'ExecutionInspect', 'update_resume_state', 'AskUserQuestion', 'ToolSearch', 'ToolResultRead', 'ListMcpResourcesTool', 'ReadMcpResourceTool', 'ListMcpResources', 'ReadMcpResource', 'GetMcpPrompt'])
+const READ_ONLY_TOOLS = new Set(['Read', 'list_files', 'Glob', 'Grep', 'Skill', 'ActivateSkill', 'DeactivateSkill', 'TodoCreate', 'TodoUpdate', 'update_resume_state', 'AskUserQuestion', 'ToolSearch', 'ToolResultRead', 'ListMcpResourcesTool', 'ReadMcpResourceTool', 'ListMcpResources', 'ReadMcpResource', 'GetMcpPrompt'])
 const WRITE_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
 const WEB_TOOLS = new Set(['WebSearch', 'WebFetch'])
 const EXTERNAL_EFFECT_TOOLS = new Map<string, { reason: string; ruleId: string; riskLevel: PermissionRiskLevel }>([
-  ['DelegateTasks', { reason: '并行执行计划步骤', ruleId: 'tool.delegation.execute', riskLevel: 2 }],
   ['ExecutionControl', { reason: '控制并行执行器', ruleId: 'tool.execution.control', riskLevel: 1 }],
   ['PushNotification', { reason: '发送系统通知', ruleId: 'tool.notification.send', riskLevel: 1 }]
 ])

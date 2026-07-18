@@ -22,7 +22,7 @@ export function parseTaskUpdateDetail(detail?: string): ParsedTaskUpdateDetail |
 
   try {
     const parsed = JSON.parse(detail)
-    const task = parsed?.data?.task
+    const task = parsed?.data?.updated?.[0] ?? parsed?.data?.task
     if (!task || typeof task !== 'object') return null
 
     return {

@@ -496,8 +496,8 @@ const taskUpdateTimeline = (status: 'completed' | 'cancelled'): ExecutionTimelin
 
 describe('TaskUpdate execution log', () => {
   it.each([
-    ['completed', '完成任务：Lifecycle task'],
-    ['cancelled', '取消任务：Lifecycle task']
+    ['completed', '完成待办：Lifecycle task'],
+    ['cancelled', '取消待办：Lifecycle task']
   ] as const)('keeps a %s TaskUpdate as a terminal execution log', (status, target) => {
     const [item] = buildUnifiedTimeline(taskUpdateTimeline(status), [], [], undefined, false)
     expect(item).toMatchObject({ toolName: 'TaskUpdate', target, status: 'success' })
@@ -542,7 +542,7 @@ describe('TaskUpdate execution log', () => {
     const terminalItem = items.find((item) => item.id === 'delegate_task_t1')
 
     expect(terminalItem).toMatchObject({
-      toolName: 'TaskUpdate',
+      toolName: 'TodoUpdate',
       target: '完成任务：Delegated task',
       status: 'success'
     })

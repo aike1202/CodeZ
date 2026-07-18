@@ -27,7 +27,7 @@ import { VerificationStrategyModule } from './context/VerificationStrategy'
 import { EditingModule } from './execution/Editing'
 import { VerificationModule } from './execution/Verification'
 // ── Layer 3: Execution — Workflow Gates ──────────
-import { TaskManagementModule } from './execution/TaskManagement'
+import { TodoManagementModule } from './execution/TaskManagement'
 import { WorkerDelegationModule } from './execution/WorkerDelegation'
 // ── Layer 3: Execution — Support ─────────────────
 import { OutputPolicyModule } from './execution/OutputPolicy'
@@ -55,7 +55,7 @@ export function createDefaultPipeline(): PromptPipeline {
     .register(EditingModule)
     .register(VerificationModule)
     // Layer 3: Execution — Workflow Gates
-    .register(TaskManagementModule)
+    .register(TodoManagementModule)
     .register(WorkerDelegationModule)
     // Layer 3: Execution — Support
     .register(OutputPolicyModule)

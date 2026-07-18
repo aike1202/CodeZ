@@ -48,6 +48,7 @@ pub struct PromptContext {
     pub available_agents: Option<Vec<PromptAgentSummary>>,
     pub available_skills: Option<Vec<PromptSkillSummary>>,
     pub active_skills: Option<Vec<PromptSkillSummary>>,
+    pub todo_state: Option<String>,
     pub global_rules: Option<String>,
     pub workspace_rules: Option<String>,
     pub directory_rules: Option<String>,

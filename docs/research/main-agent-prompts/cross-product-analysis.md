@@ -1,5 +1,7 @@
 # Claude Code、Codex、Grok Build、CodeZ 主 Agent 架构对比
 
+CodeZ 的分阶段实现顺序、验收不变量与评测集见 [codez-optimization-blueprint.md](codez-optimization-blueprint.md)。
+
 ## 结论
 
 四个平台的核心差异不在“谁的 system prompt 更长”，而在于上下文如何分层、如何缓存、以及动态目录何时进入模型上下文。
@@ -25,6 +27,18 @@
 | SubAgent | Agent 目录、sync/async/team、mailbox/output file | spawn/mailbox/follow-up，独立 rollout，共享 filesystem | task/query/kill/resume，capability 与 isolation 正交，最大深度 1 | Durable Agent/mailbox/followup；Explore/Reviewer allowlist；8 active attempts |
 
 详细 schema、执行算法和证据边界见各平台 `tools/`，主子交互协议见 `subagent-io-and-interaction.md`。
+
+## Task 与计划状态对比
+
+| 维度 | Claude Code | Codex | Grok Build | CodeZ 方案 |
+|---|---|---|---|---|
+| 当前工作状态 | Durable Task/Todo，Task 支持依赖 | `update_plan` 表示当前协作状态 | `todo` 保存/替换 session 清单 | Session-scoped durable snapshot |
+| 依赖 | `blocks`/`blockedBy` | plan step 顺序，无通用依赖图 | todo 清单为主 | 只持久化 `blockedBy`，反向 `blocks` 派生 |
+| 并发保护 | 运行时 Task 状态更新 | 最多一个 `in_progress` | 全清单批量替换 | session mutex + 单一 `in_progress` + `expectedRevision` CAS |
+| 准入 | 提示和工具状态共同约束 | plan 是协作状态，不执行工作 | todo 与 subagent 分离 | 未完成依赖/待审批禁止开始或完成 |
+| 与 Agent 的关系 | Task 是进度数据，Agent 是计算实例 | plan/thread/Agent/Goal 分离 | todo/Goal/task 子智能体分离 | Task 永不自动 spawn Agent |
+
+CodeZ 采用三者交集而不是复制任一 schema：保留现有批量 Create、revisioned atomic persistence、风险/审批/验收/验证字段；吸收 Claude 的依赖图和最新状态读取约束、Codex 的协作状态边界、Grok 的批量创建与简短状态摘要。没有采用双向依赖持久化、Task 自动分配 Agent，或丢失状态后的宽松 merge fallback。
 
 ## 最值得借鉴的设计
 
