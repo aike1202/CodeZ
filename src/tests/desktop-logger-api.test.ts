@@ -58,18 +58,4 @@ describe('desktop renderer logging adapter', () => {
     ])
   })
 
-  it('uses the frozen Electron logger when Tauri is unavailable', async () => {
-    const electronLogger = {
-      debug: vi.fn(),
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn()
-    }
-    setWindow({ api: { logger: electronLogger } })
-
-    await desktopApi.logger.warn('Electron fallback')
-
-    expect(tauriMocks.invoke).not.toHaveBeenCalled()
-    expect(electronLogger.warn).toHaveBeenCalledWith('Electron fallback')
-  })
 })

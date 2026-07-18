@@ -48,7 +48,7 @@ jobs:
       - name: Check TypeScript
         run: npm run typecheck
 
-      - name: Test Electron behavior baseline
+      - name: Test renderer behavior
         run: npm test -- --run
 
       - name: Check Rust formatting

@@ -116,7 +116,6 @@ dist/
 Thumbs.db
 
 # Build outputs
-dist-electron/
 release/
 *.vite/
 /target/
@@ -134,10 +133,8 @@ release/
 scratch/
 testmsg.txt
 scratch_*
-electron.vite.config.*.mjs
 .myagent-cache/
 .codez/worktrees/
-dist-app
 
 # Agent test temporaries
 tmp-agent-test/

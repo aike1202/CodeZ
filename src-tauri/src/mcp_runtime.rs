@@ -2122,6 +2122,12 @@ mod tests {
             .to_path_buf()
     }
 
+    fn fixture_path(name: &str) -> PathBuf {
+        workspace_root()
+            .join("crates/codez-mcp/tests/fixtures")
+            .join(name)
+    }
+
     fn node_executable() -> TestResult<PathBuf> {
         let executable_name = if cfg!(windows) { "node.exe" } else { "node" };
         let path =
@@ -2157,12 +2163,7 @@ mod tests {
         let root = workspace_root();
         let mut command = Command::new(node_executable()?);
         command
-            .arg(
-                root.join("src")
-                    .join("tests")
-                    .join("fixtures")
-                    .join("mcp-legacy-sse-server.cjs"),
-            )
+            .arg(fixture_path("mcp-legacy-sse-server.cjs"))
             .current_dir(&root)
             .env_clear()
             .envs(fixture_environment())
@@ -2192,12 +2193,7 @@ mod tests {
         let root = workspace_root();
         let mut command = Command::new(node_executable()?);
         command
-            .arg(
-                root.join("src")
-                    .join("tests")
-                    .join("fixtures")
-                    .join("mcp-oauth-server.cjs"),
-            )
+            .arg(fixture_path("mcp-oauth-server.cjs"))
             .current_dir(&root)
             .env_clear()
             .envs(fixture_environment())
@@ -2286,10 +2282,7 @@ mod tests {
         let mut fixture = config(McpTransport::Stdio);
         fixture.command = Some(node_executable()?.to_string_lossy().into_owned());
         fixture.args = Some(vec![
-            root.join("src")
-                .join("tests")
-                .join("fixtures")
-                .join("mcp-stdio-server.cjs")
+            fixture_path("mcp-stdio-server.cjs")
                 .to_string_lossy()
                 .into_owned(),
         ]);

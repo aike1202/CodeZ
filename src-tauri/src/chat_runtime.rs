@@ -1,4 +1,4 @@
-﻿use std::{
+use std::{
     collections::{HashMap, HashSet, VecDeque},
     io,
     path::{Path, PathBuf},
@@ -65,9 +65,7 @@ use codez_runtime::{
         prompt::{
             builder::create_default_pipeline,
             pipeline::PromptPipeline,
-            types::{
-                PromptAgentSummary, PromptContext, PromptSkillSummary, PromptToolSummary,
-            },
+            types::{PromptAgentSummary, PromptContext, PromptSkillSummary, PromptToolSummary},
         },
         stream_state::{ChatStreamState, ChatStreamStateMachine},
     },
@@ -3481,8 +3479,7 @@ async fn run_provider_conversation(
                 }
             },
         };
-        let provider_surface =
-            tool_run.map(|run| tools.provider_tool_surface_for_run(run));
+        let provider_surface = tool_run.map(|run| tools.provider_tool_surface_for_run(run));
         let provider_tools = provider_surface
             .as_ref()
             .map_or(&[][..], |surface| surface.definitions.as_slice());
@@ -6781,11 +6778,14 @@ mod tests {
                 ChatStreamFrameEvent::ContextBudget(snapshot)
                     if snapshot.history_version >= 2 && snapshot.system_prompt_tokens > 0
             )));
-            assert!(frames.iter().any(|frame| matches!(
-                &frame.event,
-                ChatStreamFrameEvent::ContextCompactionStarted(payload)
-                    if payload.trigger == "provider_overflow"
-            )), "Provider overflow compaction did not start; frames: {frames:#?}");
+            assert!(
+                frames.iter().any(|frame| matches!(
+                    &frame.event,
+                    ChatStreamFrameEvent::ContextCompactionStarted(payload)
+                        if payload.trigger == "provider_overflow"
+                )),
+                "Provider overflow compaction did not start; frames: {frames:#?}"
+            );
             assert!(frames.iter().any(|frame| matches!(
                 &frame.event,
                 ChatStreamFrameEvent::ContextCompactionCompleted(payload)

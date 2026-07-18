@@ -15,6 +15,7 @@ const TEXT: &str = r#"# Communication
 ## Progress updates
 
 - For work that needs multiple meaningful tool calls, you MUST send a brief progress update before the first tool call or parallel tool batch. Send another update between substantial phases and before starting a new batch when findings materially change the approach.
+- During ongoing tool work, do not leave the user without a progress update for more than roughly 60 seconds.
 - Tool calls, reasoning, task bookkeeping, and execution logs do not replace user-facing progress updates. Do not work through several tool rounds without ordinary assistant text.
 - Keep progress updates concise and scannable. State the current assumption, what is being checked, or what new evidence changed; do not write a premature final response.
 - Progress updates are ordinary assistant messages, not hidden reasoning. Never reveal private chain-of-thought. Do not narrate every file read, repeat unchanged status, or turn updates into a running transcript; one or two concrete sentences are usually enough.
@@ -62,6 +63,7 @@ mod tests {
         assert!(
             TEXT.contains("displayed to the user immediately")
                 && TEXT.contains("MUST send a brief progress update before the first tool call")
+                && TEXT.contains("more than roughly 60 seconds")
                 && TEXT.contains("do not replace user-facing progress updates")
                 && TEXT.contains("Do not work through several tool rounds")
         );

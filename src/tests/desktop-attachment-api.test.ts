@@ -104,34 +104,6 @@ describe('desktop attachment adapter', () => {
     ])
   })
 
-  it('uses the frozen Electron attachment API only at the adapter boundary', async () => {
-    const attachment = {
-      importDraft: vi.fn().mockResolvedValue(draft),
-      promoteDrafts: vi.fn().mockResolvedValue([sessionAttachment]),
-      rollbackPromotion: vi.fn().mockResolvedValue(undefined),
-      discardDrafts: vi.fn().mockResolvedValue(undefined),
-      readPreview: vi.fn().mockResolvedValue({ mimeType: 'image/png', bytes: new Uint8Array([1]) })
-    }
-    setWindow({ api: { attachment } })
-
-    await desktopApi.attachment.importDraft('diagram.png', 'image/png', [1, 2, 3])
-    await desktopApi.attachment.promoteDrafts('session-1', [draft])
-    await desktopApi.attachment.rollbackPromotion('session-1', [sessionAttachment.id])
-    await desktopApi.attachment.discardDrafts([draft.draftId])
-    await desktopApi.attachment.readPreview(sessionAttachment, 'original')
-
-    expect(tauriMocks.invoke).not.toHaveBeenCalled()
-    expect(attachment.importDraft).toHaveBeenCalledWith({
-      name: 'diagram.png',
-      declaredMimeType: 'image/png',
-      bytes: new Uint8Array([1, 2, 3])
-    })
-    expect(attachment.promoteDrafts).toHaveBeenCalledWith('session-1', [draft])
-    expect(attachment.rollbackPromotion).toHaveBeenCalledWith('session-1', [sessionAttachment.id])
-    expect(attachment.discardDrafts).toHaveBeenCalledWith([draft.draftId])
-    expect(attachment.readPreview).toHaveBeenCalledWith(sessionAttachment, 'original')
-  })
-
   it('rejects unsupported preview MIME types before they reach renderer components', async () => {
     setWindow({ __TAURI_INTERNALS__: {} })
     tauriMocks.invoke.mockResolvedValueOnce({ mimeType: 'image/gif', bytes: [1] })

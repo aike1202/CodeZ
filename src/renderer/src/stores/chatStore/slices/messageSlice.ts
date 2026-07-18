@@ -33,9 +33,6 @@ function schedulePersist(get: () => ChatState) {
   }, 500)
 }
 
-let _planStateListenerRefs = 0
-let _planStateListenerCleanup: (() => void) | null = null
-
 export interface MessageSlice {
   messages: ChatMessage[]
   streamCleanups: Record<string, (() => void) | null>
@@ -900,60 +897,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
   setExpandedCapsule: (capsule) => set({ expandedCapsule: capsule }),
   setSubAgentStatus: (status) => set({ subAgentStatus: status }),
 
-  initPlanStateListener: () => {
-    if (!desktopApi.capabilities.plan) return () => undefined
-
-    let released = false
-    const release = () => {
-      if (released) return
-      released = true
-      _planStateListenerRefs = Math.max(0, _planStateListenerRefs - 1)
-      if (_planStateListenerRefs === 0) {
-        _planStateListenerCleanup?.()
-        _planStateListenerCleanup = null
-      }
-    }
-
-    _planStateListenerRefs += 1
-    if (_planStateListenerCleanup) return release
-
-    const win = window as any
-    const ipc = win?.electron?.ipcRenderer
-    if (!ipc) {
-      _planStateListenerRefs -= 1
-      return () => {}
-    }
-
-    const subAgentProgressHandler = (
-      _event: unknown,
-      data: { status: 'idle' | 'running' | 'completed' | 'failed' }
-    ) => {
-      get().setSubAgentStatus(data.status)
-    }
-    const reviewRequestHandler = (_event: unknown, streamId: string, plan: any) => {
-      get().setActivePlanStreamId(streamId)
-      get().setPlanReview({ plan, status: 'pending_review' })
-    }
-    const stateChangedHandler = (_event: unknown, plan: any) => {
-      get().setActivePlan(plan)
-    }
-    const linkedHandler = (_event: unknown, data: { sessionId: string; plan: any }) => {
-      get().linkPlanToSession(data.sessionId, data.plan.slug)
-      get().setActivePlan(data.plan)
-    }
-
-    const listeners: Array<[string, (...args: any[]) => void]> = [
-      ['plan:subagent-progress', subAgentProgressHandler],
-      ['plan:review-request', reviewRequestHandler],
-      ['plan:state-changed', stateChangedHandler],
-      ['plan:linked', linkedHandler]
-    ]
-    listeners.forEach(([channel, handler]) => ipc.on(channel, handler))
-    _planStateListenerCleanup = () => {
-      listeners.forEach(([channel, handler]) => ipc.removeListener?.(channel, handler))
-    }
-    return release
-  },
+  initPlanStateListener: () => () => undefined,
 
   setPlanListModalOpen: (open) => set({ planListModalOpen: open }),
   setActivePlan: (plan) => set({ activePlan: plan }),

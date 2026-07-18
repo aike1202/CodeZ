@@ -98,7 +98,7 @@ import type {
   McpServerStatus,
 } from '../../components/SettingsMcpTab/types'
 import { normalizeDesktopError } from './errors'
-import { desktopEvents, getLegacyTodoRevision } from './events'
+import { desktopEvents } from './events'
 
 type RendererLogLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -110,331 +110,8 @@ async function command<T>(name: string, args?: Record<string, unknown>): Promise
   }
 }
 
-function isTauriRuntime(): boolean {
-  if (typeof window === 'undefined') return true
-  if ('__TAURI_INTERNALS__' in window) return true
-  return !(window as unknown as { api?: Window['api'] }).api
-}
-
-function legacyWorkspace(): Window['api']['workspace'] {
-  const workspace = (window as unknown as { api?: Window['api'] }).api?.workspace
-  if (!workspace) throw new Error('The desktop workspace API is unavailable.')
-  return workspace
-}
-
-function legacyProvider(): Window['api']['provider'] {
-  const provider = (window as unknown as { api?: Window['api'] }).api?.provider
-  if (!provider) throw new Error('The desktop provider API is unavailable.')
-  return provider
-}
-
-function legacyTheme(): Window['api']['theme'] {
-  const theme = (window as unknown as { api?: Window['api'] }).api?.theme
-  if (!theme) throw new Error('The desktop theme API is unavailable.')
-  return theme
-}
-
-function legacySettings(): Window['api']['settings'] {
-  const settings = (window as unknown as { api?: Window['api'] }).api?.settings
-  if (!settings) throw new Error('The desktop settings API is unavailable.')
-  return settings
-}
-
-function legacyPermission(): Window['api']['permission'] {
-  const permission = (window as unknown as { api?: Window['api'] }).api?.permission
-  if (!permission) throw new Error('The desktop permission API is unavailable.')
-  return permission
-}
-
-function legacyRules(): Window['api']['rules'] {
-  const rules = (window as unknown as { api?: Window['api'] }).api?.rules
-  if (!rules) throw new Error('The desktop rules API is unavailable.')
-  return rules
-}
-
-function sendLegacyWindowControl(action: WindowAction): void {
-  const ipcRenderer = (window as unknown as {
-    electron?: { ipcRenderer?: { send(channel: string, ...args: unknown[]): void } }
-  }).electron?.ipcRenderer
-  if (!ipcRenderer) throw new Error('The desktop window API is unavailable.')
-
-  const legacyAction = action === 'toggleMaximize' ? 'maximize' : action
-  ipcRenderer.send('window-control', legacyAction)
-}
-
-function legacyAttachment(): Window['api']['attachment'] {
-  const attachment = (window as unknown as { api?: Window['api'] }).api?.attachment
-  if (!attachment) throw new Error('The desktop attachment API is unavailable.')
-  return attachment
-}
-
-function legacyChat(): Window['api']['chat'] {
-  const chat = (window as unknown as { api?: Window['api'] }).api?.chat
-  if (!chat) throw new Error('The desktop chat API is unavailable.')
-  return chat
-}
-
-async function invokeLegacyChatHistory<T>(
-  channel: 'chat:revert-messages' | 'chat:preview-revert-messages',
-  sessionId: string,
-  messageId: string,
-  transactionIds: string[]
-): Promise<T> {
-  const ipcRenderer = (window as unknown as {
-    electron?: {
-      ipcRenderer?: {
-        invoke<T>(channel: string, ...args: unknown[]): Promise<T>
-      }
-    }
-  }).electron?.ipcRenderer
-  if (!ipcRenderer) throw new Error('The desktop chat history API is unavailable.')
-  return ipcRenderer.invoke<T>(channel, sessionId, messageId, transactionIds)
-}
-
-function legacySession(): Window['api']['session'] {
-  const session = (window as unknown as { api?: Window['api'] }).api?.session
-  if (!session) throw new Error('The desktop session API is unavailable.')
-  return session
-}
-
-function legacyTerminal(): Window['api']['terminal'] {
-  const terminal = (window as unknown as { api?: Window['api'] }).api?.terminal
-  if (!terminal) throw new Error('The desktop terminal API is unavailable.')
-  return terminal
-}
-
-function legacyMcp(): Window['api']['mcp'] {
-  const mcp = (window as unknown as { api?: Window['api'] }).api?.mcp
-  if (!mcp) throw new Error('The desktop MCP API is unavailable.')
-  return mcp
-}
-
-function legacySkill(): Window['api']['skill'] {
-  const skill = (window as unknown as { api?: Window['api'] }).api?.skill
-  if (!skill) throw new Error('The desktop skill API is unavailable.')
-  return skill
-}
-
-function legacyTask(): Window['api']['task'] {
-  const task = (window as unknown as { api?: Window['api'] }).api?.task
-  if (!task) throw new Error('The desktop task API is unavailable.')
-  return task
-}
-
-function legacySubAgent(): Window['api']['subAgent'] {
-  const subAgent = (window as unknown as { api?: Window['api'] }).api?.subAgent
-  if (!subAgent) throw new Error('The desktop sub-agent API is unavailable.')
-  return subAgent
-}
-
-function legacyLogger(): Window['api']['logger'] {
-  const logger = (window as unknown as { api?: Window['api'] }).api?.logger
-  if (!logger) throw new Error('The desktop logger API is unavailable.')
-  return logger
-}
-
-async function legacyEditorInfo(): Promise<EditorInfo[]> {
-  const editors = await legacyWorkspace().detectInstalledEditors()
-  return editors.map((editor) => ({
-    id: editor.id,
-    name: editor.name,
-    exePath: editor.exePath ?? undefined,
-    iconData: editor.iconPath ?? undefined
-  }))
-}
-
-async function workspaceCommand<T>(
-  name: string,
-  args: Record<string, unknown> | undefined,
-  electron: () => Promise<T>
-): Promise<T> {
-  if (isTauriRuntime()) return command<T>(name, args)
-  try {
-    return await electron()
-  } catch (error) {
-    throw normalizeDesktopError(error)
-  }
-}
-
-async function providerCommand<T>(
-  name: string,
-  args: Record<string, unknown> | undefined,
-  electron: () => Promise<T>
-): Promise<T> {
-  if (isTauriRuntime()) return command<T>(name, args)
-  try {
-    return await electron()
-  } catch (error) {
-    throw normalizeDesktopError(error)
-  }
-}
-
-async function permissionCommand<T>(
-  name: string,
-  args: Record<string, unknown> | undefined,
-  electron: () => Promise<T>
-): Promise<T> {
-  if (isTauriRuntime()) return command<T>(name, args)
-  try {
-    return await electron()
-  } catch (error) {
-    throw normalizeDesktopError(error)
-  }
-}
-
-async function rulesCommand<T>(
-  name: string,
-  args: Record<string, unknown> | undefined,
-  electron: () => Promise<T>
-): Promise<T> {
-  if (isTauriRuntime()) return command<T>(name, args)
-  try {
-    return await electron()
-  } catch (error) {
-    throw normalizeDesktopError(error)
-  }
-}
-
-async function attachmentCommand<T>(
-  name: string,
-  args: Record<string, unknown> | undefined,
-  electron: () => Promise<T>
-): Promise<T> {
-  if (isTauriRuntime()) return command<T>(name, args)
-  try {
-    return await electron()
-  } catch (error) {
-    throw normalizeDesktopError(error)
-  }
-}
-
-async function sessionCommand<T>(
-  name: string,
-  args: Record<string, unknown> | undefined,
-  electron: () => Promise<T>
-): Promise<T> {
-  if (isTauriRuntime()) return command<T>(name, args)
-  try {
-    return await electron()
-  } catch (error) {
-    throw normalizeDesktopError(error)
-  }
-}
-
-async function terminalCommand<T>(
-  name: string,
-  args: Record<string, unknown> | undefined,
-  electron: () => Promise<T>
-): Promise<T> {
-  if (isTauriRuntime()) return command<T>(name, args)
-  try {
-    return await electron()
-  } catch (error) {
-    throw normalizeDesktopError(error)
-  }
-}
-
-async function chatCommand<T>(
-  name: string,
-  args: Record<string, unknown> | undefined,
-  electron: () => Promise<T>
-): Promise<T> {
-  if (isTauriRuntime()) return command<T>(name, args)
-  try {
-    return await electron()
-  } catch (error) {
-    throw normalizeDesktopError(error)
-  }
-}
-
-async function mcpCommand<T>(
-  name: string,
-  args: Record<string, unknown> | undefined,
-  electron: () => Promise<T>
-): Promise<T> {
-  if (isTauriRuntime()) return command<T>(name, args)
-  try {
-    return await electron()
-  } catch (error) {
-    throw normalizeDesktopError(error)
-  }
-}
-
-async function skillCommand<T>(
-  name: string,
-  args: Record<string, unknown> | undefined,
-  electron: () => Promise<T>
-): Promise<T> {
-  if (isTauriRuntime()) return command<T>(name, args)
-  try {
-    return await electron()
-  } catch (error) {
-    throw normalizeDesktopError(error)
-  }
-}
-
-async function executionHistoryCommand<T>(
-  name: string,
-  args: Record<string, unknown> | undefined,
-  electron: () => Promise<T>
-): Promise<T> {
-  if (isTauriRuntime()) return command<T>(name, args)
-  try {
-    return await electron()
-  } catch (error) {
-    throw normalizeDesktopError(error)
-  }
-}
-
-async function todoCommand<T>(
-  name: string,
-  args: Record<string, unknown> | undefined,
-  electron: () => Promise<T>
-): Promise<T> {
-  if (isTauriRuntime()) return command<T>(name, args)
-  try {
-    return await electron()
-  } catch (error) {
-    throw normalizeDesktopError(error)
-  }
-}
-
-async function agentCommand<T>(
-  name: string,
-  args: Record<string, unknown> | undefined,
-  electron: () => Promise<T>
-): Promise<T> {
-  if (isTauriRuntime()) return command<T>(name, args)
-  try {
-    return await electron()
-  } catch (error) {
-    throw normalizeDesktopError(error)
-  }
-}
-
-async function subAgentCommand<T>(
-  name: string,
-  args: Record<string, unknown> | undefined,
-  electron: () => Promise<T>
-): Promise<T> {
-  if (isTauriRuntime()) return command<T>(name, args)
-  try {
-    return await electron()
-  } catch (error) {
-    throw normalizeDesktopError(error)
-  }
-}
-
 async function rendererLogCommand(level: RendererLogLevel, message: string): Promise<void> {
-  if (isTauriRuntime()) {
-    await command<void>('renderer_log', { level, message })
-    return
-  }
-  try {
-    legacyLogger()[level](message)
-  } catch (error) {
-    throw normalizeDesktopError(error)
-  }
+  await command<void>('renderer_log', { level, message })
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -495,42 +172,6 @@ function normalizeExecutionHistoryRecords(value: unknown): ExecutionHistoryRecor
     throw new Error('The desktop returned an invalid task list.')
   }
   return value.map(normalizeExecutionHistoryRecord)
-}
-
-function legacyTodoItem(task: import('@shared/types/todo').TodoItem): WireTodoItem {
-  const requiresApproval = task.requiresApproval === true
-  return {
-    id: task.id,
-    subject: task.subject,
-    description: task.description,
-    status: task.status,
-    files: task.files,
-    activeForm: task.activeForm,
-    groupId: task.groupId,
-    groupTitle: task.groupTitle,
-    groupSubtitle: task.groupSubtitle,
-    riskLevel: task.riskLevel,
-    requiresApproval,
-    approvalStatus: task.approvalStatus ?? (requiresApproval ? 'pending' : 'not_required'),
-    acceptanceCriteria: task.acceptanceCriteria,
-    verificationCommand: task.verificationCommand,
-    contextBundle: task.contextBundle
-  }
-}
-
-async function legacyTodoSnapshot(sessionId: string): Promise<TodoListSnapshot> {
-  const session = await legacySession().get(sessionId)
-  return {
-    version: 1,
-    sessionId,
-    revision: getLegacyTodoRevision(sessionId),
-    nextSequence: 0,
-    items: (session?.tasks ?? []).map(legacyTodoItem)
-  }
-}
-
-async function unavailableLegacyAgentSnapshot(): Promise<never> {
-  throw new Error('Typed Agent lifecycle snapshots are unavailable in the frozen Electron runtime.')
 }
 
 export interface ChatStreamHandle {
@@ -1048,8 +689,7 @@ export interface DesktopApi {
 export const desktopApi: DesktopApi = {
   capabilities: {
     get plan(): boolean {
-      if (isTauriRuntime()) return false
-      return Boolean((window as unknown as { api?: { plan?: unknown } }).api?.plan)
+      return false
     }
   },
   system: {
@@ -1080,13 +720,7 @@ export const desktopApi: DesktopApi = {
     })
   },
   window: {
-    control: async (action) => {
-      if (isTauriRuntime()) {
-        await command<void>('window_control', { action })
-        return
-      }
-      sendLegacyWindowControl(action)
-    },
+    control: (action) => command<void>('window_control', { action }),
     openExternal: (target) => command('open_external', { target })
   },
   logger: {
@@ -1096,37 +730,16 @@ export const desktopApi: DesktopApi = {
     error: (message) => rendererLogCommand('error', message)
   },
   workspace: {
-    openDirectory: () =>
-      workspaceCommand('workspace_open_directory', undefined, () => legacyWorkspace().openDirectory()),
-    scanFileTree: (rootPath) =>
-      workspaceCommand('workspace_scan_file_tree', { rootPath }, () =>
-        legacyWorkspace().scanFileTree(rootPath)
-      ),
+    openDirectory: () => command('workspace_open_directory'),
+    scanFileTree: (rootPath) => command('workspace_scan_file_tree', { rootPath }),
     getAllPaths: (rootPath) => command('workspace_get_all_paths', { rootPath }),
-    readFile: (filePath, rootPath) =>
-      workspaceCommand('workspace_read_file', { filePath, rootPath }, () =>
-        legacyWorkspace().readFile(filePath, rootPath)
-      ),
-    detectProject: (rootPath) =>
-      workspaceCommand('workspace_detect_project', { rootPath }, () =>
-        legacyWorkspace().detectProject(rootPath)
-      ),
-    getRecentProjects: () =>
-      workspaceCommand('workspace_get_recent_projects', undefined, () =>
-        legacyWorkspace().getRecentProjects()
-      ),
-    addRecentProject: (project) =>
-      workspaceCommand('workspace_add_recent_project', { project }, () =>
-        legacyWorkspace().addRecentProject(project)
-      ),
-    removeRecentProject: (id) =>
-      workspaceCommand('workspace_remove_recent_project', { id }, () =>
-        legacyWorkspace().removeRecentProject(id)
-      ),
+    readFile: (filePath, rootPath) => command('workspace_read_file', { filePath, rootPath }),
+    detectProject: (rootPath) => command('workspace_detect_project', { rootPath }),
+    getRecentProjects: () => command('workspace_get_recent_projects'),
+    addRecentProject: (project) => command('workspace_add_recent_project', { project }),
+    removeRecentProject: (id) => command('workspace_remove_recent_project', { id }),
     renameRecentProject: (id, newName) =>
-      workspaceCommand('workspace_rename_recent_project', { id, newName }, () =>
-        legacyWorkspace().renameRecentProject(id, newName)
-      ),
+      command('workspace_rename_recent_project', { id, newName }),
     glob: (rootPath, pattern, path, headLimit) =>
       command('workspace_glob', { rootPath, pattern, path, headLimit }),
     grep: (rootPath, pattern, options) =>
@@ -1147,18 +760,10 @@ export const desktopApi: DesktopApi = {
         headLimit: options?.headLimit,
         offset: options?.offset
       }),
-    openInExplorer: (rootPath) =>
-      workspaceCommand('workspace_open_in_explorer', { rootPath }, () =>
-        legacyWorkspace().openInExplorer(rootPath)
-      ),
+    openInExplorer: (rootPath) => command('workspace_open_in_explorer', { rootPath }),
     openInEditor: (rootPath, editorId, exePath) =>
-      workspaceCommand('workspace_open_in_editor', { rootPath, editorId, exePath }, () =>
-        legacyWorkspace().openInEditor(rootPath, editorId, exePath ?? null)
-      ),
-    detectInstalledEditors: () =>
-      workspaceCommand('workspace_detect_installed_editors', undefined, () =>
-        legacyEditorInfo()
-      ),
+      command('workspace_open_in_editor', { rootPath, editorId, exePath }),
+    detectInstalledEditors: () => command('workspace_detect_installed_editors'),
     getProjectSnapshot: (rootPath, options) =>
       command('workspace_get_project_snapshot', {
         rootPath,
@@ -1174,17 +779,9 @@ export const desktopApi: DesktopApi = {
     listWorktrees: (rootPath) => command('workspace_list_worktrees', { rootPath })
   },
   theme: {
-    get: () => {
-      if (isTauriRuntime()) return command('theme_get')
-      return legacyTheme().get()
-    },
-    set: (source) => {
-      if (isTauriRuntime()) return command('theme_set', { source })
-      return legacyTheme().set(source)
-    },
+    get: () => command('theme_get'),
+    set: (source) => command('theme_set', { source }),
     onUpdated: (callback) => {
-      if (!isTauriRuntime()) return legacyTheme().onUpdated(callback)
-
       let disposed = false
       const unlisten = listen<DesktopEvent<ThemeInfo>>('desktop://theme-changed', (event) => {
         if (!disposed) callback(event.payload.payload)
@@ -1196,40 +793,22 @@ export const desktopApi: DesktopApi = {
     }
   },
   settings: {
-    get: async () => {
-      if (isTauriRuntime()) {
-        return normalizeSettings(await command<unknown>('settings_get'))
-      }
-      return normalizeSettings(await legacySettings().get())
-    },
+    get: async () => normalizeSettings(await command<unknown>('settings_get')),
     save: async (settings) => {
       const normalized = normalizeSettings(settings)
-      if (isTauriRuntime()) {
-        await command<boolean>('settings_save', { settings: normalized })
-        return
-      }
-      await legacySettings().save(normalized)
+      await command<boolean>('settings_save', { settings: normalized })
     }
   },
   permission: {
-    getMode: (rootPath) =>
-      permissionCommand('permission_mode_get', { rootPath }, () => legacyPermission().getMode(rootPath)),
-    setMode: (rootPath, mode) =>
-      permissionCommand('permission_mode_set', { rootPath, mode }, () =>
-        legacyPermission().setMode(rootPath, mode)
-      )
+    getMode: (rootPath) => command('permission_mode_get', { rootPath }),
+    setMode: (rootPath, mode) => command('permission_mode_set', { rootPath, mode })
   },
   rules: {
-    getList: (workspaces) =>
-      rulesCommand('rules_get_list', { workspaces }, () => legacyRules().getList(workspaces)),
-    save: (rule, workspaceRoot) =>
-      rulesCommand('rules_save', { rule, workspaceRoot }, () => legacyRules().save(rule, workspaceRoot)),
-    delete: (rulePath) =>
-      rulesCommand('rules_delete', { rulePath }, () => legacyRules().delete(rulePath)),
+    getList: (workspaces) => command('rules_get_list', { workspaces }),
+    save: (rule, workspaceRoot) => command('rules_save', { rule, workspaceRoot }),
+    delete: (rulePath) => command('rules_delete', { rulePath }),
     rename: (oldPath, newFilename, workspaceRoot, scope) =>
-      rulesCommand('rules_rename', { oldPath, newFilename, workspaceRoot, scope }, () =>
-        legacyRules().rename(oldPath, newFilename, workspaceRoot, scope)
-      )
+      command('rules_rename', { oldPath, newFilename, workspaceRoot, scope })
   },
   attachment: {
     importDraft: async (name, declaredMimeType, bytes) => {
@@ -1238,7 +817,6 @@ export const desktopApi: DesktopApi = {
         declaredMimeType: declaredMimeType ?? '',
         bytes: new Uint8Array(bytes || [])
       }
-      if (!isTauriRuntime()) return legacyAttachment().importDraft(input)
       const attachment = await command<WireDraftImageAttachment>('attachment_import_draft', {
         name,
         declaredMimeType,
@@ -1247,7 +825,6 @@ export const desktopApi: DesktopApi = {
       return wireAttachmentToUi(attachment) as UiDraftImageAttachment
     },
     promoteDrafts: async (sessionId, attachments) => {
-      if (!isTauriRuntime()) return legacyAttachment().promoteDrafts(sessionId, attachments)
       const promoted = await command<WireSessionImageAttachment[]>('attachment_promote_drafts', {
         sessionId,
         attachments: attachments.map(uiAttachmentToWire)
@@ -1255,15 +832,9 @@ export const desktopApi: DesktopApi = {
       return promoted.map((attachment) => wireAttachmentToUi(attachment) as UiSessionImageAttachment)
     },
     rollbackPromotion: (sessionId, attachmentIds) =>
-      attachmentCommand('attachment_rollback_promotion', { sessionId, attachmentIds }, () =>
-        legacyAttachment().rollbackPromotion(sessionId, attachmentIds)
-      ),
-    discardDrafts: (draftIds) =>
-      attachmentCommand('attachment_discard_drafts', { draftIds }, () =>
-        legacyAttachment().discardDrafts(draftIds)
-      ),
+      command('attachment_rollback_promotion', { sessionId, attachmentIds }),
+    discardDrafts: (draftIds) => command('attachment_discard_drafts', { draftIds }),
     readPreview: async (attachment, variant) => {
-      if (!isTauriRuntime()) return legacyAttachment().readPreview(attachment, variant as 'thumbnail' | 'original')
       const preview = await command<WireAttachmentPreviewBytes>('attachment_read_preview', {
         attachment: uiAttachmentToWire(attachment),
         variant
@@ -1272,13 +843,9 @@ export const desktopApi: DesktopApi = {
     },
   },
   chat: {
-    predictNextInput: (request) =>
-      chatCommand('chat_predict_next_input', { request }, () => legacyChat().predictNextInput(request)),
-    getRuntimeStatus: (sessionId) =>
-      chatCommand('chat_get_runtime_status', { sessionId }, () => legacyChat().getRuntimeStatus(sessionId)),
+    predictNextInput: (request) => command('chat_predict_next_input', { request }),
+    getRuntimeStatus: (sessionId) => command('chat_get_runtime_status', { sessionId }),
     onRuntimeStatusChanged: (callback) => {
-      if (!isTauriRuntime()) return legacyChat().onRuntimeStatusChanged(callback)
-
       let active = true
       const unlisten = listen<SessionRuntimeStatusChanged>('chat:runtime-status-changed', (event) => {
         if (active) callback(event.payload)
@@ -1288,15 +855,9 @@ export const desktopApi: DesktopApi = {
         void unlisten.then((dispose) => dispose()).catch(() => undefined)
       }
     },
-    steer: (sessionId, input) =>
-      chatCommand('chat_steer', { sessionId, input }, () => legacyChat().steer(sessionId, input)),
-    interruptTool: (toolCallId) =>
-      chatCommand('chat_interrupt_tool', { toolCallId }, () => legacyChat().interruptTool(toolCallId)),
+    steer: (sessionId, input) => command('chat_steer', { sessionId, input }),
+    interruptTool: (toolCallId) => command('chat_interrupt_tool', { toolCallId }),
     stream: (providerId, model, sessionId, input, callbacks, workspaceRoot) => {
-      if (!isTauriRuntime()) {
-        return legacyChat().stream(providerId, model, sessionId, input, callbacks)
-      }
-
       const requestedRunId = `stream_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
       const events = new Channel<TauriChatStreamFrame>()
       let activeRunId: string | null = requestedRunId
@@ -1479,94 +1040,43 @@ export const desktopApi: DesktopApi = {
         started
       }
     },
-    compact: (sessionId, instructions) =>
-      chatCommand('chat_compact', { sessionId, instructions }, () =>
-        legacyChat().compact(sessionId, instructions)
-      ),
+    compact: (sessionId, instructions) => command('chat_compact', { sessionId, instructions }),
     revertHistory: (sessionId, messageId, transactionIds) =>
-      chatCommand('chat_revert_history', { sessionId, messageId, transactionIds }, () =>
-        invokeLegacyChatHistory<ChatHistoryRevertResult>(
-          'chat:revert-messages',
-          sessionId,
-          messageId,
-          transactionIds
-        )
-      ),
+      command<ChatHistoryRevertResult>('chat_revert_history', { sessionId, messageId, transactionIds }),
     previewHistoryRevert: (sessionId, messageId, transactionIds) =>
-      chatCommand('chat_preview_history_revert', { sessionId, messageId, transactionIds }, () =>
-        invokeLegacyChatHistory<ChatHistoryRevertPreview>(
-          'chat:preview-revert-messages',
-          sessionId,
-          messageId,
-          transactionIds
-        )
-      ),
-    acceptFile: (txId, filePath) =>
-      chatCommand('chat_accept_file', { txId, filePath }, () => legacyChat().acceptFile(txId, filePath)),
-    rejectFile: (txId, filePath) =>
-      chatCommand('chat_reject_file', { txId, filePath }, () => legacyChat().rejectFile(txId, filePath)),
-    getDiff: (txId) =>
-      chatCommand('chat_get_diff', { txId }, () => legacyChat().getDiff(txId)),
+      command<ChatHistoryRevertPreview>('chat_preview_history_revert', { sessionId, messageId, transactionIds }),
+    acceptFile: (txId, filePath) => command('chat_accept_file', { txId, filePath }),
+    rejectFile: (txId, filePath) => command('chat_reject_file', { txId, filePath }),
+    getDiff: (txId) => command('chat_get_diff', { txId }),
     respondToApproval: (requestId, response) =>
-      chatCommand('chat_respond_to_approval', { requestId, response }, () =>
-        legacyChat().respondToApproval(requestId, response)
-      ),
+      command('chat_respond_to_approval', { requestId, response }),
     respondAskUser: (requestId, answers) =>
-      chatCommand('chat_respond_ask_user', { requestId, answers }, () =>
-        legacyChat().respondAskUser(requestId, answers)
-      )
+      command('chat_respond_ask_user', { requestId, answers })
   },
   session: {
     list: async () => {
-      const sessions = await sessionCommand<unknown>(
-        'session_list',
-        undefined,
-        () => legacySession().list()
-      )
+      const sessions = await command<unknown>('session_list')
       if (!Array.isArray(sessions)) {
         throw new Error('The desktop returned an invalid session list.')
       }
       return sessions.map(normalizeSession)
     },
     get: async (sessionId) => {
-      const session = await sessionCommand<unknown>(
-        'session_get',
-        { sessionId },
-        () => legacySession().get(sessionId)
-      )
+      const session = await command<unknown>('session_get', { sessionId })
       return session === null ? null : normalizeSession(session)
     },
     save: async (session) => {
       const normalized = normalizeSession(session)
-      await sessionCommand<void>(
-        'session_save',
-        { session: normalized },
-        () => legacySession().save(normalized)
-      )
+      await command<void>('session_save', { session: normalized })
     },
-    delete: (sessionId) =>
-      sessionCommand<void>('session_delete', { sessionId }, () => legacySession().delete(sessionId))
+    delete: (sessionId) => command<void>('session_delete', { sessionId })
   },
   terminal: {
-    start: (workspaceId, rootPath) =>
-      terminalCommand('terminal_start', { workspaceId, rootPath }, () =>
-        legacyTerminal().start(workspaceId, rootPath)
-      ),
-    write: (workspaceId, text) =>
-      terminalCommand('terminal_write', { workspaceId, text }, () =>
-        legacyTerminal().write(workspaceId, text)
-      ),
-    resize: (workspaceId, cols, rows) =>
-      terminalCommand('terminal_resize', { workspaceId, cols, rows }, () =>
-        legacyTerminal().resize(workspaceId, cols, rows)
-      ),
-    kill: (workspaceId) =>
-      terminalCommand('terminal_kill', { workspaceId }, () => legacyTerminal().kill(workspaceId)),
+    start: (workspaceId, rootPath) => command('terminal_start', { workspaceId, rootPath }),
+    write: (workspaceId, text) => command('terminal_write', { workspaceId, text }),
+    resize: (workspaceId, cols, rows) => command('terminal_resize', { workspaceId, cols, rows }),
+    kill: (workspaceId) => command('terminal_kill', { workspaceId }),
     onOutput: (callback) => {
-      if (!isTauriRuntime()) {
-        return legacyTerminal().onOutput((workspaceId, data) => callback({ workspaceId, data }))
-      }
-
       let active = true
       const unlisten = listen<unknown>('terminal:output', (event) => {
         if (!active) return
@@ -1587,10 +1097,6 @@ export const desktopApi: DesktopApi = {
       }
     },
     onExit: (callback) => {
-      if (!isTauriRuntime()) {
-        return legacyTerminal().onExit((workspaceId) => callback({ workspaceId, exitCode: null }))
-      }
-
       let active = true
       const unlisten = listen<unknown>('terminal:exit', (event) => {
         if (!active) return
@@ -1604,110 +1110,73 @@ export const desktopApi: DesktopApi = {
     }
   },
   provider: {
-    getAll: () =>
-      providerCommand('provider_get_all', undefined, () => legacyProvider().list()),
-    create: (data) =>
-      providerCommand('provider_create', { data }, () => legacyProvider().add(data)),
-    update: (id, data) =>
-      providerCommand('provider_update', { id, data }, () => legacyProvider().update(id, data)),
-    delete: async (id) => {
-      await providerCommand('provider_delete', { id }, async () => {
-        await legacyProvider().remove(id)
-      })
-    },
-    setActive: (id) =>
-      providerCommand('provider_set_active', { id }, () => legacyProvider().setActive(id)),
-    testConnection: (id) =>
-      providerCommand('provider_test_connection', { id }, () =>
-        legacyProvider().testConnection(id)
-      )
+    getAll: () => command('provider_get_all'),
+    create: (data) => command('provider_create', { data }),
+    update: (id, data) => command('provider_update', { id, data }),
+    delete: (id) => command('provider_delete', { id }),
+    setActive: (id) => command('provider_set_active', { id }),
+    testConnection: (id) => command('provider_test_connection', { id })
   },
   skill: {
-    getAll: (rootPath) =>
-      skillCommand('skill_get_all', { rootPath }, () => legacySkill().getAll(rootPath ?? null)),
-    toggle: (rootPath, id, enabled) =>
-      skillCommand('skill_toggle', { rootPath, id, enabled }, () =>
-        legacySkill().toggle(rootPath, id, enabled)
-      ),
-    checkExternal: (rootPath) =>
-      skillCommand('skill_check_external', { rootPath }, () =>
-        legacySkill().checkExternal(rootPath)
-      ),
-    listExternal: (rootPath) =>
-      skillCommand('skill_list_external', { rootPath }, () => legacySkill().listExternal(rootPath)),
+    getAll: (rootPath) => command('skill_get_all', { rootPath }),
+    toggle: (rootPath, id, enabled) => command('skill_toggle', { rootPath, id, enabled }),
+    checkExternal: (rootPath) => command('skill_check_external', { rootPath }),
+    listExternal: (rootPath) => command('skill_list_external', { rootPath }),
     importSingle: (sourceName, dirName, rootPath) =>
-      skillCommand('skill_import_single', { sourceName, dirName, rootPath }, () =>
-        legacySkill().importSingle(sourceName, dirName, rootPath)
-      ),
-    remove: (rootPath, id) =>
-      skillCommand('skill_remove', { rootPath, id }, () => legacySkill().remove(rootPath, id))
+      command('skill_import_single', { sourceName, dirName, rootPath }),
+    remove: (rootPath, id) => command('skill_remove', { rootPath, id })
   },
   todo: {
-    snapshot: (sessionId) => todoCommand<TodoListSnapshot>(
+    snapshot: (sessionId) => command<TodoListSnapshot>(
       'todo_list',
-      { request: { sessionId } },
-      () => legacyTodoSnapshot(sessionId)
+      { request: { sessionId } }
     )
   },
   executionHistory: {
-    getByProject: async (projectId) => normalizeExecutionHistoryRecords(await executionHistoryCommand<unknown>(
+    getByProject: async (projectId) => normalizeExecutionHistoryRecords(await command<unknown>(
       'task_get_by_project',
-      { projectId },
-      () => legacyTask().getByProject(projectId)
+      { projectId }
     )),
-    delete: (executionId) => executionHistoryCommand<void>(
+    delete: (executionId) => command<void>(
       'task_delete',
-      { taskId: executionId },
-      () => legacyTask().delete(executionId)
+      { taskId: executionId }
     )
   },
   agent: {
-    snapshot: (sessionId) => agentCommand<AgentRuntimeSnapshot>(
+    snapshot: (sessionId) => command<AgentRuntimeSnapshot>(
       'agent_snapshot',
-      { request: { sessionId } },
-      unavailableLegacyAgentSnapshot
+      { request: { sessionId } }
     ),
-    activeIds: (sessionId) => agentCommand<AgentActiveIdsResult>(
+    activeIds: (sessionId) => command<AgentActiveIdsResult>(
       'agent_active_ids',
-      { request: { sessionId } },
-      unavailableLegacyAgentSnapshot
+      { request: { sessionId } }
     )
   },
   subAgent: {
-    list: () => subAgentCommand<SubAgentInfo[]>(
-      'subagent_list',
-      undefined,
-      () => legacySubAgent().list()
-    ),
-    toggle: (type, enabled) => subAgentCommand<void>(
+    list: () => command<SubAgentInfo[]>('subagent_list'),
+    toggle: (type, enabled) => command<void>(
       'subagent_toggle',
-      { subagentType: type, enabled },
-      () => legacySubAgent().toggle(type, enabled)
+      { subagentType: type, enabled }
     ),
-    getDetail: (type) => subAgentCommand<SubAgentDetailResponse>(
+    getDetail: (type) => command<SubAgentDetailResponse>(
       'subagent_get_detail',
-      { subagentType: type },
-      () => legacySubAgent().getDetail(type)
+      { subagentType: type }
     ),
-    setModel: (type, selections) => subAgentCommand<void>(
+    setModel: (type, selections) => command<void>(
       'subagent_set_model',
-      { subagentType: type, selections },
-      () => legacySubAgent().setModel(type, selections)
+      { subagentType: type, selections }
     ),
-    run: (request) => subAgentCommand<SubAgentRunState>(
+    run: (request) => command<SubAgentRunState>(
       'subagent_run',
-      { request },
-      () => legacySubAgent().run(request)
+      { request }
     ),
-    getRun: (sessionId, runId) => subAgentCommand<SubAgentRunState>(
+    getRun: (sessionId, runId) => command<SubAgentRunState>(
       'subagent_get_run',
-      { sessionId, runId },
-      () => legacySubAgent().getRun(runId)
+      { sessionId, runId }
     ),
-    cancelRun: (sessionId, runId) => subAgentCommand<SubAgentRunCancelResult>(
+    cancelRun: (sessionId, runId) => command<SubAgentRunCancelResult>(
       'subagent_cancel_run',
-      { sessionId, runId },
-      () => legacySubAgent().cancelRun(runId)
+      { sessionId, runId }
     ),
     onState: (callback) => {
       let active = true
@@ -1725,73 +1194,38 @@ export const desktopApi: DesktopApi = {
     }
   },
   mcp: {
-    list: (workspaceRoot) =>
-      mcpCommand('mcp_list', { workspaceRoot }, () => legacyMcp().list()),
+    list: (workspaceRoot) => command('mcp_list', { workspaceRoot }),
     saveUser: (servers, workspaceRoot) =>
-      mcpCommand('mcp_save_user', { servers, workspaceRoot }, () =>
-        legacyMcp().saveUser(servers)
-      ),
+      command('mcp_save_user', { servers, workspaceRoot }),
     setEnabled: (name, enabled, workspaceRoot) =>
-      mcpCommand('mcp_set_enabled', { name, enabled, workspaceRoot }, () =>
-        legacyMcp().setEnabled(name, enabled)
-      ),
+      command('mcp_set_enabled', { name, enabled, workspaceRoot }),
     getCatalog: (name, workspaceRoot) =>
-      mcpCommand('mcp_get_catalog', { name, workspaceRoot }, () =>
-        legacyMcp().getCatalog(name)
-      ),
+      command('mcp_get_catalog', { name, workspaceRoot }),
     readResource: (name, uri, workspaceRoot) =>
-      mcpCommand('mcp_read_resource', { name, uri, workspaceRoot }, async () => {
-        const readResource = (legacyMcp() as Partial<Window['api']['mcp']>).readResource
-        if (!readResource) throw new Error('MCP resource reads require the Tauri desktop host.')
-        return readResource(name, uri, workspaceRoot)
-      }),
+      command('mcp_read_resource', { name, uri, workspaceRoot }),
     subscribeResource: (name, uri, workspaceRoot) =>
-      mcpCommand('mcp_subscribe_resource', { name, uri, workspaceRoot }, async () => {
-        const subscribeResource = (legacyMcp() as Partial<Window['api']['mcp']>).subscribeResource
-        if (!subscribeResource) throw new Error('MCP resource subscriptions require the Tauri desktop host.')
-        return subscribeResource(name, uri, workspaceRoot)
-      }),
+      command('mcp_subscribe_resource', { name, uri, workspaceRoot }),
     unsubscribeResource: (name, uri, workspaceRoot) =>
-      mcpCommand('mcp_unsubscribe_resource', { name, uri, workspaceRoot }, async () => {
-        const unsubscribeResource = (legacyMcp() as Partial<Window['api']['mcp']>).unsubscribeResource
-        if (!unsubscribeResource) throw new Error('MCP resource subscriptions require the Tauri desktop host.')
-        return unsubscribeResource(name, uri, workspaceRoot)
-      }),
+      command('mcp_unsubscribe_resource', { name, uri, workspaceRoot }),
     getPrompt: (name, prompt, arguments_, workspaceRoot) =>
-      mcpCommand('mcp_get_prompt', { name, prompt, arguments: arguments_, workspaceRoot }, async () => {
-        const getPrompt = (legacyMcp() as Partial<Window['api']['mcp']>).getPrompt
-        if (!getPrompt) throw new Error('MCP prompt reads require the Tauri desktop host.')
-        return getPrompt(name, prompt, arguments_, workspaceRoot)
-      }),
+      command('mcp_get_prompt', { name, prompt, arguments: arguments_, workspaceRoot }),
     reconnect: (name, workspaceRoot) =>
-      mcpCommand('mcp_reconnect', { name, workspaceRoot }, () =>
-        legacyMcp().reconnect(name)
-      ),
+      command('mcp_reconnect', { name, workspaceRoot }),
     authorize: (name, workspaceRoot) =>
-      mcpCommand('mcp_authorize', { name, workspaceRoot }, () => legacyMcp().authorize(name)),
+      command('mcp_authorize', { name, workspaceRoot }),
     logout: (name, workspaceRoot) =>
-      mcpCommand('mcp_logout', { name, workspaceRoot }, () => legacyMcp().logout(name)),
+      command('mcp_logout', { name, workspaceRoot }),
     trustProject: (fingerprint, workspaceRoot) =>
-      mcpCommand('mcp_trust_project', { fingerprint, workspaceRoot }, () =>
-        legacyMcp().trustProject(fingerprint)
-      ),
+      command('mcp_trust_project', { fingerprint, workspaceRoot }),
     listSecretKeys: (workspaceRoot) =>
-      mcpCommand('mcp_list_secret_keys', { workspaceRoot }, () =>
-        legacyMcp().listSecretKeys(workspaceRoot)
-      ),
+      command('mcp_list_secret_keys', { workspaceRoot }),
     setSecret: (key, value) =>
-      mcpCommand('mcp_set_secret', { key, value }, () => legacyMcp().setSecret(key, value)),
+      command('mcp_set_secret', { key, value }),
     deleteSecret: (key) =>
-      mcpCommand('mcp_delete_secret', { key }, () => legacyMcp().deleteSecret(key)),
-    respondReverseRequest: (requestId, response) => {
-      if (!isTauriRuntime()) {
-        return Promise.reject(new Error('MCP reverse-request approval requires the Tauri desktop host.'))
-      }
-      return command('mcp_respond_reverse_request', { requestId, response })
-    },
+      command('mcp_delete_secret', { key }),
+    respondReverseRequest: (requestId, response) =>
+      command('mcp_respond_reverse_request', { requestId, response }),
     onChanged: (callback) => {
-      if (!isTauriRuntime()) return legacyMcp().onChanged(callback)
-
       let active = true
       const unlisten = listen<McpServerStatus[]>('mcp:status-changed', (event) => {
         if (active) callback(event.payload)
@@ -1802,8 +1236,6 @@ export const desktopApi: DesktopApi = {
       }
     },
     onReverseRequest: (callback) => {
-      if (!isTauriRuntime()) return () => undefined
-
       let active = true
       const unlisten = listen<unknown>('mcp:reverse-request', (event) => {
         if (!active || !isMcpReverseRequestEvent(event.payload)) return

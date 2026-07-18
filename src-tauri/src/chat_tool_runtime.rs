@@ -1,4 +1,4 @@
-﻿use std::{
+use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
     fs,
@@ -469,10 +469,7 @@ impl ChatToolRuntime {
     }
 
     #[cfg(test)]
-    fn provider_tool_definitions_for_run(
-        &self,
-        run: &ChatToolRunContext,
-    ) -> Vec<ToolDefinition> {
+    fn provider_tool_definitions_for_run(&self, run: &ChatToolRunContext) -> Vec<ToolDefinition> {
         self.provider_tool_surface_for_run(run).definitions
     }
 

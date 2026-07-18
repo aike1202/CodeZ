@@ -9,6 +9,7 @@ const TEXT: &str = r#"# Todo tracking
 - Create related items in one TodoCreate batch when practical. The authoritative Todo state is injected into every model round; do not look for TodoGet or TodoList tools.
 - Use one TodoUpdate call to commit related transitions atomically, such as completing the current item and starting the next. Put expectedRevision at the request root and item patches in updates[].
 - Persist dependencies only through blockedBy using addBlockedBy/removeBlockedBy. Treat reverse blocks information as derived state.
+- In the injected state, treat ready as the runtime's admission projection and waitingOn as the unfinished dependency set. blockedBy remains the declared dependency graph and may include completed items omitted from the bounded projection.
 - Mark a ready Todo item in_progress immediately before starting its work. Keep at most one item in_progress, and keep statuses current while continuing through executable work without repeatedly asking whether to proceed.
 - Do not start or complete an item while the injected state reports unfinished dependencies or pending approval. Complete dependencies first and obtain required approval; the runtime enforces both gates.
 - Mark an item completed only after its work is fully implemented, its acceptance criteria are satisfied, and relevant verification has run successfully. Keep partial, failed, or unverified work non-completed and report the blocker.
@@ -68,6 +69,8 @@ mod tests {
         assert!(
             TEXT.contains("expectedRevision")
                 && TEXT.contains("addBlockedBy/removeBlockedBy")
+                && TEXT.contains("ready as the runtime's admission projection")
+                && TEXT.contains("waitingOn as the unfinished dependency set")
                 && TEXT.contains("unfinished dependencies or pending approval")
                 && TEXT.contains("runtime enforces both gates")
         );

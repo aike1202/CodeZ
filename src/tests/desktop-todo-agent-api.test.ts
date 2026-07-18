@@ -1,4 +1,4 @@
-﻿import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const tauriMocks = vi.hoisted(() => ({
   invoke: vi.fn()
@@ -160,45 +160,6 @@ describe('desktop task and sub-agent adapter', () => {
       ['agent_snapshot', { request: { sessionId: 'session-1' } }],
       ['agent_active_ids', { request: { sessionId: 'session-1' } }]
     ])
-  })
-
-  it('contains frozen Electron fallbacks inside the adapter boundary', async () => {
-    const legacyTask = {
-      getByProject: vi.fn().mockResolvedValue([task]),
-      delete: vi.fn().mockResolvedValue(undefined)
-    }
-    const legacySubAgent = {
-      list: vi.fn().mockResolvedValue([subAgent]),
-      toggle: vi.fn().mockResolvedValue(undefined),
-      getDetail: vi.fn().mockResolvedValue(detail.detail),
-      setModel: vi.fn().mockResolvedValue(undefined),
-      run: vi.fn().mockResolvedValue(runState),
-      getRun: vi.fn().mockResolvedValue(runState),
-      cancelRun: vi.fn().mockResolvedValue({ accepted: false, state: runState }),
-      onState: vi.fn().mockReturnValue(() => undefined)
-    }
-    setWindow({ api: { task: legacyTask, subAgent: legacySubAgent } })
-
-    await expect(desktopApi.executionHistory.getByProject('workspace-1')).resolves.toEqual([task])
-    await desktopApi.executionHistory.delete(task.id)
-    await expect(desktopApi.subAgent.list()).resolves.toEqual([subAgent])
-    await desktopApi.subAgent.toggle('Explore', false)
-    await expect(desktopApi.subAgent.getDetail('Explore')).resolves.toEqual(detail.detail)
-    await desktopApi.subAgent.setModel('Explore', [])
-    await desktopApi.subAgent.run(runRequest)
-    await desktopApi.subAgent.getRun('session-1', 'subagent-1')
-    await desktopApi.subAgent.cancelRun('session-1', 'subagent-1')
-
-    expect(tauriMocks.invoke).not.toHaveBeenCalled()
-    expect(legacyTask.getByProject).toHaveBeenCalledWith('workspace-1')
-    expect(legacyTask.delete).toHaveBeenCalledWith('task-1')
-    expect(legacySubAgent.list).toHaveBeenCalledOnce()
-    expect(legacySubAgent.toggle).toHaveBeenCalledWith('Explore', false)
-    expect(legacySubAgent.getDetail).toHaveBeenCalledWith('Explore')
-    expect(legacySubAgent.setModel).toHaveBeenCalledWith('Explore', [])
-    expect(legacySubAgent.run).toHaveBeenCalledWith(runRequest)
-    expect(legacySubAgent.getRun).toHaveBeenCalledWith('subagent-1')
-    expect(legacySubAgent.cancelRun).toHaveBeenCalledWith('subagent-1')
   })
 
   it('rejects malformed task history before it reaches the renderer', async () => {

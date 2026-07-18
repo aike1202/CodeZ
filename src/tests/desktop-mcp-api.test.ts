@@ -102,14 +102,4 @@ describe('desktop MCP adapter', () => {
     await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce())
   })
 
-  it('keeps the frozen Electron fallback limited to legacy secret key listing', async () => {
-    const listSecretKeys = vi.fn().mockResolvedValue(['MCP_TOKEN'])
-    setWindow({ api: { mcp: { listSecretKeys } } })
-
-    await expect(desktopApi.mcp.listSecretKeys('C:/workspace')).resolves.toEqual(['MCP_TOKEN'])
-    expect(listSecretKeys).toHaveBeenCalledWith('C:/workspace')
-    await expect(
-      desktopApi.mcp.respondReverseRequest('request-1', { kind: 'sampling', approved: false })
-    ).rejects.toThrow('requires the Tauri desktop host')
-  })
 })

@@ -85,8 +85,6 @@ export function getToolNoun(toolName: string): string {
     case 'spawn':
     case 'delegate':
       return '子任务'
-    case 'DelegateTasks':
-      return '多任务委派'
     case 'Write':
     case 'write_to_file':
       return '保存文件'

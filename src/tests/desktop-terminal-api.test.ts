@@ -100,47 +100,6 @@ describe('desktop terminal adapter', () => {
     expect(received).toHaveBeenCalledOnce()
   })
 
-  it('uses frozen Electron terminal behavior only through the adapter boundary', async () => {
-    const disposeOutput = vi.fn()
-    const disposeExit = vi.fn()
-    const terminal = {
-      start: vi.fn().mockResolvedValue(undefined),
-      write: vi.fn().mockResolvedValue(undefined),
-      resize: vi.fn().mockResolvedValue(undefined),
-      kill: vi.fn().mockResolvedValue(undefined),
-      onOutput: vi.fn().mockReturnValue(disposeOutput),
-      onExit: vi.fn().mockReturnValue(disposeExit)
-    }
-    setWindow({ api: { terminal } })
-    const onOutput = vi.fn()
-    const onExit = vi.fn()
-
-    await desktopApi.terminal.start('term-1', 'C:\\workspace')
-    await desktopApi.terminal.write('term-1', 'echo ready\r')
-    await desktopApi.terminal.resize('term-1', 100, 30)
-    await desktopApi.terminal.kill('term-1')
-    const stopOutput = desktopApi.terminal.onOutput(onOutput)
-    const stopExit = desktopApi.terminal.onExit(onExit)
-
-    expect(tauriMocks.invoke).not.toHaveBeenCalled()
-    expect(terminal.start).toHaveBeenCalledWith('term-1', 'C:\\workspace')
-    expect(terminal.write).toHaveBeenCalledWith('term-1', 'echo ready\r')
-    expect(terminal.resize).toHaveBeenCalledWith('term-1', 100, 30)
-    expect(terminal.kill).toHaveBeenCalledWith('term-1')
-
-    const outputCallback = terminal.onOutput.mock.calls[0][0] as (workspaceId: string, data: string) => void
-    const exitCallback = terminal.onExit.mock.calls[0][0] as (workspaceId: string) => void
-    outputCallback('term-1', 'ready\r\n')
-    exitCallback('term-1')
-    expect(onOutput).toHaveBeenCalledWith({ workspaceId: 'term-1', data: 'ready\r\n' })
-    expect(onExit).toHaveBeenCalledWith({ workspaceId: 'term-1', exitCode: null })
-
-    stopOutput()
-    stopExit()
-    expect(disposeOutput).toHaveBeenCalledOnce()
-    expect(disposeExit).toHaveBeenCalledOnce()
-  })
-
   it('rejects malformed Tauri byte frames without acknowledging them', async () => {
     setWindow({ __TAURI_INTERNALS__: {} })
     const received = vi.fn()

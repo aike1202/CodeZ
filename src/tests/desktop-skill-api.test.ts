@@ -68,30 +68,4 @@ describe('desktop skill adapter', () => {
     ])
   })
 
-  it('uses the frozen Electron skill API only at the adapter boundary', async () => {
-    const skill = {
-      getAll: vi.fn().mockResolvedValue([]),
-      toggle: vi.fn().mockResolvedValue(undefined),
-      checkExternal: vi.fn().mockResolvedValue({ hasUpdates: false, totalCount: 0, sources: [] }),
-      listExternal: vi.fn().mockResolvedValue([]),
-      importSingle: vi.fn().mockResolvedValue(true),
-      remove: vi.fn().mockResolvedValue(true)
-    }
-    setWindow({ api: { skill } })
-
-    await desktopApi.skill.getAll()
-    await desktopApi.skill.toggle(null, 'global-example', false)
-    await desktopApi.skill.checkExternal()
-    await desktopApi.skill.listExternal()
-    await desktopApi.skill.importSingle('Claude', 'example')
-    await desktopApi.skill.remove(null, 'global-example')
-
-    expect(tauriMocks.invoke).not.toHaveBeenCalled()
-    expect(skill.getAll).toHaveBeenCalledWith(null)
-    expect(skill.toggle).toHaveBeenCalledWith(null, 'global-example', false)
-    expect(skill.checkExternal).toHaveBeenCalledWith(undefined)
-    expect(skill.listExternal).toHaveBeenCalledWith(undefined)
-    expect(skill.importSingle).toHaveBeenCalledWith('Claude', 'example', undefined)
-    expect(skill.remove).toHaveBeenCalledWith(null, 'global-example')
-  })
 })

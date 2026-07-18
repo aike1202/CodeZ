@@ -33,13 +33,7 @@ function detailFromBridgeResult(result: unknown): SubAgentSettingsDetail | null 
   if (!result || typeof result !== 'object') return null
   const typed = result as SubAgentDetailResult
   if (typed.kind === 'available' || typed.kind === 'partial') return typed.detail
-  if (typed.kind === 'notFound') return null
-
-  // Electron remains a frozen rollback baseline and returns its older shape.
-  const legacy = result as Partial<SubAgentSettingsDetail>
-  return typeof legacy.type === 'string' && typeof legacy.description === 'string'
-    ? legacy as SubAgentSettingsDetail
-    : null
+  return null
 }
 
 export default function SubAgentDetailModal({ type, onClose }: Props): React.ReactElement {

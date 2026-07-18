@@ -1,4 +1,4 @@
-﻿use std::sync::Arc;
+use std::sync::Arc;
 
 use codez_core::{AppError, AppErrorKind, SessionId};
 use serde_json::{Map, Value};
@@ -20,6 +20,8 @@ use crate::{
         },
     },
 };
+
+const MAX_MODEL_TODO_UPDATES: usize = 40;
 
 #[derive(Clone, Copy)]
 enum TodoToolKind {
@@ -186,6 +188,11 @@ async fn execute_create(
         .ok_or_else(|| AppError::validation("TodoCreate requires items"))?;
     let mut items: Vec<TodoCreateInput> = serde_json::from_value(items)
         .map_err(|source| AppError::validation(format!("TodoCreate input is invalid: {source}")))?;
+    if items.len() > MAX_MODEL_TODO_UPDATES {
+        return Err(AppError::validation(format!(
+            "TodoCreate accepts at most {MAX_MODEL_TODO_UPDATES} items per call"
+        )));
+    }
     for item in &mut items {
         if item.approval_status.is_some() {
             return Err(AppError::validation(
@@ -213,6 +220,11 @@ async fn execute_update(
         .get("updates")
         .and_then(Value::as_array)
         .ok_or_else(|| AppError::validation("TodoUpdate requires updates"))?;
+    if updates.len() > MAX_MODEL_TODO_UPDATES {
+        return Err(AppError::validation(format!(
+            "TodoUpdate accepts at most {MAX_MODEL_TODO_UPDATES} items per call"
+        )));
+    }
     let mut parsed_updates = Vec::with_capacity(updates.len());
     for update in updates {
         let mut patch = update
@@ -255,7 +267,7 @@ fn created_result(snapshot: &TodoListSnapshot, created_count: usize) -> Value {
         .collect::<Vec<_>>();
     serde_json::json!({
         "revision": snapshot.revision,
-        "summary": todo_summary(&snapshot),
+        "summary": todo_summary(snapshot),
         "created": created,
         "state": todo_model_state(snapshot)
     })
@@ -264,12 +276,7 @@ fn created_result(snapshot: &TodoListSnapshot, created_count: usize) -> Value {
 fn updated_result(snapshot: &TodoListSnapshot, updated_ids: &[String]) -> Value {
     let updated = updated_ids
         .iter()
-        .filter_map(|id| {
-            snapshot
-                .items
-                .iter()
-                .find(|todo| todo.id == id.as_str())
-        })
+        .filter_map(|id| snapshot.items.iter().find(|todo| todo.id == id.as_str()))
         .map(todo_brief)
         .collect::<Vec<_>>();
     serde_json::json!({
@@ -424,7 +431,7 @@ fn create_schema() -> Value {
             "items": {
                 "type": "array",
                 "minItems": 1,
-                "maxItems": 256,
+                "maxItems": MAX_MODEL_TODO_UPDATES,
                 "items": todo_fields_schema(true)
             }
         },
@@ -441,7 +448,7 @@ fn update_schema() -> Value {
             "updates": {
                 "type": "array",
                 "minItems": 1,
-                "maxItems": 256,
+                "maxItems": MAX_MODEL_TODO_UPDATES,
                 "items": todo_update_item_schema()
             }
         },
@@ -611,6 +618,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn todo_create_rejects_more_than_the_model_projection_limit() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
+        let store = Arc::new(TodoStore::new(directory.path(), persistence));
+        let create = TodoTool::create(store);
+        let context = context(directory.path());
+        let items = (1..=41)
+            .map(|index| serde_json::json!({ "subject": format!("todo {index}") }))
+            .collect::<Vec<_>>();
+
+        let result = create
+            .execute(&serde_json::json!({ "items": items }), &context)
+            .await;
+
+        assert!(matches!(
+            result,
+            ToolExecutionResult::Error { error, .. }
+                if error.code == "TODO_INPUT_INVALID"
+                    && error.message.contains("at most 40 items")
+        ));
+    }
+
+    #[tokio::test]
     async fn todo_update_commits_a_complete_and_start_transition_atomically() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
         let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
@@ -659,6 +689,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn todo_update_rejects_more_than_the_model_projection_limit() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
+        let store = Arc::new(TodoStore::new(directory.path(), persistence));
+        let create = TodoTool::create(Arc::clone(&store));
+        let update = TodoTool::update(store);
+        let context = context(directory.path());
+        create
+            .execute(
+                &serde_json::json!({ "items": [{ "subject": "first" }] }),
+                &context,
+            )
+            .await;
+        let updates = (1..=41)
+            .map(|index| serde_json::json!({ "todoId": "t1", "subject": format!("todo {index}") }))
+            .collect::<Vec<_>>();
+
+        let result = update
+            .execute(&serde_json::json!({ "updates": updates }), &context)
+            .await;
+
+        assert!(matches!(
+            result,
+            ToolExecutionResult::Error { error, .. }
+                if error.code == "TODO_INPUT_INVALID"
+                    && error.message.contains("at most 40 items")
+        ));
+    }
+
+    #[tokio::test]
     async fn todo_update_conflict_returns_the_latest_snapshot() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
         let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
@@ -701,11 +761,17 @@ mod tests {
         let create = TodoTool::create(Arc::clone(&store));
         let update = TodoTool::update(store);
         let context = context(directory.path());
-        let items = (1..=45)
+        let first_batch = (1..=40)
+            .map(|index| serde_json::json!({ "subject": format!("todo {index}") }))
+            .collect::<Vec<_>>();
+        let second_batch = (41..=45)
             .map(|index| serde_json::json!({ "subject": format!("todo {index}") }))
             .collect::<Vec<_>>();
         create
-            .execute(&serde_json::json!({ "items": items }), &context)
+            .execute(&serde_json::json!({ "items": first_batch }), &context)
+            .await;
+        create
+            .execute(&serde_json::json!({ "items": second_batch }), &context)
             .await;
 
         let conflicted = update

@@ -3,6 +3,11 @@ import { createStore } from 'zustand/vanilla'
 import type { ChatState } from '../renderer/src/stores/chatStore/types'
 import { createRuntimeStatusSlice } from '../renderer/src/stores/chatStore/slices/runtimeStatusSlice'
 
+const getRuntimeStatus = vi.hoisted(() => vi.fn())
+vi.mock('../renderer/src/shared/desktop/api', () => ({
+  desktopApi: { chat: { getRuntimeStatus } }
+}))
+
 const inactiveStatus = {
   sessionId: 'session-a',
   mainRunnerActive: false,
@@ -11,18 +16,12 @@ const inactiveStatus = {
 
 describe('renderer runtime status slice', () => {
   beforeEach(() => {
-    ;(globalThis as any).window = {
-      api: {
-        chat: {
-          getRuntimeStatus: vi.fn()
-        }
-      }
-    }
+    getRuntimeStatus.mockReset()
   })
 
   it('does not let an unversioned query overwrite a newer event', async () => {
     let resolveQuery!: (value: typeof inactiveStatus) => void
-    ;(window as any).api.chat.getRuntimeStatus.mockReturnValue(
+    getRuntimeStatus.mockReturnValue(
       new Promise((resolve) => { resolveQuery = resolve })
     )
     const store = createStore<ChatState>()((...args) => ({
@@ -44,7 +43,7 @@ describe('renderer runtime status slice', () => {
   })
 
   it('stores an initial query result and ignores older events', async () => {
-    ;(window as any).api.chat.getRuntimeStatus.mockResolvedValue(inactiveStatus)
+    getRuntimeStatus.mockResolvedValue(inactiveStatus)
     const store = createStore<ChatState>()((...args) => ({
       ...createRuntimeStatusSlice(...args)
     } as ChatState))
@@ -55,7 +54,7 @@ describe('renderer runtime status slice', () => {
       status: { ...inactiveStatus, mainRunnerActive: true }
     })
 
-    expect((window as any).api.chat.getRuntimeStatus).toHaveBeenCalledTimes(1)
+    expect(getRuntimeStatus).toHaveBeenCalledTimes(1)
     expect(store.getState().runtimeStatuses['session-a']).toEqual({
       version: 0,
       status: inactiveStatus

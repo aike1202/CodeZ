@@ -7,7 +7,6 @@ import type {
   ExecutionTimelineItem,
   ToolCallState
 } from '../types'
-import { useWorkspaceStore } from '../../workspaceStore'
 import { desktopApi } from '../../../shared/desktop'
 import type { SessionData } from '@shared/types/session'
 import type {
@@ -556,19 +555,6 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
         if (healed.changed || interruptedRequests.changed) {
           await desktopApi.session.save(persistedSession(healedSession))
         }
-        if (desktopApi.capabilities.plan && freshSession.linkedPlanSlug) {
-          try {
-            const workspace = useWorkspaceStore.getState().workspace
-            if (workspace) {
-              const plan = await (window as any).api.plan.load(workspace.rootPath, freshSession.linkedPlanSlug)
-              if (get().activeSessionId === sessionId) {
-                set({ activePlan: plan })
-              }
-            }
-          } catch {
-            // ignore
-          }
-        }
         return
       }
     } catch (err) {
@@ -596,47 +582,10 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
         pendingInternalContinuation: null,
         activePlan: null
       }))
-      if (desktopApi.capabilities.plan && session.linkedPlanSlug) {
-        try {
-          const workspace = useWorkspaceStore.getState().workspace
-          if (workspace) {
-            const plan = await (window as any).api.plan.load(workspace.rootPath, session.linkedPlanSlug)
-            if (get().activeSessionId === sessionId) {
-              set({ activePlan: plan })
-            }
-          }
-        } catch {
-          // ignore
-        }
-      }
     }
   },
 
-  linkPlanToSession: async (sessionId: string, planSlug: string | null) => {
-    if (!desktopApi.capabilities.plan) return
-
-    set((s) => ({
-      sessions: s.sessions.map((sess) =>
-        sess.id === sessionId ? { ...sess, linkedPlanSlug: planSlug || undefined } : sess
-      )
-    }))
-    if (get().activeSessionId === sessionId) {
-      if (!planSlug) {
-        set({ activePlan: null })
-      } else {
-        try {
-          const workspace = useWorkspaceStore.getState().workspace
-          if (workspace) {
-            const plan = await (window as any).api.plan.load(workspace.rootPath, planSlug)
-            set({ activePlan: plan })
-          }
-        } catch {
-          // ignore
-        }
-      }
-      await get().persistCurrentSession()
-    }
-  },
+  linkPlanToSession: async () => undefined,
 
   persistCurrentSession: async () => {
     const { sessions, activeSessionId } = get()

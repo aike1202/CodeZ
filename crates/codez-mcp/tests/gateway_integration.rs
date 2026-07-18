@@ -30,7 +30,9 @@ fn workspace_root() -> PathBuf {
 }
 
 fn fixture(name: &str) -> PathBuf {
-    workspace_root().join("src/tests/fixtures").join(name)
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name)
 }
 
 fn node_executable() -> TestResult<PathBuf> {

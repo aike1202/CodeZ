@@ -5,10 +5,15 @@ vi.mock('../renderer/src/stores/workspaceStore', () => ({
   useWorkspaceStore: { getState: () => ({ workspace: null }) }
 }))
 
+const saveSession = vi.hoisted(() => vi.fn())
+vi.mock('../renderer/src/shared/desktop/api', () => ({
+  desktopApi: { session: { save: saveSession } }
+}))
+
 describe('chat message terminal status', () => {
   beforeEach(() => {
     vi.resetModules()
-    ;(globalThis as any).window = { api: { session: { save: vi.fn() } } }
+    saveSession.mockReset()
   })
 
   it('stores a structured terminal status on the selected agent message', async () => {

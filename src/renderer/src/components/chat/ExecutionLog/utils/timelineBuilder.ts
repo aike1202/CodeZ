@@ -10,7 +10,6 @@ import {
   getToolNoun,
   getToolTarget
 } from './itemParsers'
-import { parseTodoUpdateDetail } from '../../ExecutionLogDetail/todoUpdateDetail'
 
 function getReadFileStatuses(
   result: string | undefined,
@@ -328,8 +327,6 @@ export function buildUnifiedTimeline(
           || tc.name === 'delegate'
         ) {
           verbDisplay = tc.status === 'running' ? 'Dispatching' : 'Dispatched'
-        } else if (tc.name === 'DelegateTasks') {
-          verbDisplay = tc.status === 'running' ? 'Executing' : 'Executed'
         } else if (tc.name === 'Write' || tc.name === 'write_to_file') {
           verbDisplay = tc.status === 'running' ? 'Saving' : 'Saved'
         } else if (tc.name === 'Skill' || tc.name === 'ActivateSkill' || tc.name === 'invoke_skill') {
@@ -422,12 +419,11 @@ export function buildUnifiedTimeline(
           }
         }
 
-        // SubAgentRunner / spawn / DelegateTasks：展示委派目标
+        // SubAgentRunner / spawn：展示委派目标
         if (
           tc.name === 'SubAgentRunner'
           || tc.name === 'spawn'
           || tc.name === 'spawn_agent'
-          || tc.name === 'DelegateTasks'
         ) {
           try {
             const ta = JSON.parse(tc.args)
@@ -456,8 +452,7 @@ export function buildUnifiedTimeline(
           }
         }
 
-        // TodoCreate (TaskCreate is retained for historical logs)
-        if (tc.name === 'TodoCreate' || tc.name === 'TaskCreate') {
+        if (tc.name === 'TodoCreate') {
           try {
             const res = JSON.parse(tc.result || '{}')
             const created = res.data?.created || res.snapshot?.items || res.data?.snapshot?.items || []
@@ -472,11 +467,10 @@ export function buildUnifiedTimeline(
           }
         }
 
-        // TodoUpdate (TaskUpdate is retained for historical logs)
-        if (tc.name === 'TodoUpdate' || tc.name === 'TaskUpdate') {
+        if (tc.name === 'TodoUpdate') {
           try {
             const res = JSON.parse(tc.result || '{}')
-            const todo = res.data?.updated?.[0] || res.data?.todo || res.data?.task
+            const todo = res.data?.updated?.[0] || res.data?.todo
             if (todo) {
               if (todo.status === 'completed') {
                 targetDisplay = `完成待办：${todo.subject}`
@@ -513,45 +507,6 @@ export function buildUnifiedTimeline(
           toolName: tc.name,
           ...toolTimelineMeta
         })
-
-        if (tc.name === 'DelegateTasks' && tc.status === 'success') {
-          try {
-            const result = JSON.parse(tc.result || '{}')
-            const legacyTerminalTasks = Array.isArray(result?.data?.terminalTasks)
-              ? result.data.terminalTasks
-              : []
-
-            legacyTerminalTasks.forEach((legacyTodo: unknown, index: number) => {
-              const detail = JSON.stringify({
-                ok: true,
-                data: {
-                  task: legacyTodo,
-                  summary: result.data.status
-                }
-              })
-              const todo = parseTodoUpdateDetail(detail)?.todo
-              const isTerminal = todo?.status === 'completed' || todo?.status === 'cancelled'
-              if (!isTerminal || !todo.id || !todo.subject) return
-
-              list.push({
-                id: `${tc.id}_todo_${todo.id}`,
-                type: 'tool',
-                timestamp: (tc.completedAt ?? tc.startedAt) + index + 1,
-                completedAt: tc.completedAt,
-                status: 'success',
-                verb: 'Executed',
-                target: todo.status === 'completed'
-                  ? `完成待办：${todo.subject}`
-                  : `取消待办：${todo.subject}`,
-                args: JSON.stringify({ todoId: todo.id, status: todo.status }),
-                detail,
-                toolName: 'TodoUpdate'
-              })
-            })
-          } catch {
-            // Keep the DelegateTasks row even when a legacy result cannot be expanded.
-          }
-        }
       }
     }
   })

@@ -22,7 +22,7 @@ export function parseTodoUpdateDetail(detail?: string): ParsedTodoUpdateDetail |
 
   try {
     const parsed = JSON.parse(detail)
-    const todo = parsed?.data?.updated?.[0] ?? parsed?.data?.todo ?? parsed?.data?.task
+    const todo = parsed?.data?.updated?.[0] ?? parsed?.data?.todo
     if (!todo || typeof todo !== 'object') return null
 
     return {

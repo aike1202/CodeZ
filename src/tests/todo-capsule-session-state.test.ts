@@ -5,7 +5,7 @@ import { TodoCapsule } from '../renderer/src/components/chat/TodoCapsule'
 import type { TodoItem } from '../shared/types/todo'
 
 const mockChatState = vi.hoisted(() => ({
-  tasks: [] as TodoItem[],
+  todos: [] as TodoItem[],
   expandedCapsule: null as 'todo' | 'plan' | null,
   setExpandedCapsule: vi.fn()
 }))
@@ -17,7 +17,7 @@ vi.mock('../renderer/src/stores/chatStore', () => ({
 const activeTasks: TodoItem[] = [
   {
     id: 't1',
-    subject: 'Keep Task state session-scoped',
+    subject: 'Keep Todo state session-scoped',
     description: 'The store controls visible expansion.',
     status: 'pending'
   }
@@ -25,7 +25,7 @@ const activeTasks: TodoItem[] = [
 
 describe('TodoCapsule session state', () => {
   beforeEach(() => {
-    mockChatState.tasks = activeTasks
+    mockChatState.todos = activeTasks
     mockChatState.expandedCapsule = null
     mockChatState.setExpandedCapsule.mockReset()
   })
@@ -37,11 +37,11 @@ describe('TodoCapsule session state', () => {
     mockChatState.expandedCapsule = 'todo'
     const expanded = renderToStaticMarkup(React.createElement(TodoCapsule))
     expect(expanded).toContain('plan-capsule-popover')
-    expect(expanded).toContain('Keep Task state session-scoped')
+    expect(expanded).toContain('Keep Todo state session-scoped')
   })
 
   it('renders Todo status without deriving it from Executor state', () => {
-    mockChatState.tasks = [
+    mockChatState.todos = [
       {
         id: 't1',
         subject: 'Implement the active Todo',
@@ -65,7 +65,7 @@ describe('TodoCapsule session state', () => {
   })
 
   it('renders dependency and approval blockers separately from ready tasks', () => {
-    mockChatState.tasks = [
+    mockChatState.todos = [
       {
         id: 't1',
         subject: 'Complete prerequisite',

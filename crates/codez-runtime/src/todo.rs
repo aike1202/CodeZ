@@ -1,4 +1,4 @@
-﻿use std::{
+use std::{
     collections::HashSet,
     path::{Component, Path, PathBuf},
     sync::Arc,
@@ -384,6 +384,7 @@ impl TodoStore {
                 .ok_or_else(|| AppError::not_found("The Todo item was not found"))?;
             apply_patch(todo, update.patch);
         }
+        validate_approval_policy_transitions(&previous, &next.items)?;
         for todo in &next.items {
             validate_todo(todo)?;
         }
@@ -521,13 +522,46 @@ pub fn todo_model_state(snapshot: &TodoListSnapshot) -> serde_json::Value {
     let items = snapshot
         .items
         .iter()
+        .filter(|todo| todo.status == TodoStatus::InProgress)
+        .chain(
+            snapshot
+                .items
+                .iter()
+                .filter(|todo| todo.status == TodoStatus::Pending),
+        )
+        .chain(
+            snapshot
+                .items
+                .iter()
+                .rev()
+                .filter(|todo| todo.status.is_terminal()),
+        )
         .take(MAX_PROMPT_TODO_ITEMS)
         .map(|todo| {
+            let waiting_on = todo
+                .blocked_by
+                .iter()
+                .filter(|dependency| {
+                    snapshot
+                        .items
+                        .iter()
+                        .find(|candidate| candidate.id == dependency.as_str())
+                        .is_none_or(|candidate| candidate.status != TodoStatus::Completed)
+                })
+                .take(MAX_PROMPT_DETAIL_ITEMS)
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            let approval_ready =
+                !todo.requires_approval || todo.approval_status == TodoApprovalStatus::Approved;
+            let ready =
+                todo.status == TodoStatus::Pending && waiting_on.is_empty() && approval_ready;
             serde_json::json!({
                 "id": todo.id,
                 "subject": bounded_prompt_text(&todo.subject, MAX_PROMPT_SUBJECT_CHARS),
                 "status": todo.status,
                 "blockedBy": bounded_prompt_list(&todo.blocked_by),
+                "waitingOn": waiting_on,
+                "ready": ready,
                 "requiresApproval": todo.requires_approval,
                 "approvalStatus": todo.approval_status,
             })
@@ -548,11 +582,17 @@ pub fn todo_model_state(snapshot: &TodoListSnapshot) -> serde_json::Value {
         .iter()
         .filter(|todo| todo.status == TodoStatus::Cancelled)
         .count();
+    let in_progress = snapshot
+        .items
+        .iter()
+        .filter(|todo| todo.status == TodoStatus::InProgress)
+        .count();
     serde_json::json!({
         "summary": {
             "total": snapshot.items.len(),
             "completed": completed,
             "pending": pending,
+            "inProgress": in_progress,
             "cancelled": cancelled,
             "omitted": snapshot.items.len().saturating_sub(items.len()),
         },
@@ -793,8 +833,40 @@ fn apply_patch(todo: &mut TodoItem, patch: TodoItemPatch) {
 }
 
 fn validate_create_input(input: &TodoCreateInput) -> Result<(), AppError> {
+    match (input.requires_approval, input.approval_status) {
+        (true, Some(status)) if status != TodoApprovalStatus::Pending => {
+            return Err(AppError::validation(
+                "A newly created Todo requiring approval must start pending",
+            ));
+        }
+        (false, Some(status)) if status != TodoApprovalStatus::NotRequired => {
+            return Err(AppError::validation(
+                "A newly created Todo without approval requirements must be not required",
+            ));
+        }
+        _ => {}
+    }
     let todo = todo_from_create(1, input.clone());
     validate_todo(&todo)
+}
+
+fn validate_approval_policy_transitions(
+    previous: &[TodoItem],
+    next: &[TodoItem],
+) -> Result<(), AppError> {
+    for previous_todo in previous.iter().filter(|todo| todo.requires_approval) {
+        let current = next
+            .iter()
+            .find(|todo| todo.id == previous_todo.id)
+            .ok_or_else(|| AppError::internal("updated Todo item disappeared"))?;
+        if !current.requires_approval {
+            return Err(AppError::conflict(format!(
+                "Todo '{}' cannot remove an existing approval requirement",
+                current.id
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn validate_update_input(input: &TodoItemPatch) -> Result<(), AppError> {
@@ -1132,8 +1204,9 @@ mod tests {
     use codez_storage::AtomicFileStore;
 
     use super::{
-        TodoApprovalStatus, TodoCreateInput, TodoEventSink, TodoItem, TodoItemUpdate, TodoListSnapshot,
-        TodoStatus, TodoStore, TodoItemPatch, todo_prompt_state,
+        TodoApprovalStatus, TodoCreateInput, TodoEventSink, TodoItem, TodoItemPatch,
+        TodoItemUpdate, TodoListSnapshot, TodoStatus, TodoStore, todo_model_state,
+        todo_prompt_state,
     };
 
     #[derive(Default)]
@@ -1333,10 +1406,7 @@ mod tests {
     #[tokio::test]
     async fn persisted_snapshot_keeps_the_legacy_tasks_field() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
-        let store = TodoStore::new(
-            directory.path(),
-            Arc::new(AtomicFileStore::default()),
-        );
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
         let session_id = session("session-1");
         store
             .create(&session_id, vec![input("persisted")])
@@ -1827,6 +1897,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_cannot_declare_an_approved_todo() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+        let session_id = session("session-1");
+        let mut approval_todo = input("approval todo");
+        approval_todo.requires_approval = true;
+        approval_todo.approval_status = Some(TodoApprovalStatus::Approved);
+
+        let error = store
+            .create(&session_id, vec![approval_todo])
+            .await
+            .expect_err("Todo creation must not bypass approval");
+
+        assert_eq!(error.kind(), AppErrorKind::Validation);
+    }
+
+    #[tokio::test]
+    async fn update_cannot_remove_an_existing_approval_requirement() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+        let session_id = session("session-1");
+        let mut approval_todo = input("approval todo");
+        approval_todo.requires_approval = true;
+        store
+            .create(&session_id, vec![approval_todo])
+            .await
+            .expect("Todo creation must succeed");
+
+        let error = store
+            .update(
+                &session_id,
+                "t1",
+                TodoItemPatch {
+                    requires_approval: Some(false),
+                    approval_status: Some(TodoApprovalStatus::NotRequired),
+                    ..TodoItemPatch::default()
+                },
+            )
+            .await
+            .expect_err("Todo approval requirements must be irreversible");
+
+        assert_eq!(error.kind(), AppErrorKind::Conflict);
+    }
+
+    #[tokio::test]
     async fn empty_update_is_rejected() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
         let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
@@ -2029,6 +2144,71 @@ mod tests {
                     "x".repeat(super::MAX_PROMPT_DESCRIPTION_CHARS)
                 ))
                 && !state.contains("active <item>")
+        );
+    }
+
+    #[test]
+    fn todo_model_state_prioritizes_active_and_non_terminal_items() {
+        let items = (1..=45)
+            .map(|index| TodoItem {
+                id: format!("t{index}"),
+                subject: format!("todo {index}"),
+                description: String::new(),
+                status: if index == 45 {
+                    TodoStatus::InProgress
+                } else if index > 40 {
+                    TodoStatus::Pending
+                } else {
+                    TodoStatus::Completed
+                },
+                blocked_by: match index {
+                    41 => vec!["t1".to_string()],
+                    42 => vec!["t44".to_string()],
+                    _ => Vec::new(),
+                },
+                files: Vec::new(),
+                active_form: None,
+                group_id: None,
+                group_title: None,
+                group_subtitle: None,
+                risk_level: None,
+                requires_approval: false,
+                approval_status: TodoApprovalStatus::NotRequired,
+                acceptance_criteria: Vec::new(),
+                verification_command: None,
+                context_bundle: None,
+            })
+            .collect();
+        let snapshot = TodoListSnapshot {
+            version: 1,
+            session_id: session("session-1"),
+            revision: 9,
+            next_sequence: 46,
+            items,
+        };
+
+        let state = todo_model_state(&snapshot);
+        let visible = state["items"]
+            .as_array()
+            .expect("Todo model state items must be an array");
+        let todo_41 = visible
+            .iter()
+            .find(|todo| todo["id"] == "t41")
+            .expect("first pending Todo must remain visible");
+        let todo_42 = visible
+            .iter()
+            .find(|todo| todo["id"] == "t42")
+            .expect("blocked pending Todo must remain visible");
+
+        assert!(
+            visible.len() == super::MAX_PROMPT_TODO_ITEMS
+                && visible[0]["id"] == "t45"
+                && todo_41["ready"] == true
+                && todo_41["waitingOn"].as_array().is_some_and(Vec::is_empty)
+                && todo_42["ready"] == false
+                && todo_42["waitingOn"][0] == "t44"
+                && visible.iter().all(|todo| todo["id"] != "t1")
+                && state["summary"]["omitted"] == 5
         );
     }
 }

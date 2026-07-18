@@ -2,8 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { acceptPendingEdits } from '../renderer/src/components/chat/EditApprovalWidget'
 import { useChatStore } from '../renderer/src/stores/chatStore'
 
+const saveSession = vi.hoisted(() => vi.fn(async () => undefined))
+vi.mock('../renderer/src/shared/desktop/api', () => ({
+  desktopApi: { session: { save: saveSession } }
+}))
+
 afterEach(() => {
-  vi.unstubAllGlobals()
+  saveSession.mockClear()
 })
 
 describe('edit approval acceptance', () => {
@@ -47,8 +52,6 @@ describe('edit approval acceptance', () => {
   })
 
   it('records all accepted files in one message update', async () => {
-    const save = vi.fn(async () => undefined)
-    vi.stubGlobal('window', { api: { session: { save } } })
     const message = { id: 'agent-1', role: 'agent' as const, content: '' }
     const session = {
       id: 'session-1', projectId: 'project-1', summary: '', relativeTime: '', messages: [message]
@@ -70,6 +73,6 @@ describe('edit approval acceptance', () => {
       'docs/spec.md': 'accepted',
       'docs/plan.md': 'accepted'
     })
-    await vi.waitFor(() => expect(save).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(saveSession).toHaveBeenCalledOnce())
   })
 })

@@ -3,7 +3,11 @@ import { createStore } from 'zustand/vanilla'
 import type { ChatState } from '../renderer/src/stores/chatStore/types'
 import { createSessionSlice } from '../renderer/src/stores/chatStore/slices/sessionSlice'
 
-const save = vi.fn()
+const { save, list } = vi.hoisted(() => ({ save: vi.fn(), list: vi.fn() }))
+
+vi.mock('../renderer/src/shared/desktop/api', () => ({
+  desktopApi: { session: { list, save } }
+}))
 
 function createSessionStore() {
   return createStore<ChatState>()((...args) => ({
@@ -15,15 +19,7 @@ function createSessionStore() {
 describe('queued prompt session state', () => {
   beforeEach(() => {
     save.mockReset()
-    ;(globalThis as any).window = {
-      api: {
-        session: {
-          list: vi.fn().mockResolvedValue([]),
-          get: vi.fn(),
-          save
-        }
-      }
-    }
+    list.mockReset().mockResolvedValue([])
   })
 
   it('keeps FIFO order and persists queue edits', () => {
@@ -53,7 +49,7 @@ describe('queued prompt session state', () => {
 
   it('restores in-flight steering entries as queued after reload', async () => {
     const store = createSessionStore()
-    ;(window as any).api.session.list.mockResolvedValue([{
+    list.mockResolvedValue([{
       id: 's1', projectId: 'p1', summary: 'Session', relativeTime: 'now', messages: [],
       queuedPrompts: [{
         id: 'q1', text: 'resume me', modelName: 'm1', attachments: [],

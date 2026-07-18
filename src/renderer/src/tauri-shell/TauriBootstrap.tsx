@@ -124,8 +124,8 @@ export default function TauriBootstrap(): React.ReactElement {
           </div>
           <div className="tauri-bootstrap__trace-row">
             <span className="tauri-bootstrap__trace-node" />
-            <span className="tauri-bootstrap__trace-label">Electron removal</span>
-            <span className="tauri-bootstrap__trace-value">gated</span>
+            <span className="tauri-bootstrap__trace-label">Desktop runtime</span>
+            <span className="tauri-bootstrap__trace-value">Tauri</span>
           </div>
         </section>
 

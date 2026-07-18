@@ -380,8 +380,8 @@ export default function ExecutionLogDetail({
       )
     }
 
-    const isTodoCreate = item.toolName === 'TodoCreate' || item.toolName === 'TaskCreate'
-    const isTodoUpdate = item.toolName === 'TodoUpdate' || item.toolName === 'TaskUpdate'
+    const isTodoCreate = item.toolName === 'TodoCreate'
+    const isTodoUpdate = item.toolName === 'TodoUpdate'
     if (isTodoCreate || isTodoUpdate) {
       let parsedArgs: any = null
       try {

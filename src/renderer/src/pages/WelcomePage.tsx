@@ -102,7 +102,7 @@ export default function WelcomePage(): React.ReactElement {
             </Stack>
           )}
 
-          <p className="welcome-footer-text">Electron + TypeScript + React</p>
+          <p className="welcome-footer-text">Tauri + Rust + React</p>
         </Stack>
       </Card>
     </Flex>

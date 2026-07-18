@@ -8,7 +8,7 @@ use crate::AtomicFileStore;
 
 fn fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../src/tests/fixtures/migration/legacy-data-v0")
+        .join("tests/fixtures/migration/legacy-data-v0")
         .canonicalize()
         .expect("legacy fixture root must exist")
 }

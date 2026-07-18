@@ -4,7 +4,6 @@ import type {
   AgentUpdatedEvent,
   DesktopEvent,
   SubAgentRunState,
-  TodoItem,
   TodoUpdatedEvent,
   ThemeInfo
 } from './generated/contracts'
@@ -14,20 +13,12 @@ const TODO_UPDATED_EVENT = 'todo:updated'
 const AGENT_UPDATED_EVENT = 'agent:updated'
 const SUBAGENT_STATE_EVENT = 'subagent:state'
 
-const legacyTodoRevisions = new Map<string, number>()
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function isNonNegativeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0
-}
-
-function isTauriRuntime(): boolean {
-  if (typeof window === 'undefined') return true
-  if ('__TAURI_INTERNALS__' in window) return true
-  return !(window as unknown as { api?: Window['api'] }).api
 }
 
 export function isTodoUpdatedEvent(value: unknown): value is TodoUpdatedEvent {
@@ -65,62 +56,6 @@ function isSubAgentRunState(value: unknown): value is SubAgentRunState {
     && ['running', 'completed', 'failed', 'interrupted'].includes(String(value.status))
 }
 
-function legacyTodoItems(value: unknown): TodoItem[] {
-  if (!Array.isArray(value)) return []
-  return value.filter(isRecord).flatMap((item) => {
-    if (
-      typeof item.id !== 'string'
-      || typeof item.subject !== 'string'
-      || typeof item.description !== 'string'
-      || !['pending', 'in_progress', 'completed', 'cancelled'].includes(String(item.status))
-    ) {
-      return []
-    }
-    const requiresApproval = item.requiresApproval === true
-    return [{
-      ...item,
-      requiresApproval,
-      approvalStatus: typeof item.approvalStatus === 'string'
-        ? item.approvalStatus
-        : requiresApproval ? 'pending' : 'not_required'
-    } as TodoItem]
-  })
-}
-
-function legacyTodoListener(callback: (event: TodoUpdatedEvent) => void): UnlistenFn {
-  const task = (window as unknown as {
-    api?: {
-      task?: {
-        subscribe?: (
-          callback: (payload: { sessionId: string; tasks: unknown[] }) => void
-        ) => UnlistenFn
-      }
-    }
-  }).api?.task
-  if (!task?.subscribe) return () => undefined
-  return task.subscribe((payload) => {
-    if (!payload || typeof payload.sessionId !== 'string' || payload.sessionId.length === 0) return
-    const revision = (legacyTodoRevisions.get(payload.sessionId) ?? 0) + 1
-    legacyTodoRevisions.set(payload.sessionId, revision)
-    callback({
-      version: 1,
-      sessionId: payload.sessionId,
-      revision,
-      snapshot: {
-        version: 1,
-        sessionId: payload.sessionId,
-        revision,
-        nextSequence: 0,
-        items: legacyTodoItems(payload.tasks)
-      }
-    })
-  })
-}
-
-export function getLegacyTodoRevision(sessionId: string): number {
-  return legacyTodoRevisions.get(sessionId) ?? 0
-}
-
 export interface DesktopEvents {
   theme: {
     onChanged(callback: (event: DesktopEvent<ThemeInfo>) => void): Promise<UnlistenFn>
@@ -144,7 +79,6 @@ export const desktopEvents: DesktopEvents = {
   },
   todo: {
     onUpdated: async (callback) => {
-      if (!isTauriRuntime()) return legacyTodoListener(callback)
       return listen<unknown>(TODO_UPDATED_EVENT, (event) => {
         if (isTodoUpdatedEvent(event.payload)) callback(event.payload)
       })
@@ -152,7 +86,6 @@ export const desktopEvents: DesktopEvents = {
   },
   agent: {
     onUpdated: async (callback) => {
-      if (!isTauriRuntime()) return () => undefined
       return listen<unknown>(AGENT_UPDATED_EVENT, (event) => {
         if (isAgentUpdatedEvent(event.payload)) callback(event.payload)
       })
@@ -160,10 +93,6 @@ export const desktopEvents: DesktopEvents = {
   },
   subAgent: {
     onState: async (callback) => {
-      if (!isTauriRuntime()) {
-        const subAgent = (window as unknown as { api?: Window['api'] }).api?.subAgent
-        return subAgent?.onState(callback) ?? (() => undefined)
-      }
       return listen<unknown>(SUBAGENT_STATE_EVENT, (event) => {
         if (isSubAgentRunState(event.payload)) callback(event.payload)
       })

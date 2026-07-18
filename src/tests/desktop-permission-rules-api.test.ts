@@ -83,32 +83,4 @@ describe('desktop permission and rules adapter', () => {
     ])
   })
 
-  it('uses the frozen Electron APIs only at the adapter boundary', async () => {
-    const permission = {
-      getMode: vi.fn().mockResolvedValue('auto'),
-      setMode: vi.fn().mockResolvedValue('full-access')
-    }
-    const rules = {
-      getList: vi.fn().mockResolvedValue([rule]),
-      save: vi.fn().mockResolvedValue(true),
-      delete: vi.fn().mockResolvedValue(true),
-      rename: vi.fn().mockResolvedValue(true)
-    }
-    setWindow({ api: { permission, rules } })
-
-    await desktopApi.permission.getMode(workspace.rootPath)
-    await desktopApi.permission.setMode(workspace.rootPath, 'full-access')
-    await desktopApi.rules.getList([workspace])
-    await desktopApi.rules.save(rule, workspace.rootPath)
-    await desktopApi.rules.delete(rule.path)
-    await desktopApi.rules.rename(rule.path, 'team.md', workspace.rootPath, 'workspace')
-
-    expect(tauriMocks.invoke).not.toHaveBeenCalled()
-    expect(permission.getMode).toHaveBeenCalledWith(workspace.rootPath)
-    expect(permission.setMode).toHaveBeenCalledWith(workspace.rootPath, 'full-access')
-    expect(rules.getList).toHaveBeenCalledWith([workspace])
-    expect(rules.save).toHaveBeenCalledWith(rule, workspace.rootPath)
-    expect(rules.delete).toHaveBeenCalledWith(rule.path)
-    expect(rules.rename).toHaveBeenCalledWith(rule.path, 'team.md', workspace.rootPath, 'workspace')
-  })
 })

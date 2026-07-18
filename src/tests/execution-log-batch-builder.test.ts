@@ -82,12 +82,12 @@ describe('execution log parallel batch builder', () => {
         sequence: 0
       },
       {
-        id: 'tool_task-get-visible',
+        id: 'tool_todo-update-visible',
         type: 'tool',
         toolCall: {
-          id: 'task-get-visible',
-          name: 'TaskGet',
-          args: JSON.stringify({ taskId: 't1' }),
+          id: 'todo-update-visible',
+          name: 'TodoUpdate',
+          args: JSON.stringify({ updates: [{ todoId: 't1', status: 'pending' }] }),
           status: 'success',
           result: '{}',
           startedAt: 101,
@@ -105,7 +105,7 @@ describe('execution log parallel batch builder', () => {
 
     const visible = buildUnifiedTimeline(timeline, [], [], undefined, false)
     expect(groupParallelToolBatches(visible)).toEqual(visible)
-    expect(visible).toMatchObject([{ toolName: 'TaskGet' }])
+    expect(visible).toMatchObject([{ toolName: 'TodoUpdate' }])
   })
 
   it('groups one model response into one parallel batch', () => {
@@ -376,12 +376,12 @@ describe('execution log parallel batch builder', () => {
         sequence: 0
       },
       {
-        id: 'tool_task-get',
+        id: 'tool_todo-update',
         type: 'tool',
         toolCall: {
-          id: 'task-get',
-          name: 'TaskGet',
-          args: JSON.stringify({ taskId: 't1' }),
+          id: 'todo-update',
+          name: 'TodoUpdate',
+          args: JSON.stringify({ updates: [{ todoId: 't1', status: 'pending' }] }),
           status: 'success',
           result: '{}',
           startedAt: 101,
@@ -406,12 +406,12 @@ describe('execution log parallel batch builder', () => {
     expect((batch as ParallelToolBatchItem).batchSize).toBe(2)
     expect((batch as ParallelToolBatchItem).items.map((item) => item.target)).toEqual([
       '2 个文件',
-      'TaskGet'
+      '更新待办状态'
     ])
   })
 })
 
-describe('legacy edit execution log', () => {
+describe('edit execution log', () => {
   it('shows only the file name for Edit while preserving its full path', () => {
     const filePath = 'F:\\Project\\src\\components\\App.tsx'
     const timeline: ExecutionTimelineItem[] = [{
@@ -462,26 +462,26 @@ describe('legacy edit execution log', () => {
   })
 })
 
-const taskUpdateTimeline = (status: 'completed' | 'cancelled'): ExecutionTimelineItem[] => [{
-  id: `tool_task-${status}`,
+const todoUpdateTimeline = (status: 'completed' | 'cancelled'): ExecutionTimelineItem[] => [{
+  id: `tool_todo-${status}`,
   type: 'tool',
   toolCall: {
-    id: `task-${status}`,
-    name: 'TaskUpdate',
-    args: JSON.stringify({ taskId: 't1', status }),
+    id: `todo-${status}`,
+    name: 'TodoUpdate',
+    args: JSON.stringify({ updates: [{ todoId: 't1', status }] }),
     status: 'success',
     result: JSON.stringify({
       ok: true,
       data: {
-        task: {
+        updated: [{
           id: 't1',
-          subject: 'Lifecycle task',
+          subject: 'Lifecycle Todo',
           description: 'Detailed terminal snapshot',
           status,
-          files: ['src/task.ts'],
+          files: ['src/todo.ts'],
           acceptanceCriteria: ['Terminal state is logged'],
           verificationCommand: 'npm test'
-        },
+        }],
         summary: '1/1 completed'
       }
     }),
@@ -494,100 +494,43 @@ const taskUpdateTimeline = (status: 'completed' | 'cancelled'): ExecutionTimelin
   sequence: 0
 }]
 
-describe('TaskUpdate execution log', () => {
+describe('TodoUpdate execution log', () => {
   it.each([
-    ['completed', '完成待办：Lifecycle task'],
-    ['cancelled', '取消待办：Lifecycle task']
-  ] as const)('keeps a %s TaskUpdate as a terminal execution log', (status, target) => {
-    const [item] = buildUnifiedTimeline(taskUpdateTimeline(status), [], [], undefined, false)
-    expect(item).toMatchObject({ toolName: 'TaskUpdate', target, status: 'success' })
+    ['completed', '完成待办：Lifecycle Todo'],
+    ['cancelled', '取消待办：Lifecycle Todo']
+  ] as const)('keeps a %s TodoUpdate as a terminal execution log', (status, target) => {
+    const [item] = buildUnifiedTimeline(todoUpdateTimeline(status), [], [], undefined, false)
+    expect(item).toMatchObject({ toolName: 'TodoUpdate', target, status: 'success' })
   })
 
-  it('derives one TaskUpdate terminal log per completed delegated task', () => {
-    const timeline: ExecutionTimelineItem[] = [{
-      id: 'tool_delegate',
-      type: 'tool',
-      toolCall: {
-        id: 'delegate',
-        name: 'DelegateTasks',
-        args: JSON.stringify({ waves: [{ index: 0, taskIds: ['t1'] }] }),
-        status: 'success',
-        result: JSON.stringify({
-          ok: true,
-          data: {
-            source: 'task:s1',
-            status: 'completed',
-            waves: [],
-            terminalTasks: [{
-              id: 't1',
-              subject: 'Delegated task',
-              description: 'Completed by a Worker',
-              status: 'completed',
-              files: ['src/delegated.ts'],
-              acceptanceCriteria: ['Worker result is retained'],
-              verificationCommand: 'npm test'
-            }]
-          }
-        }),
-        startedAt: 100,
-        completedAt: 200,
-        sequence: 0
-      },
-      startedAt: 100,
-      updatedAt: 200,
-      sequence: 0
-    }]
-
-    const items = buildUnifiedTimeline(timeline, [], [], undefined, false)
-    const terminalItem = items.find((item) => item.id === 'delegate_todo_t1')
-
-    expect(terminalItem).toMatchObject({
-      toolName: 'TodoUpdate',
-      target: '完成待办：Delegated task',
-      status: 'success'
-    })
-    expect(parseTodoUpdateDetail(terminalItem?.detail)).toMatchObject({
-      todo: {
-        id: 't1',
-        description: 'Completed by a Worker',
-        files: ['src/delegated.ts']
-      }
-    })
-  })
-
-  it('parses complete TaskUpdate detail and tolerates legacy reduced snapshots', () => {
-    const [fullItem] = buildUnifiedTimeline(taskUpdateTimeline('completed'), [], [], undefined, false)
+  it('parses the complete TodoUpdate detail', () => {
+    const [fullItem] = buildUnifiedTimeline(todoUpdateTimeline('completed'), [], [], undefined, false)
     expect(parseTodoUpdateDetail(fullItem.detail)).toMatchObject({
       todo: {
         description: 'Detailed terminal snapshot',
-        files: ['src/task.ts'],
+        files: ['src/todo.ts'],
         acceptanceCriteria: ['Terminal state is logged'],
         verificationCommand: 'npm test'
       }
     })
-
-    expect(parseTodoUpdateDetail(JSON.stringify({
-      ok: true,
-      data: { task: { id: 't1', subject: 'Legacy', status: 'completed' } }
-    }))).toMatchObject({ todo: { subject: 'Legacy', status: 'completed' } })
   })
 
-  it('drops malformed optional Task fields before structured rendering', () => {
+  it('drops malformed optional Todo fields before structured rendering', () => {
     const parsed = parseTodoUpdateDetail(JSON.stringify({
       ok: true,
       data: {
-        task: {
+        updated: [{
           id: 't1',
-          subject: 'Legacy',
+          subject: 'Todo',
           status: 'unknown',
-          files: 'src/task.ts',
+          files: 'src/todo.ts',
           acceptanceCriteria: [1, 2],
           verificationCommand: false
-        }
+        }]
       }
     }))
 
-    expect(parsed?.todo).toMatchObject({ id: 't1', subject: 'Legacy' })
+    expect(parsed?.todo).toMatchObject({ id: 't1', subject: 'Todo' })
     expect(parsed?.todo.status).toBeUndefined()
     expect(parsed?.todo.files).toBeUndefined()
     expect(parsed?.todo.acceptanceCriteria).toBeUndefined()

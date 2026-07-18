@@ -54,7 +54,7 @@ pub trait ChatProvider: Send + Sync {
 #[cfg(test)]
 fn protocol_fixture(provider: &str) -> serde_json::Value {
     let document: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../src/tests/fixtures/migration/provider-protocol-golden.json"
+        "../../tests/fixtures/provider-protocol-golden.json"
     ))
     .expect("frozen provider protocol fixture must be valid JSON");
     document["fixtures"]

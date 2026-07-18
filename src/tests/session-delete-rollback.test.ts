@@ -6,6 +6,11 @@ vi.mock('../renderer/src/stores/workspaceStore', () => ({
   }
 }))
 
+const deleteSession = vi.hoisted(() => vi.fn())
+vi.mock('../renderer/src/shared/desktop/api', () => ({
+  desktopApi: { session: { delete: deleteSession } }
+}))
+
 function deferred<T>() {
   let reject!: (reason?: unknown) => void
   const promise = new Promise<T>((_resolve, rejectPromise) => {
@@ -17,16 +22,7 @@ function deferred<T>() {
 describe('session deletion rollback', () => {
   beforeEach(() => {
     vi.resetModules()
-    ;(globalThis as any).window = {
-      api: {
-        session: {
-          list: vi.fn(),
-          get: vi.fn(),
-          save: vi.fn(),
-          delete: vi.fn()
-        }
-      }
-    }
+    deleteSession.mockReset()
   })
 
   it('restores a soft-deleted active session when the desktop command rejects', async () => {
@@ -39,7 +35,7 @@ describe('session deletion rollback', () => {
       relativeTime: 'now',
       messages
     }
-    ;(window as any).api.session.delete.mockRejectedValue(new Error('RUN_ACTIVE'))
+    deleteSession.mockRejectedValue(new Error('RUN_ACTIVE'))
     useChatStore.setState({
       sessions: [session as any],
       activeSessionId: session.id,
@@ -77,7 +73,7 @@ describe('session deletion rollback', () => {
       messages: []
     }
     const draft = { text: 'restore draft', attachments: [] }
-    ;(window as any).api.session.delete.mockReturnValue(pendingDelete.promise)
+    deleteSession.mockReturnValue(pendingDelete.promise)
     useChatStore.setState({
       sessions: [deletedSession, activeSession] as any,
       activeSessionId: deletedSession.id,

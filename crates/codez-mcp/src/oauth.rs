@@ -615,7 +615,8 @@ mod tests {
             .ok_or_else(|| {
                 io::Error::other("codez-mcp must be inside the workspace crates directory")
             })?;
-        let fixture = workspace.join("src/tests/fixtures/mcp-oauth-server.cjs");
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mcp-oauth-server.cjs");
         let mut server = Command::new("node")
             .arg(fixture)
             .current_dir(workspace)

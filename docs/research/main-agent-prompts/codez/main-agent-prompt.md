@@ -24,6 +24,7 @@
 ## Progress updates
 
 - For work that needs multiple meaningful tool calls, you MUST send a brief progress update before the first tool call or parallel tool batch. Send another update between substantial phases and before starting a new batch when findings materially change the approach.
+- During ongoing tool work, do not leave the user without a progress update for more than roughly 60 seconds.
 - Tool calls, reasoning, task bookkeeping, and execution logs do not replace user-facing progress updates. Do not work through several tool rounds without ordinary assistant text.
 - Keep progress updates concise and scannable. State the current assumption, what is being checked, or what new evidence changed; do not write a premature final response.
 - Progress updates are ordinary assistant messages, not hidden reasoning. Never reveal private chain-of-thought. Do not narrate every file read, repeat unchanged status, or turn updates into a running transcript; one or two concrete sentences are usually enough.
@@ -58,11 +59,12 @@
 - Todo items are optional durable collaboration state, not Agent or Executor instances.
 - The latest bounded Todo state is injected into every Provider round; no Get/List tool call is needed.
 - Use one TodoUpdate batch for related transitions and expectedRevision for CAS protection.
+- Use ready as the admission projection and waitingOn as the unfinished dependency set; blockedBy remains the declared graph.
 - Mark a ready item in_progress immediately before work. Do not start or complete blocked or unapproved items.
 - Mark completed only after full implementation, acceptance criteria, and relevant successful verification.
 ```
 
-源码证据：`crates/codez-runtime/src/chat/prompt/modules/{output_policy,engineering_philosophy,task_management}.rs`，等级 B。主聊天流已经把普通 assistant delta 发送到 UI；本次变化针对模型行为约束和现有 TaskStore 状态机，不是新增消息传输协议。下方完整正文仍是历史快照，不混入这些工作树增量。
+源码证据：`crates/codez-runtime/src/chat/prompt/modules/{output_policy,engineering_philosophy,todo_management}.rs`，等级 B。主聊天流已经把普通 assistant delta 发送到 UI；本次变化针对模型行为约束和 Rust TodoStore 状态机，不是新增消息传输协议。下方完整正文仍是历史快照，不混入这些工作树增量。
 
 ## 完整正文
 

@@ -75,38 +75,6 @@ describe('desktop session adapter', () => {
     ])
   })
 
-  it('reports Plan capability only for the frozen Electron API', () => {
-    setWindow({ __TAURI_INTERNALS__: {}, api: { plan: {} } })
-    expect(desktopApi.capabilities.plan).toBe(false)
-
-    setWindow({ api: { plan: {} } })
-    expect(desktopApi.capabilities.plan).toBe(true)
-
-    setWindow({ api: {} })
-    expect(desktopApi.capabilities.plan).toBe(false)
-  })
-
-  it('uses the frozen Electron session API only at the adapter boundary', async () => {
-    const electronSession = {
-      list: vi.fn().mockResolvedValue([session]),
-      get: vi.fn().mockResolvedValue(session),
-      save: vi.fn().mockResolvedValue(undefined),
-      delete: vi.fn().mockResolvedValue(undefined)
-    }
-    setWindow({ api: { session: electronSession } })
-
-    await expect(desktopApi.session.list()).resolves.toEqual([session])
-    await expect(desktopApi.session.get(session.id)).resolves.toEqual(session)
-    await desktopApi.session.save(session)
-    await desktopApi.session.delete(session.id)
-
-    expect(tauriMocks.invoke).not.toHaveBeenCalled()
-    expect(electronSession.list).toHaveBeenCalledOnce()
-    expect(electronSession.get).toHaveBeenCalledWith(session.id)
-    expect(electronSession.save).toHaveBeenCalledWith(session)
-    expect(electronSession.delete).toHaveBeenCalledWith(session.id)
-  })
-
   it('preserves valid image-only messages with empty text content', async () => {
     const imageOnlySession = {
       ...session,

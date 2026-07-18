@@ -338,49 +338,4 @@ describe('desktop chat adapter', () => {
     }))
   })
 
-  it('uses the frozen Electron chat API only through the adapter boundary', async () => {
-    const ipcRenderer = {
-      invoke: vi.fn()
-        .mockResolvedValueOnce({ historyVersion: 4 })
-        .mockResolvedValueOnce({ toDelete: ['new.ts'], toRestore: ['old.ts'] })
-    }
-    const chat = {
-      predictNextInput: vi.fn().mockResolvedValue({ suggestion: ' next' }),
-      getRuntimeStatus: vi.fn().mockResolvedValue({
-        sessionId: 'session-1', mainRunnerActive: false, activeSubAgentIds: []
-      }),
-      onRuntimeStatusChanged: vi.fn().mockReturnValue(() => undefined),
-      steer: vi.fn(),
-      interruptTool: vi.fn(),
-      stream: vi.fn(),
-      compact: vi.fn(),
-      acceptFile: vi.fn(),
-      rejectFile: vi.fn().mockResolvedValue(true),
-      getDiff: vi.fn(),
-      respondToApproval: vi.fn(),
-      respondAskUser: vi.fn()
-    }
-    setWindow({ api: { chat }, electron: { ipcRenderer } })
-
-    await expect(desktopApi.chat.predictNextInput({
-      providerId: 'provider-1', model: 'model-1', context: [], draft: 'draft'
-    })).resolves.toEqual({ suggestion: ' next' })
-    await expect(desktopApi.chat.rejectFile('tx-1', 'C:\\workspace\\file.ts')).resolves.toBe(true)
-    await expect(desktopApi.chat.revertHistory(
-      'session-1', 'message-1', ['tx-1']
-    )).resolves.toEqual({ historyVersion: 4 })
-    await expect(desktopApi.chat.previewHistoryRevert(
-      'session-1', 'message-1', ['tx-1']
-    )).resolves.toEqual({ toDelete: ['new.ts'], toRestore: ['old.ts'] })
-
-    expect(tauriMocks.invoke).not.toHaveBeenCalled()
-    expect(chat.predictNextInput).toHaveBeenCalledWith({
-      providerId: 'provider-1', model: 'model-1', context: [], draft: 'draft'
-    })
-    expect(chat.rejectFile).toHaveBeenCalledWith('tx-1', 'C:\\workspace\\file.ts')
-    expect(ipcRenderer.invoke.mock.calls).toEqual([
-      ['chat:revert-messages', 'session-1', 'message-1', ['tx-1']],
-      ['chat:preview-revert-messages', 'session-1', 'message-1', ['tx-1']]
-    ])
-  })
 })

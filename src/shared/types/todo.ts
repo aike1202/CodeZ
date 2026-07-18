@@ -29,7 +29,7 @@ export interface TodoItem {
   subject: string
   /** 任务清单的整体标题（可选，如 "TodoList 应用开发任务"） */
   title?: string
-  /** 任务清单的整体副标题/摘要（可选，如 "基于 React + Electron 的待办事项桌面应用"） */
+  /** 任务清单的整体副标题/摘要（可选） */
   subtitle?: string
   /** 详细描述：目标 + 验收标准 */
   description: string
