@@ -962,7 +962,8 @@ fn builtin_catalog(
         )),
         Arc::new(SkillTool::deactivate(skills, model_ledger)),
         Arc::new(TodoTool::create(Arc::clone(&todo_store))),
-        Arc::new(TodoTool::update(todo_store)),
+        Arc::new(TodoTool::update(Arc::clone(&todo_store))),
+        Arc::new(TodoTool::archive(todo_store)),
         Arc::new(AgentTool::spawn(Arc::clone(&agent_runtime))),
         Arc::new(AgentTool::followup(Arc::clone(&agent_runtime))),
         Arc::new(AgentTool::send(Arc::clone(&agent_runtime))),
@@ -1484,6 +1485,7 @@ mod tests {
         }
         expected.sort_unstable();
         expected.extend([
+            "TodoArchive",
             "TodoCreate",
             "TodoUpdate",
             "ToolSearch",
@@ -1930,6 +1932,7 @@ mod tests {
                     0,
                     "TodoCreate",
                     serde_json::json!({
+                        "expectedRevision": 0,
                         "items": [{ "subject": "Verify Todo pipeline authorization" }]
                     }),
                 )],

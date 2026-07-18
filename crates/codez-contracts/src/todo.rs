@@ -34,6 +34,44 @@ pub enum TodoApprovalStatus {
     Rejected,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum TodoVerificationOutcome {
+    Passed,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", optional_fields)]
+pub struct TodoVerificationEvidence {
+    pub outcome: TodoVerificationOutcome,
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub enum TodoClearField {
+    Files,
+    ActiveForm,
+    GroupId,
+    GroupTitle,
+    GroupSubtitle,
+    RiskLevel,
+    AcceptanceCriteria,
+    VerificationCommand,
+    VerificationEvidence,
+    ContextBundle,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase", optional_fields)]
@@ -79,6 +117,8 @@ pub struct TodoItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verification_command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification_evidence: Option<TodoVerificationEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_bundle: Option<TodoContextBundle>,
 }
 
@@ -93,6 +133,8 @@ pub struct TodoListSnapshot {
     #[ts(type = "number")]
     pub next_sequence: u64,
     pub items: Vec<TodoItem>,
+    #[serde(default)]
+    pub archived_items: Vec<TodoItem>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -138,6 +180,10 @@ pub struct TodoItemUpdate {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<TodoStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reopen: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clear_fields: Option<Vec<TodoClearField>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub add_blocked_by: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remove_blocked_by: Option<Vec<String>>,
@@ -162,6 +208,8 @@ pub struct TodoItemUpdate {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verification_command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification_evidence: Option<TodoVerificationEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_bundle: Option<TodoContextBundle>,
 }
 
@@ -170,6 +218,9 @@ pub struct TodoItemUpdate {
 #[ts(rename_all = "camelCase")]
 pub struct TodoCreateRequest {
     pub session_id: String,
+    #[ts(type = "number")]
+    pub expected_revision: u64,
+    pub idempotency_key: String,
     pub items: Vec<TodoCreateInput>,
 }
 
@@ -178,10 +229,32 @@ pub struct TodoCreateRequest {
 #[ts(rename_all = "camelCase", optional_fields)]
 pub struct TodoUpdateRequest {
     pub session_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(type = "number")]
-    pub expected_revision: Option<u64>,
+    pub expected_revision: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
     pub updates: Vec<TodoItemUpdate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct TodoArchiveRequest {
+    pub session_id: String,
+    #[ts(type = "number")]
+    pub expected_revision: u64,
+    pub todo_ids: Vec<String>,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct TodoDeleteRequest {
+    pub session_id: String,
+    #[ts(type = "number")]
+    pub expected_revision: u64,
+    pub todo_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -204,6 +277,7 @@ pub struct TodoListRequest {
 #[ts(rename_all = "camelCase")]
 pub struct TodoMutationResult {
     pub snapshot: TodoListSnapshot,
+    pub replayed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -229,6 +303,7 @@ mod tests {
             revision: 3,
             next_sequence: 1,
             items: Vec::new(),
+            archived_items: Vec::new(),
         };
         let event = TodoUpdatedEvent {
             version: TODO_EVENT_VERSION,

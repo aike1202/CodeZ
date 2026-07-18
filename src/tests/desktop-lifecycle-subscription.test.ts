@@ -13,7 +13,7 @@ import {
 } from '../renderer/src/components/chat/hooks/useDesktopLifecycleSubscription'
 
 function todoSnapshot(sessionId: string, revision: number): TodoListSnapshot {
-  return { version: 1, sessionId, revision, nextSequence: 1, items: [] }
+  return { version: 2, sessionId, revision, nextSequence: 1, items: [], archivedItems: [] }
 }
 
 function agentSnapshot(sessionId: string, revision: number): AgentRuntimeSnapshot {

@@ -10,7 +10,7 @@
 | Grep | Always | Safe | Cancel | 35s | 100k |
 | PowerShell | Always, Windows | Exclusive | Cancel | 126s | 100k |
 | Read | Always | Safe | Cancel | 30s | 100k |
-| TodoCreate/TodoUpdate | Always | ResourceLocked | Cancel | 30s | 64k |
+| TodoCreate/TodoUpdate/TodoArchive | Always | ResourceLocked | Cancel | 30s | 64k |
 | ToolSearch | Always | Safe | Cancel | 5s | 32k |
 | Write | Always | ResourceLocked | Block | 无 | 100k |
 | Agent spawn/followup/send/wait/interrupt | Always | ResourceLocked | Cancel | 30s；wait 305s | 512k |

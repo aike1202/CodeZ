@@ -8,6 +8,15 @@
 export type TodoStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
 export type TodoRiskLevel = 'low' | 'medium' | 'high'
 export type TodoApprovalStatus = 'not_required' | 'pending' | 'approved' | 'changes_requested' | 'rejected'
+export type TodoVerificationOutcome = 'passed' | 'failed'
+
+export interface TodoVerificationEvidence {
+  outcome: TodoVerificationOutcome
+  summary: string
+  command?: string
+  exitCode?: number
+  toolCallId?: string
+}
 
 export interface TodoContextBundle {
   /** 研究阶段已经确认、执行阶段可直接使用的事实。 */
@@ -52,6 +61,8 @@ export interface TodoItem {
   acceptanceCriteria?: string[]
   /** 推荐验证命令，完成任务前优先运行 */
   verificationCommand?: string
+  /** 支撑完成状态的结构化验证结果。 */
+  verificationEvidence?: TodoVerificationEvidence
   /** 从研究与 Plan 阶段传递给执行智能体的任务专属上下文。 */
   contextBundle?: TodoContextBundle
   /** 涉及文件路径列表（相对 workspaceRoot） */

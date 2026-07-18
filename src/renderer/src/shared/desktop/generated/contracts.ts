@@ -256,25 +256,35 @@ export type TodoRiskLevel = "low" | "medium" | "high";
 
 export type TodoApprovalStatus = "not_required" | "pending" | "approved" | "changes_requested" | "rejected";
 
+export type TodoVerificationOutcome = "passed" | "failed";
+
+export type TodoVerificationEvidence = { outcome: TodoVerificationOutcome, summary: string, command?: string, exitCode?: number, toolCallId?: string, };
+
+export type TodoClearField = "files" | "activeForm" | "groupId" | "groupTitle" | "groupSubtitle" | "riskLevel" | "acceptanceCriteria" | "verificationCommand" | "verificationEvidence" | "contextBundle";
+
 export type TodoContextBundle = { knownFacts?: Array<string>, decisions?: Array<string>, constraints?: Array<string>, excludedDirections?: Array<string>, sourceReferences?: Array<string>, };
 
-export type TodoItem = { id: string, subject: string, description: string, status: TodoStatus, blockedBy?: Array<string>, files?: Array<string>, activeForm?: string, groupId?: string, groupTitle?: string, groupSubtitle?: string, riskLevel?: TodoRiskLevel, requiresApproval: boolean, approvalStatus: TodoApprovalStatus, acceptanceCriteria?: Array<string>, verificationCommand?: string, contextBundle?: TodoContextBundle, };
+export type TodoItem = { id: string, subject: string, description: string, status: TodoStatus, blockedBy?: Array<string>, files?: Array<string>, activeForm?: string, groupId?: string, groupTitle?: string, groupSubtitle?: string, riskLevel?: TodoRiskLevel, requiresApproval: boolean, approvalStatus: TodoApprovalStatus, acceptanceCriteria?: Array<string>, verificationCommand?: string, verificationEvidence?: TodoVerificationEvidence, contextBundle?: TodoContextBundle, };
 
-export type TodoListSnapshot = { version: number, sessionId: string, revision: number, nextSequence: number, items: Array<TodoItem>, };
+export type TodoListSnapshot = { version: number, sessionId: string, revision: number, nextSequence: number, items: Array<TodoItem>, archivedItems: Array<TodoItem>, };
 
 export type TodoCreateInput = { subject: string, description?: string, files?: Array<string>, activeForm?: string, groupId?: string, groupTitle?: string, groupSubtitle?: string, riskLevel?: TodoRiskLevel, requiresApproval?: boolean, approvalStatus?: TodoApprovalStatus, acceptanceCriteria?: Array<string>, verificationCommand?: string, contextBundle?: TodoContextBundle, };
 
-export type TodoItemUpdate = { todoId: string, subject?: string, description?: string, status?: TodoStatus, addBlockedBy?: Array<string>, removeBlockedBy?: Array<string>, files?: Array<string>, activeForm?: string, groupId?: string, groupTitle?: string, groupSubtitle?: string, riskLevel?: TodoRiskLevel, requiresApproval?: boolean, approvalStatus?: TodoApprovalStatus, acceptanceCriteria?: Array<string>, verificationCommand?: string, contextBundle?: TodoContextBundle, };
+export type TodoItemUpdate = { todoId: string, subject?: string, description?: string, status?: TodoStatus, reopen?: boolean, clearFields?: Array<TodoClearField>, addBlockedBy?: Array<string>, removeBlockedBy?: Array<string>, files?: Array<string>, activeForm?: string, groupId?: string, groupTitle?: string, groupSubtitle?: string, riskLevel?: TodoRiskLevel, requiresApproval?: boolean, approvalStatus?: TodoApprovalStatus, acceptanceCriteria?: Array<string>, verificationCommand?: string, verificationEvidence?: TodoVerificationEvidence, contextBundle?: TodoContextBundle, };
 
-export type TodoCreateRequest = { sessionId: string, items: Array<TodoCreateInput>, };
+export type TodoCreateRequest = { sessionId: string, expectedRevision: number, idempotencyKey: string, items: Array<TodoCreateInput>, };
 
-export type TodoUpdateRequest = { sessionId: string, expectedRevision?: number, updates: Array<TodoItemUpdate>, };
+export type TodoUpdateRequest = { sessionId: string, expectedRevision: number, reason?: string, updates: Array<TodoItemUpdate>, };
+
+export type TodoArchiveRequest = { sessionId: string, expectedRevision: number, todoIds: Array<string>, reason: string, };
+
+export type TodoDeleteRequest = { sessionId: string, expectedRevision: number, todoId: string, };
 
 export type TodoGetRequest = { sessionId: string, todoId: string, };
 
 export type TodoListRequest = { sessionId: string, };
 
-export type TodoMutationResult = { snapshot: TodoListSnapshot, };
+export type TodoMutationResult = { snapshot: TodoListSnapshot, replayed: boolean, };
 
 export type TodoUpdatedEvent = { version: number, sessionId: string, revision: number, snapshot: TodoListSnapshot, };
 

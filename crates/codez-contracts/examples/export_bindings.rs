@@ -46,9 +46,10 @@ use codez_contracts::{
         SubAgentRunStatus, SubAgentSettingsDetail, SubAgentUnavailableDetail,
     },
     todo::{
-        TodoApprovalStatus, TodoContextBundle, TodoCreateInput, TodoCreateRequest, TodoGetRequest,
-        TodoItem, TodoItemUpdate, TodoListRequest, TodoListSnapshot, TodoMutationResult,
-        TodoRiskLevel, TodoStatus, TodoUpdateRequest, TodoUpdatedEvent,
+        TodoApprovalStatus, TodoArchiveRequest, TodoClearField, TodoContextBundle, TodoCreateInput,
+        TodoCreateRequest, TodoDeleteRequest, TodoGetRequest, TodoItem, TodoItemUpdate,
+        TodoListRequest, TodoListSnapshot, TodoMutationResult, TodoRiskLevel, TodoStatus,
+        TodoUpdateRequest, TodoUpdatedEvent, TodoVerificationEvidence, TodoVerificationOutcome,
     },
 };
 use ts_rs::{Config, TS};
@@ -188,6 +189,9 @@ fn main() -> std::io::Result<()> {
         format!("export {}", TodoStatus::decl(&config)),
         format!("export {}", TodoRiskLevel::decl(&config)),
         format!("export {}", TodoApprovalStatus::decl(&config)),
+        format!("export {}", TodoVerificationOutcome::decl(&config)),
+        format!("export {}", TodoVerificationEvidence::decl(&config)),
+        format!("export {}", TodoClearField::decl(&config)),
         format!("export {}", TodoContextBundle::decl(&config)),
         format!("export {}", TodoItem::decl(&config)),
         format!("export {}", TodoListSnapshot::decl(&config)),
@@ -195,6 +199,8 @@ fn main() -> std::io::Result<()> {
         format!("export {}", TodoItemUpdate::decl(&config)),
         format!("export {}", TodoCreateRequest::decl(&config)),
         format!("export {}", TodoUpdateRequest::decl(&config)),
+        format!("export {}", TodoArchiveRequest::decl(&config)),
+        format!("export {}", TodoDeleteRequest::decl(&config)),
         format!("export {}", TodoGetRequest::decl(&config)),
         format!("export {}", TodoListRequest::decl(&config)),
         format!("export {}", TodoMutationResult::decl(&config)),

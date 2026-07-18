@@ -27,11 +27,12 @@ export function isTodoUpdatedEvent(value: unknown): value is TodoUpdatedEvent {
     && typeof value.sessionId === 'string'
     && value.sessionId.length > 0
     && isNonNegativeInteger(value.revision)
-    && value.snapshot.version === 1
+    && value.snapshot.version === 2
     && value.snapshot.sessionId === value.sessionId
     && value.snapshot.revision === value.revision
     && isNonNegativeInteger(value.snapshot.nextSequence)
     && Array.isArray(value.snapshot.items)
+    && Array.isArray(value.snapshot.archivedItems)
 }
 
 export function isAgentUpdatedEvent(value: unknown): value is AgentUpdatedEvent {

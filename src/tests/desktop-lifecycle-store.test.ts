@@ -8,7 +8,7 @@ import { useDesktopLifecycleStore } from '../renderer/src/stores/desktopLifecycl
 
 function todoSnapshot(sessionId: string, revision: number, todoId = `todo-${revision}`): TodoListSnapshot {
   return {
-    version: 1,
+    version: 2,
     sessionId,
     revision,
     nextSequence: revision + 1,
@@ -19,7 +19,8 @@ function todoSnapshot(sessionId: string, revision: number, todoId = `todo-${revi
       status: 'pending',
       requiresApproval: false,
       approvalStatus: 'not_required'
-    }]
+    }],
+    archivedItems: []
   }
 }
 

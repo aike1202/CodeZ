@@ -7,13 +7,18 @@ use std::{
 use codez_core::{AppError, AtomicPersistence, SessionId};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 
 // Keep the legacy directory name so existing sessions remain readable after the Todo rename.
 const TODO_DIRECTORY: &str = "tasks";
-const TODO_SNAPSHOT_VERSION: u16 = 1;
+const TODO_SNAPSHOT_VERSION: u16 = 2;
+const LEGACY_TODO_SNAPSHOT_VERSION: u16 = 1;
 const MAX_TODO_DOCUMENT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_TODOS: usize = 256;
+const MAX_ARCHIVED_TODOS: usize = 512;
+const MAX_CREATE_RECEIPTS: usize = 256;
+const MAX_IDEMPOTENCY_KEY_BYTES: usize = 256;
 const MAX_SUBJECT_BYTES: usize = 512;
 const MAX_DESCRIPTION_BYTES: usize = 32 * 1024;
 const MAX_LABEL_BYTES: usize = 1024;
@@ -60,6 +65,41 @@ pub enum TodoApprovalStatus {
     Rejected,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TodoVerificationOutcome {
+    Passed,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TodoVerificationEvidence {
+    pub outcome: TodoVerificationOutcome,
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TodoClearField {
+    Files,
+    ActiveForm,
+    GroupId,
+    GroupTitle,
+    GroupSubtitle,
+    RiskLevel,
+    AcceptanceCriteria,
+    VerificationCommand,
+    VerificationEvidence,
+    ContextBundle,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TodoContextBundle {
@@ -102,8 +142,18 @@ pub struct TodoItem {
     pub acceptance_criteria: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verification_command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification_evidence: Option<TodoVerificationEvidence>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_bundle: Option<TodoContextBundle>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TodoCreateReceipt {
+    pub idempotency_key: String,
+    pub request_hash: String,
+    pub created_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -115,6 +165,10 @@ pub struct TodoListSnapshot {
     pub next_sequence: u64,
     #[serde(default, rename = "tasks", alias = "items")]
     pub items: Vec<TodoItem>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub archived_items: Vec<TodoItem>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub create_receipts: Vec<TodoCreateReceipt>,
 }
 
 impl TodoListSnapshot {
@@ -125,8 +179,17 @@ impl TodoListSnapshot {
             revision: 0,
             next_sequence: 1,
             items: Vec::new(),
+            archived_items: Vec::new(),
+            create_receipts: Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TodoCreateOutcome {
+    pub snapshot: TodoListSnapshot,
+    pub created_ids: Vec<String>,
+    pub replayed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -163,13 +226,15 @@ pub struct TodoCreateInput {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TodoItemPatch {
     #[serde(default)]
-    pub expected_revision: Option<u64>,
-    #[serde(default)]
     pub subject: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
     pub status: Option<TodoStatus>,
+    #[serde(default)]
+    pub reopen: bool,
+    #[serde(default)]
+    pub clear_fields: Vec<TodoClearField>,
     #[serde(default)]
     pub add_blocked_by: Vec<String>,
     #[serde(default)]
@@ -194,6 +259,8 @@ pub struct TodoItemPatch {
     pub acceptance_criteria: Option<Vec<String>>,
     #[serde(default)]
     pub verification_command: Option<String>,
+    #[serde(default)]
+    pub verification_evidence: Option<TodoVerificationEvidence>,
     #[serde(default)]
     pub context_bundle: Option<TodoContextBundle>,
 }
@@ -270,11 +337,13 @@ impl TodoStore {
             .ok_or_else(|| AppError::not_found("The todo was not found"))
     }
 
-    pub async fn create(
+    pub async fn create_guarded(
         &self,
         session_id: &SessionId,
+        expected_revision: u64,
+        idempotency_key: &str,
         inputs: Vec<TodoCreateInput>,
-    ) -> Result<TodoListSnapshot, AppError> {
+    ) -> Result<TodoCreateOutcome, AppError> {
         if inputs.is_empty() {
             return Err(AppError::validation(
                 "Todo creation requires at least one todo",
@@ -286,6 +355,9 @@ impl TodoStore {
         for input in &inputs {
             validate_create_input(input)?;
         }
+        let idempotency_key = idempotency_key.trim();
+        validate_idempotency_key(idempotency_key)?;
+        let request_hash = create_request_hash(&inputs)?;
 
         let state = self.session_state(session_id);
         let mut state = state.lock().await;
@@ -294,13 +366,32 @@ impl TodoStore {
             .snapshot
             .clone()
             .ok_or_else(|| AppError::internal("todo snapshot was not loaded"))?;
-        if next.items.iter().all(|todo| todo.status.is_terminal()) {
-            next.items.clear();
+        if let Some(receipt) = next
+            .create_receipts
+            .iter()
+            .find(|receipt| receipt.idempotency_key == idempotency_key)
+        {
+            if receipt.request_hash != request_hash {
+                return Err(AppError::conflict(
+                    "The TodoCreate idempotency key was already used for different items",
+                ));
+            }
+            let created_ids = receipt.created_ids.clone();
+            return Ok(TodoCreateOutcome {
+                snapshot: next,
+                created_ids,
+                replayed: true,
+            });
         }
+        validate_expected_revision(expected_revision, next.revision)?;
+        archive_for_capacity(&mut next, inputs.len())?;
         if next.items.len().saturating_add(inputs.len()) > MAX_TODOS {
-            return Err(AppError::conflict("The session todo limit was reached"));
+            return Err(AppError::conflict(
+                "The session Todo limit was reached and no terminal items can be archived",
+            ));
         }
 
+        let mut created_ids = Vec::with_capacity(inputs.len());
         for input in inputs {
             let sequence = next.next_sequence;
             next.next_sequence = sequence.checked_add(1).ok_or_else(|| {
@@ -310,22 +401,53 @@ impl TodoStore {
                     false,
                 )
             })?;
-            next.items.push(todo_from_create(sequence, input));
+            let todo = todo_from_create(sequence, input);
+            created_ids.push(todo.id.clone());
+            next.items.push(todo);
         }
+        next.create_receipts.push(TodoCreateReceipt {
+            idempotency_key: idempotency_key.to_string(),
+            request_hash,
+            created_ids: created_ids.clone(),
+        });
+        trim_create_receipts(&mut next.create_receipts);
         bump_revision(&mut next)?;
-        self.commit(&mut state, next).await
+        let snapshot = self.commit(&mut state, next).await?;
+        Ok(TodoCreateOutcome {
+            snapshot,
+            created_ids,
+            replayed: false,
+        })
     }
 
+    #[cfg(test)]
+    pub async fn create(
+        &self,
+        session_id: &SessionId,
+        inputs: Vec<TodoCreateInput>,
+    ) -> Result<TodoListSnapshot, AppError> {
+        let snapshot = self.snapshot(session_id).await?;
+        let key = format!(
+            "test-create-{}-{}",
+            snapshot.revision, snapshot.next_sequence
+        );
+        self.create_guarded(session_id, snapshot.revision, &key, inputs)
+            .await
+            .map(|outcome| outcome.snapshot)
+    }
+
+    #[cfg(test)]
     pub async fn update(
         &self,
         session_id: &SessionId,
         todo_id: &str,
-        mut patch: TodoItemPatch,
+        patch: TodoItemPatch,
     ) -> Result<TodoListSnapshot, AppError> {
-        let expected_revision = patch.expected_revision.take();
+        let expected_revision = self.snapshot(session_id).await?.revision;
         self.update_batch(
             session_id,
             expected_revision,
+            Some("test update"),
             vec![TodoItemUpdate {
                 todo_id: todo_id.to_string(),
                 patch,
@@ -337,7 +459,8 @@ impl TodoStore {
     pub async fn update_batch(
         &self,
         session_id: &SessionId,
-        expected_revision: Option<u64>,
+        expected_revision: u64,
+        reason: Option<&str>,
         updates: Vec<TodoItemUpdate>,
     ) -> Result<TodoListSnapshot, AppError> {
         if updates.is_empty() {
@@ -366,14 +489,8 @@ impl TodoStore {
             .snapshot
             .clone()
             .ok_or_else(|| AppError::internal("todo snapshot was not loaded"))?;
-        if let Some(expected_revision) = expected_revision {
-            if expected_revision != next.revision {
-                return Err(AppError::conflict(format!(
-                    "Todo state changed since revision {expected_revision}; use the latest injected state at revision {}",
-                    next.revision
-                )));
-            }
-        }
+        validate_expected_revision(expected_revision, next.revision)?;
+        validate_update_intents(&next.items, &updates, reason)?;
 
         let previous = next.items.clone();
         for update in updates {
@@ -384,6 +501,7 @@ impl TodoStore {
                 .ok_or_else(|| AppError::not_found("The Todo item was not found"))?;
             apply_patch(todo, update.patch);
         }
+        validate_completion_transitions(&previous, &next.items)?;
         validate_approval_policy_transitions(&previous, &next.items)?;
         for todo in &next.items {
             validate_todo(todo)?;
@@ -392,17 +510,6 @@ impl TodoStore {
         for todo_index in 0..next.items.len() {
             validate_todo_admission(&next.items, todo_index)?;
         }
-        if next
-            .items
-            .iter()
-            .filter(|todo| todo.status == TodoStatus::InProgress)
-            .count()
-            > 1
-        {
-            return Err(AppError::conflict(
-                "Another Todo item is already in progress for this session",
-            ));
-        }
         if next.items == previous {
             return Ok(next);
         }
@@ -410,9 +517,10 @@ impl TodoStore {
         self.commit(&mut state, next).await
     }
 
-    pub async fn delete(
+    pub async fn delete_guarded(
         &self,
         session_id: &SessionId,
+        expected_revision: u64,
         todo_id: &str,
     ) -> Result<TodoListSnapshot, AppError> {
         validate_todo_id(todo_id).map_err(AppError::validation)?;
@@ -423,6 +531,17 @@ impl TodoStore {
             .snapshot
             .clone()
             .ok_or_else(|| AppError::internal("todo snapshot was not loaded"))?;
+        validate_expected_revision(expected_revision, next.revision)?;
+        let todo = next
+            .items
+            .iter()
+            .find(|todo| todo.id == todo_id)
+            .ok_or_else(|| AppError::not_found("The todo was not found"))?;
+        if !todo.status.is_terminal() {
+            return Err(AppError::conflict(
+                "Only terminal Todo items can be deleted; cancel unfinished work with a reason first",
+            ));
+        }
         let previous_len = next.items.len();
         next.items.retain(|todo| todo.id != todo_id);
         if next.items.len() == previous_len {
@@ -431,6 +550,37 @@ impl TodoStore {
         for todo in &mut next.items {
             todo.blocked_by.retain(|dependency| dependency != todo_id);
         }
+        bump_revision(&mut next)?;
+        self.commit(&mut state, next).await
+    }
+
+    #[cfg(test)]
+    pub async fn delete(
+        &self,
+        session_id: &SessionId,
+        todo_id: &str,
+    ) -> Result<TodoListSnapshot, AppError> {
+        let revision = self.snapshot(session_id).await?.revision;
+        self.delete_guarded(session_id, revision, todo_id).await
+    }
+
+    pub async fn archive_batch(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        todo_ids: &[String],
+        reason: &str,
+    ) -> Result<TodoListSnapshot, AppError> {
+        validate_archive_request(todo_ids, reason)?;
+        let state = self.session_state(session_id);
+        let mut state = state.lock().await;
+        self.ensure_loaded(session_id, &mut state).await?;
+        let mut next = state
+            .snapshot
+            .clone()
+            .ok_or_else(|| AppError::internal("todo snapshot was not loaded"))?;
+        validate_expected_revision(expected_revision, next.revision)?;
+        archive_todos(&mut next, todo_ids)?;
         bump_revision(&mut next)?;
         self.commit(&mut state, next).await
     }
@@ -497,9 +647,6 @@ impl TodoStore {
 
 #[must_use]
 pub fn todo_prompt_state(snapshot: &TodoListSnapshot) -> Option<String> {
-    if snapshot.items.is_empty() {
-        return None;
-    }
     let value = todo_model_state(snapshot);
     let encoded = serde_json::to_string(&value)
         .ok()?
@@ -517,8 +664,10 @@ pub fn todo_model_state(snapshot: &TodoListSnapshot) -> serde_json::Value {
     let active = snapshot
         .items
         .iter()
-        .find(|todo| todo.status == TodoStatus::InProgress)
-        .map(active_todo_prompt_value);
+        .filter(|todo| todo.status == TodoStatus::InProgress)
+        .take(MAX_PROMPT_DETAIL_ITEMS)
+        .map(active_todo_prompt_value)
+        .collect::<Vec<_>>();
     let items = snapshot
         .items
         .iter()
@@ -590,6 +739,7 @@ pub fn todo_model_state(snapshot: &TodoListSnapshot) -> serde_json::Value {
     serde_json::json!({
         "summary": {
             "total": snapshot.items.len(),
+            "archived": snapshot.archived_items.len(),
             "completed": completed,
             "pending": pending,
             "inProgress": in_progress,
@@ -598,6 +748,7 @@ pub fn todo_model_state(snapshot: &TodoListSnapshot) -> serde_json::Value {
         },
         "active": active,
         "items": items,
+        "nextAction": todo_next_action(snapshot),
     })
 }
 
@@ -609,6 +760,15 @@ fn active_todo_prompt_value(todo: &TodoItem) -> serde_json::Value {
             "constraints": bounded_prompt_list(&bundle.constraints),
             "excludedDirections": bounded_prompt_list(&bundle.excluded_directions),
             "sourceReferences": bounded_prompt_list(&bundle.source_references),
+        })
+    });
+    let verification_evidence = todo.verification_evidence.as_ref().map(|evidence| {
+        serde_json::json!({
+            "outcome": evidence.outcome,
+            "summary": bounded_prompt_text(&evidence.summary, MAX_PROMPT_DETAIL_CHARS),
+            "command": evidence.command.as_deref().map(|value| bounded_prompt_text(value, MAX_PROMPT_DETAIL_CHARS)),
+            "exitCode": evidence.exit_code,
+            "toolCallId": evidence.tool_call_id.as_deref().map(|value| bounded_prompt_text(value, MAX_PROMPT_DETAIL_CHARS)),
         })
     });
     serde_json::json!({
@@ -623,7 +783,107 @@ fn active_todo_prompt_value(todo: &TodoItem) -> serde_json::Value {
         "approvalStatus": todo.approval_status,
         "acceptanceCriteria": bounded_prompt_list(&todo.acceptance_criteria),
         "verificationCommand": todo.verification_command.as_deref().map(|value| bounded_prompt_text(value, MAX_PROMPT_DETAIL_CHARS)),
+        "verificationEvidence": verification_evidence,
         "contextBundle": context_bundle,
+    })
+}
+
+pub(crate) fn todo_is_ready(snapshot: &TodoListSnapshot, todo: &TodoItem) -> bool {
+    todo.status == TodoStatus::Pending && !todo_is_blocked(snapshot, todo)
+}
+
+pub(crate) fn todo_is_blocked(snapshot: &TodoListSnapshot, todo: &TodoItem) -> bool {
+    todo.status == TodoStatus::Pending
+        && (todo.requires_approval && todo.approval_status != TodoApprovalStatus::Approved
+            || todo.blocked_by.iter().any(|dependency| {
+                snapshot
+                    .items
+                    .iter()
+                    .find(|candidate| candidate.id == dependency.as_str())
+                    .is_none_or(|candidate| candidate.status != TodoStatus::Completed)
+            }))
+}
+
+fn todo_next_action(snapshot: &TodoListSnapshot) -> serde_json::Value {
+    let in_progress = snapshot
+        .items
+        .iter()
+        .filter(|todo| todo.status == TodoStatus::InProgress)
+        .take(MAX_PROMPT_DETAIL_ITEMS)
+        .map(|todo| todo.id.as_str())
+        .collect::<Vec<_>>();
+    if !in_progress.is_empty() {
+        return serde_json::json!({
+            "kind": "continue_in_progress",
+            "todoIds": in_progress,
+            "message": "Continue the genuinely active Todo items and keep each status current."
+        });
+    }
+
+    let ready = snapshot
+        .items
+        .iter()
+        .filter(|todo| todo_is_ready(snapshot, todo))
+        .take(MAX_PROMPT_DETAIL_ITEMS)
+        .map(|todo| todo.id.as_str())
+        .collect::<Vec<_>>();
+    if !ready.is_empty() {
+        return serde_json::json!({
+            "kind": "start_ready",
+            "todoIds": ready,
+            "message": "Start the next ready Todo items that can execute concurrently."
+        });
+    }
+
+    let blocked = snapshot
+        .items
+        .iter()
+        .filter(|todo| todo_is_blocked(snapshot, todo))
+        .take(MAX_PROMPT_DETAIL_ITEMS)
+        .map(|todo| todo.id.as_str())
+        .collect::<Vec<_>>();
+    if !blocked.is_empty() {
+        return serde_json::json!({
+            "kind": "report_blocked",
+            "todoIds": blocked,
+            "message": "All remaining Todo items are blocked; report the exact dependency, approval, or user-input blocker."
+        });
+    }
+
+    let completed = snapshot
+        .items
+        .iter()
+        .filter(|todo| todo.status == TodoStatus::Completed)
+        .collect::<Vec<_>>();
+    let missing_declared_evidence = completed
+        .iter()
+        .filter(|todo| todo.verification_command.is_some() && !todo_verification_passed(todo))
+        .map(|todo| todo.id.as_str())
+        .take(MAX_PROMPT_DETAIL_ITEMS)
+        .collect::<Vec<_>>();
+    let has_passed_evidence = completed.iter().any(|todo| todo_verification_passed(todo));
+    let completed_without_evidence = !completed.is_empty() && !has_passed_evidence;
+    if !missing_declared_evidence.is_empty() || completed_without_evidence {
+        let todo_ids = if missing_declared_evidence.is_empty() {
+            completed
+                .iter()
+                .map(|todo| todo.id.as_str())
+                .take(MAX_PROMPT_DETAIL_ITEMS)
+                .collect::<Vec<_>>()
+        } else {
+            missing_declared_evidence
+        };
+        return serde_json::json!({
+            "kind": "verify_before_final",
+            "todoIds": todo_ids,
+            "message": "Record structured passing verification evidence before reporting the overall work complete."
+        });
+    }
+
+    serde_json::json!({
+        "kind": "complete",
+        "todoIds": [],
+        "message": "All in-scope Todo items are terminal and declared verification is satisfied."
     })
 }
 
@@ -654,8 +914,11 @@ fn decode_snapshot(
             format!("document has {} bytes", bytes.len()),
         ));
     }
-    let snapshot: TodoListSnapshot = serde_json::from_slice(bytes)
+    let mut snapshot: TodoListSnapshot = serde_json::from_slice(bytes)
         .map_err(|source| todo_document_error(path, format!("parse JSON: {source}")))?;
+    if snapshot.version == LEGACY_TODO_SNAPSHOT_VERSION {
+        snapshot.version = TODO_SNAPSHOT_VERSION;
+    }
     validate_snapshot(expected_session_id, path, &snapshot)?;
     Ok(snapshot)
 }
@@ -674,12 +937,17 @@ fn validate_snapshot(
     if &snapshot.session_id != expected_session_id {
         return Err(todo_document_error(path, "session identity mismatch"));
     }
-    if snapshot.items.len() > MAX_TODOS || snapshot.next_sequence == 0 {
+    if snapshot.items.len() > MAX_TODOS
+        || snapshot.archived_items.len() > MAX_ARCHIVED_TODOS
+        || snapshot.create_receipts.len() > MAX_CREATE_RECEIPTS
+        || snapshot.next_sequence == 0
+    {
         return Err(todo_document_error(path, "invalid todo snapshot bounds"));
     }
-    let mut identifiers = HashSet::with_capacity(snapshot.items.len());
+    let mut identifiers =
+        HashSet::with_capacity(snapshot.items.len() + snapshot.archived_items.len());
     let mut largest_sequence = 0;
-    for todo in &snapshot.items {
+    for todo in snapshot.items.iter().chain(&snapshot.archived_items) {
         let sequence =
             validate_todo_id(&todo.id).map_err(|message| todo_document_error(path, message))?;
         if !identifiers.insert(todo.id.as_str()) {
@@ -696,23 +964,35 @@ fn validate_snapshot(
             )
         })?;
     }
+    if snapshot
+        .archived_items
+        .iter()
+        .any(|todo| !todo.status.is_terminal())
+    {
+        return Err(todo_document_error(
+            path,
+            "archived Todo items must be terminal",
+        ));
+    }
     if snapshot.next_sequence <= largest_sequence {
         return Err(todo_document_error(
             path,
             "next sequence does not follow persisted todo identifiers",
         ));
     }
-    if snapshot
-        .items
-        .iter()
-        .filter(|todo| todo.status == TodoStatus::InProgress)
-        .count()
-        > 1
-    {
-        return Err(todo_document_error(
-            path,
-            "multiple items are marked in progress",
-        ));
+    for receipt in &snapshot.create_receipts {
+        validate_idempotency_key(&receipt.idempotency_key)
+            .map_err(|error| todo_document_error(path, error.public_message()))?;
+        if receipt.request_hash.len() != 64
+            || !receipt
+                .request_hash
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(todo_document_error(path, "invalid TodoCreate request hash"));
+        }
+        validate_todo_ids("TodoCreate receipt ids", &receipt.created_ids)
+            .map_err(|error| todo_document_error(path, error.public_message()))?;
     }
     validate_todo_graph(&snapshot.items).map_err(|error| {
         todo_document_error(
@@ -756,6 +1036,135 @@ fn bump_revision(snapshot: &mut TodoListSnapshot) -> Result<(), AppError> {
     Ok(())
 }
 
+fn validate_expected_revision(expected: u64, actual: u64) -> Result<(), AppError> {
+    if expected == actual {
+        return Ok(());
+    }
+    Err(AppError::conflict(format!(
+        "Todo state changed since revision {expected}; use the latest injected state at revision {actual}"
+    )))
+}
+
+fn validate_idempotency_key(value: &str) -> Result<(), AppError> {
+    validate_required_text(
+        "TodoCreate idempotency key",
+        value,
+        MAX_IDEMPOTENCY_KEY_BYTES,
+    )?;
+    if value
+        .bytes()
+        .any(|byte| !(byte.is_ascii_alphanumeric() || b"._:-".contains(&byte)))
+    {
+        return Err(AppError::validation(
+            "TodoCreate idempotency keys may contain only letters, digits, '.', '_', ':', and '-'",
+        ));
+    }
+    Ok(())
+}
+
+fn create_request_hash(inputs: &[TodoCreateInput]) -> Result<String, AppError> {
+    let bytes = serde_json::to_vec(inputs).map_err(|source| {
+        AppError::internal(format!(
+            "serialize TodoCreate idempotency payload: {source}"
+        ))
+    })?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
+fn trim_create_receipts(receipts: &mut Vec<TodoCreateReceipt>) {
+    let overflow = receipts.len().saturating_sub(MAX_CREATE_RECEIPTS);
+    if overflow > 0 {
+        receipts.drain(..overflow);
+    }
+}
+
+fn archive_for_capacity(
+    snapshot: &mut TodoListSnapshot,
+    incoming_count: usize,
+) -> Result<(), AppError> {
+    let overflow = snapshot
+        .items
+        .len()
+        .saturating_add(incoming_count)
+        .saturating_sub(MAX_TODOS);
+    if overflow == 0 {
+        return Ok(());
+    }
+    let candidates = snapshot
+        .items
+        .iter()
+        .filter(|todo| todo_can_archive(snapshot, todo))
+        .take(overflow)
+        .map(|todo| todo.id.clone())
+        .collect::<Vec<_>>();
+    if candidates.len() != overflow {
+        return Ok(());
+    }
+    archive_todos(snapshot, &candidates)
+}
+
+fn todo_can_archive(snapshot: &TodoListSnapshot, todo: &TodoItem) -> bool {
+    todo.status.is_terminal()
+        && (todo.status == TodoStatus::Completed
+            || !snapshot
+                .items
+                .iter()
+                .any(|candidate| candidate.blocked_by.contains(&todo.id)))
+}
+
+fn validate_archive_request(todo_ids: &[String], reason: &str) -> Result<(), AppError> {
+    if todo_ids.is_empty() {
+        return Err(AppError::validation(
+            "TodoArchive requires at least one Todo id",
+        ));
+    }
+    validate_todo_ids("TodoArchive ids", todo_ids)?;
+    validate_required_text("TodoArchive reason", reason, MAX_DESCRIPTION_BYTES)
+}
+
+fn archive_todos(snapshot: &mut TodoListSnapshot, todo_ids: &[String]) -> Result<(), AppError> {
+    for todo_id in todo_ids {
+        let todo = snapshot
+            .items
+            .iter()
+            .find(|todo| todo.id == *todo_id)
+            .ok_or_else(|| AppError::not_found("The Todo item to archive was not found"))?;
+        if !todo.status.is_terminal() {
+            return Err(AppError::conflict(format!(
+                "Todo {todo_id} must be completed or cancelled before it can be archived"
+            )));
+        }
+        if !todo_can_archive(snapshot, todo) {
+            return Err(AppError::conflict(format!(
+                "Cancelled Todo {todo_id} is still blocking active work; update its dependents before archiving it"
+            )));
+        }
+    }
+
+    let archived_ids = todo_ids.iter().map(String::as_str).collect::<HashSet<_>>();
+    let mut retained = Vec::with_capacity(snapshot.items.len().saturating_sub(todo_ids.len()));
+    for todo in snapshot.items.drain(..) {
+        if archived_ids.contains(todo.id.as_str()) {
+            snapshot.archived_items.push(todo);
+        } else {
+            retained.push(todo);
+        }
+    }
+    snapshot.items = retained;
+    for todo in &mut snapshot.items {
+        todo.blocked_by
+            .retain(|dependency| !archived_ids.contains(dependency.as_str()));
+    }
+    let overflow = snapshot
+        .archived_items
+        .len()
+        .saturating_sub(MAX_ARCHIVED_TODOS);
+    if overflow > 0 {
+        snapshot.archived_items.drain(..overflow);
+    }
+    Ok(())
+}
+
 fn todo_from_create(sequence: u64, input: TodoCreateInput) -> TodoItem {
     let approval_status = input.approval_status.unwrap_or(if input.requires_approval {
         TodoApprovalStatus::Pending
@@ -778,11 +1187,35 @@ fn todo_from_create(sequence: u64, input: TodoCreateInput) -> TodoItem {
         approval_status,
         acceptance_criteria: input.acceptance_criteria,
         verification_command: input.verification_command,
+        verification_evidence: None,
         context_bundle: input.context_bundle,
     }
 }
 
 fn apply_patch(todo: &mut TodoItem, patch: TodoItemPatch) {
+    if patch.reopen {
+        todo.verification_evidence = None;
+    }
+    for field in &patch.clear_fields {
+        match field {
+            TodoClearField::Files => todo.files.clear(),
+            TodoClearField::ActiveForm => todo.active_form = None,
+            TodoClearField::GroupId => todo.group_id = None,
+            TodoClearField::GroupTitle => todo.group_title = None,
+            TodoClearField::GroupSubtitle => todo.group_subtitle = None,
+            TodoClearField::RiskLevel => todo.risk_level = None,
+            TodoClearField::AcceptanceCriteria => {
+                todo.acceptance_criteria.clear();
+                todo.verification_evidence = None;
+            }
+            TodoClearField::VerificationCommand => {
+                todo.verification_command = None;
+                todo.verification_evidence = None;
+            }
+            TodoClearField::VerificationEvidence => todo.verification_evidence = None,
+            TodoClearField::ContextBundle => todo.context_bundle = None,
+        }
+    }
     if let Some(subject) = patch.subject {
         todo.subject = subject.trim().to_string();
     }
@@ -822,10 +1255,19 @@ fn apply_patch(todo: &mut TodoItem, patch: TodoItemPatch) {
         todo.approval_status = approval_status;
     }
     if let Some(acceptance_criteria) = patch.acceptance_criteria {
+        if todo.acceptance_criteria != acceptance_criteria {
+            todo.verification_evidence = None;
+        }
         todo.acceptance_criteria = acceptance_criteria;
     }
     if let Some(verification_command) = patch.verification_command {
+        if todo.verification_command.as_ref() != Some(&verification_command) {
+            todo.verification_evidence = None;
+        }
         todo.verification_command = Some(verification_command);
+    }
+    if let Some(verification_evidence) = patch.verification_evidence {
+        todo.verification_evidence = Some(verification_evidence);
     }
     if let Some(context_bundle) = patch.context_bundle {
         todo.context_bundle = Some(context_bundle);
@@ -869,6 +1311,148 @@ fn validate_approval_policy_transitions(
     Ok(())
 }
 
+fn validate_update_intents(
+    current: &[TodoItem],
+    updates: &[TodoItemUpdate],
+    reason: Option<&str>,
+) -> Result<(), AppError> {
+    if let Some(reason) = reason {
+        validate_required_text("TodoUpdate reason", reason, MAX_DESCRIPTION_BYTES)?;
+    }
+    for update in updates {
+        let todo = current
+            .iter()
+            .find(|todo| todo.id == update.todo_id)
+            .ok_or_else(|| AppError::not_found("The Todo item was not found"))?;
+        let patch = &update.patch;
+        if patch.reopen {
+            if !todo.status.is_terminal() || patch.status != Some(TodoStatus::Pending) {
+                return Err(AppError::validation(
+                    "reopen is valid only for a terminal Todo transitioning to pending",
+                ));
+            }
+            require_update_reason(reason, "reopening a terminal Todo")?;
+        }
+        if let Some(target) = patch.status {
+            validate_status_transition(todo.status, target, patch.reopen)?;
+            if target == TodoStatus::Cancelled && todo.status != TodoStatus::Cancelled {
+                require_update_reason(reason, "cancelling a Todo")?;
+            }
+        }
+        if !patch.add_blocked_by.is_empty() || !patch.remove_blocked_by.is_empty() {
+            require_update_reason(reason, "changing Todo dependencies")?;
+        }
+        if todo.status.is_terminal()
+            && !patch.reopen
+            && (patch.acceptance_criteria.is_some()
+                || patch.verification_command.is_some()
+                || patch.clear_fields.iter().any(|field| {
+                    matches!(
+                        field,
+                        TodoClearField::AcceptanceCriteria
+                            | TodoClearField::VerificationCommand
+                            | TodoClearField::VerificationEvidence
+                    )
+                }))
+        {
+            return Err(AppError::conflict(
+                "Reopen a terminal Todo before changing its acceptance or verification state",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_status_transition(
+    previous: TodoStatus,
+    target: TodoStatus,
+    reopen: bool,
+) -> Result<(), AppError> {
+    if previous == target {
+        return Ok(());
+    }
+    let allowed = matches!(
+        (previous, target),
+        (
+            TodoStatus::Pending,
+            TodoStatus::InProgress | TodoStatus::Cancelled
+        ) | (
+            TodoStatus::InProgress,
+            TodoStatus::Pending | TodoStatus::Completed | TodoStatus::Cancelled
+        )
+    ) || (previous.is_terminal() && target == TodoStatus::Pending && reopen);
+    if allowed {
+        return Ok(());
+    }
+    Err(AppError::conflict(format!(
+        "Invalid Todo status transition from {previous:?} to {target:?}"
+    )))
+}
+
+fn require_update_reason(reason: Option<&str>, action: &str) -> Result<(), AppError> {
+    if reason.is_some_and(|value| !value.trim().is_empty()) {
+        return Ok(());
+    }
+    Err(AppError::validation(format!(
+        "TodoUpdate requires a reason when {action}"
+    )))
+}
+
+fn validate_completion_transitions(
+    previous: &[TodoItem],
+    next: &[TodoItem],
+) -> Result<(), AppError> {
+    for todo in next
+        .iter()
+        .filter(|todo| todo.status == TodoStatus::Completed)
+    {
+        let was_completed = previous
+            .iter()
+            .find(|candidate| candidate.id == todo.id)
+            .is_some_and(|candidate| candidate.status == TodoStatus::Completed);
+        if !was_completed && todo.verification_command.is_some() && !todo_verification_passed(todo)
+        {
+            return Err(AppError::conflict(format!(
+                "Todo {} declares verificationCommand and requires passed verificationEvidence before completion",
+                todo.id
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn todo_verification_passed(todo: &TodoItem) -> bool {
+    todo.verification_evidence
+        .as_ref()
+        .is_some_and(|evidence| evidence.outcome == TodoVerificationOutcome::Passed)
+}
+
+fn validate_verification_evidence(evidence: &TodoVerificationEvidence) -> Result<(), AppError> {
+    validate_required_text(
+        "Todo verification evidence summary",
+        &evidence.summary,
+        MAX_LIST_ITEM_BYTES,
+    )?;
+    validate_optional_text(
+        "Todo verification evidence command",
+        evidence.command.as_deref(),
+        MAX_COMMAND_BYTES,
+    )?;
+    validate_optional_text(
+        "Todo verification evidence tool call id",
+        evidence.tool_call_id.as_deref(),
+        MAX_LABEL_BYTES,
+    )?;
+    if evidence.outcome == TodoVerificationOutcome::Passed
+        && evidence.exit_code.is_some_and(|exit_code| exit_code != 0)
+    {
+        return Err(AppError::validation(
+            "Passed Todo verification evidence cannot contain a non-zero exit code",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_update_input(input: &TodoItemPatch) -> Result<(), AppError> {
     if !has_todo_mutation(input) {
         return Err(AppError::validation(
@@ -881,6 +1465,7 @@ fn validate_update_input(input: &TodoItemPatch) -> Result<(), AppError> {
     if let Some(description) = &input.description {
         validate_text("Todo description", description, MAX_DESCRIPTION_BYTES)?;
     }
+    validate_clear_fields(input)?;
     validate_dependency_patch(input)?;
     if let Some(files) = &input.files {
         validate_files(files)?;
@@ -909,6 +1494,9 @@ fn validate_update_input(input: &TodoItemPatch) -> Result<(), AppError> {
         input.verification_command.as_deref(),
         MAX_COMMAND_BYTES,
     )?;
+    if let Some(evidence) = &input.verification_evidence {
+        validate_verification_evidence(evidence)?;
+    }
     if let Some(bundle) = &input.context_bundle {
         validate_context_bundle(bundle)?;
     }
@@ -943,6 +1531,9 @@ fn validate_todo(todo: &TodoItem) -> Result<(), AppError> {
         todo.verification_command.as_deref(),
         MAX_COMMAND_BYTES,
     )?;
+    if let Some(evidence) = &todo.verification_evidence {
+        validate_verification_evidence(evidence)?;
+    }
     if let Some(bundle) = &todo.context_bundle {
         validate_context_bundle(bundle)?;
     }
@@ -963,6 +1554,8 @@ fn has_todo_mutation(input: &TodoItemPatch) -> bool {
     input.subject.is_some()
         || input.description.is_some()
         || input.status.is_some()
+        || input.reopen
+        || !input.clear_fields.is_empty()
         || !input.add_blocked_by.is_empty()
         || !input.remove_blocked_by.is_empty()
         || input.files.is_some()
@@ -975,7 +1568,37 @@ fn has_todo_mutation(input: &TodoItemPatch) -> bool {
         || input.approval_status.is_some()
         || input.acceptance_criteria.is_some()
         || input.verification_command.is_some()
+        || input.verification_evidence.is_some()
         || input.context_bundle.is_some()
+}
+
+fn validate_clear_fields(input: &TodoItemPatch) -> Result<(), AppError> {
+    let mut fields = HashSet::with_capacity(input.clear_fields.len());
+    for field in &input.clear_fields {
+        if !fields.insert(*field) {
+            return Err(AppError::validation(
+                "Todo clearFields cannot contain duplicates",
+            ));
+        }
+        let also_set = match field {
+            TodoClearField::Files => input.files.is_some(),
+            TodoClearField::ActiveForm => input.active_form.is_some(),
+            TodoClearField::GroupId => input.group_id.is_some(),
+            TodoClearField::GroupTitle => input.group_title.is_some(),
+            TodoClearField::GroupSubtitle => input.group_subtitle.is_some(),
+            TodoClearField::RiskLevel => input.risk_level.is_some(),
+            TodoClearField::AcceptanceCriteria => input.acceptance_criteria.is_some(),
+            TodoClearField::VerificationCommand => input.verification_command.is_some(),
+            TodoClearField::VerificationEvidence => input.verification_evidence.is_some(),
+            TodoClearField::ContextBundle => input.context_bundle.is_some(),
+        };
+        if also_set {
+            return Err(AppError::validation(
+                "A Todo field cannot be cleared and set in the same update",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_dependency_patch(input: &TodoItemPatch) -> Result<(), AppError> {
@@ -1204,9 +1827,9 @@ mod tests {
     use codez_storage::AtomicFileStore;
 
     use super::{
-        TodoApprovalStatus, TodoCreateInput, TodoEventSink, TodoItem, TodoItemPatch,
-        TodoItemUpdate, TodoListSnapshot, TodoStatus, TodoStore, todo_model_state,
-        todo_prompt_state,
+        TodoApprovalStatus, TodoClearField, TodoCreateInput, TodoEventSink, TodoItem,
+        TodoItemPatch, TodoItemUpdate, TodoListSnapshot, TodoStatus, TodoStore,
+        TodoVerificationEvidence, TodoVerificationOutcome, todo_model_state, todo_prompt_state,
     };
 
     #[derive(Default)]
@@ -1296,7 +1919,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn concurrent_creates_preserve_every_todo_and_revision() {
+    async fn concurrent_creates_with_the_same_revision_accept_only_one_writer() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
         let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
         let store = Arc::new(TodoStore::new(directory.path(), persistence));
@@ -1307,15 +1930,20 @@ mod tests {
             let session_id = session_id.clone();
             workers.push(tokio::spawn(async move {
                 store
-                    .create(&session_id, vec![input(format!("todo {index}"))])
+                    .create_guarded(
+                        &session_id,
+                        0,
+                        &format!("concurrent-{index}"),
+                        vec![input(format!("todo {index}"))],
+                    )
                     .await
             }));
         }
+        let mut successes = 0;
         for worker in workers {
-            worker
-                .await
-                .expect("todo worker must join")
-                .expect("concurrent todo create must succeed");
+            if worker.await.expect("todo worker must join").is_ok() {
+                successes += 1;
+            }
         }
 
         let snapshot = store
@@ -1324,11 +1952,12 @@ mod tests {
             .expect("todo snapshot must load");
         assert_eq!(
             (
+                successes,
                 snapshot.items.len(),
                 snapshot.revision,
                 snapshot.next_sequence
             ),
-            (32, 32, 33)
+            (1, 1, 1, 2)
         );
     }
 
@@ -1475,7 +2104,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn in_progress_admission_is_atomic() {
+    async fn multiple_todos_can_be_in_progress_concurrently() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
         let store = Arc::new(TodoStore::new(
             directory.path(),
@@ -1486,41 +2115,30 @@ mod tests {
             .create(&session_id, vec![input("first"), input("second")])
             .await
             .expect("todo create must succeed");
-        let mut workers = Vec::new();
         for todo_id in ["t1", "t2"] {
-            let store = Arc::clone(&store);
-            let session_id = session_id.clone();
-            workers.push(tokio::spawn(async move {
-                store
-                    .update(
-                        &session_id,
-                        todo_id,
-                        TodoItemPatch {
-                            status: Some(TodoStatus::InProgress),
-                            ..TodoItemPatch::default()
-                        },
-                    )
-                    .await
-            }));
-        }
-        let mut successes = 0;
-        for worker in workers {
-            if worker.await.expect("todo worker must join").is_ok() {
-                successes += 1;
-            }
+            store
+                .update(
+                    &session_id,
+                    todo_id,
+                    TodoItemPatch {
+                        status: Some(TodoStatus::InProgress),
+                        ..TodoItemPatch::default()
+                    },
+                )
+                .await
+                .expect("independent Todo must start");
         }
         let snapshot = store
             .snapshot(&session_id)
             .await
             .expect("todo snapshot must load");
-        assert_eq!(successes, 1);
         assert_eq!(
             snapshot
                 .items
                 .iter()
                 .filter(|todo| todo.status == TodoStatus::InProgress)
                 .count(),
-            1
+            2
         );
     }
 
@@ -1686,6 +2304,17 @@ mod tests {
                 &session_id,
                 "t1",
                 TodoItemPatch {
+                    status: Some(TodoStatus::InProgress),
+                    ..TodoItemPatch::default()
+                },
+            )
+            .await
+            .expect("dependency must start");
+        store
+            .update(
+                &session_id,
+                "t1",
+                TodoItemPatch {
                     status: Some(TodoStatus::Completed),
                     ..TodoItemPatch::default()
                 },
@@ -1710,6 +2339,7 @@ mod tests {
                 "t1",
                 TodoItemPatch {
                     status: Some(TodoStatus::Pending),
+                    reopen: true,
                     ..TodoItemPatch::default()
                 },
             )
@@ -1841,14 +2471,17 @@ mod tests {
             .expect("todo create must succeed");
 
         let error = store
-            .update(
+            .update_batch(
                 &session_id,
-                "t1",
-                TodoItemPatch {
-                    expected_revision: Some(0),
-                    subject: Some("stale update".to_string()),
-                    ..TodoItemPatch::default()
-                },
+                0,
+                None,
+                vec![TodoItemUpdate {
+                    todo_id: "t1".to_string(),
+                    patch: TodoItemPatch {
+                        subject: Some("stale update".to_string()),
+                        ..TodoItemPatch::default()
+                    },
+                }],
             )
             .await
             .expect_err("stale revision must be rejected");
@@ -1979,6 +2612,28 @@ mod tests {
             )
             .await
             .expect("dependency update must succeed");
+        store
+            .update(
+                &session_id,
+                "t1",
+                TodoItemPatch {
+                    status: Some(TodoStatus::InProgress),
+                    ..TodoItemPatch::default()
+                },
+            )
+            .await
+            .expect("dependency Todo must start");
+        store
+            .update(
+                &session_id,
+                "t1",
+                TodoItemPatch {
+                    status: Some(TodoStatus::Completed),
+                    ..TodoItemPatch::default()
+                },
+            )
+            .await
+            .expect("dependency Todo must complete");
 
         let snapshot = store
             .delete(&session_id, "t1")
@@ -2018,7 +2673,8 @@ mod tests {
         let snapshot = store
             .update_batch(
                 &session_id,
-                Some(2),
+                2,
+                None,
                 vec![
                     TodoItemUpdate {
                         todo_id: "t1".to_string(),
@@ -2072,7 +2728,8 @@ mod tests {
         let error = store
             .update_batch(
                 &session_id,
-                Some(1),
+                1,
+                None,
                 vec![
                     TodoItemUpdate {
                         todo_id: "t1".to_string(),
@@ -2107,10 +2764,381 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn create_should_replay_the_same_idempotency_key_without_duplication() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+        let session_id = session("session-1");
+        let first = store
+            .create_guarded(&session_id, 0, "logical-create-1", vec![input("first")])
+            .await
+            .expect("initial guarded create must succeed");
+
+        let replay = store
+            .create_guarded(&session_id, 0, "logical-create-1", vec![input("first")])
+            .await
+            .expect("idempotent replay must succeed with its stale original revision");
+
+        assert_eq!(
+            (
+                first.replayed,
+                replay.replayed,
+                replay.snapshot.revision,
+                replay.snapshot.items.len(),
+                replay.created_ids,
+            ),
+            (false, true, 1, 1, vec!["t1".to_string()])
+        );
+    }
+
+    #[tokio::test]
+    async fn update_should_reject_pending_to_completed_transition() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+        let session_id = session("session-1");
+        store
+            .create(&session_id, vec![input("first")])
+            .await
+            .expect("Todo creation must succeed");
+
+        let error = store
+            .update_batch(
+                &session_id,
+                1,
+                None,
+                vec![TodoItemUpdate {
+                    todo_id: "t1".to_string(),
+                    patch: TodoItemPatch {
+                        status: Some(TodoStatus::Completed),
+                        ..TodoItemPatch::default()
+                    },
+                }],
+            )
+            .await
+            .expect_err("pending Todo must start before completion");
+
+        assert_eq!(error.kind(), AppErrorKind::Conflict);
+    }
+
+    #[tokio::test]
+    async fn cancellation_should_require_a_reason() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+        let session_id = session("session-1");
+        store
+            .create(&session_id, vec![input("removed scope")])
+            .await
+            .expect("Todo creation must succeed");
+
+        let error = store
+            .update_batch(
+                &session_id,
+                1,
+                None,
+                vec![TodoItemUpdate {
+                    todo_id: "t1".to_string(),
+                    patch: TodoItemPatch {
+                        status: Some(TodoStatus::Cancelled),
+                        ..TodoItemPatch::default()
+                    },
+                }],
+            )
+            .await
+            .expect_err("cancellation without a reason must fail");
+
+        assert_eq!(error.kind(), AppErrorKind::Validation);
+    }
+
+    #[tokio::test]
+    async fn clear_fields_should_remove_stale_optional_metadata() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+        let session_id = session("session-1");
+        let mut todo = input("clear stale state");
+        todo.group_title = Some("Old group".to_string());
+        todo.verification_command = Some("cargo test old".to_string());
+        store
+            .create(&session_id, vec![todo])
+            .await
+            .expect("Todo creation must succeed");
+
+        let snapshot = store
+            .update_batch(
+                &session_id,
+                1,
+                None,
+                vec![TodoItemUpdate {
+                    todo_id: "t1".to_string(),
+                    patch: TodoItemPatch {
+                        clear_fields: vec![
+                            TodoClearField::GroupTitle,
+                            TodoClearField::VerificationCommand,
+                        ],
+                        ..TodoItemPatch::default()
+                    },
+                }],
+            )
+            .await
+            .expect("optional fields must be clearable");
+
+        assert!(
+            snapshot.items[0].group_title.is_none()
+                && snapshot.items[0].verification_command.is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_should_require_passed_declared_verification_evidence() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+        let session_id = session("session-1");
+        let mut todo = input("verify work");
+        todo.verification_command = Some("cargo test -p codez-runtime".to_string());
+        store
+            .create(&session_id, vec![todo])
+            .await
+            .expect("Todo creation must succeed");
+        store
+            .update(
+                &session_id,
+                "t1",
+                TodoItemPatch {
+                    status: Some(TodoStatus::InProgress),
+                    ..TodoItemPatch::default()
+                },
+            )
+            .await
+            .expect("Todo must start");
+
+        let missing = store
+            .update_batch(
+                &session_id,
+                2,
+                None,
+                vec![TodoItemUpdate {
+                    todo_id: "t1".to_string(),
+                    patch: TodoItemPatch {
+                        status: Some(TodoStatus::Completed),
+                        ..TodoItemPatch::default()
+                    },
+                }],
+            )
+            .await
+            .expect_err("declared verification requires evidence");
+        assert_eq!(missing.kind(), AppErrorKind::Conflict);
+
+        let snapshot = store
+            .update_batch(
+                &session_id,
+                2,
+                None,
+                vec![TodoItemUpdate {
+                    todo_id: "t1".to_string(),
+                    patch: TodoItemPatch {
+                        status: Some(TodoStatus::Completed),
+                        verification_evidence: Some(passed_evidence()),
+                        ..TodoItemPatch::default()
+                    },
+                }],
+            )
+            .await
+            .expect("passing evidence may be committed with completion");
+
+        assert_eq!(snapshot.items[0].status, TodoStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn reopen_should_require_a_reason_and_clear_old_verification_evidence() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+        let session_id = session("session-1");
+        store
+            .create(&session_id, vec![input("reopen work")])
+            .await
+            .expect("Todo creation must succeed");
+        store
+            .update(
+                &session_id,
+                "t1",
+                TodoItemPatch {
+                    status: Some(TodoStatus::InProgress),
+                    ..TodoItemPatch::default()
+                },
+            )
+            .await
+            .expect("Todo must start");
+        store
+            .update(
+                &session_id,
+                "t1",
+                TodoItemPatch {
+                    status: Some(TodoStatus::Completed),
+                    verification_evidence: Some(passed_evidence()),
+                    ..TodoItemPatch::default()
+                },
+            )
+            .await
+            .expect("Todo must complete");
+
+        let error = store
+            .update_batch(
+                &session_id,
+                3,
+                None,
+                vec![TodoItemUpdate {
+                    todo_id: "t1".to_string(),
+                    patch: TodoItemPatch {
+                        status: Some(TodoStatus::Pending),
+                        reopen: true,
+                        ..TodoItemPatch::default()
+                    },
+                }],
+            )
+            .await
+            .expect_err("reopen without a reason must fail");
+        assert_eq!(error.kind(), AppErrorKind::Validation);
+
+        let snapshot = store
+            .update_batch(
+                &session_id,
+                3,
+                Some("The user added a new acceptance condition"),
+                vec![TodoItemUpdate {
+                    todo_id: "t1".to_string(),
+                    patch: TodoItemPatch {
+                        status: Some(TodoStatus::Pending),
+                        reopen: true,
+                        ..TodoItemPatch::default()
+                    },
+                }],
+            )
+            .await
+            .expect("explicit reopen with a reason must succeed");
+
+        assert!(
+            snapshot.items[0].status == TodoStatus::Pending
+                && snapshot.items[0].verification_evidence.is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn archive_should_preserve_terminal_history_and_clean_completed_dependencies() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
+        let store = TodoStore::new(directory.path(), Arc::clone(&persistence));
+        let session_id = session("session-1");
+        store
+            .create(&session_id, vec![input("dependency"), input("dependent")])
+            .await
+            .expect("Todo creation must succeed");
+        store
+            .update(
+                &session_id,
+                "t2",
+                TodoItemPatch {
+                    add_blocked_by: vec!["t1".to_string()],
+                    ..TodoItemPatch::default()
+                },
+            )
+            .await
+            .expect("dependency must be recorded");
+        store
+            .update(
+                &session_id,
+                "t1",
+                TodoItemPatch {
+                    status: Some(TodoStatus::InProgress),
+                    ..TodoItemPatch::default()
+                },
+            )
+            .await
+            .expect("dependency must start");
+        store
+            .update(
+                &session_id,
+                "t1",
+                TodoItemPatch {
+                    status: Some(TodoStatus::Completed),
+                    ..TodoItemPatch::default()
+                },
+            )
+            .await
+            .expect("dependency must complete");
+
+        store
+            .archive_batch(
+                &session_id,
+                4,
+                &["t1".to_string()],
+                "Keep the active list focused",
+            )
+            .await
+            .expect("completed dependency must archive");
+        let recovered = TodoStore::new(directory.path(), persistence)
+            .snapshot(&session_id)
+            .await
+            .expect("archived state must recover");
+
+        assert!(
+            recovered.items.len() == 1
+                && recovered.items[0].blocked_by.is_empty()
+                && recovered.archived_items.len() == 1
+                && recovered.archived_items[0].id == "t1"
+        );
+    }
+
+    #[tokio::test]
+    async fn next_action_should_request_verification_after_final_unverified_completion() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+        let session_id = session("session-1");
+        store
+            .create(&session_id, vec![input("final outcome")])
+            .await
+            .expect("Todo creation must succeed");
+        store
+            .update(
+                &session_id,
+                "t1",
+                TodoItemPatch {
+                    status: Some(TodoStatus::InProgress),
+                    ..TodoItemPatch::default()
+                },
+            )
+            .await
+            .expect("Todo item may start");
+        let snapshot = store
+            .update(
+                &session_id,
+                "t1",
+                TodoItemPatch {
+                    status: Some(TodoStatus::Completed),
+                    ..TodoItemPatch::default()
+                },
+            )
+            .await
+            .expect("Todo item may complete");
+
+        assert_eq!(
+            todo_model_state(&snapshot)["nextAction"]["kind"],
+            "verify_before_final"
+        );
+    }
+
+    fn passed_evidence() -> TodoVerificationEvidence {
+        TodoVerificationEvidence {
+            outcome: TodoVerificationOutcome::Passed,
+            summary: "Focused test suite passed".to_string(),
+            command: Some("cargo test -p codez-runtime".to_string()),
+            exit_code: Some(0),
+            tool_call_id: Some("call-test-1".to_string()),
+        }
+    }
+
     #[test]
     fn todo_prompt_state_is_bounded_and_escapes_markup() {
         let snapshot = TodoListSnapshot {
-            version: 1,
+            version: 2,
             session_id: session("session-1"),
             revision: 7,
             next_sequence: 2,
@@ -2130,8 +3158,11 @@ mod tests {
                 approval_status: TodoApprovalStatus::NotRequired,
                 acceptance_criteria: Vec::new(),
                 verification_command: None,
+                verification_evidence: None,
                 context_bundle: None,
             }],
+            archived_items: Vec::new(),
+            create_receipts: Vec::new(),
         };
 
         let state = todo_prompt_state(&snapshot).expect("non-empty Todo state must render");
@@ -2176,15 +3207,18 @@ mod tests {
                 approval_status: TodoApprovalStatus::NotRequired,
                 acceptance_criteria: Vec::new(),
                 verification_command: None,
+                verification_evidence: None,
                 context_bundle: None,
             })
             .collect();
         let snapshot = TodoListSnapshot {
-            version: 1,
+            version: 2,
             session_id: session("session-1"),
             revision: 9,
             next_sequence: 46,
             items,
+            archived_items: Vec::new(),
+            create_receipts: Vec::new(),
         };
 
         let state = todo_model_state(&snapshot);

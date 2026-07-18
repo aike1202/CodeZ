@@ -160,6 +160,7 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::todo::todo_get,
             commands::todo::todo_create,
             commands::todo::todo_update,
+            commands::todo::todo_archive,
             commands::todo::todo_delete,
             commands::agent::agent_snapshot,
             commands::agent::agent_active_ids,

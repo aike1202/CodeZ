@@ -26,11 +26,12 @@ const todoEvent: TodoUpdatedEvent = {
   sessionId: 'session-1',
   revision: 1,
   snapshot: {
-    version: 1,
+    version: 2,
     sessionId: 'session-1',
     revision: 1,
     nextSequence: 2,
-    items: []
+    items: [],
+    archivedItems: []
   }
 }
 
@@ -104,6 +105,10 @@ describe('desktop lifecycle event facade', () => {
     expect(isTodoUpdatedEvent(todoEvent)).toBe(true)
     expect(isAgentUpdatedEvent(agentEvent)).toBe(true)
     expect(isTodoUpdatedEvent({ ...todoEvent, revision: 2 })).toBe(false)
+    expect(isTodoUpdatedEvent({
+      ...todoEvent,
+      snapshot: { ...todoEvent.snapshot, archivedItems: undefined }
+    })).toBe(false)
     expect(isAgentUpdatedEvent({ ...agentEvent, revision: 2 })).toBe(false)
   })
 })

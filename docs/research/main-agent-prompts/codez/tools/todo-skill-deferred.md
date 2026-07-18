@@ -7,15 +7,16 @@ Todo 是 session 级 durable collaboration state，只描述工作，不拥有 A
 模型工具面只有：
 
 ```text
-TodoCreate { items[] }
-TodoUpdate { expectedRevision?, updates[] }
+TodoCreate { expectedRevision, idempotencyKey?, items[] }
+TodoUpdate { expectedRevision, reason?, updates[] }
+TodoArchive { expectedRevision, todoIds[], reason }
 ```
 
-`TodoUpdate` 在同一 session mutex 内执行完整事务：
+Todo 写工具在同一 session mutex 内执行完整事务：
 
-1. 检查 revision、空 batch 和重复 todoId。
+1. 检查必填 revision、空 batch、重复 todoId 和 Create 幂等收据。
 2. 克隆权威 snapshot，并在副本上应用全部 patch。
-3. 校验最终依赖图、审批门、未完成依赖和唯一 `in_progress`。
+3. 校验状态转换、reason、clearFields、最终依赖图、审批门、未完成依赖和验证证据；允许多个真实并行的 `in_progress`。
 4. 全部通过后只增加一次 revision、持久化一次、发送一次事件。
 5. 冲突时返回最新有界 Todo state，模型无需也不能调用 Get/List。
 
@@ -25,9 +26,11 @@ TodoUpdate { expectedRevision?, updates[] }
 
 ```text
 <todo_state revision="N">
-summary + bounded active item details + compact item list
+summary + bounded active item details + compact item list + nextAction
 </todo_state>
 ```
+
+`nextAction` 基于结构化状态而不是标题匹配：优先继续真实 `in_progress`、启动 ready 项或报告 blocker；最后一个完成项关闭后若没有 passed `verificationEvidence`，返回 `verify_before_final`，供长期恢复和最终答复前对账。
 
 投影限制项目数量和字段长度，并 JSON 编码 Todo 文本。工具结果历史不是 Todo 权威来源。
 

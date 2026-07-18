@@ -1,19 +1,22 @@
 ﻿use codez_contracts::{
     CommandError,
     todo::{
-        TODO_EVENT_VERSION, TODO_UPDATED_EVENT, TodoApprovalStatus, TodoContextBundle,
-        TodoCreateInput, TodoCreateRequest, TodoGetRequest, TodoItem, TodoItemUpdate,
-        TodoListRequest, TodoListSnapshot, TodoMutationResult, TodoRiskLevel, TodoStatus,
-        TodoUpdateRequest, TodoUpdatedEvent,
+        TODO_EVENT_VERSION, TODO_UPDATED_EVENT, TodoApprovalStatus, TodoArchiveRequest,
+        TodoClearField, TodoContextBundle, TodoCreateInput, TodoCreateRequest, TodoDeleteRequest,
+        TodoGetRequest, TodoItem, TodoItemUpdate, TodoListRequest, TodoListSnapshot,
+        TodoMutationResult, TodoRiskLevel, TodoStatus, TodoUpdateRequest, TodoUpdatedEvent,
+        TodoVerificationEvidence, TodoVerificationOutcome,
     },
 };
 use codez_core::{AppError, SessionId};
 use codez_runtime::todo::{
-    TodoApprovalStatus as RuntimeApprovalStatus, TodoContextBundle as RuntimeContextBundle,
-    TodoCreateInput as RuntimeCreateInput, TodoEventSink, TodoItem as RuntimeTodoItem,
-    TodoItemPatch as RuntimeItemPatch, TodoItemUpdate as RuntimeItemUpdate,
-    TodoListSnapshot as RuntimeSnapshot, TodoRiskLevel as RuntimeRiskLevel,
-    TodoStatus as RuntimeStatus,
+    TodoApprovalStatus as RuntimeApprovalStatus, TodoClearField as RuntimeClearField,
+    TodoContextBundle as RuntimeContextBundle, TodoCreateInput as RuntimeCreateInput,
+    TodoEventSink, TodoItem as RuntimeTodoItem, TodoItemPatch as RuntimeItemPatch,
+    TodoItemUpdate as RuntimeItemUpdate, TodoListSnapshot as RuntimeSnapshot,
+    TodoRiskLevel as RuntimeRiskLevel, TodoStatus as RuntimeStatus,
+    TodoVerificationEvidence as RuntimeVerificationEvidence,
+    TodoVerificationOutcome as RuntimeVerificationOutcome,
 };
 use tauri::{AppHandle, Emitter, State, command};
 
@@ -91,9 +94,18 @@ pub async fn todo_create(
     let result = async {
         let session_id = parse_session_id(request.session_id)?;
         let items = request.items.into_iter().map(create_input).collect();
-        let snapshot = state.todo_store.create(&session_id, items).await?;
+        let outcome = state
+            .todo_store
+            .create_guarded(
+                &session_id,
+                request.expected_revision,
+                &request.idempotency_key,
+                items,
+            )
+            .await?;
         Ok(TodoMutationResult {
-            snapshot: snapshot_contract(&snapshot),
+            snapshot: snapshot_contract(&outcome.snapshot),
+            replayed: outcome.replayed,
         })
     }
     .await;
@@ -112,11 +124,13 @@ pub async fn todo_update(
             .update_batch(
                 &session_id,
                 request.expected_revision,
+                request.reason.as_deref(),
                 request.updates.into_iter().map(update_input).collect(),
             )
             .await?;
         Ok(TodoMutationResult {
             snapshot: snapshot_contract(&snapshot),
+            replayed: false,
         })
     }
     .await;
@@ -126,16 +140,40 @@ pub async fn todo_update(
 #[command(rename_all = "camelCase")]
 pub async fn todo_delete(
     state: State<'_, AppState>,
-    session_id: String,
-    todo_id: String,
+    request: TodoDeleteRequest,
 ) -> Result<TodoListSnapshot, CommandError> {
     let result = async {
-        let session_id = parse_session_id(session_id)?;
+        let session_id = parse_session_id(request.session_id)?;
         state
             .todo_store
-            .delete(&session_id, &todo_id)
+            .delete_guarded(&session_id, request.expected_revision, &request.todo_id)
             .await
             .map(|snapshot| snapshot_contract(&snapshot))
+    }
+    .await;
+    command_result(&state.errors, result)
+}
+
+#[command]
+pub async fn todo_archive(
+    state: State<'_, AppState>,
+    request: TodoArchiveRequest,
+) -> Result<TodoMutationResult, CommandError> {
+    let result = async {
+        let session_id = parse_session_id(request.session_id)?;
+        let snapshot = state
+            .todo_store
+            .archive_batch(
+                &session_id,
+                request.expected_revision,
+                &request.todo_ids,
+                &request.reason,
+            )
+            .await?;
+        Ok(TodoMutationResult {
+            snapshot: snapshot_contract(&snapshot),
+            replayed: false,
+        })
     }
     .await;
     command_result(&state.errors, result)
@@ -168,10 +206,16 @@ fn update_input(input: TodoItemUpdate) -> RuntimeItemUpdate {
     RuntimeItemUpdate {
         todo_id: input.todo_id,
         patch: RuntimeItemPatch {
-            expected_revision: None,
             subject: input.subject,
             description: input.description,
             status: input.status.map(status_runtime),
+            reopen: input.reopen.unwrap_or(false),
+            clear_fields: input
+                .clear_fields
+                .unwrap_or_default()
+                .into_iter()
+                .map(clear_field_runtime)
+                .collect(),
             add_blocked_by: input.add_blocked_by.unwrap_or_default(),
             remove_blocked_by: input.remove_blocked_by.unwrap_or_default(),
             files: input.files,
@@ -184,6 +228,7 @@ fn update_input(input: TodoItemUpdate) -> RuntimeItemUpdate {
             approval_status: input.approval_status.map(approval_runtime),
             acceptance_criteria: input.acceptance_criteria,
             verification_command: input.verification_command,
+            verification_evidence: input.verification_evidence.map(verification_runtime),
             context_bundle: input.context_bundle.map(context_runtime),
         },
     }
@@ -199,6 +244,26 @@ fn context_runtime(context: TodoContextBundle) -> RuntimeContextBundle {
     }
 }
 
+fn verification_runtime(evidence: TodoVerificationEvidence) -> RuntimeVerificationEvidence {
+    RuntimeVerificationEvidence {
+        outcome: verification_outcome_runtime(evidence.outcome),
+        summary: evidence.summary,
+        command: evidence.command,
+        exit_code: evidence.exit_code,
+        tool_call_id: evidence.tool_call_id,
+    }
+}
+
+fn verification_contract(evidence: &RuntimeVerificationEvidence) -> TodoVerificationEvidence {
+    TodoVerificationEvidence {
+        outcome: verification_outcome_contract(evidence.outcome),
+        summary: evidence.summary.clone(),
+        command: evidence.command.clone(),
+        exit_code: evidence.exit_code,
+        tool_call_id: evidence.tool_call_id.clone(),
+    }
+}
+
 fn snapshot_contract(snapshot: &RuntimeSnapshot) -> TodoListSnapshot {
     TodoListSnapshot {
         version: snapshot.version,
@@ -206,6 +271,7 @@ fn snapshot_contract(snapshot: &RuntimeSnapshot) -> TodoListSnapshot {
         revision: snapshot.revision,
         next_sequence: snapshot.next_sequence,
         items: snapshot.items.iter().map(todo_contract).collect(),
+        archived_items: snapshot.archived_items.iter().map(todo_contract).collect(),
     }
 }
 
@@ -226,6 +292,10 @@ fn todo_contract(todo: &RuntimeTodoItem) -> TodoItem {
         approval_status: approval_contract(todo.approval_status),
         acceptance_criteria: non_empty(todo.acceptance_criteria.clone()),
         verification_command: todo.verification_command.clone(),
+        verification_evidence: todo
+            .verification_evidence
+            .as_ref()
+            .map(verification_contract),
         context_bundle: todo.context_bundle.as_ref().map(context_contract),
     }
 }
@@ -259,6 +329,39 @@ const fn status_runtime(status: TodoStatus) -> RuntimeStatus {
         TodoStatus::InProgress => RuntimeStatus::InProgress,
         TodoStatus::Completed => RuntimeStatus::Completed,
         TodoStatus::Cancelled => RuntimeStatus::Cancelled,
+    }
+}
+
+const fn clear_field_runtime(field: TodoClearField) -> RuntimeClearField {
+    match field {
+        TodoClearField::Files => RuntimeClearField::Files,
+        TodoClearField::ActiveForm => RuntimeClearField::ActiveForm,
+        TodoClearField::GroupId => RuntimeClearField::GroupId,
+        TodoClearField::GroupTitle => RuntimeClearField::GroupTitle,
+        TodoClearField::GroupSubtitle => RuntimeClearField::GroupSubtitle,
+        TodoClearField::RiskLevel => RuntimeClearField::RiskLevel,
+        TodoClearField::AcceptanceCriteria => RuntimeClearField::AcceptanceCriteria,
+        TodoClearField::VerificationCommand => RuntimeClearField::VerificationCommand,
+        TodoClearField::VerificationEvidence => RuntimeClearField::VerificationEvidence,
+        TodoClearField::ContextBundle => RuntimeClearField::ContextBundle,
+    }
+}
+
+const fn verification_outcome_contract(
+    outcome: RuntimeVerificationOutcome,
+) -> TodoVerificationOutcome {
+    match outcome {
+        RuntimeVerificationOutcome::Passed => TodoVerificationOutcome::Passed,
+        RuntimeVerificationOutcome::Failed => TodoVerificationOutcome::Failed,
+    }
+}
+
+const fn verification_outcome_runtime(
+    outcome: TodoVerificationOutcome,
+) -> RuntimeVerificationOutcome {
+    match outcome {
+        TodoVerificationOutcome::Passed => RuntimeVerificationOutcome::Passed,
+        TodoVerificationOutcome::Failed => RuntimeVerificationOutcome::Failed,
     }
 }
 
@@ -308,7 +411,7 @@ mod tests {
     #[test]
     fn snapshot_conversion_preserves_identity_revision_and_optional_fields() {
         let snapshot = TodoListSnapshot {
-            version: 1,
+            version: 2,
             session_id: SessionId::parse("session-1").expect("fixture session ID must be valid"),
             revision: 4,
             next_sequence: 2,
@@ -328,8 +431,11 @@ mod tests {
                 approval_status: TodoApprovalStatus::NotRequired,
                 acceptance_criteria: Vec::new(),
                 verification_command: None,
+                verification_evidence: None,
                 context_bundle: None,
             }],
+            archived_items: Vec::new(),
+            create_receipts: Vec::new(),
         };
 
         let contract = snapshot_contract(&snapshot);
