@@ -53,14 +53,12 @@ pub(crate) fn snapshot_to_wire(
 fn scope_from_wire(value: wire::ContextScopeId) -> domain::ContextScopeId {
     match value {
         wire::ContextScopeId::Main => domain::ContextScopeId::Main,
-        wire::ContextScopeId::Subagent(id) => domain::ContextScopeId::Subagent(id),
     }
 }
 
 fn scope_to_wire(value: domain::ContextScopeId) -> wire::ContextScopeId {
     match value {
         domain::ContextScopeId::Main => wire::ContextScopeId::Main,
-        domain::ContextScopeId::Subagent(id) => wire::ContextScopeId::Subagent(id),
     }
 }
 
@@ -328,7 +326,7 @@ mod tests {
         let source = wire::LedgerAppendRequest {
             event_id: "event-1".to_string(),
             session_id: "session-1".to_string(),
-            context_scope_id: wire::ContextScopeId::Subagent("run-1".to_string()),
+            context_scope_id: wire::ContextScopeId::Main,
             turn_id: Some("turn-1".to_string()),
             created_at: "2026-07-16T00:00:00.000Z".to_string(),
             r#type: wire::LedgerEventType::ToolResult,
@@ -346,7 +344,7 @@ mod tests {
             ),
             (
                 "event-1",
-                "subagent:run-1",
+                "main",
                 domain::LedgerEventType::ToolResult,
                 Some("success")
             )

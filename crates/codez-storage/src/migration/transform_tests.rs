@@ -326,7 +326,7 @@ async fn transform_is_idempotent_versions_all_files_and_excludes_secret_envelope
     .expect("transformed settings must be JSON");
 
     assert_eq!(first, second);
-    assert_eq!((first.files.len(), first.skipped_secret_files), (12, 1));
+    assert_eq!((first.files.len(), first.skipped_secret_files), (11, 1));
     assert_eq!(provider["schema"], "providers");
     assert_eq!(
         provider["providers"][0]["credentialId"],
@@ -341,7 +341,6 @@ async fn transform_is_idempotent_versions_all_files_and_excludes_secret_envelope
         8192
     );
     assert_eq!(settings["appTheme"], "system");
-    assert!(settings["subAgentModels"]["explore"].is_array());
     assert!(
         provider["providers"][0].get("apiKeyRef").is_none()
             && provider["providers"][0].get("encryption").is_none()
@@ -398,7 +397,7 @@ async fn transform_report_is_immutable_after_verification() {
 }
 
 #[tokio::test]
-async fn transform_matches_legacy_provider_and_settings_normalization() {
+async fn transform_matches_legacy_provider_normalization() {
     const PROVIDERS: &str = r#"{
       "providers": [{
         "id":"provider-1",
@@ -406,9 +405,7 @@ async fn transform_matches_legacy_provider_and_settings_normalization() {
         "thinking":{"enabled":true,"mode":"openai","effort":"high","unknown":"drop"}
       }]
     }"#;
-    const SETTINGS: &str = r#"{"subAgentModels":"invalid"}"#;
-    let fixture =
-        MigrationFixture::with_files([("providers.json", PROVIDERS), ("settings.json", SETTINGS)]);
+    let fixture = MigrationFixture::with_files([("providers.json", PROVIDERS)]);
     let service = LegacyMigrationService::default();
     let (manifest, backup) = discover_and_backup(&service, &fixture, "legacy-normalization").await;
     let report = service
@@ -427,12 +424,6 @@ async fn transform_matches_legacy_provider_and_settings_normalization() {
             .expect("transformed Provider document must be readable"),
     )
     .expect("transformed Provider document must be JSON");
-    let settings: Value = serde_json::from_slice(
-        &fs::read(repository.join("user-data/settings.json"))
-            .expect("transformed settings document must be readable"),
-    )
-    .expect("transformed settings document must be JSON");
-
     assert_eq!(
         provider["providers"][0]["models"][0]["maxContextTokens"],
         16384
@@ -443,7 +434,6 @@ async fn transform_matches_legacy_provider_and_settings_normalization() {
             .get("unknown")
             .is_none()
     );
-    assert_eq!(settings["subAgentModels"], serde_json::json!({}));
 }
 
 #[tokio::test]
@@ -490,37 +480,6 @@ async fn semantic_validation_rejects_a_missing_attachment_without_completion_evi
                 .expect("absent marker must be readable")
                 .is_none()
     );
-}
-
-#[tokio::test]
-async fn semantic_validation_rejects_settings_that_reference_a_missing_provider() {
-    const SETTINGS: &str = r#"{
-      "subAgentModels": {
-        "explore": {"providerId":"provider-missing","model":"model-1"}
-      }
-    }"#;
-    let fixture = MigrationFixture::with_files([("settings.json", SETTINGS)]);
-    let service = LegacyMigrationService::default();
-    let (manifest, backup) = discover_and_backup(&service, &fixture, "missing-provider").await;
-
-    let error = service
-        .transform(
-            &fixture.roots,
-            &manifest,
-            &backup,
-            &fixture.backup_root,
-            &fixture.target_root,
-        )
-        .await
-        .expect_err("missing Provider IDs must block semantic verification");
-
-    assert!(matches!(
-        error,
-        MigrationError::MissingReference {
-            relation: "provider",
-            ..
-        }
-    ));
 }
 
 #[tokio::test]

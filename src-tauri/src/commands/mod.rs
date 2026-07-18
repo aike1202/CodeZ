@@ -1,4 +1,3 @@
-pub mod agent;
 pub mod attachment;
 pub mod chat;
 pub mod context;
@@ -13,7 +12,6 @@ pub mod renderer_log;
 pub mod rules;
 pub mod settings;
 pub mod skills;
-pub mod subagent;
 pub mod system;
 pub mod terminal;
 pub mod theme;

@@ -75,7 +75,7 @@ ready | blocked | unfinishedDependencies[] | blocks[] | waitingForApproval
 3. 只有全部依赖 `completed` 后 Task 才能开始或完成；`cancelled` 依赖不算完成。
 4. `requiresApproval=true` 的 Task 只有 `approved` 后才能开始或完成。
 5. Create/Update/Archive 都必须携带权威 revision；Create 用持久化幂等收据避免重试重复创建。
-6. Update 至少包含一项变更；同一批次不得重复 ID。状态按 `pending -> in_progress -> completed` 流转，取消、依赖变更和显式 reopen 必须说明 reason。
+6. Update 至少包含一项变更；同一批次不得重复 ID。状态按 `pending -> in_progress -> completed` 流转，取消、依赖变更、批量范围变更和显式 reopen 必须说明 reason。
 7. `clearFields` 可移除过期可选字段；声明 verificationCommand 的 Todo 必须有 passed verificationEvidence 才能完成，最终项关闭后若没有任何 passed evidence 则返回 `verify_before_final`。
 8. 删除或归档 Task 时原子清理安全的已完成依赖；仍阻塞活动工作的 cancelled Task 不得归档。
 9. Todo 只表达工作状态，不拥有 Agent/Executor，也不触发自动 spawn；Goal 保持为不同生命周期概念。

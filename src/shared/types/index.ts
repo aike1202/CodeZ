@@ -98,15 +98,6 @@ export type {
 export type { ToolBatchMeta } from './toolExecution'
 
 export type {
-  AgentMailboxMessage,
-  AgentMessageType,
-  AgentRecord,
-  AgentResultSnapshot,
-  AgentRuntimeSnapshot,
-  AgentRuntimeStatus
-} from './subagent'
-
-export type {
   ImageMimeType,
   ImageAttachmentBase,
   ImageAttachment,
@@ -119,4 +110,4 @@ export type {
   PendingPromptDraft
 } from './attachment'
 
-export { MAIN_CONTEXT_SCOPE, CONTEXT_SCHEMA_VERSION, contextScopeForSubAgent, eventChangesHistory } from './context'
+export { MAIN_CONTEXT_SCOPE, CONTEXT_SCHEMA_VERSION, eventChangesHistory } from './context'

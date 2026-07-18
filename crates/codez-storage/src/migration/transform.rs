@@ -517,31 +517,6 @@ fn transform_settings(object: &mut Map<String, Value>) {
     {
         object.insert("appTheme".to_string(), theme);
     }
-    let Some(selections) = object.get_mut("subAgentModels") else {
-        return;
-    };
-    let Some(selections) = selections.as_object_mut() else {
-        object.insert("subAgentModels".to_string(), Value::Object(Map::new()));
-        return;
-    };
-    let mut normalized = Map::new();
-    for (agent_type, raw) in selections.iter() {
-        let candidates = raw
-            .as_array()
-            .map_or_else(|| vec![raw], |values| values.iter().collect());
-        let valid = candidates
-            .into_iter()
-            .filter(|candidate| {
-                candidate.get("providerId").is_some_and(Value::is_string)
-                    && candidate.get("model").is_some_and(Value::is_string)
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        if !valid.is_empty() {
-            normalized.insert(agent_type.clone(), Value::Array(valid));
-        }
-    }
-    *selections = normalized;
 }
 
 fn add_version_header(
@@ -757,7 +732,7 @@ fn collect_semantic_facts(
     match file.data_set {
         LegacyDataSet::Providers => collect_provider_facts(file, values, facts),
         LegacyDataSet::Sessions => collect_session_facts(file, values, facts),
-        LegacyDataSet::Settings => collect_settings_facts(file, values, facts),
+        LegacyDataSet::Settings => Ok(()),
         LegacyDataSet::PermissionAudit => {
             for value in values {
                 if let Some(session_id) = value.get("sessionId").and_then(Value::as_str) {
@@ -774,13 +749,6 @@ fn collect_semantic_facts(
         }
         LegacyDataSet::Attachments => collect_attachment_facts(file, values, facts),
         LegacyDataSet::ContextLedger => collect_ledger_facts(file, values, facts),
-        LegacyDataSet::ParallelExecutions => {
-            for value in values {
-                let session_id = required_string(value, "sessionId", file)?;
-                facts.session_references.push(session_id.to_string());
-            }
-            Ok(())
-        }
         LegacyDataSet::RecentProjects
         | LegacyDataSet::PermissionRules
         | LegacyDataSet::WorkspacePermissions
@@ -904,28 +872,6 @@ fn collect_session_facts(
                 }
                 facts.ledger_references.push(path);
             }
-        }
-    }
-    Ok(())
-}
-
-fn collect_settings_facts(
-    file: &TransformedFile,
-    values: &[Value],
-    facts: &mut SemanticFacts,
-) -> Result<(), MigrationError> {
-    let document = single_document(file, values)?;
-    let Some(selections) = document.get("subAgentModels").and_then(Value::as_object) else {
-        return Ok(());
-    };
-    for selection in selections.values() {
-        let candidates = selection
-            .as_array()
-            .ok_or_else(|| invalid_transformed_file(file))?;
-        for candidate in candidates {
-            let provider_id = required_string(candidate, "providerId", file)?;
-            required_string(candidate, "model", file)?;
-            facts.provider_references.push(provider_id.to_string());
         }
     }
     Ok(())

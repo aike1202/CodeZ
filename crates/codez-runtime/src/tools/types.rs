@@ -89,12 +89,6 @@ pub enum ToolEffect {
     NotifyUser {
         channel: String,
     }, // desktop | remote
-    SpawnAgent {
-        role: String,
-        isolation: Option<String>,
-        #[serde(default)]
-        read_only: bool,
-    },
     ControlExecution {
         execution_id: String,
         action: String,

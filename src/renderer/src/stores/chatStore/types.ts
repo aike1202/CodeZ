@@ -2,7 +2,7 @@
 import type { PermissionApprovalResponse, PermissionRequest } from '../../../../shared/types/permission'
 import type { CompactionTrigger, ContextBudgetSnapshot } from '../../../../shared/types/context'
 import type { ImageAttachment, PendingPromptDraft } from '../../../../shared/types/attachment'
-import type { SessionRuntimeStatusChanged, SubAgentHandoff } from '../../../../shared/types/subagent'
+import type { ChatRuntimeStatusChanged } from '../../shared/desktop/generated/contracts'
 import type { QueuedPrompt } from '../../../../shared/types/queuedPrompt'
 
 export type AgentStateType =
@@ -89,38 +89,6 @@ export type ExecutionTimelineItem =
   | TextTimelineItem
   | CompactionTimelineItem
 
-/** 子 Agent 调用记录 — 与主 Agent 时间线分离，由 SubAgentCard 消费 */
-export interface SubAgentRecord {
-  id: string
-  sessionId?: string
-  contextScopeId?: string
-  attemptId?: string
-  type: string
-  description: string
-  prompt: string
-  depth?: 'quick' | 'normal' | 'exhaustive'
-  expectations?: { questions: string[]; outOfScope?: string[] }
-  context?: string
-  scope?: { directories?: string[]; excludeGlobs?: string[] }
-  parentToolCallId: string
-  status: 'running' | 'completed' | 'failed' | 'interrupted'
-  interruptionReason?: 'runtime_missing' | 'user_aborted' | 'parent_delivery_missing'
-  startedAt: number
-  completedAt?: number
-  content: string
-  reasoningContent?: string
-  toolCalls: ToolCallState[]
-  executionTimeline: ExecutionTimelineItem[]
-  result?: {
-    output?: string
-    qualitySummary?: any
-    toolCallCount: number
-    filesExamined?: string[]
-    conclusion?: string
-    handoff?: SubAgentHandoff
-  }
-}
-
 export interface PermissionRequestState extends PermissionRequest {
   status: 'pending' | 'approved' | 'denied' | 'interrupted'
   createdAt: number
@@ -170,7 +138,6 @@ export interface ChatMessage {
   diffEntries?: Array<{ path: string; diff: string }>
   permissionRequests?: PermissionRequestState[]
   askUserRequests?: AskUserRequestState[]
-  subAgents?: SubAgentRecord[]
   attachments?: ImageAttachment[]
 }
 
@@ -207,7 +174,6 @@ export interface ChatState {
   messages: ChatMessage[]
   streamCleanups: Record<string, (() => void) | null>
   expandedCapsule: 'todo' | 'plan' | null
-  subAgentStatus: 'idle' | 'running' | 'completed' | 'failed'
   planListModalOpen: boolean
   activePlan: any | null
   planReview: { plan: any; status: string } | null
@@ -218,10 +184,10 @@ export interface ChatState {
   todos: TodoItem[]
   contextBudgets: Record<string, ContextBudgetSnapshot | undefined>
   compactionStates: Record<string, CompactionUiState | undefined>
-  runtimeStatuses: Record<string, SessionRuntimeStatusChanged | undefined>
+  runtimeStatuses: Record<string, ChatRuntimeStatusChanged | undefined>
   blockedRuntimeSessionIds: Record<string, true | undefined>
 
-  applyRuntimeStatus: (next: SessionRuntimeStatusChanged) => void
+  applyRuntimeStatus: (next: ChatRuntimeStatusChanged) => void
   refreshRuntimeStatuses: (sessionIds: string[]) => Promise<void>
   clearRuntimeStatus: (sessionId: string) => void
   allowRuntimeStatus: (sessionId: string) => void
@@ -284,31 +250,7 @@ export interface ChatState {
   startToolCall: (msgId: string, toolCall: Omit<ToolCallState, 'status' | 'startedAt' | 'sequence'>) => void
   finishToolCall: (msgId: string, toolCallId: string, result: string) => void
 
-  startSubAgent: (
-    msgId: string,
-    subAgentId: string,
-    meta: {
-      type: string
-      description: string
-      prompt: string
-      depth?: 'quick' | 'normal' | 'exhaustive'
-      expectations?: { questions: string[]; outOfScope?: string[] }
-      context?: string
-      scope?: { directories?: string[]; excludeGlobs?: string[] }
-      parentToolCallId: string
-    }
-  ) => void
-  appendSubAgentChunk: (msgId: string, subAgentId: string, delta: string, reasoningDelta: string) => void
-  startSubAgentToolCall: (msgId: string, subAgentId: string, toolCall: Omit<ToolCallState, 'status' | 'startedAt' | 'sequence'>) => void
-  finishSubAgentToolCall: (msgId: string, subAgentId: string, toolCallId: string, result: string) => void
-  endSubAgent: (
-    msgId: string,
-    subAgentId: string,
-    result: { status: 'completed' | 'failed' | 'interrupted'; output?: string; qualitySummary?: any; toolCallCount: number; filesExamined?: string[]; handoff?: SubAgentHandoff }
-  ) => void
-
   setExpandedCapsule: (capsule: 'todo' | 'plan' | null) => void
-  setSubAgentStatus: (status: 'idle' | 'running' | 'completed' | 'failed') => void
   initPlanStateListener: () => () => void
   setPlanListModalOpen: (open: boolean) => void
   setActivePlan: (plan: any | null) => void

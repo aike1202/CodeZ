@@ -1,6 +1,5 @@
 ﻿#![forbid(unsafe_code)]
 
-mod agent_runtime;
 mod attachment_boundary;
 mod chat_compaction;
 mod chat_interaction;
@@ -23,8 +22,6 @@ mod session_deletion;
 mod skill_document;
 mod skill_tool_runtime;
 mod state;
-mod subagent_boundary;
-mod subagent_runtime;
 mod web_tool_runtime;
 
 use codez_core::{AppError, RedactedText};
@@ -162,8 +159,6 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::todo::todo_update,
             commands::todo::todo_archive,
             commands::todo::todo_delete,
-            commands::agent::agent_snapshot,
-            commands::agent::agent_active_ids,
             commands::rules::rules_get_list,
             commands::rules::rules_save,
             commands::rules::rules_delete,
@@ -191,13 +186,6 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::mcp::mcp_list_secret_keys,
             commands::mcp::mcp_set_secret,
             commands::mcp::mcp_delete_secret,
-            commands::subagent::subagent_list,
-            commands::subagent::subagent_toggle,
-            commands::subagent::subagent_get_detail,
-            commands::subagent::subagent_set_model,
-            commands::subagent::subagent_run,
-            commands::subagent::subagent_get_run,
-            commands::subagent::subagent_cancel_run,
             commands::chat::chat_predict_next_input,
             commands::chat::chat_stream_start,
             commands::chat::chat_stream_ack,
@@ -266,7 +254,6 @@ pub fn run() -> Result<(), tauri::Error> {
                 app.handle(),
                 &state.shutdown,
                 &state.cancellation,
-                &state.agent_runtime,
                 &state.process_runner,
                 &state.pty_manager,
                 &state.mcp_runtime,

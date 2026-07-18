@@ -232,7 +232,6 @@ mod tests {
                     }
                     SessionDeletionStep::Permissions
                     | SessionDeletionStep::EditTransactions
-                    | SessionDeletionStep::SubAgentRuns
                     | SessionDeletionStep::Todos
                     | SessionDeletionStep::Fingerprints => {}
                 }
@@ -432,7 +431,6 @@ mod tests {
                 vec![
                     SessionDeletionStep::Permissions,
                     SessionDeletionStep::EditTransactions,
-                    SessionDeletionStep::SubAgentRuns,
                     SessionDeletionStep::Todos,
                     SessionDeletionStep::Attachments,
                     SessionDeletionStep::Ledger,

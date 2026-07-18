@@ -318,15 +318,6 @@ export function buildUnifiedTimeline(
           verbDisplay = tc.status === 'running' ? 'Analyzing' : 'Analyzed'
         } else if (tc.name === 'AskUserQuestion') {
           verbDisplay = tc.status === 'running' ? 'Asking' : 'Asked'
-        } else if (tc.name === 'submit_result' || tc.name === 'submit') {
-          verbDisplay = tc.status === 'running' ? 'Submitting' : 'Submitted'
-        } else if (
-          tc.name === 'SubAgentRunner'
-          || tc.name === 'spawn'
-          || tc.name === 'spawn_agent'
-          || tc.name === 'delegate'
-        ) {
-          verbDisplay = tc.status === 'running' ? 'Dispatching' : 'Dispatched'
         } else if (tc.name === 'Write' || tc.name === 'write_to_file') {
           verbDisplay = tc.status === 'running' ? 'Saving' : 'Saved'
         } else if (tc.name === 'Skill' || tc.name === 'ActivateSkill' || tc.name === 'invoke_skill') {
@@ -402,34 +393,6 @@ export function buildUnifiedTimeline(
             }
           } catch {
             // keep original target
-          }
-        }
-
-        // submit_result：展示提交摘要
-        if (tc.name === 'submit_result') {
-          try {
-            const sa = JSON.parse(tc.args)
-            if (sa.conclusion) {
-              targetDisplay = sa.conclusion.slice(0, 80) + (sa.conclusion.length > 80 ? '…' : '')
-            } else {
-              targetDisplay = '提交研究结果'
-            }
-          } catch {
-            targetDisplay = '提交结果'
-          }
-        }
-
-        // SubAgentRunner / spawn：展示委派目标
-        if (
-          tc.name === 'SubAgentRunner'
-          || tc.name === 'spawn'
-          || tc.name === 'spawn_agent'
-        ) {
-          try {
-            const ta = JSON.parse(tc.args)
-            targetDisplay = ta.description || ta.subagent_type || '子任务'
-          } catch {
-            targetDisplay = '委派子任务'
           }
         }
 

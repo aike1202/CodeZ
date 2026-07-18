@@ -2,7 +2,6 @@
 
 use codez_core::{AppError, PortFuture, SessionId};
 use codez_runtime::{
-    agent::collaboration::AgentRuntime,
     attachment::AttachmentService,
     context::ledger::ModelLedgerStore,
     edit_transaction::EditTransactionService,
@@ -13,14 +12,12 @@ use codez_runtime::{
 };
 use codez_storage::SessionStore;
 
-use crate::{chat_runtime::ChatRuntime, subagent_runtime::SubAgentRuntime};
+use crate::chat_runtime::ChatRuntime;
 
 pub(crate) struct SessionDeletionDependencies {
     pub(crate) chat_runtime: Arc<ChatRuntime>,
     pub(crate) history_revert: Arc<HistoryRevertService>,
     pub(crate) edit_transaction: Arc<EditTransactionService>,
-    pub(crate) subagent_runtime: Arc<SubAgentRuntime>,
-    pub(crate) agent_runtime: Arc<AgentRuntime>,
     pub(crate) todo_store: Arc<TodoStore>,
     pub(crate) attachment: Arc<AttachmentService>,
     pub(crate) model_ledger: Arc<ModelLedgerStore>,
@@ -59,16 +56,6 @@ impl SessionDeletionOperations for DesktopSessionDeletionOperations {
                         session_id,
                     )
                     .await?;
-                }
-                SessionDeletionStep::SubAgentRuns => {
-                    self.dependencies
-                        .agent_runtime
-                        .cleanup_session(session_id)
-                        .await?;
-                    self.dependencies
-                        .subagent_runtime
-                        .cleanup_session(session_id)
-                        .await?;
                 }
                 SessionDeletionStep::Todos => {
                     self.dependencies

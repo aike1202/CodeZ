@@ -1319,6 +1319,13 @@ fn validate_update_intents(
     if let Some(reason) = reason {
         validate_required_text("TodoUpdate reason", reason, MAX_DESCRIPTION_BYTES)?;
     }
+    if updates.len() > 1
+        && updates
+            .iter()
+            .any(|update| todo_patch_changes_scope(&update.patch))
+    {
+        require_update_reason(reason, "changing the scope of multiple Todo items")?;
+    }
     for update in updates {
         let todo = current
             .iter()
@@ -1361,6 +1368,24 @@ fn validate_update_intents(
         }
     }
     Ok(())
+}
+
+fn todo_patch_changes_scope(patch: &TodoItemPatch) -> bool {
+    patch.subject.is_some()
+        || patch.description.is_some()
+        || patch.files.is_some()
+        || patch.acceptance_criteria.is_some()
+        || patch.verification_command.is_some()
+        || patch.context_bundle.is_some()
+        || patch.clear_fields.iter().any(|field| {
+            matches!(
+                field,
+                TodoClearField::Files
+                    | TodoClearField::AcceptanceCriteria
+                    | TodoClearField::VerificationCommand
+                    | TodoClearField::ContextBundle
+            )
+        })
 }
 
 fn validate_status_transition(
@@ -2845,6 +2870,34 @@ mod tests {
             )
             .await
             .expect_err("cancellation without a reason must fail");
+
+        assert_eq!(error.kind(), AppErrorKind::Validation);
+    }
+
+    #[tokio::test]
+    async fn multi_item_scope_change_should_require_a_reason() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+        let session_id = session("session-1");
+        store
+            .create(&session_id, vec![input("first"), input("second")])
+            .await
+            .expect("Todo creation must succeed");
+        let updates = ["t1", "t2"]
+            .into_iter()
+            .map(|todo_id| TodoItemUpdate {
+                todo_id: todo_id.to_string(),
+                patch: TodoItemPatch {
+                    description: Some("Changed scope".to_string()),
+                    ..TodoItemPatch::default()
+                },
+            })
+            .collect();
+
+        let error = store
+            .update_batch(&session_id, 1, None, updates)
+            .await
+            .expect_err("multi-item scope changes without a reason must fail");
 
         assert_eq!(error.kind(), AppErrorKind::Validation);
     }

@@ -9,7 +9,6 @@ use codez_mcp::{McpProjectConfigService, McpSecretService, McpUserConfigService}
 use codez_platform::ResourceLocator;
 use codez_runtime::{
     CancellationTree, HostPreferences, ShutdownCoordinator, SystemService,
-    agent::collaboration::{AgentAttemptExecutor, AgentRuntime, AgentRuntimeEventSink},
     history_revert::{HistoryRevertError, HistoryRevertService, HistoryRevertWorkspace},
     permission::store::{PermissionStoreError, WorkspacePermissionStore},
     session_deletion::SessionDeletionService,
@@ -21,10 +20,9 @@ use tauri::{App, Manager};
 use thiserror::Error;
 
 use crate::{
-    agent_runtime::DesktopAgentAttemptExecutor,
     chat_runtime::{ChatPromptSources, ChatRuntime},
     chat_tool_runtime::{ChatToolRuntime, ChatToolRuntimeDependencies},
-    commands::{agent::DesktopAgentEventSink, todo::DesktopTodoEventSink},
+    commands::todo::DesktopTodoEventSink,
     error::ErrorReporter,
     logging::{self, LoggingError},
     mcp_boundary::StorageMcpSecretStore,
@@ -34,7 +32,6 @@ use crate::{
     provider_boundary::{StorageProviderCredentials, StorageProviderRepository},
     session_deletion::{SessionDeletionDependencies, desktop_session_deletion_operations},
     state::AppState,
-    subagent_runtime::SubAgentRuntime,
 };
 
 #[derive(Debug, Error)]
@@ -56,21 +53,6 @@ pub(crate) enum CompositionError {
     Logging(#[from] LoggingError),
     #[error("failed to initialize provider storage: {source}")]
     Provider {
-        #[source]
-        source: AppError,
-    },
-    #[error("failed to initialize sub-agent runtime: {source}")]
-    SubAgentRuntime {
-        #[source]
-        source: AppError,
-    },
-    #[error("failed to recover Agent runtime snapshots: {source}")]
-    AgentRuntimeRecovery {
-        #[source]
-        source: AppError,
-    },
-    #[error("failed to bind Agent runtime composition: {source}")]
-    AgentRuntimeComposition {
         #[source]
         source: AppError,
     },
@@ -162,31 +144,6 @@ pub(crate) fn compose_app_state(
         .map_err(|source| CompositionError::Provider { source })?;
         Arc::new(service)
     };
-    let subagent_runtime = Arc::new(
-        SubAgentRuntime::new(
-            paths.data_directory(),
-            Arc::clone(&persistence),
-            Arc::clone(&provider_service),
-        )
-        .map_err(|source| CompositionError::SubAgentRuntime { source })?,
-    );
-    let agent_executor = Arc::new(DesktopAgentAttemptExecutor::new(
-        paths.data_directory().to_path_buf(),
-        Arc::clone(&storage),
-        Arc::clone(&provider_service),
-        Arc::clone(&model_ledger),
-    ));
-    let agent_executor_port: Arc<dyn AgentAttemptExecutor> = agent_executor.clone();
-    let agent_events: Arc<dyn AgentRuntimeEventSink> =
-        Arc::new(DesktopAgentEventSink::new(app.handle().clone()));
-    let agent_runtime = Arc::new(AgentRuntime::with_event_sink(
-        paths.data_directory(),
-        Arc::clone(&persistence),
-        agent_executor_port,
-        agent_events,
-    ));
-    tauri::async_runtime::block_on(agent_runtime.recover_all())
-        .map_err(|source| CompositionError::AgentRuntimeRecovery { source })?;
     let chat_tools = Arc::new(ChatToolRuntime::new(
         paths.as_ref(),
         ChatToolRuntimeDependencies {
@@ -198,7 +155,6 @@ pub(crate) fn compose_app_state(
             mutation_coordinator: Arc::clone(&mutation_coordinator),
             edit_transaction_service: Arc::clone(&edit_transaction),
             todo_store: Arc::clone(&todo_store),
-            agent_runtime: Arc::clone(&agent_runtime),
             process_runner: Arc::clone(&process_runner),
             notification_port: Arc::new(TauriNotificationPort::new(app.handle().clone())),
             permission_ai_classifier: Some(Arc::new(ProviderPermissionAiClassifier::new(
@@ -223,9 +179,6 @@ pub(crate) fn compose_app_state(
         )
         .with_skills(chat_tools.skill_service()),
     ));
-    agent_executor
-        .bind_chat_runtime(&chat_runtime)
-        .map_err(|source| CompositionError::AgentRuntimeComposition { source })?;
     let session_deletion = Arc::new(SessionDeletionService::new(
         paths.data_directory(),
         Arc::clone(&persistence),
@@ -233,8 +186,6 @@ pub(crate) fn compose_app_state(
             chat_runtime: Arc::clone(&chat_runtime),
             history_revert: Arc::clone(&history_revert),
             edit_transaction: Arc::clone(&edit_transaction),
-            subagent_runtime: Arc::clone(&subagent_runtime),
-            agent_runtime: Arc::clone(&agent_runtime),
             todo_store: Arc::clone(&todo_store),
             attachment: Arc::clone(&attachment),
             model_ledger: Arc::clone(&model_ledger),
@@ -299,9 +250,6 @@ pub(crate) fn compose_app_state(
         process_runner,
         pty_manager: Arc::new(codez_platform::PtyManager::new(pty_tx)),
         provider_service,
-        subagent_settings: tokio::sync::Mutex::new(()),
-        subagent_runtime,
-        agent_runtime,
         todo_store,
         workspace_permissions,
         mcp_config,

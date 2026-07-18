@@ -15,57 +15,6 @@ afterEach(() => {
 })
 
 describe('chat compaction execution timeline', () => {
-  it('renders a SubAgent card immediately after its delegated tool row', () => {
-    const spawnCall = {
-      id: 'spawn-frontend',
-      name: 'spawn_agent',
-      args: JSON.stringify({ description: '分析前端架构' }),
-      status: 'success' as const,
-      result: JSON.stringify({ agent: { agentId: 'agent-frontend' } }),
-      startedAt: 1_000,
-      completedAt: 1_100,
-      sequence: 0
-    }
-    const nextCall = {
-      id: 'read-after-spawn',
-      name: 'PowerShell',
-      args: JSON.stringify({ command: 'next-command-marker' }),
-      status: 'success' as const,
-      result: 'project docs',
-      startedAt: 2_000,
-      completedAt: 2_100,
-      sequence: 1
-    }
-    const html = renderToStaticMarkup(React.createElement(ExecutionLog, {
-      timeline: [spawnCall, nextCall].map((toolCall) => ({
-        id: `timeline-${toolCall.id}`,
-        type: 'tool' as const,
-        toolCall,
-        startedAt: toolCall.startedAt,
-        updatedAt: toolCall.completedAt,
-        sequence: toolCall.sequence
-      })),
-      subAgents: [{
-        id: 'agent-frontend',
-        type: 'Explore',
-        description: '前端架构子智能体',
-        prompt: '分析前端',
-        parentToolCallId: spawnCall.id,
-        status: 'completed' as const,
-        startedAt: 1_000,
-        completedAt: 1_500,
-        content: '完成',
-        toolCalls: [],
-        executionTimeline: []
-      }]
-    }))
-
-    expect(html.indexOf('已委派子任务')).toBeGreaterThan(-1)
-    expect(html.indexOf('前端架构子智能体')).toBeGreaterThan(html.indexOf('已委派子任务'))
-    expect(html.indexOf('next-command-marker')).toBeGreaterThan(-1)
-    expect(html.indexOf('前端架构子智能体')).toBeLessThan(html.indexOf('next-command-marker'))
-  })
-
   it('suppresses empty and sub-100ms completed reasoning fragments', () => {
     const unified = buildUnifiedTimeline([{
       id: 'reasoning-fragment',

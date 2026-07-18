@@ -1,8 +1,7 @@
 ﻿/**
  * 会话级 Todo 类型定义。
  *
- * Todo 描述工作状态，不拥有 Agent 或 Executor 生命周期。权威状态由
- * Rust TodoStore 持久化。
+ * Todo 描述工作状态，权威状态由 Rust TodoStore 持久化。
  */
 
 export type TodoStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'

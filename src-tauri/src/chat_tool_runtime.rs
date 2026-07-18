@@ -1,12 +1,11 @@
 use std::{
     borrow::Cow,
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fs,
     future::Future,
     path::Path,
     pin::Pin,
     sync::{Arc, Mutex},
-    time::Duration,
 };
 
 use codez_contracts::chat::{ChatAskUserAnswer, ChatAskUserQuestion, ChatAskUserRequest};
@@ -22,9 +21,6 @@ use codez_platform::{
 };
 use codez_runtime::{
     SearchService,
-    agent::collaboration::{
-        AgentMailboxMessage, AgentMessageDeliveryState, AgentRuntime, AgentWaitOutcome,
-    },
     context::ledger::ModelLedgerStore,
     edit_transaction::EditTransactionService,
     fingerprint::ReadFingerprintStore,
@@ -39,7 +35,6 @@ use codez_runtime::{
     tools::{
         authorization::AuthorizationBinding,
         builtin::{
-            agent::AgentTool,
             bash::{BashHost, BashTool},
             edit::EditTool,
             glob::GlobTool,
@@ -87,8 +82,6 @@ use crate::{
 const BUILTIN_CATALOG_ID: &str = "chat-builtin-v1";
 const MAX_AGENT_ROLE_BYTES: usize = 160;
 const ASK_USER_TOOL_NAME: &str = "AskUserQuestion";
-const ROOT_AGENT_PATH: &str = "/root";
-const ROOT_AGENT_WAIT_SLICE: Duration = Duration::from_secs(30);
 
 #[async_trait::async_trait]
 pub(crate) trait AskUserHandler: Send + Sync {
@@ -139,24 +132,6 @@ pub(crate) struct ChatToolRunContext {
     active_tools: Arc<ToolCancellationRegistry>,
     context_scope_id: ContextScopeId,
     transaction_id: String,
-    agent_policy: Option<AgentToolPolicy>,
-    permission_ai_context: PermissionAiContext,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AgentToolPolicy {
-    Explore,
-    Reviewer,
-}
-
-struct AgentRunContextInput {
-    workspace_root: WorkspaceRoot,
-    session_id: SessionId,
-    run_id: StreamId,
-    cancellation: CancellationToken,
-    role: AgentRole,
-    context_scope_id: ContextScopeId,
-    policy: AgentToolPolicy,
     permission_ai_context: PermissionAiContext,
 }
 
@@ -198,35 +173,6 @@ impl ChatToolRunContext {
             active_tools: Arc::new(ToolCancellationRegistry::default()),
             context_scope_id: ContextScopeId::Main,
             transaction_id: format!("tx_{}", uuid::Uuid::new_v4()),
-            agent_policy: None,
-            permission_ai_context,
-        })
-    }
-
-    fn new_agent(input: AgentRunContextInput) -> Result<Self, ChatToolRunContextError> {
-        let AgentRunContextInput {
-            workspace_root,
-            session_id,
-            run_id,
-            cancellation,
-            role,
-            context_scope_id,
-            policy,
-            permission_ai_context,
-        } = input;
-        validate_agent_role(&role)?;
-        Ok(Self {
-            workspace_root,
-            session_id,
-            run_id,
-            cancellation,
-            agent_role: role,
-            approval_handler: None,
-            ask_user_handler: None,
-            active_tools: Arc::new(ToolCancellationRegistry::default()),
-            context_scope_id,
-            transaction_id: format!("tx_{}", uuid::Uuid::new_v4()),
-            agent_policy: Some(policy),
             permission_ai_context,
         })
     }
@@ -323,7 +269,6 @@ pub(crate) struct ChatToolRuntime {
     command_tasks: Arc<CommandTaskRegistry>,
     exposure_state: Arc<ToolExposureState>,
     skills: Arc<SkillsService>,
-    agent_runtime: Arc<AgentRuntime>,
     todo_store: Arc<TodoStore>,
     bash: Option<Arc<BashTool>>,
     powershell: Option<Arc<PowerShellTool>>,
@@ -343,7 +288,6 @@ pub(crate) struct ChatToolRuntimeDependencies {
     pub(crate) mutation_coordinator: Arc<FileMutationCoordinator>,
     pub(crate) edit_transaction_service: Arc<EditTransactionService>,
     pub(crate) todo_store: Arc<TodoStore>,
-    pub(crate) agent_runtime: Arc<AgentRuntime>,
     pub(crate) process_runner: Arc<NativeProcessRunner>,
     pub(crate) notification_port: Arc<dyn NotificationPort>,
     pub(crate) permission_ai_classifier: Option<Arc<dyn PermissionAiClassifier>>,
@@ -372,7 +316,6 @@ impl ChatToolRuntime {
             mutation_coordinator,
             edit_transaction_service,
             todo_store,
-            agent_runtime,
             process_runner,
             notification_port,
             permission_ai_classifier,
@@ -430,7 +373,6 @@ impl ChatToolRuntime {
             powershell: powershell.clone(),
             result_store: Arc::clone(&result_store),
             todo_store: Arc::clone(&todo_store),
-            agent_runtime: Arc::clone(&agent_runtime),
             exposure_state: Arc::clone(&exposure_state),
             skills: Arc::clone(&skills),
             model_ledger,
@@ -461,7 +403,6 @@ impl ChatToolRuntime {
             command_tasks,
             exposure_state,
             skills,
-            agent_runtime,
             todo_store,
             bash,
             powershell,
@@ -481,9 +422,7 @@ impl ChatToolRuntime {
     ) -> ProviderToolSurface {
         let exposure = self.exposure_for_run(run);
         let mut definitions = provider_definitions(exposure.eager_tools.iter());
-        if run.agent_policy.is_none() {
-            definitions.push(ask_user_tool_definition());
-        }
+        definitions.push(ask_user_tool_definition());
         ProviderToolSurface {
             definitions,
             deferred_tools: exposure.deferred_tools,
@@ -502,95 +441,6 @@ impl ChatToolRuntime {
             .snapshot(session_id)
             .await
             .map(|snapshot| codez_runtime::todo::todo_prompt_state(&snapshot))
-    }
-
-    /// Waits for direct root Agents that still owe the main conversation mailbox updates.
-    ///
-    /// A normal Provider completion must not tear down children it just started. The wait remains
-    /// tied to the main run cancellation token so an explicit user stop still cancels promptly.
-    pub(crate) async fn wait_for_root_agent_results(
-        &self,
-        run: &ChatToolRunContext,
-    ) -> Result<Vec<AgentMailboxMessage>, AppError> {
-        if run.context_scope_id() != &ContextScopeId::Main {
-            return Ok(Vec::new());
-        }
-
-        let snapshot = self.agent_runtime.snapshot(run.session_id()).await?;
-        let unread_authors = snapshot
-            .messages
-            .iter()
-            .filter(|message| {
-                message.delivery_state == AgentMessageDeliveryState::Unread
-                    && message.recipient == ROOT_AGENT_PATH
-            })
-            .map(|message| message.author.as_str())
-            .collect::<HashSet<_>>();
-        let targets = snapshot
-            .agents
-            .iter()
-            .filter(|agent| {
-                agent.parent_agent_id == ROOT_AGENT_PATH
-                    && (agent.status.is_active() || unread_authors.contains(agent.path.as_str()))
-            })
-            .map(|agent| agent.agent_id.clone())
-            .collect::<Vec<_>>();
-        if targets.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let mut messages = Vec::new();
-        loop {
-            let wait = self.agent_runtime.wait_for_update(
-                run.session_id(),
-                "main",
-                &targets,
-                ROOT_AGENT_WAIT_SLICE,
-            );
-            let result = tokio::select! {
-                result = wait => result?,
-                () = run.cancellation.cancelled() => {
-                    return Err(AppError::cancelled("The root Agent wait was cancelled"));
-                }
-            };
-            messages.extend(result.messages);
-            match result.outcome {
-                AgentWaitOutcome::Updated | AgentWaitOutcome::Timeout => {}
-                AgentWaitOutcome::NoActiveAgents => return Ok(messages),
-            }
-        }
-    }
-
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "Agent authority and classifier context remain explicit at the boundary"
-    )]
-    pub(crate) fn agent_run_context(
-        &self,
-        workspace_root: WorkspaceRoot,
-        session_id: SessionId,
-        run_id: StreamId,
-        cancellation: CancellationToken,
-        role: &str,
-        context_scope_id: ContextScopeId,
-        permission_ai_context: PermissionAiContext,
-    ) -> Result<ChatToolRunContext, AppError> {
-        let policy = match role {
-            "Explore" => AgentToolPolicy::Explore,
-            "Reviewer" => AgentToolPolicy::Reviewer,
-            _ => return Err(AppError::validation("The Agent role is not available")),
-        };
-        ChatToolRunContext::new_agent(AgentRunContextInput {
-            workspace_root,
-            session_id,
-            run_id,
-            cancellation,
-            role: role.to_string(),
-            context_scope_id,
-            policy,
-            permission_ai_context,
-        })
-        .map_err(|error| AppError::validation(error.to_string()))
     }
 
     /// Clears commands, shell workspace state, and permission decisions owned by a session.
@@ -678,15 +528,6 @@ impl ChatToolRuntime {
     }
 
     fn exposure_for_run(&self, run: &ChatToolRunContext) -> ToolExposurePlan {
-        let denied_tools = run.agent_policy.map(|policy| {
-            let allowed = agent_tool_allowlist(policy);
-            self.catalog
-                .descriptors
-                .iter()
-                .map(|descriptor| descriptor.name().to_string())
-                .filter(|name| !allowed.contains(name.as_str()))
-                .collect::<HashSet<_>>()
-        });
         let scope_key = format!(
             "{}:{}",
             run.session_id.as_str(),
@@ -695,7 +536,7 @@ impl ChatToolRuntime {
         ToolExposurePlanner::plan(ToolExposureRequest {
             catalog: self.catalog.clone(),
             agent_role: run.agent_role.clone(),
-            denied_tools,
+            denied_tools: None,
             activated_deferred_tools: Some(self.exposure_state.get(&scope_key)),
             max_tools: None,
             schema_token_budget: None,
@@ -905,7 +746,6 @@ struct BuiltinCatalogDependencies {
     powershell: Option<Arc<PowerShellTool>>,
     result_store: Arc<LargeToolResultStore>,
     todo_store: Arc<TodoStore>,
-    agent_runtime: Arc<AgentRuntime>,
     exposure_state: Arc<ToolExposureState>,
     skills: Arc<SkillsService>,
     model_ledger: Arc<ModelLedgerStore>,
@@ -923,7 +763,6 @@ fn builtin_catalog(
         powershell,
         result_store,
         todo_store,
-        agent_runtime,
         exposure_state,
         skills,
         model_ledger,
@@ -964,12 +803,6 @@ fn builtin_catalog(
         Arc::new(TodoTool::create(Arc::clone(&todo_store))),
         Arc::new(TodoTool::update(Arc::clone(&todo_store))),
         Arc::new(TodoTool::archive(todo_store)),
-        Arc::new(AgentTool::spawn(Arc::clone(&agent_runtime))),
-        Arc::new(AgentTool::followup(Arc::clone(&agent_runtime))),
-        Arc::new(AgentTool::send(Arc::clone(&agent_runtime))),
-        Arc::new(AgentTool::list(Arc::clone(&agent_runtime))),
-        Arc::new(AgentTool::wait(Arc::clone(&agent_runtime))),
-        Arc::new(AgentTool::interrupt(agent_runtime)),
     ]);
     ToolCatalogSnapshot::from_handlers(BUILTIN_CATALOG_ID, handlers)
 }
@@ -1001,104 +834,6 @@ fn provider_definitions<'a>(
             },
         })
         .collect()
-}
-
-fn agent_tool_allowlist(policy: AgentToolPolicy) -> HashSet<&'static str> {
-    let mut allowed = HashSet::from([
-        "Read",
-        "Glob",
-        "Grep",
-        "list_files",
-        "ToolResultRead",
-        "send_message",
-        "list_agents",
-        "wait_agent",
-    ]);
-    if policy == AgentToolPolicy::Reviewer {
-        allowed.extend(["Bash", "PowerShell"]);
-    }
-    allowed
-}
-
-fn agent_policy_error(
-    run: &ChatToolRunContext,
-    prepared: &PreparedToolCall,
-) -> Option<ToolExecutionError> {
-    if run.agent_policy == Some(AgentToolPolicy::Reviewer)
-        && matches!(prepared.canonical_name.as_str(), "Bash" | "PowerShell")
-        && !reviewer_verification_command(&prepared.input)
-    {
-        return Some(tool_error(
-            "AGENT_TOOL_POLICY_DENIED",
-            "Reviewer Agents may run only explicitly allowed verification commands.",
-            true,
-        ));
-    }
-    None
-}
-
-fn reviewer_verification_command(input: &serde_json::Value) -> bool {
-    if input.get("background").and_then(serde_json::Value::as_bool) == Some(true)
-        || input.get("taskId").is_some()
-        || input.get("interrupt").is_some()
-    {
-        return false;
-    }
-    let Some(command) = input.get("command").and_then(serde_json::Value::as_str) else {
-        return false;
-    };
-    if command.trim().is_empty()
-        || command.chars().any(|character| {
-            character.is_control()
-                || matches!(
-                    character,
-                    ';' | '&'
-                        | '|'
-                        | '>'
-                        | '<'
-                        | '`'
-                        | '$'
-                        | '%'
-                        | '!'
-                        | '\''
-                        | '"'
-                        | '('
-                        | ')'
-                        | '{'
-                        | '}'
-                        | '['
-                        | ']'
-                )
-        })
-    {
-        return false;
-    }
-    let tokens = command.split_whitespace().collect::<Vec<_>>();
-    if tokens.iter().skip(1).any(|token| {
-        token.contains("..")
-            || (!token.starts_with('-') && std::path::Path::new(token).is_absolute())
-            || token.contains(':')
-    }) {
-        return false;
-    }
-    match tokens.as_slice() {
-        ["cargo", "check" | "test" | "clippy", ..] => true,
-        ["cargo", "fmt", arguments @ ..] => arguments.contains(&"--check"),
-        ["git", "status" | "diff" | "show" | "log" | "rev-parse", ..] => true,
-        ["npm" | "pnpm" | "bun", "test", ..] => true,
-        ["npm" | "pnpm" | "bun", "run", script, ..] => {
-            matches!(*script, "test" | "typecheck" | "lint" | "check" | "build")
-        }
-        ["yarn", script, ..] => {
-            matches!(*script, "test" | "typecheck" | "lint" | "check" | "build")
-        }
-        ["go", "test", ..]
-        | ["dotnet", "test", ..]
-        | ["python" | "python3" | "py", "-m", "pytest", ..]
-        | ["pytest", ..]
-        | ["mvn" | "mvnw" | "gradle" | "gradlew", "test", ..] => true,
-        _ => false,
-    }
 }
 
 fn tool_error(code: &str, message: &str, recoverable: bool) -> ToolExecutionError {
@@ -1176,9 +911,6 @@ impl ToolExecutionPipelineContext for PipelineContext<'_> {
         Self: 'async_trait,
     {
         Box::pin(async move {
-            if let Some(error) = agent_policy_error(self.run, prepared) {
-                return ToolAuthorizationDecision::deny(error);
-            }
             match self
                 .runtime
                 .permission
@@ -1213,13 +945,9 @@ mod tests {
 
     use codez_contracts::chat::{ChatAskUserAnswer, ChatAskUserAnswerValue, ChatAskUserRequest};
     use codez_core::{
-        AppError, AppPaths, AtomicPersistence, CancellationToken, SessionId, StreamId,
-        WorkspaceRoot, context::ContextScopeId,
+        AppPaths, AtomicPersistence, CancellationToken, SessionId, StreamId, WorkspaceRoot,
     };
     use codez_runtime::{
-        agent::collaboration::{
-            AgentAttemptExecutor, AgentAttemptOutput, AgentAttemptRequest, AgentRuntime,
-        },
         context::{budget::ContextBudgetService, ledger::ModelLedgerStore},
         permission::{ai_classifier::PermissionAiContext, store::WorkspacePermissionStore},
         tools::large_result::LargeToolResultStore,
@@ -1229,21 +957,6 @@ mod tests {
 
     use super::{AskUserHandler, ChatToolRunContext, ChatToolRuntime, ChatToolRuntimeDependencies};
     use crate::notification_tool_runtime::UnsupportedNotificationPort;
-
-    struct UnavailableAgentExecutor;
-
-    #[async_trait::async_trait]
-    impl AgentAttemptExecutor for UnavailableAgentExecutor {
-        async fn execute(
-            &self,
-            _request: AgentAttemptRequest,
-            _cancellation: CancellationToken,
-        ) -> Result<AgentAttemptOutput, AppError> {
-            Err(AppError::unsupported(
-                "Agent Provider execution is unavailable in this fixture",
-            ))
-        }
-    }
 
     struct Fixture {
         _data: tempfile::TempDir,
@@ -1281,11 +994,6 @@ mod tests {
                 paths.data_directory(),
                 Arc::clone(&persistence),
             ));
-            let agent_runtime = Arc::new(AgentRuntime::new(
-                paths.data_directory(),
-                Arc::clone(&persistence),
-                Arc::new(UnavailableAgentExecutor),
-            ));
             let runtime = ChatToolRuntime::new(
                 paths.as_ref(),
                 ChatToolRuntimeDependencies {
@@ -1301,7 +1009,6 @@ mod tests {
                     ),
                     edit_transaction_service: Arc::clone(&edit_transaction),
                     todo_store,
-                    agent_runtime,
                     process_runner: Arc::new(codez_platform::NativeProcessRunner::new()),
                     notification_port: Arc::new(UnsupportedNotificationPort),
                     permission_ai_classifier: None,
@@ -1379,26 +1086,6 @@ mod tests {
                 ask_user_handler,
             )
             .expect("fixture run context must be valid")
-        }
-
-        fn agent_context(&self, role: &str) -> ChatToolRunContext {
-            let root = WorkspaceRoot::from_canonical(
-                fs::canonicalize(self.workspace.path())
-                    .expect("fixture workspace must canonicalize"),
-            )
-            .expect("fixture workspace must be a valid authority");
-            self.runtime
-                .agent_run_context(
-                    root,
-                    SessionId::parse("session-1").expect("fixture session id must be valid"),
-                    StreamId::parse(format!("run-{role}"))
-                        .expect("fixture Agent run id must be valid"),
-                    CancellationToken::new(),
-                    role,
-                    ContextScopeId::Subagent(format!("agent-{role}")),
-                    PermissionAiContext::default(),
-                )
-                .expect("fixture Agent context must be valid")
         }
 
         async fn registered_run_context(&self) -> ChatToolRunContext {
@@ -1490,13 +1177,7 @@ mod tests {
             "TodoUpdate",
             "ToolSearch",
             "Write",
-            "followup_task",
-            "interrupt_agent",
-            "list_agents",
             "list_files",
-            "send_message",
-            "spawn_agent",
-            "wait_agent",
             "ActivateSkill",
             "DeactivateSkill",
             "Skill",
@@ -1769,114 +1450,6 @@ mod tests {
         assert!(matches!(
             forced[0].result,
             ToolExecutionResult::Success { .. }
-        ));
-    }
-
-    #[test]
-    fn agent_provider_schemas_follow_the_role_allowlists() {
-        let fixture = Fixture::new();
-        let explore = fixture
-            .runtime
-            .provider_tool_definitions_for_run(&fixture.agent_context("Explore"))
-            .into_iter()
-            .map(|definition| definition.function.name)
-            .collect::<HashSet<_>>();
-        let reviewer = fixture
-            .runtime
-            .provider_tool_definitions_for_run(&fixture.agent_context("Reviewer"))
-            .into_iter()
-            .map(|definition| definition.function.name)
-            .collect::<HashSet<_>>();
-        let expected_explore = HashSet::from([
-            "Read".to_string(),
-            "Glob".to_string(),
-            "Grep".to_string(),
-            "list_files".to_string(),
-            "ToolResultRead".to_string(),
-            "send_message".to_string(),
-            "list_agents".to_string(),
-            "wait_agent".to_string(),
-        ]);
-
-        assert!(
-            explore == expected_explore
-                && reviewer.is_superset(&expected_explore)
-                && !reviewer.contains("Write")
-                && !reviewer.contains("TodoUpdate")
-                && !reviewer.contains("spawn_agent")
-        );
-    }
-
-    #[tokio::test]
-    async fn explore_cannot_invoke_a_hidden_mutation_tool() {
-        let fixture = Fixture::new();
-        let results = fixture
-            .runtime
-            .execute(
-                vec![call(
-                    0,
-                    "Write",
-                    serde_json::json!({ "file_path": "forbidden.txt", "content": "blocked" }),
-                )],
-                &fixture.agent_context("Explore"),
-            )
-            .await;
-
-        assert!(matches!(
-            results.as_slice(),
-            [result]
-                if matches!(
-                    &result.result,
-                    ToolExecutionResult::Error { error, .. }
-                        if error.code == "TOOL_NOT_EXPOSED"
-                )
-        ));
-    }
-
-    #[test]
-    fn reviewer_shell_policy_accepts_verification_and_rejects_dynamic_commands() {
-        assert!(super::reviewer_verification_command(
-            &serde_json::json!({ "command": "cargo test -p codez-runtime --locked" })
-        ));
-        assert!(!super::reviewer_verification_command(
-            &serde_json::json!({ "command": "cargo test; Remove-Item source.rs" })
-        ));
-        assert!(!super::reviewer_verification_command(
-            &serde_json::json!({ "command": "git status", "background": true })
-        ));
-    }
-
-    #[tokio::test]
-    async fn reviewer_unsafe_shell_call_is_denied_before_execution() {
-        let fixture = Fixture::new();
-        let shell = if fixture.runtime.powershell.is_some() {
-            "PowerShell"
-        } else if fixture.runtime.bash.is_some() {
-            "Bash"
-        } else {
-            return;
-        };
-
-        let results = fixture
-            .runtime
-            .execute(
-                vec![call(
-                    0,
-                    shell,
-                    serde_json::json!({ "command": "cargo test; Remove-Item source.rs" }),
-                )],
-                &fixture.agent_context("Reviewer"),
-            )
-            .await;
-
-        assert!(matches!(
-            results.as_slice(),
-            [result]
-                if matches!(
-                    &result.result,
-                    ToolExecutionResult::Denied { error, .. }
-                        if error.code == "AGENT_TOOL_POLICY_DENIED"
-                )
         ));
     }
 

@@ -1,11 +1,11 @@
-import type { SessionRuntimeStatusChanged } from '@shared/types/subagent'
+import type { ChatRuntimeStatusChanged } from '../../shared/desktop/generated/contracts'
 import type { ChatMessage } from '../../stores/chatStore/types'
 
 export type SessionListStatus = 'action-required' | 'running' | 'error' | 'idle'
 
 interface SessionListStatusInput {
   messages: ChatMessage[]
-  runtimeStatus?: SessionRuntimeStatusChanged
+  runtimeStatus?: ChatRuntimeStatusChanged
 }
 
 const PRESENTATIONS: Record<SessionListStatus, { label: string; className: string }> = {
@@ -25,7 +25,7 @@ export function deriveSessionListStatus({
   if (actionRequired) return 'action-required'
 
   const runtime = runtimeStatus?.status
-  if (runtime?.mainRunnerActive || runtime?.activeSubAgentIds.length) return 'running'
+  if (runtime?.mainRunnerActive) return 'running'
 
   const latestExecution = [...messages].reverse().find((message) => message.executionStatus)
   return latestExecution?.executionStatus === 'error' ? 'error' : 'idle'

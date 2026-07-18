@@ -4,7 +4,7 @@ import IconBot from '../../../icons/IconBot'
 import Flex from '../../../ui/Flex'
 import Stack from '../../../ui/Stack'
 import { AgentMessageContent } from '../../AgentMessageContent'
-import type { ChatMessage, SubAgentRecord } from '../../../../stores/chatStore'
+import type { ChatMessage } from '../../../../stores/chatStore'
 import { useChatStore } from '../../../../stores/chatStore'
 import IconRestore from '../../../icons/IconRestore'
 import RevertPreviewModal from '../../../modals/RevertPreviewModal'
@@ -16,7 +16,6 @@ interface ChatMessageListProps {
   messages: ChatMessage[]
   lastStreamingMsgId: string | null
   handleFileClick: (filePath: string, virtualContent?: string) => Promise<void>
-  handleSubAgentClick: (subAgent: SubAgentRecord) => void
   handleDiffClick: (
     filePath: string,
     editInfo: {
@@ -30,7 +29,6 @@ interface ChatMessageListProps {
 
 interface ChatMessageRowProps extends Omit<ChatMessageListProps, 'messages'> {
   msg: ChatMessage
-  showParallelExecution: boolean
   onOpenImages: (attachments: ImageAttachment[], index: number) => void
   onPreviewRevert: (msgId: string) => void
   revertDisabled: boolean
@@ -39,9 +37,7 @@ interface ChatMessageRowProps extends Omit<ChatMessageListProps, 'messages'> {
 const ChatMessageRow = React.memo(function ChatMessageRow({
   msg,
   lastStreamingMsgId,
-  showParallelExecution,
   handleFileClick,
-  handleSubAgentClick,
   handleDiffClick,
   onOpenImages,
   onPreviewRevert,
@@ -107,9 +103,7 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
       <AgentMessageContent
         msg={msg}
         lastStreamingMsgId={lastStreamingMsgId}
-        showParallelExecution={showParallelExecution}
         handleFileClick={handleFileClick}
-        handleSubAgentClick={handleSubAgentClick}
         handleDiffClick={handleDiffClick}
       />
     </Flex>
@@ -120,7 +114,6 @@ export function ChatMessageList({
   messages,
   lastStreamingMsgId,
   handleFileClick,
-  handleSubAgentClick,
   handleDiffClick
 }: ChatMessageListProps): React.ReactElement {
   const [previewData, setPreviewData] = React.useState<{ msgId: string, toDelete: string[], toRestore: string[], unknownStatus?: boolean } | null>(null)
@@ -138,13 +131,6 @@ export function ChatMessageList({
       : { msgId, toDelete: [], toRestore: [], unknownStatus: true })
   }, [])
 
-  const latestAgentMessageId = React.useMemo(() => {
-    for (let index = messages.length - 1; index >= 0; index--) {
-      if (messages[index].role === 'agent') return messages[index].id
-    }
-    return null
-  }, [messages])
-
   return (
     <Stack gap={6} className="app-message-list">
       {messages.map((msg) => {
@@ -153,9 +139,7 @@ export function ChatMessageList({
             key={msg.id}
             msg={msg}
             lastStreamingMsgId={lastStreamingMsgId}
-            showParallelExecution={msg.id === latestAgentMessageId}
             handleFileClick={handleFileClick}
-            handleSubAgentClick={handleSubAgentClick}
             handleDiffClick={handleDiffClick}
             onOpenImages={handleOpenImages}
             onPreviewRevert={handlePreviewRevert}

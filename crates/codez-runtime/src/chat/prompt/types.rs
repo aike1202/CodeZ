@@ -24,15 +24,6 @@ pub struct PromptToolSummary {
     pub summary: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PromptAgentSummary {
-    pub role: String,
-    pub description: String,
-    pub when_to_use: String,
-    pub when_not_to_use: Option<String>,
-    pub cost_hint: Option<String>,
-}
-
 #[derive(Debug, Clone)]
 pub struct PromptContext {
     pub workspace_root: Option<PathBuf>,
@@ -45,7 +36,6 @@ pub struct PromptContext {
     pub thinking_enabled: Option<bool>,
     pub available_tools: Option<Vec<PromptToolSummary>>,
     pub deferred_tools: Option<Vec<PromptToolSummary>>,
-    pub available_agents: Option<Vec<PromptAgentSummary>>,
     pub available_skills: Option<Vec<PromptSkillSummary>>,
     pub active_skills: Option<Vec<PromptSkillSummary>>,
     pub todo_state: Option<String>,

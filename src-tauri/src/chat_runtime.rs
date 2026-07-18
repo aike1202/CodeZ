@@ -54,18 +54,12 @@ use codez_providers::{
 use codez_runtime::attachment::{AttachmentService, ResolvedSessionImage};
 use codez_runtime::{
     CancellationTree,
-    agent::{
-        collaboration::{
-            AgentAttemptOutput, AgentAttemptRequest, AgentMailboxMessage, AgentMessageType,
-        },
-        registry::get_builtin_subagents,
-    },
     cancellation::SessionCancellation,
     chat::{
         prompt::{
             builder::create_default_pipeline,
             pipeline::PromptPipeline,
-            types::{PromptAgentSummary, PromptContext, PromptSkillSummary, PromptToolSummary},
+            types::{PromptContext, PromptSkillSummary, PromptToolSummary},
         },
         stream_state::{ChatStreamState, ChatStreamStateMachine},
     },
@@ -144,7 +138,6 @@ const ASK_USER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const PERMISSION_RESPONSE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const MAX_PENDING_PERMISSION_REQUESTS: usize = 256;
 const MAX_INTERRUPTED_CONTENT_BYTES: usize = 16 * 1024;
-const MAX_ROOT_AGENT_RESULTS_BYTES: usize = 128 * 1024;
 const MAX_COMMAND_METADATA_BYTES: usize = 64 * 1024;
 const MAX_COMMAND_METADATA_FILES: usize = 128;
 const MAX_COMMAND_METADATA_FIELD_BYTES: usize = 4 * 1024;
@@ -331,7 +324,6 @@ impl ChatPromptAssembler {
             thinking_enabled: Some(input.resolved.thinking.enabled),
             available_tools: Some(prompt_tool_summaries(input.tool_schemas)),
             deferred_tools: Some(prompt_deferred_tool_summaries(input.deferred_tools)),
-            available_agents: prompt_agent_summaries(input.tool_schemas),
             available_skills: available_skills?,
             active_skills: active_prompt_skills(input.scope),
             todo_state: input.todo_state.map(str::to_string),
@@ -526,26 +518,6 @@ fn prompt_deferred_tool_summaries(
             summary: tool.summary.clone(),
         })
         .collect()
-}
-
-fn prompt_agent_summaries(tool_schemas: &[ToolDefinition]) -> Option<Vec<PromptAgentSummary>> {
-    if !tool_schemas
-        .iter()
-        .any(|schema| schema.function.name == "spawn_agent")
-    {
-        return None;
-    }
-    let agents = get_builtin_subagents()
-        .into_iter()
-        .map(|agent| PromptAgentSummary {
-            role: agent.r#type,
-            description: agent.description,
-            when_to_use: agent.when_to_use,
-            when_not_to_use: agent.when_not_to_use,
-            cost_hint: agent.cost_hint,
-        })
-        .collect::<Vec<_>>();
-    (!agents.is_empty()).then_some(agents)
 }
 
 fn active_prompt_skills(scope: &SessionRuntimeScopeSnapshot) -> Option<Vec<PromptSkillSummary>> {
@@ -970,33 +942,6 @@ trait ProviderConversationSink: Send {
     fn take_next_steer(&mut self) -> Option<ChatSteerInput>;
 }
 
-struct AgentConversationSink;
-
-#[async_trait::async_trait]
-impl ProviderConversationSink for AgentConversationSink {
-    async fn send_delta(
-        &mut self,
-        _delta: String,
-        _reasoning_delta: Option<String>,
-    ) -> Result<(), AppError> {
-        Ok(())
-    }
-
-    async fn send_event(&mut self, _event: ChatStreamFrameEvent) -> Result<(), AppError> {
-        Ok(())
-    }
-
-    async fn receive_control(&mut self) -> Result<(), AppError> {
-        std::future::pending().await
-    }
-
-    fn drain_controls(&mut self) {}
-
-    fn take_next_steer(&mut self) -> Option<ChatSteerInput> {
-        None
-    }
-}
-
 #[derive(Debug)]
 enum TerminalOutcome {
     Completed {
@@ -1086,89 +1031,6 @@ impl ConversationLedger {
                 persisted_attachments,
             )
             .await?;
-        Ok(ledger)
-    }
-
-    async fn begin_agent(
-        store: Arc<ModelLedgerStore>,
-        request: &AgentAttemptRequest,
-        resolved: &ResolvedProviderChatConfig,
-    ) -> Result<Self, AppError> {
-        if request.mailbox_messages.is_empty() {
-            return Err(AppError::validation(
-                "An Agent attempt requires at least one durable mailbox message",
-            ));
-        }
-        let context_scope_id = ContextScopeId::parse(&request.agent.context_scope_id)
-            .map_err(|source| AppError::validation(source.to_string()))?;
-        let run_id = StreamId::parse(request.agent.attempt_id.clone())
-            .map_err(|source| AppError::validation(source.to_string()))?;
-        let mut ledger = Self {
-            store,
-            session_id: request.session_id.clone(),
-            run_id,
-            provider_id: resolved.provider_id.clone(),
-            model_id: resolved.model.id.clone(),
-            context_scope_id,
-            system_prompt_addendum: Some(agent_system_addendum(request)),
-            current_input_message_id: String::new(),
-            next_record: 0,
-            interrupted_content: None,
-        };
-        for mailbox in &request.mailbox_messages {
-            let event_id = format!("agent-mailbox:{}", mailbox.message_id);
-            let message_id = format!("agent-mailbox-message:{}", mailbox.message_id);
-            let message_type = match mailbox.message_type {
-                AgentMessageType::NewTask => "new_task",
-                AgentMessageType::Message => "message",
-                AgentMessageType::FinalAnswer => "final_answer",
-            };
-            let content = match mailbox.message_type {
-                AgentMessageType::NewTask => mailbox.payload.clone(),
-                AgentMessageType::Message => {
-                    format!("Message from {}:\n\n{}", mailbox.author, mailbox.payload)
-                }
-                AgentMessageType::FinalAnswer => format!(
-                    "Final answer from {}:\n\n{}",
-                    mailbox.author, mailbox.payload
-                ),
-            };
-            let message = NormalizedModelMessage {
-                id: message_id.clone(),
-                client_message_id: None,
-                turn_id: request.agent.attempt_id.clone(),
-                role: "user".to_string(),
-                content,
-                tool_calls: None,
-                tool_call_id: None,
-                name: None,
-                status: "complete".to_string(),
-                created_at: mailbox.created_at.to_rfc3339(),
-                source_sequence: None,
-                attachments: None,
-                file_references: None,
-            };
-            ledger
-                .append_payload(
-                    event_id,
-                    mailbox.created_at.to_rfc3339(),
-                    LedgerEventType::UserMessage,
-                    UserMessagePayload {
-                        message: message.clone(),
-                        provider_id: Some(ledger.provider_id.clone()),
-                        model: Some(ledger.model_id.clone()),
-                        command_metadata: Some(serde_json::json!({
-                            "agentMailboxMessageId": mailbox.message_id,
-                            "agentAttemptId": mailbox.attempt_id,
-                            "agentMessageType": message_type,
-                            "author": mailbox.author,
-                            "recipient": mailbox.recipient,
-                        })),
-                    },
-                )
-                .await?;
-            ledger.current_input_message_id = message_id;
-        }
         Ok(ledger)
     }
 
@@ -1456,66 +1318,6 @@ impl ConversationLedger {
     }
 }
 
-fn agent_system_addendum(request: &AgentAttemptRequest) -> String {
-    let agent = &request.agent;
-    let mut sections = vec![format!(
-        "You are the CodeZ {} Agent at {}. Work only on the delegated task and use only the tools exposed in this request. Do not claim actions not supported by tool results.",
-        agent.role, agent.path
-    )];
-    sections.push(
-        "For multi-step work, send concise user-visible progress updates as ordinary assistant content before substantial tool batches and when findings materially change. Do not expose private reasoning or narrate every trivial read."
-            .to_string(),
-    );
-    if agent.role == "Reviewer" {
-        sections.push(
-            "Report findings first. Shell access is restricted to explicit verification commands and must not mutate source files."
-                .to_string(),
-        );
-    } else {
-        sections.push("Explore read-only evidence and return a concise handoff.".to_string());
-    }
-    if let Some(context) = agent.launch.context.as_deref() {
-        sections.push(format!("Durable context:\n{context}"));
-    }
-    if let Some(expectations) = &agent.launch.expectations {
-        if !expectations.questions.is_empty() {
-            sections.push(format!(
-                "Questions to answer:\n{}",
-                prompt_bullets(&expectations.questions)
-            ));
-        }
-        if !expectations.out_of_scope.is_empty() {
-            sections.push(format!(
-                "Out of scope:\n{}",
-                prompt_bullets(&expectations.out_of_scope)
-            ));
-        }
-    }
-    if let Some(scope) = &agent.launch.scope {
-        if !scope.directories.is_empty() {
-            sections.push(format!(
-                "Workspace directories in scope:\n{}",
-                prompt_bullets(&scope.directories)
-            ));
-        }
-        if !scope.exclude_globs.is_empty() {
-            sections.push(format!(
-                "Excluded globs:\n{}",
-                prompt_bullets(&scope.exclude_globs)
-            ));
-        }
-    }
-    sections.join("\n\n")
-}
-
-fn prompt_bullets(values: &[String]) -> String {
-    values
-        .iter()
-        .map(|value| format!("- {value}"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 impl ChatRuntime {
     #[must_use]
     pub(crate) fn new(
@@ -1549,59 +1351,6 @@ impl ChatRuntime {
             registry: Mutex::new(RegistryState::default()),
             ask_user_responses: Arc::new(AskUserResponseRegistry::new()),
             permission_responses: Arc::new(PermissionResponseRegistry::default()),
-        }
-    }
-
-    pub(crate) async fn execute_agent_attempt(
-        &self,
-        providers: Arc<ProviderService>,
-        request: AgentAttemptRequest,
-        resolved: ResolvedProviderChatConfig,
-        cancellation: CancellationToken,
-    ) -> Result<AgentAttemptOutput, AppError> {
-        let run_id = StreamId::parse(request.agent.attempt_id.clone())
-            .map_err(|source| AppError::validation(source.to_string()))?;
-        let context_scope_id = ContextScopeId::parse(&request.agent.context_scope_id)
-            .map_err(|source| AppError::validation(source.to_string()))?;
-        let permission_ai_context = PermissionAiContext {
-            provider_id: Some(resolved.provider_id.clone()),
-            model: Some(resolved.model.id.clone()),
-            user_intent: Some(request.task.clone()),
-        };
-        let tool_run = self.tools.agent_run_context(
-            request.workspace_root.clone(),
-            request.session_id.clone(),
-            run_id,
-            cancellation.clone(),
-            &request.agent.role,
-            context_scope_id,
-            permission_ai_context,
-        )?;
-        let mut conversation =
-            ConversationLedger::begin_agent(Arc::clone(&self.ledger), &request, &resolved).await?;
-        let mut sink = AgentConversationSink;
-        let outcome = run_provider_conversation(
-            ProviderConversationServices {
-                providers: &providers,
-                tools: self.tools.as_ref(),
-                attachment_service: self.attachment.as_ref(),
-                prompt: self.prompt.as_ref(),
-            },
-            resolved,
-            cancellation,
-            &mut conversation,
-            Some(&tool_run),
-            &mut sink,
-        )
-        .await;
-        conversation.persist_terminal(&outcome).await?;
-        match outcome {
-            TerminalOutcome::Completed { full_content, .. } => Ok(AgentAttemptOutput {
-                report: full_content,
-                conclusion: None,
-            }),
-            TerminalOutcome::Failed { error, .. } => Err(error),
-            TerminalOutcome::Interrupted { reason } => Err(AppError::cancelled(reason)),
         }
     }
 
@@ -1716,7 +1465,6 @@ impl ChatRuntime {
         ChatRuntimeStatus {
             session_id: session_id.as_str().to_string(),
             main_runner_active: !state.is_terminal(),
-            active_sub_agent_ids: Vec::new(),
             run_id: Some(entry.run_id.as_str().to_string()),
             state: Some(contract_state(&state)),
         }
@@ -3804,56 +3552,6 @@ async fn run_provider_conversation(
             continue;
         }
 
-        if let Some(tool_run) = tool_run {
-            let agent_messages = match tools.wait_for_root_agent_results(tool_run).await {
-                Ok(messages) => messages,
-                Err(error) if cancellation.is_cancelled() => {
-                    return TerminalOutcome::Interrupted {
-                        reason: error.public_message().to_string(),
-                    };
-                }
-                Err(error) => {
-                    return TerminalOutcome::Failed {
-                        error,
-                        provider_code: None,
-                    };
-                }
-            };
-            if !agent_messages.is_empty() {
-                if let Err(error) = conversation
-                    .record_assistant(full_content, usage, request_fingerprint)
-                    .await
-                {
-                    return TerminalOutcome::Failed {
-                        error,
-                        provider_code: None,
-                    };
-                }
-                if let Err(error) = conversation
-                    .record_user(
-                        root_agent_results_message(&agent_messages),
-                        None,
-                        true,
-                        Some(serde_json::json!({
-                            "internal": "root_agent_results",
-                            "messageIds": agent_messages
-                                .iter()
-                                .map(|message| message.message_id.as_str())
-                                .collect::<Vec<_>>()
-                        })),
-                        Vec::new(),
-                    )
-                    .await
-                {
-                    return TerminalOutcome::Failed {
-                        error,
-                        provider_code: None,
-                    };
-                }
-                continue;
-            }
-        }
-
         return TerminalOutcome::Completed {
             full_content,
             stop_reason,
@@ -4509,25 +4207,6 @@ fn bounded_text(value: &str, max_bytes: usize) -> String {
     value[..end].to_string()
 }
 
-fn root_agent_results_message(messages: &[AgentMailboxMessage]) -> String {
-    let mut rendered = String::from(
-        "<subagent_results>\nThe direct SubAgents have finished. Use their reports to produce the final response for the user.\n",
-    );
-    for message in messages {
-        let kind = match message.message_type {
-            AgentMessageType::NewTask => "new task",
-            AgentMessageType::Message => "message",
-            AgentMessageType::FinalAnswer => "final answer",
-        };
-        rendered.push_str(&format!(
-            "\n## {} ({kind})\n{}\n",
-            message.author, message.payload
-        ));
-    }
-    rendered.push_str("</subagent_results>");
-    bounded_text(&rendered, MAX_ROOT_AGENT_RESULTS_BYTES)
-}
-
 fn provider_failure(error: ChatProviderError) -> TerminalOutcome {
     let provider_code = Some(provider_error_code(&error));
     TerminalOutcome::Failed {
@@ -4596,7 +4275,6 @@ fn inactive_status(session_id: &SessionId) -> ChatRuntimeStatus {
     ChatRuntimeStatus {
         session_id: session_id.as_str().to_string(),
         main_runner_active: false,
-        active_sub_agent_ids: Vec::new(),
         run_id: None,
         state: None,
     }
@@ -5526,7 +5204,7 @@ mod tests {
 
     mod local_provider_e2e {
         use std::{
-            collections::{HashMap, HashSet},
+            collections::HashMap,
             io::{self, Cursor, Read, Write},
             net::{TcpListener, TcpStream},
             path::PathBuf,
@@ -5556,11 +5234,6 @@ mod tests {
         use codez_providers::service::ProviderService;
         use codez_runtime::{
             CancellationTree,
-            agent::collaboration::{
-                AgentAttemptExecutor, AgentAttemptOutput, AgentAttemptRequest, AgentLaunchPolicy,
-                AgentMailboxMessage, AgentMessageDeliveryState, AgentMessageType, AgentRecord,
-                AgentRuntime, AgentRuntimeStatus, SpawnAgentInput,
-            },
             attachment::AttachmentService,
             chat::stream_state::ChatStreamStateMachine,
             context::ledger::ModelLedgerStore,
@@ -5584,13 +5257,12 @@ mod tests {
         use tokio::sync::mpsc;
 
         use super::super::{
-            AgentConversationSink, CONTROL_CAPACITY, ChatPromptAssembler, ChatPromptSources,
-            ChatRuntime, ConversationLedger, FrameSink, PermissionResponseRegistry,
+            CONTROL_CAPACITY, ChatPromptAssembler, ChatPromptSources, ChatRuntime,
+            ConversationLedger, FrameSink, PermissionResponseRegistry,
             ProviderConversationServices, RunControl, RunEntry, TerminalOutcome,
             denied_permission_response, permission_request_to_wire, run_provider_conversation,
         };
         use crate::{
-            agent_runtime::DesktopAgentAttemptExecutor,
             attachment_boundary::session_to_wire,
             chat_interaction::AskUserResponseRegistry,
             chat_tool_runtime::{
@@ -5599,46 +5271,12 @@ mod tests {
             error::ErrorReporter,
         };
 
-        struct FixtureAgentExecutor;
-
-        #[async_trait::async_trait]
-        impl AgentAttemptExecutor for FixtureAgentExecutor {
-            async fn execute(
-                &self,
-                request: AgentAttemptRequest,
-                cancellation: CancellationToken,
-            ) -> Result<AgentAttemptOutput, AppError> {
-                if request.agent.task_name == "mailbox-child" {
-                    return Ok(AgentAttemptOutput {
-                        report: "child-final-evidence".to_string(),
-                        conclusion: None,
-                    });
-                }
-                if request.agent.task_name == "auto-wait-child" {
-                    return tokio::select! {
-                        () = tokio::time::sleep(Duration::from_millis(150)) => {
-                            Ok(AgentAttemptOutput {
-                                report: "auto-wait-child-evidence".to_string(),
-                                conclusion: Some("The delegated analysis completed.".to_string()),
-                            })
-                        }
-                        () = cancellation.cancelled() => {
-                            Err(AppError::cancelled("fixture root Agent stopped"))
-                        }
-                    };
-                }
-                cancellation.cancelled().await;
-                Err(AppError::cancelled("fixture parent Agent stopped"))
-            }
-        }
-
         struct RuntimeFixture {
             _data: tempfile::TempDir,
             workspace: tempfile::TempDir,
             data_root: PathBuf,
             attachment: Arc<AttachmentService>,
             tools: Arc<ChatToolRuntime>,
-            agent_runtime: Arc<AgentRuntime>,
             ledger: Arc<ModelLedgerStore>,
             edit_transaction: Arc<EditTransactionService>,
             permissions: Arc<WorkspacePermissionStore>,
@@ -5675,11 +5313,6 @@ mod tests {
                     paths.data_directory(),
                     Arc::clone(&persistence),
                 ));
-                let agent_runtime = Arc::new(AgentRuntime::new(
-                    paths.data_directory(),
-                    Arc::clone(&persistence),
-                    Arc::new(FixtureAgentExecutor),
-                ));
                 let ledger = Arc::new(ModelLedgerStore::new(
                     paths.data_directory().join("chat-ledger"),
                     Arc::clone(&persistence),
@@ -5696,7 +5329,6 @@ mod tests {
                             mutation_coordinator: Arc::new(FileMutationCoordinator::default()),
                             edit_transaction_service: Arc::clone(&edit_transaction),
                             todo_store,
-                            agent_runtime: Arc::clone(&agent_runtime),
                             process_runner: native_process_runner,
                             notification_port: Arc::new(
                                 crate::notification_tool_runtime::UnsupportedNotificationPort,
@@ -5713,7 +5345,6 @@ mod tests {
                     data_root: paths.data_directory().to_path_buf(),
                     attachment,
                     tools,
-                    agent_runtime,
                     ledger,
                     edit_transaction,
                     permissions,
@@ -5728,53 +5359,6 @@ mod tests {
                         .expect("fixture workspace must canonicalize"),
                 )
                 .expect("fixture workspace must be a valid authority")
-            }
-        }
-
-        fn explore_attempt_request(
-            fixture: &RuntimeFixture,
-            session_id: SessionId,
-            agent_id: &str,
-            attempt_id: &str,
-            mailbox_id: &str,
-            payload: &str,
-        ) -> AgentAttemptRequest {
-            let now = chrono::Utc::now();
-            AgentAttemptRequest {
-                session_id: session_id.clone(),
-                workspace_root: fixture.workspace_root(),
-                agent: AgentRecord {
-                    agent_id: agent_id.to_string(),
-                    session_id,
-                    parent_agent_id: "/root".to_string(),
-                    parent_path: "/root".to_string(),
-                    path: "/root/cancel-e2e".to_string(),
-                    role: "Explore".to_string(),
-                    task_name: "cancel-e2e".to_string(),
-                    description: payload.to_string(),
-                    context_scope_id: format!("subagent:{agent_id}"),
-                    status: AgentRuntimeStatus::Running,
-                    attempt_id: attempt_id.to_string(),
-                    run_count: 1,
-                    created_at: now,
-                    updated_at: now,
-                    started_at: Some(now),
-                    completed_at: None,
-                    launch: AgentLaunchPolicy::default(),
-                    result: None,
-                },
-                task: payload.to_string(),
-                mailbox_messages: vec![AgentMailboxMessage {
-                    message_id: mailbox_id.to_string(),
-                    message_type: AgentMessageType::NewTask,
-                    attempt_id: attempt_id.to_string(),
-                    author: "/root".to_string(),
-                    recipient: "/root/cancel-e2e".to_string(),
-                    payload: payload.to_string(),
-                    delivery_state: AgentMessageDeliveryState::Read,
-                    created_at: now,
-                    read_at: Some(now),
-                }],
             }
         }
 
@@ -6287,138 +5871,6 @@ mod tests {
             format!("data: {payload}\n\ndata: [DONE]\n\n")
         }
 
-        fn agent_read_tool_call_turn() -> String {
-            let arguments = json!({
-                "files": [{ "file_path": "evidence.txt" }]
-            })
-            .to_string();
-            let payload = json!({
-                "choices": [{
-                    "delta": {"tool_calls": [{
-                        "index": 0,
-                        "id": "call-agent-read",
-                        "type": "function",
-                        "function": {"name": "Read", "arguments": arguments}
-                    }]},
-                    "finish_reason": "tool_calls"
-                }],
-                "usage": {
-                    "prompt_tokens": 80,
-                    "completion_tokens": 5,
-                    "total_tokens": 85
-                }
-            });
-            format!("data: {payload}\n\ndata: [DONE]\n\n")
-        }
-
-        fn agent_completed_turn() -> String {
-            let payload = json!({
-                "choices": [{
-                    "delta": {"content": "The evidence file contains durable-agent-evidence."},
-                    "finish_reason": "stop"
-                }],
-                "usage": {
-                    "prompt_tokens": 95,
-                    "completion_tokens": 12,
-                    "total_tokens": 107
-                }
-            });
-            format!("data: {payload}\n\ndata: [DONE]\n\n")
-        }
-
-        fn agent_wait_tool_call_turn(target: &str) -> String {
-            let arguments = json!({ "targets": [target], "timeoutMs": 2_000 }).to_string();
-            let payload = json!({
-                "choices": [{
-                    "delta": {"tool_calls": [{
-                        "index": 0,
-                        "id": "call-agent-wait",
-                        "type": "function",
-                        "function": {"name": "wait_agent", "arguments": arguments}
-                    }]},
-                    "finish_reason": "tool_calls"
-                }],
-                "usage": {
-                    "prompt_tokens": 80,
-                    "completion_tokens": 5,
-                    "total_tokens": 85
-                }
-            });
-            format!("data: {payload}\n\ndata: [DONE]\n\n")
-        }
-
-        fn root_agent_spawn_tool_call_turn() -> String {
-            let arguments = json!({
-                "role": "Explore",
-                "taskName": "auto-wait-child",
-                "description": "Collect delegated evidence",
-                "message": "Return delegated evidence after a short delay"
-            })
-            .to_string();
-            let payload = json!({
-                "choices": [{
-                    "delta": {"tool_calls": [{
-                        "index": 0,
-                        "id": "call-root-agent-spawn",
-                        "type": "function",
-                        "function": {"name": "spawn_agent", "arguments": arguments}
-                    }]},
-                    "finish_reason": "tool_calls"
-                }],
-                "usage": {
-                    "prompt_tokens": 80,
-                    "completion_tokens": 5,
-                    "total_tokens": 85
-                }
-            });
-            format!("data: {payload}\n\ndata: [DONE]\n\n")
-        }
-
-        fn premature_parent_completed_turn() -> String {
-            let payload = json!({
-                "choices": [{
-                    "delta": {"content": "The delegated work is still running."},
-                    "finish_reason": "stop"
-                }],
-                "usage": {
-                    "prompt_tokens": 90,
-                    "completion_tokens": 8,
-                    "total_tokens": 98
-                }
-            });
-            format!("data: {payload}\n\ndata: [DONE]\n\n")
-        }
-
-        fn root_agent_synthesis_turn() -> String {
-            let payload = json!({
-                "choices": [{
-                    "delta": {"content": "The final response includes the delegated evidence."},
-                    "finish_reason": "stop"
-                }],
-                "usage": {
-                    "prompt_tokens": 110,
-                    "completion_tokens": 10,
-                    "total_tokens": 120
-                }
-            });
-            format!("data: {payload}\n\ndata: [DONE]\n\n")
-        }
-
-        fn parent_completed_turn() -> String {
-            let payload = json!({
-                "choices": [{
-                    "delta": {"content": "The child final answer was received."},
-                    "finish_reason": "stop"
-                }],
-                "usage": {
-                    "prompt_tokens": 95,
-                    "completion_tokens": 10,
-                    "total_tokens": 105
-                }
-            });
-            format!("data: {payload}\n\ndata: [DONE]\n\n")
-        }
-
         fn completed_turn() -> String {
             let payload = json!({
                 "choices": [{
@@ -6811,485 +6263,6 @@ mod tests {
             assert!(retried_prompt.contains("You are CodeZ"));
             assert!(retried_prompt.contains("overflow-retry-workspace-rule"));
             assert!(retried_prompt.contains("<compaction_summary"));
-        }
-
-        #[tokio::test]
-        async fn explore_agent_inherits_the_main_model_and_reuses_the_multi_turn_loop() {
-            let fixture = RuntimeFixture::new();
-            std::fs::write(
-                fixture.workspace.path().join("evidence.txt"),
-                "durable-agent-evidence\n",
-            )
-            .expect("Agent evidence fixture must be written");
-            let server = LocalProviderServer::start(vec![
-                agent_read_tool_call_turn(),
-                agent_completed_turn(),
-            ]);
-            let (providers, provider_id) = local_provider(&server.base_url).await;
-            let cancellation_tree = Arc::new(CancellationTree::new());
-            let runtime = Arc::new(ChatRuntime::new(
-                cancellation_tree,
-                Arc::new(ErrorReporter::default()),
-                Arc::clone(&fixture.ledger),
-                Arc::clone(&fixture.attachment),
-                Arc::clone(&fixture.tools),
-                Arc::clone(&fixture.edit_transaction),
-                ChatPromptSources::new(
-                    fixture.data_root.clone(),
-                    Arc::clone(&fixture.permissions),
-                    Arc::clone(&fixture.process_runner),
-                )
-                .with_skills(fixture.tools.skill_service()),
-            ));
-            let session_id =
-                SessionId::parse("session-agent-e2e").expect("Agent session ID must parse");
-            seed_prior_context(&fixture.ledger, &session_id, &provider_id).await;
-            let agent_id = "agent_00000000-0000-4000-8000-000000000101".to_string();
-            let attempt_id = "attempt_00000000-0000-4000-8000-000000000102".to_string();
-            let mailbox_id = "amsg_00000000-0000-4000-8000-000000000103".to_string();
-            let now = chrono::Utc::now();
-            let request = AgentAttemptRequest {
-                session_id: session_id.clone(),
-                workspace_root: fixture.workspace_root(),
-                agent: AgentRecord {
-                    agent_id: agent_id.clone(),
-                    session_id: session_id.clone(),
-                    parent_agent_id: "/root".to_string(),
-                    parent_path: "/root".to_string(),
-                    path: "/root/explore-e2e".to_string(),
-                    role: "Explore".to_string(),
-                    task_name: "explore-e2e".to_string(),
-                    description: "Read durable evidence".to_string(),
-                    context_scope_id: format!("subagent:{agent_id}"),
-                    status: AgentRuntimeStatus::Running,
-                    attempt_id: attempt_id.clone(),
-                    run_count: 1,
-                    created_at: now,
-                    updated_at: now,
-                    started_at: Some(now),
-                    completed_at: None,
-                    launch: AgentLaunchPolicy::default(),
-                    result: None,
-                },
-                task: "Read evidence.txt and report its content".to_string(),
-                mailbox_messages: vec![AgentMailboxMessage {
-                    message_id: mailbox_id.clone(),
-                    message_type: AgentMessageType::NewTask,
-                    attempt_id,
-                    author: "/root".to_string(),
-                    recipient: "/root/explore-e2e".to_string(),
-                    payload: "Read evidence.txt and report its content".to_string(),
-                    delivery_state: AgentMessageDeliveryState::Read,
-                    created_at: now,
-                    read_at: Some(now),
-                }],
-            };
-            let settings_storage = Arc::new(AtomicFileStore::default());
-            settings_storage
-                .write_json(
-                    &fixture.data_root.join("settings.json"),
-                    &json!({ "subAgentModels": {} }),
-                )
-                .await
-                .expect("Agent model settings must persist");
-            let executor = DesktopAgentAttemptExecutor::new(
-                fixture.data_root.clone(),
-                settings_storage,
-                Arc::clone(&providers),
-                Arc::clone(&fixture.ledger),
-            );
-            executor
-                .bind_chat_runtime(&runtime)
-                .expect("Agent executor must bind the Chat runtime once");
-
-            let output = executor
-                .execute(request.clone(), CancellationToken::new())
-                .await
-                .expect("Explore Agent multi-turn loop must complete");
-            let before_retry = fixture
-                .ledger
-                .load(&session_id)
-                .await
-                .expect("Agent ledger must load")
-                .expect("Agent ledger must exist");
-            let scope_key = format!("subagent:{agent_id}");
-            let history_version = before_retry.snapshot.scopes[&scope_key].history_version;
-            let retry_resolved = providers
-                .resolve_chat_config(Some(&provider_id), Some("local-model"))
-                .await
-                .expect("Agent retry Provider config must resolve");
-            ConversationLedger::begin_agent(Arc::clone(&fixture.ledger), &request, &retry_resolved)
-                .await
-                .expect("stable mailbox replay must be idempotent");
-            let after_retry = fixture
-                .ledger
-                .load(&session_id)
-                .await
-                .expect("Agent ledger retry must load")
-                .expect("Agent ledger retry must exist");
-            let requests = server.finish();
-            let tool_names = requests[0]["tools"]
-                .as_array()
-                .expect("Agent Provider request must expose tools")
-                .iter()
-                .filter_map(|tool| tool["function"]["name"].as_str())
-                .collect::<HashSet<_>>();
-            let system_prompt = provider_system_prompt(&requests[0]);
-            let second_messages = requests[1]["messages"]
-                .as_array()
-                .expect("second Agent request must contain messages");
-
-            assert_eq!(
-                (
-                    output.report.contains("durable-agent-evidence"),
-                    system_prompt.contains("CodeZ Explore Agent at /root/explore-e2e"),
-                    tool_names.contains("Read"),
-                    tool_names.contains("send_message"),
-                    !tool_names.contains("Write"),
-                    second_messages.iter().any(|message| {
-                        message["role"] == "tool"
-                            && message.to_string().contains("durable-agent-evidence")
-                    }),
-                    before_retry.snapshot.scopes["main"]
-                        .last_provider_id
-                        .as_deref()
-                        == Some(provider_id.as_str())
-                        && before_retry.snapshot.scopes["main"].last_model.as_deref()
-                            == Some("local-model"),
-                    after_retry.snapshot.scopes[&scope_key].history_version == history_version,
-                    after_retry.snapshot.scopes[&scope_key]
-                        .active_messages
-                        .iter()
-                        .any(|message| message.id == format!("agent-mailbox-message:{mailbox_id}")),
-                ),
-                (true, true, true, true, true, true, true, true, true),
-                "second Agent Provider request: {}",
-                requests[1]
-            );
-        }
-
-        #[tokio::test]
-        async fn agent_multi_turn_loop_forwards_cancellation_and_persists_interruption() {
-            let fixture = RuntimeFixture::new();
-            let cancellation = CancellationToken::new();
-            let cancellation_from_server = cancellation.clone();
-            let server = LocalProviderServer::start_with_after_first_request(
-                vec![agent_completed_turn()],
-                move || cancellation_from_server.cancel(),
-            );
-            let (providers, provider_id) = local_provider(&server.base_url).await;
-            let runtime = ChatRuntime::new(
-                Arc::new(CancellationTree::new()),
-                Arc::new(ErrorReporter::default()),
-                Arc::clone(&fixture.ledger),
-                Arc::clone(&fixture.attachment),
-                Arc::clone(&fixture.tools),
-                Arc::clone(&fixture.edit_transaction),
-                ChatPromptSources::new(
-                    fixture.data_root.clone(),
-                    Arc::clone(&fixture.permissions),
-                    Arc::clone(&fixture.process_runner),
-                )
-                .with_skills(fixture.tools.skill_service()),
-            );
-            let session_id =
-                SessionId::parse("session-agent-cancel").expect("Agent session ID must parse");
-            let agent_id = "agent_00000000-0000-4000-8000-000000000301";
-            let request = explore_attempt_request(
-                &fixture,
-                session_id.clone(),
-                agent_id,
-                "attempt_00000000-0000-4000-8000-000000000302",
-                "amsg_00000000-0000-4000-8000-000000000303",
-                "Wait for cancellation",
-            );
-            let resolved = providers
-                .resolve_chat_config(Some(&provider_id), Some("local-model"))
-                .await
-                .expect("cancelled Agent Provider config must resolve");
-
-            let error = runtime
-                .execute_agent_attempt(providers, request, resolved, cancellation)
-                .await
-                .expect_err("cancelled Agent Provider loop must fail");
-            let durable = fixture
-                .ledger
-                .load(&session_id)
-                .await
-                .expect("cancelled Agent ledger must load")
-                .expect("cancelled Agent ledger must exist");
-            assert_eq!(
-                error.kind(),
-                codez_core::AppErrorKind::Cancelled,
-                "unexpected Agent cancellation error: {error:?}"
-            );
-            let requests = server.finish();
-
-            assert!(
-                requests.len() == 1
-                    && durable
-                        .snapshot
-                        .scopes
-                        .contains_key(&format!("subagent:{agent_id}"))
-                    && !durable.snapshot.scopes.contains_key("main")
-            );
-        }
-
-        #[tokio::test]
-        async fn parent_agent_wait_delivers_a_late_durable_final_answer_to_the_next_turn() {
-            let fixture = RuntimeFixture::new();
-            let session_id =
-                SessionId::parse("session-agent-mailbox").expect("Agent session ID must parse");
-            let root_cancellation = CancellationToken::new();
-            let parent = fixture
-                .agent_runtime
-                .spawn(
-                    &session_id,
-                    SpawnAgentInput {
-                        workspace_root: fixture.workspace_root(),
-                        parent_context_scope_id: "main".to_string(),
-                        role: "Explore".to_string(),
-                        task_name: "mailbox-parent".to_string(),
-                        description: "Wait for child evidence".to_string(),
-                        message: "Wait for the child final answer".to_string(),
-                        launch: AgentLaunchPolicy::default(),
-                    },
-                    root_cancellation.clone(),
-                )
-                .await
-                .expect("mailbox parent Agent must start");
-            tokio::time::timeout(Duration::from_secs(2), async {
-                loop {
-                    let snapshot = fixture
-                        .agent_runtime
-                        .snapshot(&session_id)
-                        .await
-                        .expect("mailbox parent snapshot must load");
-                    if snapshot.agents[0].status == AgentRuntimeStatus::Running {
-                        break;
-                    }
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .expect("mailbox parent must become running");
-            let child = fixture
-                .agent_runtime
-                .spawn(
-                    &session_id,
-                    SpawnAgentInput {
-                        workspace_root: fixture.workspace_root(),
-                        parent_context_scope_id: parent.context_scope_id.clone(),
-                        role: "Explore".to_string(),
-                        task_name: "mailbox-child".to_string(),
-                        description: "Return child evidence".to_string(),
-                        message: "Return the child evidence".to_string(),
-                        launch: AgentLaunchPolicy::default(),
-                    },
-                    root_cancellation,
-                )
-                .await
-                .expect("mailbox child Agent must start");
-            let running_parent = tokio::time::timeout(Duration::from_secs(2), async {
-                loop {
-                    let snapshot = fixture
-                        .agent_runtime
-                        .snapshot(&session_id)
-                        .await
-                        .expect("mailbox child snapshot must load");
-                    let child_completed = snapshot.agents.iter().any(|agent| {
-                        agent.agent_id == child.agent_id
-                            && agent.status == AgentRuntimeStatus::Completed
-                    });
-                    if child_completed {
-                        break snapshot
-                            .agents
-                            .iter()
-                            .find(|agent| agent.agent_id == parent.agent_id)
-                            .expect("mailbox parent record must remain present")
-                            .clone();
-                    }
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .expect("mailbox child must complete");
-            let server = LocalProviderServer::start(vec![
-                agent_wait_tool_call_turn(&child.agent_id),
-                parent_completed_turn(),
-            ]);
-            let (providers, provider_id) = local_provider(&server.base_url).await;
-            let runtime = ChatRuntime::new(
-                Arc::new(CancellationTree::new()),
-                Arc::new(ErrorReporter::default()),
-                Arc::clone(&fixture.ledger),
-                Arc::clone(&fixture.attachment),
-                Arc::clone(&fixture.tools),
-                Arc::clone(&fixture.edit_transaction),
-                ChatPromptSources::new(
-                    fixture.data_root.clone(),
-                    Arc::clone(&fixture.permissions),
-                    Arc::clone(&fixture.process_runner),
-                )
-                .with_skills(fixture.tools.skill_service()),
-            );
-            let now = chrono::Utc::now();
-            let request = AgentAttemptRequest {
-                session_id: session_id.clone(),
-                workspace_root: fixture.workspace_root(),
-                agent: running_parent,
-                task: "Wait for the child final answer".to_string(),
-                mailbox_messages: vec![AgentMailboxMessage {
-                    message_id: "amsg_00000000-0000-4000-8000-000000000203".to_string(),
-                    message_type: AgentMessageType::NewTask,
-                    attempt_id: parent.attempt_id.clone(),
-                    author: "/root".to_string(),
-                    recipient: parent.path.clone(),
-                    payload: "Wait for the child final answer".to_string(),
-                    delivery_state: AgentMessageDeliveryState::Read,
-                    created_at: now,
-                    read_at: Some(now),
-                }],
-            };
-            let resolved = providers
-                .resolve_chat_config(Some(&provider_id), Some("local-model"))
-                .await
-                .expect("mailbox parent Provider config must resolve");
-
-            let output = runtime
-                .execute_agent_attempt(providers, request, resolved, CancellationToken::new())
-                .await
-                .expect("mailbox parent Agent loop must complete");
-            let requests = server.finish();
-
-            assert!(
-                output.report.contains("child final answer")
-                    && requests[1]["messages"]
-                        .as_array()
-                        .is_some_and(|messages| messages.iter().any(|message| {
-                            message["role"] == "tool"
-                                && message.to_string().contains("child-final-evidence")
-                        }))
-            );
-            fixture
-                .agent_runtime
-                .cleanup_session(&session_id)
-                .await
-                .expect("mailbox fixture cleanup must stop the parent Agent");
-        }
-
-        #[tokio::test]
-        async fn main_completion_waits_for_root_agent_before_final_synthesis() {
-            let fixture = RuntimeFixture::new();
-            let server = LocalProviderServer::start(vec![
-                root_agent_spawn_tool_call_turn(),
-                premature_parent_completed_turn(),
-                root_agent_synthesis_turn(),
-            ]);
-            let (providers, provider_id) = local_provider(&server.base_url).await;
-            let cancellation_tree = Arc::new(CancellationTree::new());
-            let session_id =
-                SessionId::parse("session-root-agent-wait").expect("fixture session ID must parse");
-            let run_id = StreamId::parse("run-root-agent-wait").expect("fixture run ID must parse");
-            let (_frame_sink, entry, cancellation) = frame_sink(
-                cancellation_tree.as_ref(),
-                session_id.clone(),
-                run_id.clone(),
-                Arc::new(Mutex::new(Vec::new())),
-            );
-            let mut sink = AgentConversationSink;
-            let resolved = providers
-                .resolve_chat_config(Some(&provider_id), Some("local-model"))
-                .await
-                .expect("local Provider config must resolve");
-            let mut conversation = ConversationLedger::begin(
-                Arc::clone(&fixture.ledger),
-                &entry,
-                &ChatStreamInput {
-                    text: "Delegate the analysis and return its evidence.".to_string(),
-                    attachments: None,
-                    is_system: None,
-                    command_metadata: None,
-                },
-                &[],
-                fixture.attachment.as_ref(),
-                &resolved,
-            )
-            .await
-            .expect("root Agent conversation must begin");
-            let tool_context = ChatToolRunContext::new(
-                fixture.workspace_root(),
-                session_id.clone(),
-                run_id,
-                cancellation.clone(),
-                "main".to_string(),
-                PermissionAiContext::default(),
-                None,
-                None,
-            )
-            .expect("root Agent tool context must compose");
-
-            let outcome = tokio::time::timeout(
-                Duration::from_secs(5),
-                run_provider_conversation(
-                    ProviderConversationServices {
-                        providers: &providers,
-                        tools: &fixture.tools,
-                        attachment_service: &fixture.attachment,
-                        prompt: &fixture.prompt,
-                    },
-                    resolved,
-                    cancellation,
-                    &mut conversation,
-                    Some(&tool_context),
-                    &mut sink,
-                ),
-            )
-            .await;
-            let outcome = match outcome {
-                Ok(outcome) => outcome,
-                Err(error) => {
-                    let snapshot = fixture
-                        .agent_runtime
-                        .snapshot(&session_id)
-                        .await
-                        .expect("timed out root Agent snapshot must load");
-                    let request_count = server
-                        .requests
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .len();
-                    panic!(
-                        "root Agent wait and synthesis timed out after {request_count} requests: {error}; snapshot: {snapshot:?}"
-                    );
-                }
-            };
-            assert!(matches!(
-                &outcome,
-                TerminalOutcome::Completed { full_content, .. }
-                    if full_content.contains("final response")
-            ));
-            conversation
-                .persist_terminal(&outcome)
-                .await
-                .expect("root Agent synthesis must persist");
-
-            let snapshot = fixture
-                .agent_runtime
-                .snapshot(&session_id)
-                .await
-                .expect("root Agent snapshot must load");
-            assert!(snapshot.agents.iter().any(|agent| {
-                agent.task_name == "auto-wait-child"
-                    && agent.status == AgentRuntimeStatus::Completed
-            }));
-            let requests = server.finish();
-            assert_eq!(requests.len(), 3);
-            assert!(requests[2]["messages"].as_array().is_some_and(|messages| {
-                messages
-                    .iter()
-                    .any(|message| message.to_string().contains("auto-wait-child-evidence"))
-            }));
         }
 
         #[tokio::test]

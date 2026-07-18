@@ -4,7 +4,7 @@ import type { ImageAttachment } from './attachment'
 export const MAIN_CONTEXT_SCOPE = 'main' as const
 export const CONTEXT_SCHEMA_VERSION = 1 as const
 
-export type ContextScopeId = typeof MAIN_CONTEXT_SCOPE | `subagent:${string}`
+export type ContextScopeId = typeof MAIN_CONTEXT_SCOPE
 export type LedgerEventType =
   | 'user_message'
   | 'assistant_message'
@@ -24,11 +24,6 @@ const HISTORY_EVENT_TYPES = new Set<LedgerEventType>([
   'skill_state_updated', 'resume_state_updated', 'compaction_completed', 'legacy_import_completed',
   'history_reverted'
 ])
-
-export function contextScopeForSubAgent(runId: string): ContextScopeId {
-  if (!runId.trim()) throw new Error('runId is required')
-  return `subagent:${runId}`
-}
 
 export function eventChangesHistory(type: LedgerEventType): boolean {
   return HISTORY_EVENT_TYPES.has(type)

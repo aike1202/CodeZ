@@ -17,10 +17,7 @@ describe('chat stream rendering performance', () => {
   it('coalesces a burst of main-agent chunks into one render update', () => {
     vi.useFakeTimers()
     const appendMain = vi.fn()
-    const batcher = createStreamUpdateBatcher({
-      appendMain,
-      appendSubAgent: vi.fn()
-    }, 40)
+    const batcher = createStreamUpdateBatcher({ appendMain }, 40)
 
     for (let index = 0; index < 100; index++) {
       batcher.pushMain(String(index % 10))
@@ -36,10 +33,7 @@ describe('chat stream rendering performance', () => {
   it('preserves a reasoning-to-text phase transition inside one batch', () => {
     vi.useFakeTimers()
     const appendMain = vi.fn()
-    const batcher = createStreamUpdateBatcher({
-      appendMain,
-      appendSubAgent: vi.fn()
-    }, 40)
+    const batcher = createStreamUpdateBatcher({ appendMain }, 40)
 
     batcher.pushMain('', 'thinking')
     batcher.pushMain('answer')
@@ -51,21 +45,17 @@ describe('chat stream rendering performance', () => {
     ])
   })
 
-  it('flushes main and sub-agent chunks before terminal events', () => {
+  it('flushes pending main chunks before terminal events', () => {
     vi.useFakeTimers()
     const appendMain = vi.fn()
-    const appendSubAgent = vi.fn()
-    const batcher = createStreamUpdateBatcher({ appendMain, appendSubAgent }, 40)
+    const batcher = createStreamUpdateBatcher({ appendMain }, 40)
 
     batcher.pushMain('hello', 'think')
-    batcher.pushSubAgent('worker-1', 'result', 'reasoning')
     batcher.flush()
 
     expect(appendMain).toHaveBeenCalledWith('hello', 'think')
-    expect(appendSubAgent).toHaveBeenCalledWith('worker-1', 'result', 'reasoning')
     vi.advanceTimersByTime(40)
     expect(appendMain).toHaveBeenCalledTimes(1)
-    expect(appendSubAgent).toHaveBeenCalledTimes(1)
   })
 })
 

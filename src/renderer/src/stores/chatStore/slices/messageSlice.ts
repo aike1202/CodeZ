@@ -9,13 +9,11 @@ import type {
   TextTimelineItem,
   CompactionTimelineItem,
   CompactionUiState,
-  SubAgentRecord,
   ChatSession,
   PendingInternalContinuation
 } from '../types'
 import type { TodoItem } from '../../../../../shared/types/todo'
 import type { ImageAttachment, PendingPromptDraft } from '../../../../../shared/types/attachment'
-import type { SubAgentHandoff } from '../../../../../shared/types/subagent'
 import { desktopApi } from '../../../shared/desktop'
 import { setSessionComposerDraft } from '../composerDrafts'
 
@@ -37,7 +35,6 @@ export interface MessageSlice {
   messages: ChatMessage[]
   streamCleanups: Record<string, (() => void) | null>
   expandedCapsule: 'todo' | 'plan' | null
-  subAgentStatus: 'idle' | 'running' | 'completed' | 'failed'
   planListModalOpen: boolean
   activePlan: any | null
   planReview: { plan: any; status: string } | null
@@ -74,30 +71,7 @@ export interface MessageSlice {
   updateCompactionTimeline: (msgId: string, state: CompactionUiState) => void
   startToolCall: (msgId: string, toolCall: Omit<ToolCallState, 'status' | 'startedAt' | 'sequence'>) => void
   finishToolCall: (msgId: string, toolCallId: string, result: string) => void
-  startSubAgent: (
-    msgId: string,
-    subAgentId: string,
-    meta: {
-      type: string
-      description: string
-      prompt: string
-      depth?: 'quick' | 'normal' | 'exhaustive'
-      expectations?: { questions: string[]; outOfScope?: string[] }
-      context?: string
-      scope?: { directories?: string[]; excludeGlobs?: string[] }
-      parentToolCallId: string
-    }
-  ) => void
-  appendSubAgentChunk: (msgId: string, subAgentId: string, delta: string, reasoningDelta: string) => void
-  startSubAgentToolCall: (msgId: string, subAgentId: string, toolCall: Omit<ToolCallState, 'status' | 'startedAt' | 'sequence'>) => void
-  finishSubAgentToolCall: (msgId: string, subAgentId: string, toolCallId: string, result: string) => void
-  endSubAgent: (
-    msgId: string,
-    subAgentId: string,
-    result: { status: 'completed' | 'failed' | 'interrupted'; output?: string; qualitySummary?: any; toolCallCount: number; filesExamined?: string[]; handoff?: SubAgentHandoff }
-  ) => void
   setExpandedCapsule: (capsule: 'todo' | 'plan' | null) => void
-  setSubAgentStatus: (status: 'idle' | 'running' | 'completed' | 'failed') => void
   initPlanStateListener: () => () => void
   setPlanListModalOpen: (open: boolean) => void
   setActivePlan: (plan: any | null) => void
@@ -251,28 +225,10 @@ export function applyCompactionTimelineUpdate(
   return { ...message, executionTimeline: [...timeline, item] }
 }
 
-/** 在指定消息内更新某个 sub-agent record；未找到时返回原状态（no-op） */
-function updateSubAgentInState(
-  s: ChatState,
-  msgId: string,
-  subAgentId: string,
-  updater: (sub: SubAgentRecord) => SubAgentRecord
-): Partial<ChatState> {
-  return updateMessageInState(s, msgId, (m) => {
-    const subs = m.subAgents
-    if (!subs || !subs.some((sub) => sub.id === subAgentId)) return m
-    return {
-      ...m,
-      subAgents: subs.map((sub) => (sub.id === subAgentId ? updater(sub) : sub))
-    }
-  })
-}
-
 export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> = (set, get) => ({
   messages: [],
   streamCleanups: {},
   expandedCapsule: null,
-  subAgentStatus: 'idle',
   planListModalOpen: false,
   activePlan: null,
   planReview: null,
@@ -693,209 +649,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
     }))
   },
 
-  startSubAgent: (msgId, subAgentId, meta) => {
-    set((s) => updateMessageInState(s, msgId, (m) => {
-      const existing = m.subAgents || []
-      if (existing.some((sub) => sub.id === subAgentId)) return m
-      const now = Date.now()
-      const record: SubAgentRecord = {
-        id: subAgentId,
-        type: meta.type,
-        description: meta.description,
-        prompt: meta.prompt,
-        depth: meta.depth,
-        expectations: meta.expectations,
-        context: meta.context,
-        scope: meta.scope,
-        parentToolCallId: meta.parentToolCallId,
-        status: 'running',
-        startedAt: now,
-        content: '',
-        toolCalls: [],
-        executionTimeline: []
-      }
-      return { ...m, subAgents: [...existing, record] }
-    }))
-    schedulePersist(get)
-  },
-
-  appendSubAgentChunk: (msgId, subAgentId, delta, reasoningDelta) => {
-    if (!delta && !reasoningDelta) return
-    set((s) => updateSubAgentInState(s, msgId, subAgentId, (sub) => {
-      const now = Date.now()
-      let timeline = sub.executionTimeline
-      let content = sub.content
-      let reasoningContent = sub.reasoningContent
-
-      if (delta) {
-        content = sub.content + delta
-        const last = timeline[timeline.length - 1]
-        if (last?.type === 'text') {
-          timeline = [
-            ...timeline.slice(0, -1),
-            { ...last, content: last.content + delta, updatedAt: now }
-          ]
-        } else {
-          timeline = [...timeline, {
-            id: genId(),
-            type: 'text',
-            content: delta,
-            status: 'running',
-            startedAt: now,
-            updatedAt: now,
-            sequence: timeline.length
-          } as TextTimelineItem]
-        }
-      }
-
-      if (reasoningDelta) {
-        reasoningContent = sub.reasoningContent
-          ? sub.reasoningContent + reasoningDelta
-          : reasoningDelta
-        const last = timeline[timeline.length - 1]
-        if (last?.type === 'reasoning') {
-          timeline = [
-            ...timeline.slice(0, -1),
-            { ...last, content: last.content + reasoningDelta, status: 'running', updatedAt: now }
-          ]
-        } else {
-          timeline = [...timeline, {
-            id: genId(),
-            type: 'reasoning',
-            content: reasoningDelta,
-            status: 'running',
-            startedAt: now,
-            updatedAt: now,
-            sequence: timeline.length
-          } as ReasoningTimelineItem]
-        }
-      }
-
-      return { ...sub, content, reasoningContent, executionTimeline: timeline }
-    }))
-    schedulePersist(get)
-  },
-
-  startSubAgentToolCall: (msgId, subAgentId, toolCall) => {
-    set((s) => updateSubAgentInState(s, msgId, subAgentId, (sub) => {
-      const existing = sub.toolCalls
-      const timeline = sub.executionTimeline
-      const now = Date.now()
-
-      if (existing.some((item) => item.id === toolCall.id)) {
-        return {
-          ...sub,
-          toolCalls: existing.map((item) =>
-            item.id === toolCall.id
-              ? {
-                  ...item,
-                  name: toolCall.name,
-                  args: toolCall.args,
-                  thoughtSignature: toolCall.thoughtSignature || item.thoughtSignature
-                }
-              : item
-          ),
-          executionTimeline: timeline.map((item) =>
-            item.id === 'tool_' + toolCall.id && item.type === 'tool'
-              ? {
-                  ...item,
-                  toolCall: { ...item.toolCall, name: toolCall.name, args: toolCall.args },
-                  updatedAt: now
-                }
-              : item
-          )
-        }
-      }
-
-      const nextToolCall: ToolCallState = {
-        ...toolCall,
-        status: 'running',
-        startedAt: now,
-        sequence: existing.length
-      }
-      const nextTimelineItem: ToolTimelineItem = {
-        id: 'tool_' + toolCall.id,
-        type: 'tool',
-        toolCall: nextToolCall,
-        startedAt: now,
-        updatedAt: now,
-        sequence: timeline.length
-      }
-
-      return {
-        ...sub,
-        toolCalls: [...existing, nextToolCall].sort((a, b) => a.sequence - b.sequence),
-        executionTimeline: [...timeline, nextTimelineItem].sort((a, b) => a.sequence - b.sequence)
-      }
-    }))
-    schedulePersist(get)
-  },
-
-  finishSubAgentToolCall: (msgId, subAgentId, toolCallId, result) => {
-    set((s) => updateSubAgentInState(s, msgId, subAgentId, (sub) => {
-      const now = Date.now()
-      const updateToolCall = (toolCall: ToolCallState): ToolCallState => {
-        if (toolCall.id !== toolCallId) return toolCall
-        let hasStructuredError = false
-        try {
-          const parsed = JSON.parse(result)
-          const rawDataError = typeof parsed?.data === 'string' &&
-            parsed.data.trimStart().startsWith('Error:')
-          hasStructuredError = parsed?.ok === false || rawDataError || Boolean(parsed?.error && !parsed?.data)
-        } catch {
-          hasStructuredError = false
-        }
-        return {
-          ...toolCall,
-          result,
-          status: result.startsWith('Error:') || hasStructuredError ? 'error' : 'success',
-          completedAt: now
-        }
-      }
-      return {
-        ...sub,
-        toolCalls: sub.toolCalls.map(updateToolCall),
-        executionTimeline: sub.executionTimeline.map((item) =>
-          item.type === 'tool' && item.toolCall.id === toolCallId
-            ? { ...item, toolCall: updateToolCall(item.toolCall), updatedAt: now }
-            : item
-        )
-      }
-    }))
-    schedulePersist(get)
-  },
-
-  endSubAgent: (msgId, subAgentId, result) => {
-    set((s) => updateSubAgentInState(s, msgId, subAgentId, (sub) => {
-      const now = Date.now()
-      const timeline = sub.executionTimeline.map((item) => {
-        if (item.type === 'text' && item.status === 'running') {
-          return { ...item, status: 'success' as const, completedAt: now, updatedAt: now }
-        }
-        if (item.type === 'reasoning' && item.status === 'running') {
-          return { ...item, status: 'success' as const, updatedAt: now, completedAt: now }
-        }
-        return item
-      })
-      return {
-        ...sub,
-        status: result.status,
-        completedAt: now,
-        executionTimeline: timeline,
-        result: {
-          output: result.output,
-          qualitySummary: result.qualitySummary,
-          toolCallCount: result.toolCallCount,
-          filesExamined: result.filesExamined,
-          handoff: result.handoff
-        }
-      }
-    }))
-    schedulePersist(get)
-  },
-
   setExpandedCapsule: (capsule) => set({ expandedCapsule: capsule }),
-  setSubAgentStatus: (status) => set({ subAgentStatus: status }),
 
   initPlanStateListener: () => () => undefined,
 
@@ -915,24 +669,19 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
     return pending
   },
   markActiveRunUserAborted: (sessionId) => {
-    const now = Date.now()
     set((state) => {
-      const updateMessages = (messages: ChatMessage[]) => messages.map((message) => {
-        if (!message.subAgents?.some((sub) => sub.status === 'running')) return message
-        return {
-          ...message,
-          streaming: false,
-          interrupted: true,
-          subAgents: message.subAgents.map((sub) => sub.status === 'running'
-            ? {
-                ...sub,
-                status: 'interrupted' as const,
-                interruptionReason: 'user_aborted' as const,
-                completedAt: now
-              }
-            : sub)
-        }
-      })
+      const updateMessages = (messages: ChatMessage[]) => messages.map((message) =>
+        message.streaming
+          ? {
+              ...message,
+              streaming: false,
+              streamPhase: undefined,
+              responseWaitWarning: undefined,
+              interrupted: true,
+              executionStatus: 'interrupted' as const
+            }
+          : message
+      )
       const sessions = state.sessions.map((session) => session.id === sessionId
         ? { ...session, messages: updateMessages(session.messages) }
         : session)

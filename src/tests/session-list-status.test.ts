@@ -6,8 +6,7 @@ import {
 
 const idleRuntime = {
   sessionId: 's1',
-  mainRunnerActive: false,
-  activeSubAgentIds: []
+  mainRunnerActive: false
 }
 
 describe('session list status', () => {
@@ -34,7 +33,7 @@ describe('session list status', () => {
       messages: [{ id: 'agent-1', role: 'agent', content: '', executionStatus: 'error' }],
       runtimeStatus: {
         version: 2,
-        status: { ...idleRuntime, activeSubAgentIds: ['sub-1'] }
+        status: { ...idleRuntime, mainRunnerActive: true }
       }
     })
 

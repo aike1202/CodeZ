@@ -47,36 +47,6 @@ export type ComposerImageAttachment = SessionImageAttachment | DraftImageAttachm
 
 export type AttachmentPreviewBytes = { mimeType: string, bytes: Array<number>, };
 
-export type AgentRuntimeStatus = "queued" | "running" | "completed" | "failed" | "interrupted";
-
-export type AgentMessageType = "NEW_TASK" | "MESSAGE" | "FINAL_ANSWER";
-
-export type AgentMessageDeliveryState = "unread" | "read";
-
-export type AgentDepth = "quick" | "normal" | "exhaustive";
-
-export type AgentExpectations = { questions: Array<string>, outOfScope: Array<string>, };
-
-export type AgentScope = { directories: Array<string>, excludeGlobs: Array<string>, };
-
-export type AgentLaunchPolicy = { context?: string, expectations?: AgentExpectations, scope?: AgentScope, depth?: AgentDepth, allowedWriteFiles: Array<string>, allowShell: boolean, };
-
-export type AgentTerminalResult = { status: AgentRuntimeStatus, report: string, conclusion?: string, };
-
-export type AgentRecord = { agentId: string, sessionId: string, parentAgentId: string, parentPath: string, path: string, role: string, taskName: string, description: string, contextScopeId: string, status: AgentRuntimeStatus, attemptId: string, runCount: number, createdAt: string, updatedAt: string, startedAt?: string, completedAt?: string, launch: AgentLaunchPolicy, result?: AgentTerminalResult, };
-
-export type AgentMailboxMessage = { messageId: string, messageType: AgentMessageType, attemptId: string, author: string, recipient: string, payload: string, deliveryState: AgentMessageDeliveryState, createdAt: string, readAt?: string, };
-
-export type AgentRuntimeSnapshot = { version: number, sessionId: string, revision: number, agents: Array<AgentRecord>, messages: Array<AgentMailboxMessage>, };
-
-export type AgentSnapshotRequest = { sessionId: string, };
-
-export type AgentActiveIdsRequest = { sessionId: string, };
-
-export type AgentActiveIdsResult = { agentIds: Array<string>, revision: number, };
-
-export type AgentUpdatedEvent = { version: number, sessionId: string, revision: number, snapshot: AgentRuntimeSnapshot, };
-
 export type PermissionMode = "auto" | "full-access";
 
 export type ThinkingMode = "auto" | "none" | "openai" | "deepseek" | "qwen" | "anthropic" | "gemini" | "grok" | "openrouter";
@@ -145,6 +115,12 @@ export type ChatPermissionApprovalRequest = { id: string, sessionId?: string, ag
 export type ChatPermissionApprovalEvent = { runId: string, request: ChatPermissionApprovalRequest, };
 
 export type AgentStopReason = "stop" | "length" | "toolCalls" | "contentFilter" | "error" | "unknown";
+
+export type ChatRunState = "STARTING" | "RUNNING" | "STOPPING" | "COMPLETED" | "FAILED" | "INTERRUPTED";
+
+export type ChatRuntimeStatus = { sessionId: string, mainRunnerActive: boolean, runId?: string, state?: ChatRunState, };
+
+export type ChatRuntimeStatusChanged = { version: number, status: ChatRuntimeStatus, };
 
 export type ToolCallFunction = { name: string, arguments: string, };
 
@@ -227,28 +203,6 @@ export type McpReverseRequest = { "kind": "sampling", maxTokens: number, message
 export type McpReverseRequestEvent = { requestId: string, serverName: string, fingerprint: string, policy: McpApprovalPolicy, request: McpReverseRequest, };
 
 export type McpReverseRequestResponse = { "kind": "sampling", approved: boolean, } | { "kind": "elicitationUrl", action: McpElicitationAction, } | { "kind": "elicitationForm", action: McpElicitationAction, content?: unknown, };
-
-export type SubAgentModelSelection = { providerId: string, model: string, };
-
-export type SubAgentRunRequest = { subagentType: string, sessionId: string, task: string, };
-
-export type SubAgentRunStatus = "running" | "completed" | "failed" | "interrupted";
-
-export type SubAgentRunState = { runId: string, subagentType: string, sessionId: string, providerId: string, model: string, status: SubAgentRunStatus, output?: string, error?: string, createdAt: string, updatedAt: string, };
-
-export type SubAgentRunCancelResult = { accepted: boolean, state: SubAgentRunState, };
-
-export type SubAgentInfo = { type: string, description: string, whenToUse?: string, costHint?: string, enabled: boolean, configuredModels?: Array<SubAgentModelSelection>, };
-
-export type SubAgentOutputField = { name: string, type: string, description: string, required: boolean, };
-
-export type SubAgentOutputSpec = { description: string, fields: Array<SubAgentOutputField>, };
-
-export type SubAgentUnavailableDetail = "systemPrompt" | "toolCatalog";
-
-export type SubAgentSettingsDetail = { type: string, description: string, whenToUse: string, whenNotToUse?: string, costHint?: string, maxLoops: number, canRunInBackground?: boolean, isolation?: string, outputSpec?: SubAgentOutputSpec, enabled: boolean, configuredModels?: Array<SubAgentModelSelection>, };
-
-export type SubAgentDetailResult = { "kind": "available", detail: SubAgentSettingsDetail, } | { "kind": "partial", detail: SubAgentSettingsDetail, unavailable: Array<SubAgentUnavailableDetail>, } | { "kind": "notFound", subagentType: string, };
 
 export type TodoStatus = "pending" | "in_progress" | "completed" | "cancelled";
 

@@ -40,7 +40,7 @@ describe('TodoCapsule session state', () => {
     expect(expanded).toContain('Keep Todo state session-scoped')
   })
 
-  it('renders Todo status without deriving it from Executor state', () => {
+  it('renders Todo status from stored state', () => {
     mockChatState.todos = [
       {
         id: 't1',

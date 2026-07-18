@@ -63,7 +63,7 @@ describe('desktop chat adapter', () => {
     setWindow({ __TAURI_INTERNALS__: {} })
     tauriMocks.invoke
       .mockResolvedValueOnce({ suggestion: ' next' })
-      .mockResolvedValueOnce({ sessionId: 'session-1', mainRunnerActive: false, activeSubAgentIds: [] })
+      .mockResolvedValueOnce({ sessionId: 'session-1', mainRunnerActive: false })
       .mockResolvedValueOnce({ accepted: true })
       .mockResolvedValueOnce({ ok: true })
       .mockResolvedValueOnce({ accepted: true, result: { status: 'completed' } })

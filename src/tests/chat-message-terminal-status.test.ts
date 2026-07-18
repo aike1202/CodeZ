@@ -45,54 +45,17 @@ describe('chat message terminal status', () => {
     }] as any
 
     const active = interruptPendingRequests(messages, {
-      sessionId: 's1', mainRunnerActive: true, activeSubAgentIds: []
+      sessionId: 's1', mainRunnerActive: true
     })
     expect(active.changed).toBe(false)
     expect(active.messages).toBe(messages)
 
     const inactive = interruptPendingRequests(messages, {
-      sessionId: 's1', mainRunnerActive: false, activeSubAgentIds: []
+      sessionId: 's1', mainRunnerActive: false
     })
     expect(inactive.changed).toBe(true)
     expect(inactive.messages[0].permissionRequests?.[0]?.status).toBe('interrupted')
     expect(inactive.messages[0].askUserRequests?.[0]?.status).toBe('interrupted')
   })
 
-  it('does not mark a wrapped tool error as a successful subagent edit', async () => {
-    const { useChatStore } = await import('../renderer/src/stores/chatStore')
-    const messages = [{
-      id: 'agent-1',
-      role: 'agent',
-      content: '',
-      subAgents: [{
-        id: 'subagent-1',
-        type: 'Executor',
-        description: 'edit',
-        prompt: 'edit',
-        parentToolCallId: 'tool-parent',
-        status: 'running',
-        startedAt: 1,
-        content: '',
-        toolCalls: [{
-          id: 'write-1', name: 'Write', args: '{"file_path":"src/a.ts"}',
-          status: 'running', startedAt: 2, sequence: 0
-        }],
-        executionTimeline: []
-      }]
-    }] as any
-    useChatStore.setState({
-      sessions: [{ id: 's1', projectId: 'p1', summary: 'run', relativeTime: 'now', messages }],
-      activeSessionId: 's1',
-      messages
-    })
-
-    useChatStore.getState().finishSubAgentToolCall(
-      'agent-1',
-      'subagent-1',
-      'write-1',
-      JSON.stringify({ ok: true, data: 'Error: write failed' })
-    )
-
-    expect(useChatStore.getState().messages[0].subAgents?.[0].toolCalls[0].status).toBe('error')
-  })
 })

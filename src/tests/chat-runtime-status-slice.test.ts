@@ -10,8 +10,7 @@ vi.mock('../renderer/src/shared/desktop/api', () => ({
 
 const inactiveStatus = {
   sessionId: 'session-a',
-  mainRunnerActive: false,
-  activeSubAgentIds: []
+  mainRunnerActive: false
 }
 
 describe('renderer runtime status slice', () => {

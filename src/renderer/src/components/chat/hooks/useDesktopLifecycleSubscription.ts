@@ -2,8 +2,6 @@
 
 import { desktopApi, desktopEvents } from '../../../shared/desktop'
 import type {
-  AgentRuntimeSnapshot,
-  AgentUpdatedEvent,
   TodoListSnapshot,
   TodoUpdatedEvent
 } from '../../../shared/desktop/generated/contracts'
@@ -17,23 +15,17 @@ type Unlisten = () => void
 
 export interface DesktopLifecycleSource {
   todoSnapshot(sessionId: string): Promise<TodoListSnapshot>
-  agentSnapshot(sessionId: string): Promise<AgentRuntimeSnapshot>
   onTodoUpdated(callback: (event: TodoUpdatedEvent) => void): Promise<Unlisten>
-  onAgentUpdated(callback: (event: AgentUpdatedEvent) => void): Promise<Unlisten>
 }
 
 export interface DesktopLifecycleSink {
   todoEvent(snapshot: TodoListSnapshot): SnapshotApplyResult
   todoSnapshot(snapshot: TodoListSnapshot): SnapshotApplyResult
-  agentEvent(snapshot: AgentRuntimeSnapshot): SnapshotApplyResult
-  agentSnapshot(snapshot: AgentRuntimeSnapshot): SnapshotApplyResult
 }
 
 const desktopLifecycleSource: DesktopLifecycleSource = {
   todoSnapshot: (sessionId) => desktopApi.todo.snapshot(sessionId),
-  agentSnapshot: (sessionId) => desktopApi.agent.snapshot(sessionId),
-  onTodoUpdated: (callback) => desktopEvents.todo.onUpdated(callback),
-  onAgentUpdated: (callback) => desktopEvents.agent.onUpdated(callback)
+  onTodoUpdated: (callback) => desktopEvents.todo.onUpdated(callback)
 }
 
 const desktopLifecycleSink: DesktopLifecycleSink = {
@@ -50,9 +42,7 @@ const desktopLifecycleSink: DesktopLifecycleSink = {
       useChatStore.getState().setSessionTodos(snapshot.sessionId, snapshot.items)
     }
     return result
-  },
-  agentEvent: (snapshot) => useDesktopLifecycleStore.getState().applyAgentEvent(snapshot),
-  agentSnapshot: (snapshot) => useDesktopLifecycleStore.getState().applyAgentSnapshot(snapshot)
+  }
 }
 
 export function startDesktopLifecycleSubscription(
@@ -63,7 +53,6 @@ export function startDesktopLifecycleSubscription(
   let active = true
   let unlisteners: Unlisten[] = []
   const todoRefreshes = new Map<string, Promise<void>>()
-  const agentRefreshes = new Map<string, Promise<void>>()
 
   const refreshTodo = (targetSessionId: string): Promise<void> => {
     const existing = todoRefreshes.get(targetSessionId)
@@ -80,29 +69,10 @@ export function startDesktopLifecycleSubscription(
     return refresh
   }
 
-  const refreshAgent = (targetSessionId: string): Promise<void> => {
-    const existing = agentRefreshes.get(targetSessionId)
-    if (existing) return existing
-    const refresh = source.agentSnapshot(targetSessionId)
-      .then((snapshot) => {
-        if (active) sink.agentSnapshot(snapshot)
-      })
-      .catch((error) => {
-        if (active) console.warn('[desktopLifecycle] Agent snapshot refresh failed:', error)
-      })
-      .finally(() => agentRefreshes.delete(targetSessionId))
-    agentRefreshes.set(targetSessionId, refresh)
-    return refresh
-  }
-
   const registrations = [
     source.onTodoUpdated((event) => {
       if (!active) return
       if (sink.todoEvent(event.snapshot) === 'gap') void refreshTodo(event.sessionId)
-    }),
-    source.onAgentUpdated((event) => {
-      if (!active) return
-      if (sink.agentEvent(event.snapshot) === 'gap') void refreshAgent(event.sessionId)
     })
   ]
 
@@ -115,7 +85,7 @@ export function startDesktopLifecycleSubscription(
       return
     }
     unlisteners = registered
-    void Promise.allSettled([refreshTodo(sessionId), refreshAgent(sessionId)])
+    void refreshTodo(sessionId)
   })
 
   return () => {

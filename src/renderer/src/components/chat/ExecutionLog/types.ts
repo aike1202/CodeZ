@@ -1,4 +1,4 @@
-import type { AgentState, ExecutionTimelineItem, SubAgentRecord, ToolCallState } from '../../../stores/chatStore'
+import type { AgentState, ExecutionTimelineItem, ToolCallState } from '../../../stores/chatStore'
 
 export interface ExecutionLogProps {
   timeline?: ExecutionTimelineItem[]
@@ -17,7 +17,4 @@ export interface ExecutionLogProps {
   ) => void
   streaming?: boolean
   interrupted?: boolean
-  subAgents?: SubAgentRecord[]
-  onSubAgentClick?: (subAgent: SubAgentRecord) => void
-  showParallelExecution?: boolean
 }

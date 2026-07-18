@@ -605,22 +605,6 @@ async fn classify_effect(effect: &ToolEffect, workspace_root: &Path) -> Vec<Effe
             "Perform an external or unclassified effect",
             false,
         )],
-        ToolEffect::SpawnAgent {
-            role, read_only, ..
-        } => vec![EffectClassification::new(
-            if *read_only {
-                PermissionCapability::Read
-            } else {
-                PermissionCapability::ExternalEffect
-            },
-            format!("spawn-agent:{role}"),
-            if *read_only {
-                "Spawn a shell-disabled, read-only agent"
-            } else {
-                "Spawn an agent with shell or write capabilities"
-            },
-            false,
-        )],
         ToolEffect::MutateTodoState { session_id } => vec![EffectClassification::new(
             PermissionCapability::Edit,
             session_id
@@ -1161,39 +1145,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn restricted_agent_spawn_uses_the_read_only_permission_capability() {
-        let classified = classify_effect(
-            &ToolEffect::SpawnAgent {
-                role: "Explore".to_string(),
-                isolation: Some("session".to_string()),
-                read_only: true,
-            },
-            std::path::Path::new("C:\\workspace"),
-        )
-        .await;
-
-        assert_eq!(classified[0].permission, PermissionCapability::Read);
-    }
-
-    #[tokio::test]
-    async fn shell_enabled_agent_spawn_remains_an_external_effect() {
-        let classified = classify_effect(
-            &ToolEffect::SpawnAgent {
-                role: "Explore".to_string(),
-                isolation: Some("session".to_string()),
-                read_only: false,
-            },
-            std::path::Path::new("C:\\workspace"),
-        )
-        .await;
-
-        assert_eq!(
-            classified[0].permission,
-            PermissionCapability::ExternalEffect
-        );
-    }
-
-    #[tokio::test]
     async fn cargo_clippy_is_fully_classified() {
         let classified = classify_effect(
             &ToolEffect::ExecuteCommand {
@@ -1519,17 +1470,5 @@ mod tests {
                 "command should be authorized in auto mode: {command}"
             );
         }
-    }
-
-    #[tokio::test]
-    async fn auto_mode_authorizes_a_machine_enforced_read_only_agent_spawn() {
-        assert!(
-            authorize_in_auto_mode(ToolEffect::SpawnAgent {
-                role: "Explore".to_string(),
-                isolation: Some("session".to_string()),
-                read_only: true,
-            })
-            .await
-        );
     }
 }

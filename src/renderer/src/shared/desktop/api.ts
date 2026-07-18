@@ -39,15 +39,8 @@ import type {
   ChatStreamFrame as WireChatStreamFrame,
   McpReverseRequestEvent,
   McpReverseRequestResponse,
-  SubAgentDetailResult,
-  SubAgentInfo,
-  SubAgentModelSelection,
-  SubAgentRunCancelResult,
-  SubAgentRunRequest,
-  SubAgentRunState,
-  SubAgentSettingsDetail,
-  AgentActiveIdsResult,
-  AgentRuntimeSnapshot,
+  ChatRuntimeStatus,
+  ChatRuntimeStatusChanged,
   TodoItem as WireTodoItem,
   TodoListSnapshot,
 } from './generated/contracts'
@@ -63,10 +56,6 @@ import type {
   PromptPredictionRequest,
   PromptPredictionResponse
 } from '@shared/types/promptPrediction'
-import type {
-  SessionRuntimeStatus,
-  SessionRuntimeStatusChanged
-} from '@shared/types/subagent'
 import type { ChatSteerInput, ChatSteerResult } from '@shared/types/queuedPrompt'
 import type { PermissionMode } from '@shared/types/permission'
 import type { RuleFile } from '@shared/types/rules'
@@ -98,7 +87,6 @@ import type {
   McpServerStatus,
 } from '../../components/SettingsMcpTab/types'
 import { normalizeDesktopError } from './errors'
-import { desktopEvents } from './events'
 
 type RendererLogLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -128,8 +116,6 @@ export interface ExecutionHistoryRecord {
   filesModified?: string[]
   commandsRun?: string[]
 }
-
-export type SubAgentDetailResponse = SubAgentDetailResult | SubAgentSettingsDetail | null
 
 function optionalString(value: unknown, field: string): string | undefined {
   if (value === undefined) return undefined
@@ -230,17 +216,6 @@ export interface ChatStreamCallbacks {
   onToolEnd?(toolCallId: string, result: string): void
   onPermissionRequest?(request: ChatPermissionRequest): void
   onAskUserRequest?(request: ChatAskUserRequest): void
-  onSubAgentStart?(subAgentId: string, meta: unknown): void
-  onSubAgentEnd?(subAgentId: string, result: unknown): void
-  onSubAgentChunk?(subAgentId: string, delta: string, reasoningDelta: string): void
-  onSubAgentToolStart?(
-    subAgentId: string,
-    toolCallId: string,
-    name: string,
-    args: string,
-    thoughtSignature?: string
-  ): void
-  onSubAgentToolEnd?(subAgentId: string, toolCallId: string, result: string): void
   onContextBudget?(snapshot: ContextBudgetSnapshot): void
   onCompactionStarted?(payload: ContextCompactionStarted): void
   onCompactionCompleted?(payload: ContextCompactionCompleted): void
@@ -575,8 +550,8 @@ export interface DesktopApi {
   }
   chat: {
     predictNextInput(request: PromptPredictionRequest): Promise<PromptPredictionResponse>
-    getRuntimeStatus(sessionId: string): Promise<SessionRuntimeStatus>
-    onRuntimeStatusChanged(callback: (payload: SessionRuntimeStatusChanged) => void): () => void
+    getRuntimeStatus(sessionId: string): Promise<ChatRuntimeStatus>
+    onRuntimeStatusChanged(callback: (payload: ChatRuntimeStatusChanged) => void): () => void
     steer(sessionId: string, input: ChatSteerInput): Promise<ChatSteerResult>
     interruptTool(toolCallId: string): Promise<ChatToolInterruptResult>
     stream(
@@ -644,20 +619,6 @@ export interface DesktopApi {
   executionHistory: {
     getByProject(projectId: string): Promise<ExecutionHistoryRecord[]>
     delete(executionId: string): Promise<void>
-  }
-  agent: {
-    snapshot(sessionId: string): Promise<AgentRuntimeSnapshot>
-    activeIds(sessionId: string): Promise<AgentActiveIdsResult>
-  }
-  subAgent: {
-    list(): Promise<SubAgentInfo[]>
-    toggle(type: string, enabled: boolean): Promise<void>
-    getDetail(type: string): Promise<SubAgentDetailResponse>
-    setModel(type: string, selections: SubAgentModelSelection[]): Promise<void>
-    run(request: SubAgentRunRequest): Promise<SubAgentRunState>
-    getRun(sessionId: string, runId: string): Promise<SubAgentRunState>
-    cancelRun(sessionId: string, runId: string): Promise<SubAgentRunCancelResult>
-    onState(callback: (state: SubAgentRunState) => void): () => void
   }
   mcp: {
     list(workspaceRoot?: string | null): Promise<McpListPayload>
@@ -847,7 +808,7 @@ export const desktopApi: DesktopApi = {
     getRuntimeStatus: (sessionId) => command('chat_get_runtime_status', { sessionId }),
     onRuntimeStatusChanged: (callback) => {
       let active = true
-      const unlisten = listen<SessionRuntimeStatusChanged>('chat:runtime-status-changed', (event) => {
+      const unlisten = listen<ChatRuntimeStatusChanged>('chat:runtime-status-changed', (event) => {
         if (active) callback(event.payload)
       })
       return () => {
@@ -1141,57 +1102,6 @@ export const desktopApi: DesktopApi = {
       'task_delete',
       { taskId: executionId }
     )
-  },
-  agent: {
-    snapshot: (sessionId) => command<AgentRuntimeSnapshot>(
-      'agent_snapshot',
-      { request: { sessionId } }
-    ),
-    activeIds: (sessionId) => command<AgentActiveIdsResult>(
-      'agent_active_ids',
-      { request: { sessionId } }
-    )
-  },
-  subAgent: {
-    list: () => command<SubAgentInfo[]>('subagent_list'),
-    toggle: (type, enabled) => command<void>(
-      'subagent_toggle',
-      { subagentType: type, enabled }
-    ),
-    getDetail: (type) => command<SubAgentDetailResponse>(
-      'subagent_get_detail',
-      { subagentType: type }
-    ),
-    setModel: (type, selections) => command<void>(
-      'subagent_set_model',
-      { subagentType: type, selections }
-    ),
-    run: (request) => command<SubAgentRunState>(
-      'subagent_run',
-      { request }
-    ),
-    getRun: (sessionId, runId) => command<SubAgentRunState>(
-      'subagent_get_run',
-      { sessionId, runId }
-    ),
-    cancelRun: (sessionId, runId) => command<SubAgentRunCancelResult>(
-      'subagent_cancel_run',
-      { sessionId, runId }
-    ),
-    onState: (callback) => {
-      let active = true
-      let dispose: (() => void) | null = null
-      void desktopEvents.subAgent.onState((state) => {
-        if (active) callback(state)
-      }).then((unlisten) => {
-        if (active) dispose = unlisten
-        else unlisten()
-      }).catch(() => undefined)
-      return () => {
-        active = false
-        dispose?.()
-      }
-    }
   },
   mcp: {
     list: (workspaceRoot) => command('mcp_list', { workspaceRoot }),

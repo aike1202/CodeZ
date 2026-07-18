@@ -44,8 +44,6 @@ pub enum LegacyDataSet {
     ToolJournal,
     /// Persisted large tool results and metadata.
     LargeToolResults,
-    /// Workspace parallel execution snapshots.
-    ParallelExecutions,
     /// User-authored plans under the global CodeZ directory.
     Plans,
     /// Global and workspace skill enablement configuration.
@@ -79,7 +77,6 @@ impl LegacyDataSet {
             Self::EditBackups => "edit-backups",
             Self::ToolJournal => "tool-journal",
             Self::LargeToolResults => "large-tool-results",
-            Self::ParallelExecutions => "parallel-executions",
             Self::Plans => "plans",
             Self::SkillsConfig => "skills-config",
             Self::ProjectAnalysisCache => "project-analysis-cache",
@@ -281,11 +278,6 @@ const LARGE_TOOL_RESULTS: &[DiscoveryRule] = &[DiscoveryRule::RecursiveTree {
     relative_directory: "tool-results-v2",
     selector: TreeSelector::All,
 }];
-const PARALLEL_EXECUTIONS: &[DiscoveryRule] = &[DiscoveryRule::RecursiveTree {
-    scope: RootScope::Workspace,
-    relative_directory: ".codez/executions",
-    selector: TreeSelector::Extension("json"),
-}];
 const PLANS: &[DiscoveryRule] = &[DiscoveryRule::RecursiveTree {
     scope: RootScope::UserHome,
     relative_directory: ".codez/projects",
@@ -329,7 +321,7 @@ const WORKSPACE_RULES_MEMORY: &[DiscoveryRule] = &[
 ];
 
 /// Complete migration catalog corresponding to the reviewed 23-entry inventory.
-pub const LEGACY_DATA_CATALOG: [LegacyDataSpec; 23] = [
+pub const LEGACY_DATA_CATALOG: [LegacyDataSpec; 22] = [
     LegacyDataSpec {
         data_set: LegacyDataSet::Providers,
         format: LegacyFormat::Json,
@@ -493,15 +485,6 @@ pub const LEGACY_DATA_CATALOG: [LegacyDataSpec; 23] = [
         rules: LARGE_TOOL_RESULTS,
     },
     LegacyDataSpec {
-        data_set: LegacyDataSet::ParallelExecutions,
-        format: LegacyFormat::Json,
-        sensitivity: DataSensitivity::UserData,
-        max_file_bytes: 64 * MIB,
-        schema: Some(SchemaFamily::ParallelExecution),
-        schema_selector: SchemaSelector::All,
-        rules: PARALLEL_EXECUTIONS,
-    },
-    LegacyDataSpec {
         data_set: LegacyDataSet::Plans,
         format: LegacyFormat::Opaque,
         sensitivity: DataSensitivity::UserData,
@@ -571,7 +554,6 @@ mod tests {
                 "edit-backups",
                 "tool-journal",
                 "large-tool-results",
-                "parallel-executions",
                 "plans",
                 "skills-config",
                 "project-analysis-cache",

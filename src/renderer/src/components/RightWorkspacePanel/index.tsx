@@ -1,6 +1,5 @@
 import React, { useMemo } from 'react'
 import {
-  Bot,
   FileCode2,
   FileDiff,
   PanelRightClose,
@@ -9,12 +8,10 @@ import {
   X
 } from 'lucide-react'
 import type { WorkspaceInfo } from '@shared/types/workspace'
-import type { ChatMessage, SubAgentRecord } from '../../stores/chatStore'
+import type { ChatMessage } from '../../stores/chatStore'
 import type { PreviewTab } from '../../App/hooks/useAppPreview'
 import FilePreviewPanel from '../FilePreviewPanel'
 import TerminalPanel from '../chat/TerminalPanel'
-import { SubAgentLogPanel } from './SubAgentLogPanel'
-import type { SubAgentWorkspaceTab } from './subagentTabs'
 import './RightWorkspacePanel.css'
 
 export const TERMINAL_TAB_ID = 'tool:terminal'
@@ -23,8 +20,6 @@ interface RightWorkspacePanelProps {
   previewTabs: PreviewTab[]
   activeTabId: string | null
   terminalOpen: boolean
-  subagentTabs: SubAgentWorkspaceTab[]
-  subAgents: SubAgentRecord[]
   messages: ChatMessage[]
   workspace: WorkspaceInfo
   panelWidth: number
@@ -48,17 +43,14 @@ interface WorkspaceTab {
   id: string
   title: string
   titleDetail: string
-  kind: 'file' | 'diff' | 'terminal' | 'subagent'
+  kind: 'file' | 'diff' | 'terminal'
   closable: boolean
-  running?: boolean
 }
 
 export default function RightWorkspacePanel({
   previewTabs,
   activeTabId,
   terminalOpen,
-  subagentTabs,
-  subAgents,
   messages,
   workspace,
   panelWidth,
@@ -86,20 +78,8 @@ export default function RightWorkspacePanel({
         closable: true
       })
     }
-    subagentTabs.forEach((tab) => {
-      const subAgent = subAgents.find((agent) => agent.id === tab.subAgentId)
-      if (!subAgent) return
-      fileTabs.push({
-        id: tab.id,
-        title: subAgent.type || '子智能体',
-        titleDetail: subAgent.description || subAgent.prompt,
-        kind: 'subagent',
-        closable: true,
-        running: subAgent.status === 'running'
-      })
-    })
     return fileTabs
-  }, [previewTabs, subagentTabs, subAgents, terminalOpen, workspace.rootPath])
+  }, [previewTabs, terminalOpen, workspace.rootPath])
 
   const resolvedActiveTabId = tabs.some((tab) => tab.id === activeTabId)
     ? activeTabId
@@ -123,7 +103,6 @@ export default function RightWorkspacePanel({
 
   const renderTabIcon = (kind: WorkspaceTab['kind']) => {
     if (kind === 'terminal') return <SquareTerminal size={14} aria-hidden="true" />
-    if (kind === 'subagent') return <Bot size={14} aria-hidden="true" />
     if (kind === 'diff') return <FileDiff size={14} aria-hidden="true" />
     return <FileCode2 size={14} aria-hidden="true" />
   }
@@ -152,9 +131,6 @@ export default function RightWorkspacePanel({
                 >
                   {renderTabIcon(tab.kind)}
                   <span>{tab.title}</span>
-                  {tab.kind === 'subagent' && tab.running && (
-                    <span className="right-workspace-live-dot" aria-label="有子智能体正在运行" />
-                  )}
                 </button>
                 {tab.closable && (
                   <button
@@ -229,27 +205,7 @@ export default function RightWorkspacePanel({
           </div>
         )}
 
-        {subagentTabs.map((tab) => {
-          const subAgent = subAgents.find((agent) => agent.id === tab.subAgentId)
-          if (!subAgent) return null
-          return (
-            <div
-              key={tab.id}
-              className={`right-workspace-pane ${resolvedActiveTabId === tab.id ? '' : 'right-workspace-pane--hidden'}`}
-              role="tabpanel"
-            >
-              <SubAgentLogPanel
-                subAgent={subAgent}
-                visible={resolvedActiveTabId === tab.id}
-                onFileClick={onFileClick}
-                onDiffClick={onDiffClick}
-              />
-            </div>
-          )
-        })}
       </div>
     </section>
   )
 }
-
-export type { SubAgentWorkspaceTab } from './subagentTabs'

@@ -56,11 +56,10 @@ pub struct ContextBudgetSnapshot {
 #[ts(type = "string")]
 pub enum ContextScopeId {
     Main,
-    Subagent(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("context scope must be 'main' or a non-empty 'subagent:<id>' value")]
+#[error("context scope must be 'main'")]
 pub struct ContextScopeIdError;
 
 impl ContextScopeId {
@@ -68,31 +67,17 @@ impl ContextScopeId {
     ///
     /// # Errors
     ///
-    /// Returns [`ContextScopeIdError`] for unknown, empty, oversized, or
-    /// control-character-containing scope identifiers.
+    /// Returns [`ContextScopeIdError`] for every value other than `main`.
     pub fn parse(value: &str) -> Result<Self, ContextScopeIdError> {
-        if value == MAIN_CONTEXT_SCOPE {
-            return Ok(Self::Main);
-        }
-        let Some(identifier) = value.strip_prefix("subagent:") else {
-            return Err(ContextScopeIdError);
-        };
-        if identifier.is_empty()
-            || identifier.len() > 160
-            || identifier.chars().any(char::is_control)
-        {
-            return Err(ContextScopeIdError);
-        }
-        Ok(Self::Subagent(identifier.to_string()))
+        (value == MAIN_CONTEXT_SCOPE)
+            .then_some(Self::Main)
+            .ok_or(ContextScopeIdError)
     }
 
     /// Returns the stable map key used in runtime snapshots.
     #[must_use]
     pub fn as_key(&self) -> Cow<'_, str> {
-        match self {
-            Self::Main => Cow::Borrowed(MAIN_CONTEXT_SCOPE),
-            Self::Subagent(identifier) => Cow::Owned(format!("subagent:{identifier}")),
-        }
+        Cow::Borrowed(MAIN_CONTEXT_SCOPE)
     }
 }
 
@@ -557,16 +542,11 @@ mod tests {
     use ts_rs::{Config, TS};
 
     #[test]
-    fn context_scope_uses_the_legacy_string_wire_format() {
+    fn context_scope_uses_the_stable_string_wire_format() {
         let main = serde_json::to_string(&ContextScopeId::Main)
             .expect("fixed context scope must serialize");
-        let subagent = serde_json::to_string(&ContextScopeId::Subagent("run-7".to_string()))
-            .expect("fixed context scope must serialize");
 
-        assert_eq!(
-            (main.as_str(), subagent.as_str()),
-            (r#""main""#, r#""subagent:run-7""#)
-        );
+        assert_eq!(main, r#""main""#);
     }
 
     #[test]

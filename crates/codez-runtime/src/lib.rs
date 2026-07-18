@@ -34,7 +34,6 @@ pub use workspace::{
     FilePreview, FileTreeNode, ProjectInfo, WorkspaceEntryKind, WorkspaceLimits, WorkspacePathItem,
     WorkspaceService,
 };
-pub mod agent;
 pub mod chat;
 pub mod extension;
 pub mod permission;

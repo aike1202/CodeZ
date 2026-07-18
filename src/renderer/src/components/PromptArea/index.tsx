@@ -101,9 +101,7 @@ export default function PromptArea({
     ? s.runtimeStatuses[activeSessionId]?.status
     : undefined)
   const isStreaming = activeSessionId ? !!streamCleanups[activeSessionId] : false
-  const conversationBusy = isStreaming || Boolean(
-    runtimeStatus?.mainRunnerActive || runtimeStatus?.activeSubAgentIds.length
-  )
+  const conversationBusy = isStreaming || Boolean(runtimeStatus?.mainRunnerActive)
   const stopStream = activeSessionId ? streamCleanups[activeSessionId] ?? null : null
   const contextSnapshot = useChatStore((s) => activeSessionId ? s.contextBudgets[activeSessionId] : undefined)
   const compactionState = useChatStore((s) => activeSessionId ? s.compactionStates[activeSessionId] : undefined)

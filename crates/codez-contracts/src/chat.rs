@@ -180,7 +180,6 @@ pub enum ChatRunState {
 pub struct ChatRuntimeStatus {
     pub session_id: String,
     pub main_runner_active: bool,
-    pub active_sub_agent_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

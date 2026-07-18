@@ -69,7 +69,7 @@ async fn discovery_is_deterministic_and_does_not_serialize_source_contents() {
     let serialized = serde_json::to_string(&first).expect("manifest must serialize");
 
     assert!(
-        first.entries.len() == 13
+        first.entries.len() == 12
             && first.fingerprint == second.fingerprint
             && first.entries == second.entries
             && first.has_blocking_entries()

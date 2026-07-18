@@ -1,6 +1,5 @@
 export interface StreamUpdateCallbacks {
   appendMain: (delta: string, reasoningDelta: string) => void
-  appendSubAgent: (subAgentId: string, delta: string, reasoningDelta: string) => void
 }
 
 interface BufferedSegment {
@@ -10,7 +9,6 @@ interface BufferedSegment {
 
 export interface StreamUpdateBatcher {
   pushMain: (delta: string, reasoningDelta?: string) => void
-  pushSubAgent: (subAgentId: string, delta: string, reasoningDelta: string) => void
   flush: () => void
   cancel: () => void
 }
@@ -22,7 +20,6 @@ export function createStreamUpdateBatcher(
   intervalMs = STREAM_RENDER_INTERVAL_MS
 ): StreamUpdateBatcher {
   let main: BufferedSegment[] = []
-  const subAgents = new Map<string, BufferedSegment[]>()
   let timer: ReturnType<typeof setTimeout> | null = null
 
   const clearTimer = () => {
@@ -36,15 +33,8 @@ export function createStreamUpdateBatcher(
 
     const pendingMain = main
     main = []
-    const pendingSubAgents = Array.from(subAgents.entries())
-    subAgents.clear()
 
     flushSegments(pendingMain, callbacks.appendMain)
-    for (const [subAgentId, segments] of pendingSubAgents) {
-      flushSegments(segments, (delta, reasoningDelta) => {
-        callbacks.appendSubAgent(subAgentId, delta, reasoningDelta)
-      })
-    }
   }
 
   const schedule = () => {
@@ -58,18 +48,10 @@ export function createStreamUpdateBatcher(
       appendSegments(main, delta, reasoningDelta)
       schedule()
     },
-    pushSubAgent: (subAgentId, delta, reasoningDelta) => {
-      if (!delta && !reasoningDelta) return
-      const pending = subAgents.get(subAgentId) || []
-      appendSegments(pending, delta, reasoningDelta)
-      subAgents.set(subAgentId, pending)
-      schedule()
-    },
     flush,
     cancel: () => {
       clearTimer()
       main = []
-      subAgents.clear()
     }
   }
 }

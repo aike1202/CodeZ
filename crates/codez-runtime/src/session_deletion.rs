@@ -22,8 +22,6 @@ pub enum SessionDeletionStep {
     Permissions,
     /// Removes durable and in-memory edit rollback transactions.
     EditTransactions,
-    /// Removes persisted terminal sub-agent runs.
-    SubAgentRuns,
     /// Removes the session task snapshot.
     Todos,
     /// Removes promoted image attachments.
@@ -36,10 +34,9 @@ pub enum SessionDeletionStep {
     SessionDocument,
 }
 
-const DELETION_STEPS: [SessionDeletionStep; 8] = [
+const DELETION_STEPS: [SessionDeletionStep; 7] = [
     SessionDeletionStep::Permissions,
     SessionDeletionStep::EditTransactions,
-    SessionDeletionStep::SubAgentRuns,
     SessionDeletionStep::Todos,
     SessionDeletionStep::Attachments,
     SessionDeletionStep::Ledger,
@@ -1238,10 +1235,6 @@ mod tests {
     deletion_step_failure_test!(
         edit_transaction_failure_retains_tombstone,
         SessionDeletionStep::EditTransactions
-    );
-    deletion_step_failure_test!(
-        subagent_run_failure_retains_tombstone,
-        SessionDeletionStep::SubAgentRuns
     );
     deletion_step_failure_test!(todo_failure_retains_tombstone, SessionDeletionStep::Todos);
     deletion_step_failure_test!(

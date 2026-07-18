@@ -39,8 +39,6 @@ pub enum SchemaFamily {
     ToolJournal,
     /// Metadata for persisted large tool results.
     LargeToolResultMetadata,
-    /// Durable parallel execution state.
-    ParallelExecution,
     /// Global or workspace skill enablement configuration.
     SkillsConfig,
     /// Disposable project analysis cache.
@@ -68,7 +66,6 @@ impl SchemaFamily {
             Self::EditBackupMetadata => "edit-backup-metadata",
             Self::ToolJournal => "tool-journal",
             Self::LargeToolResultMetadata => "large-tool-result-metadata",
-            Self::ParallelExecution => "parallel-execution",
             Self::SkillsConfig => "skills-config",
             Self::ProjectAnalysisCache => "project-analysis-cache",
         }
@@ -100,7 +97,6 @@ impl SchemaFamily {
             | Self::ContextSnapshot
             | Self::EditBackupMetadata
             | Self::LargeToolResultMetadata
-            | Self::ParallelExecution
             | Self::SkillsConfig
             | Self::ProjectAnalysisCache => SchemaFormat::Json,
         }

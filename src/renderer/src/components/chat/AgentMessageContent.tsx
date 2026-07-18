@@ -2,14 +2,12 @@ import React, { useMemo } from 'react'
 import ExecutionLog from './ExecutionLog'
 import MessageBody from './MessageBody'
 import { AlertTriangle } from 'lucide-react'
-import type { ChatMessage, ExecutionTimelineItem, SubAgentRecord } from '../../stores/chatStore'
+import type { ChatMessage, ExecutionTimelineItem } from '../../stores/chatStore'
 
 export interface AgentMessageContentProps {
   msg: ChatMessage
   lastStreamingMsgId: string | null
-  showParallelExecution?: boolean
   handleFileClick: (filePath: string, virtualContent?: string) => Promise<void>
-  handleSubAgentClick?: (subAgent: SubAgentRecord) => void
   handleDiffClick: (
     filePath: string,
     editInfo: {
@@ -28,9 +26,7 @@ type TimelineChunk =
 export function AgentMessageContent({
   msg,
   lastStreamingMsgId,
-  showParallelExecution = false,
   handleFileClick,
-  handleSubAgentClick = () => {},
   handleDiffClick
 }: AgentMessageContentProps): React.ReactElement {
   
@@ -83,9 +79,7 @@ export function AgentMessageContent({
   const legacyExecution = (!msg.executionTimeline || msg.executionTimeline.length === 0) && (
     msg.reasoningContent
     || (msg.agentStates && msg.agentStates.length > 0)
-    || (msg.subAgents && msg.subAgents.length > 0)
   )
-  const firstExecutionChunkIndex = chunks.findIndex((chunk) => chunk.type === 'execution')
 
   return (
     <div className="agent-message-content" style={{ minWidth: 0, width: '100%' }}>
@@ -133,9 +127,6 @@ export function AgentMessageContent({
             onDiffClick={handleDiffClick}
             streaming={isStreaming && !msg.content}
             interrupted={msg.interrupted}
-            subAgents={msg.subAgents}
-            onSubAgentClick={handleSubAgentClick}
-            showParallelExecution={showParallelExecution}
           />
         </div>
       )}
@@ -168,9 +159,6 @@ export function AgentMessageContent({
                 onDiffClick={handleDiffClick}
                 streaming={chunk.streaming}
                 interrupted={msg.interrupted}
-                subAgents={msg.subAgents}
-                onSubAgentClick={handleSubAgentClick}
-                showParallelExecution={showParallelExecution && idx === firstExecutionChunkIndex}
               />
             </div>
           )

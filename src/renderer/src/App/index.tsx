@@ -6,17 +6,13 @@ import SettingsPage from '../pages/SettingsPage'
 import McpReverseRequestApproval from '../components/McpReverseRequestApproval'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useProviderStore } from '../stores/providerStore'
-import { useChatStore, type SubAgentRecord } from '../stores/chatStore'
+import { useChatStore } from '../stores/chatStore'
 import ExecutionHistoryModal from '../components/modals/ExecutionHistoryModal'
 import PlanListModal from '../components/chat/PlanListModal'
 import ChatArea from '../components/chat/ChatArea'
 import RightWorkspacePanel, {
   TERMINAL_TAB_ID
 } from '../components/RightWorkspacePanel'
-import {
-  createSubAgentWorkspaceTab,
-  type SubAgentWorkspaceTab
-} from '../components/RightWorkspacePanel/subagentTabs'
 import '../styles.css'
 import '../App.css'
 
@@ -27,8 +23,6 @@ import {
   useAppPreview
 } from './hooks/useAppPreview'
 import { desktopApi } from '../shared/desktop'
-import { useDesktopLifecycleStore } from '../stores/desktopLifecycleStore'
-import { mergeRuntimeSubAgents } from '../utils/runtimeSubAgents'
 
 export default function App(): React.ReactElement {
   return (
@@ -52,9 +46,6 @@ function ActiveApp(): React.ReactElement {
   const setPlanListModalOpen = useChatStore((s) => s.setPlanListModalOpen)
   const createSession = useChatStore((s) => s.createSession)
   const setPendingPrompt = useChatStore((s) => s.setPendingPrompt)
-  const agentSnapshot = useDesktopLifecycleStore((state) =>
-    activeSessionId ? state.agentSnapshots[activeSessionId] : undefined
-  )
 
   const {
     workspace,
@@ -82,26 +73,16 @@ function ActiveApp(): React.ReactElement {
   const [sidebarWidth, setSidebarWidth] = useState(260)
   const [previewPanelWidth, setPreviewPanelWidth] = useState(480)
   const [terminalOpen, setTerminalOpen] = useState(false)
-  const [subagentTabs, setSubagentTabs] = useState<SubAgentWorkspaceTab[]>([])
   const [rightPanelVisible, setRightPanelVisible] = useState(false)
   const [activeRightTabId, setActiveRightTabId] = useState<string | null>(null)
   const [taskModalOpen, setTaskModalOpen] = useState(false)
 
-  const displayMessages = useMemo(
-    () => mergeRuntimeSubAgents(messages, agentSnapshot),
-    [agentSnapshot, messages]
-  )
-  const subAgents = useMemo(
-    () => displayMessages.flatMap((message) => message.subAgents ?? []),
-    [displayMessages]
-  )
-  const hasRightTabs = previewTabs.length > 0 || terminalOpen || subagentTabs.length > 0
+  const hasRightTabs = previewTabs.length > 0 || terminalOpen
   const panelOpen = rightPanelVisible && hasRightTabs
   const rightTabIds = useMemo(() => [
     ...previewTabs.map((tab) => tab.id),
-    ...(terminalOpen ? [TERMINAL_TAB_ID] : []),
-    ...subagentTabs.map((tab) => tab.id)
-  ], [previewTabs, subagentTabs, terminalOpen])
+    ...(terminalOpen ? [TERMINAL_TAB_ID] : [])
+  ], [previewTabs, terminalOpen])
   const resolvedActiveRightTabId = rightTabIds.includes(activeRightTabId ?? '')
     ? activeRightTabId
     : rightTabIds[0] ?? null
@@ -139,7 +120,6 @@ function ActiveApp(): React.ReactElement {
   useEffect(() => {
     if (!workspace) {
       setTerminalOpen(false)
-      setSubagentTabs([])
       setRightPanelVisible(false)
     }
   }, [workspace])
@@ -149,11 +129,6 @@ function ActiveApp(): React.ReactElement {
     setActiveRightTabId(activePreviewTabId)
     setRightPanelVisible(true)
   }, [activePreviewTabId])
-
-  useEffect(() => {
-    setSubagentTabs([])
-    setActiveRightTabId((current) => current?.startsWith('subagent:') ? null : current)
-  }, [activeSessionId])
 
   const maxSidebarWidth = useMemo(() => {
     const totalWidth = typeof window !== 'undefined' ? window.innerWidth : 1200
@@ -189,18 +164,6 @@ function ActiveApp(): React.ReactElement {
     setActiveRightTabId(TERMINAL_TAB_ID)
   }, [workspace])
 
-  const handleSubAgentClick = useCallback((subAgent: SubAgentRecord) => {
-    if (!workspace) return
-    const tab = createSubAgentWorkspaceTab(subAgent.id)
-    setSubagentTabs((current) =>
-      current.some((existingTab) => existingTab.subAgentId === subAgent.id)
-        ? current
-        : [...current, tab]
-    )
-    setRightPanelVisible(true)
-    setActiveRightTabId(tab.id)
-  }, [workspace])
-
   const handleSelectRightTab = useCallback((tabId: string) => {
     setActiveRightTabId(tabId)
     if (tabId.startsWith('file:') || tabId.startsWith('diff:')) selectPreviewTab(tabId)
@@ -208,9 +171,6 @@ function ActiveApp(): React.ReactElement {
 
   const handleCloseRightTab = useCallback((tabId: string) => {
     if (tabId === TERMINAL_TAB_ID) setTerminalOpen(false)
-    else if (tabId.startsWith('subagent:')) {
-      setSubagentTabs((current) => current.filter((tab) => tab.id !== tabId))
-    }
     else closePreview(tabId)
     setActiveRightTabId((current) => (current === tabId ? null : current))
   }, [closePreview])
@@ -306,9 +266,7 @@ function ActiveApp(): React.ReactElement {
               previewTabs={previewTabs}
               activeTabId={resolvedActiveRightTabId}
               terminalOpen={terminalOpen}
-              subagentTabs={subagentTabs}
-              subAgents={subAgents}
-              messages={displayMessages}
+              messages={messages}
               workspace={workspace}
               panelWidth={previewPanelWidth}
               onSelectTab={handleSelectRightTab}
@@ -322,12 +280,11 @@ function ActiveApp(): React.ReactElement {
         }
         chatArea={
           <ChatArea
-            messages={displayMessages}
+            messages={messages}
             activeSessionId={activeSessionId}
             workspace={workspace}
             panelOpen={panelOpen}
             handleFileClick={handleFileClick}
-            handleSubAgentClick={handleSubAgentClick}
             handleDiffClick={handleDiffClick}
             handleOpenRecentProject={handleOpenRecentProject}
             onOpenSettings={(tab?: string) => {

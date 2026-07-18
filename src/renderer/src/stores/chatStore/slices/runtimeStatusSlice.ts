@@ -1,15 +1,15 @@
 import type { StateCreator } from 'zustand'
 import type {
-  SessionRuntimeStatus,
-  SessionRuntimeStatusChanged
-} from '../../../../../shared/types/subagent'
+  ChatRuntimeStatus,
+  ChatRuntimeStatusChanged
+} from '../../../shared/desktop/generated/contracts'
 import { desktopApi } from '../../../shared/desktop'
 import type { ChatState } from '../types'
 
 export interface RuntimeStatusSlice {
-  runtimeStatuses: Record<string, SessionRuntimeStatusChanged | undefined>
+  runtimeStatuses: Record<string, ChatRuntimeStatusChanged | undefined>
   blockedRuntimeSessionIds: Record<string, true | undefined>
-  applyRuntimeStatus: (next: SessionRuntimeStatusChanged) => void
+  applyRuntimeStatus: (next: ChatRuntimeStatusChanged) => void
   refreshRuntimeStatuses: (sessionIds: string[]) => Promise<void>
   clearRuntimeStatus: (sessionId: string) => void
   allowRuntimeStatus: (sessionId: string) => void
@@ -35,7 +35,7 @@ export const createRuntimeStatusSlice: StateCreator<ChatState, [], [], RuntimeSt
   refreshRuntimeStatuses: async (sessionIds) => {
     const uniqueIds = [...new Set(sessionIds)]
     const results = await Promise.allSettled(
-      uniqueIds.map(async (sessionId): Promise<SessionRuntimeStatus> =>
+      uniqueIds.map(async (sessionId): Promise<ChatRuntimeStatus> =>
         desktopApi.chat.getRuntimeStatus(sessionId))
     )
 

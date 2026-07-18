@@ -1,11 +1,5 @@
 {
   "theme": "system",
-  "subAgentModels": {
-    "explore": {
-      "providerId": "provider-missing",
-      "model": "legacy-model"
-    }
-  },
   "webSearch": {
     "enabled": true
   }

@@ -16,7 +16,7 @@ Todo 写工具在同一 session mutex 内执行完整事务：
 
 1. 检查必填 revision、空 batch、重复 todoId 和 Create 幂等收据。
 2. 克隆权威 snapshot，并在副本上应用全部 patch。
-3. 校验状态转换、reason、clearFields、最终依赖图、审批门、未完成依赖和验证证据；允许多个真实并行的 `in_progress`。
+3. 校验状态转换、取消/重开/依赖/批量范围变更的 reason、clearFields、最终依赖图、审批门、未完成依赖和验证证据；允许多个真实并行的 `in_progress`。
 4. 全部通过后只增加一次 revision、持久化一次、发送一次事件。
 5. 冲突时返回最新有界 Todo state，模型无需也不能调用 Get/List。
 

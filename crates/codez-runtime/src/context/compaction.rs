@@ -1311,26 +1311,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn compact_records_insufficient_history_for_an_unknown_scope() {
-        let fixture = fixture();
-        seed_history(&fixture.store).await;
-        let summarizer = StaticSummarizer::success("This summary must not be generated.");
-        let service = CompactionService::new(fixture.store.clone(), Arc::new(summarizer.clone()));
-
-        let result = service
-            .compact(request(ContextScopeId::Subagent("missing".to_string())))
-            .await
-            .expect("unknown scope must produce a durable failure");
-
-        assert_eq!(result.status, CompactionStatus::Failed);
-        assert_eq!(
-            result.error_code,
-            Some(CompactionFailureCode::InsufficientHistory)
-        );
-        assert_eq!(summarizer.calls.load(Ordering::Acquire), 0);
-    }
-
-    #[tokio::test]
     async fn compact_rejects_an_empty_session_identifier_before_writing() {
         let fixture = fixture();
         let service = CompactionService::new(

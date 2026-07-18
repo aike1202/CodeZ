@@ -9,11 +9,7 @@ import type {
 } from '../types'
 import { desktopApi } from '../../../shared/desktop'
 import type { SessionData } from '@shared/types/session'
-import type {
-  SessionRuntimeStatus,
-  SubAgentHandoff,
-  SubAgentHandoffTool
-} from '../../../../../shared/types/subagent'
+import type { ChatRuntimeStatus } from '../../../shared/desktop/generated/contracts'
 import type { QueuedPrompt } from '../../../../../shared/types/queuedPrompt'
 
 function genId(): string {
@@ -27,8 +23,8 @@ function hasUnfinishedTodos(todos: Array<{ status: string }> | undefined): boole
   return Boolean(todos?.some((todo) => todo.status === 'pending' || todo.status === 'in_progress'))
 }
 
-function inactiveRuntimeStatus(sessionId: string): SessionRuntimeStatus {
-  return { sessionId, mainRunnerActive: false, activeSubAgentIds: [] }
+function inactiveRuntimeStatus(sessionId: string): ChatRuntimeStatus {
+  return { sessionId, mainRunnerActive: false }
 }
 
 const normalizeMessage = (message: ChatMessage): ChatMessage => ({
@@ -176,137 +172,11 @@ function settleRunningExecutionState<
   }
 }
 
-function truncateHandoffText(value: string, maxLength: number): string {
-  const normalized = value.trim()
-  return normalized.length <= maxLength
-    ? normalized
-    : `${normalized.slice(0, maxLength)}\n...[truncated]`
-}
-
-function toolTarget(name: string, rawArgs: string): string | undefined {
-  try {
-    const args = JSON.parse(rawArgs || '{}')
-    const direct = args.file_path || args.notebook_path || args.path || args.command || args.commandLine
-    if (typeof direct === 'string' && direct.trim()) return truncateHandoffText(direct, 240)
-    if (name === 'Read' && Array.isArray(args.files)) {
-      const paths = args.files.map((file: any) => file?.file_path).filter(Boolean)
-      if (paths.length > 0) return truncateHandoffText(paths.join(', '), 240)
-    }
-  } catch {}
-  return undefined
-}
-
-function toolResultSummary(rawResult: string | undefined): string | undefined {
-  if (!rawResult?.trim()) return undefined
-  try {
-    const parsed = JSON.parse(rawResult)
-    const value = parsed?.ok === false
-      ? parsed.error?.message || parsed.error
-      : parsed?.data
-    if (value === undefined) return undefined
-    return truncateHandoffText(
-      typeof value === 'string' ? value : JSON.stringify(value),
-      400
-    )
-  } catch {
-    return truncateHandoffText(rawResult, 400)
-  }
-}
-
-function hasWrappedToolError(rawResult: string | undefined): boolean {
-  if (!rawResult?.trim()) return false
-  try {
-    const parsed = JSON.parse(rawResult)
-    return parsed?.ok === false ||
-      (typeof parsed?.data === 'string' && parsed.data.trimStart().startsWith('Error:')) ||
-      Boolean(parsed?.error && !parsed?.data)
-  } catch {
-    return rawResult.trimStart().startsWith('Error:')
-  }
-}
-
-function buildRecoveredSubAgentHandoff(
-  subAgent: any,
-  reasonCode: 'runtime_missing' | 'parent_delivery_missing' = 'runtime_missing'
-): SubAgentHandoff {
-  const tools: SubAgentHandoffTool[] = (subAgent.toolCalls || []).slice(-8).map((tool: any) => ({
-    name: tool.name,
-    status: tool.status === 'running'
-      ? 'interrupted'
-      : tool.status === 'success' && hasWrappedToolError(tool.result)
-        ? 'error'
-        : tool.status,
-    target: toolTarget(tool.name, tool.args),
-    summary: toolResultSummary(tool.result)
-  }))
-  const successfulTools = tools.filter((tool) => tool.status === 'success')
-  const filesModified = successfulTools
-    .filter((tool) => ['Edit', 'Write', 'NotebookEdit'].includes(tool.name) && tool.target)
-    .map((tool) => tool.target!)
-  const filesPossiblyModified = tools
-    .filter((tool) =>
-      tool.status === 'interrupted' &&
-      ['Edit', 'Write', 'NotebookEdit'].includes(tool.name) &&
-      tool.target
-    )
-    .map((tool) => tool.target!)
-  const filesExamined = new Set<string>(subAgent.result?.filesExamined || [])
-  for (const tool of successfulTools) {
-    if (['Read', 'list_files'].includes(tool.name) && tool.target) filesExamined.add(tool.target)
-  }
-  return {
-    reasonCode,
-    reason: reasonCode === 'parent_delivery_missing'
-      ? 'The SubAgent reached a terminal state, but its result may not have been delivered to the parent Agent before the runtime disappeared.'
-      : 'The SubAgent runtime disappeared before its result was delivered to the parent Agent.',
-    originalTask: truncateHandoffText(subAgent.prompt || '', 2500),
-    knownContext: subAgent.context
-      ? truncateHandoffText(subAgent.context, 1200)
-      : undefined,
-    scope: subAgent.scope
-      ? {
-          directories: subAgent.scope.directories?.slice(0, 10).map((value: string) =>
-            truncateHandoffText(value, 160)
-          ),
-          excludeGlobs: subAgent.scope.excludeGlobs?.slice(0, 10).map((value: string) =>
-            truncateHandoffText(value, 160)
-          )
-        }
-      : undefined,
-    expectations: subAgent.expectations
-      ? {
-          questions: subAgent.expectations.questions.slice(0, 12).map((value: string) =>
-            truncateHandoffText(value, 240)
-          ),
-          outOfScope: subAgent.expectations.outOfScope?.slice(0, 8).map((value: string) =>
-            truncateHandoffText(value, 240)
-          )
-        }
-      : undefined,
-    depth: subAgent.depth,
-    lastProgress: subAgent.content
-      ? truncateHandoffText(subAgent.content, 1500)
-      : undefined,
-    filesExamined: Array.from(filesExamined).slice(-20).map((value) =>
-      truncateHandoffText(value, 240)
-    ),
-    filesModified: Array.from(new Set(filesModified)).slice(-20),
-    filesPossiblyModified: Array.from(new Set(filesPossiblyModified)).slice(-20),
-    recentTools: tools,
-    workspaceMayHaveUntrackedChanges: tools.some((tool) =>
-      ['Bash', 'PowerShell'].includes(tool.name) && tool.status !== 'error'
-    ),
-    canResume: true
-  }
-}
-
 export function interruptPendingRequests(
   messages: ChatMessage[],
-  runtimeStatus: { sessionId: string; mainRunnerActive: boolean; activeSubAgentIds: string[] }
+  runtimeStatus: { sessionId: string; mainRunnerActive: boolean }
 ): { messages: ChatMessage[]; changed: boolean } {
-  if (runtimeStatus.mainRunnerActive || runtimeStatus.activeSubAgentIds.length > 0) {
-    return { messages, changed: false }
-  }
+  if (runtimeStatus.mainRunnerActive) return { messages, changed: false }
 
   let changed = false
   const nextMessages = messages.map((message) => {
@@ -327,111 +197,27 @@ export function interruptPendingRequests(
   return { messages: nextMessages, changed }
 }
 
-function healInterruptedSubAgents(messages: any[]): {
-  messages: any[]
+function healInterruptedMessages(messages: ChatMessage[]): {
+  messages: ChatMessage[]
   changed: boolean
 } {
   let changed = false
-  const interruptMessage = (message: any, subAgents = message.subAgents) => ({
-    ...message,
-    streaming: false,
-    streamPhase: undefined,
-    responseWaitWarning: undefined,
-    interrupted: true,
-    executionStatus: 'interrupted',
-    ...(Array.isArray(subAgents) ? { subAgents } : {})
-  })
   const healedMessages = messages.map((message) => {
     const completedAt = Date.now()
-    const settledMessage = settleRunningExecutionState(message, completedAt)
-    let baseMessage = settledMessage.owner
-    if (settledMessage.changed) changed = true
-
-    const subAgents = baseMessage.subAgents
-    if (!Array.isArray(subAgents)) {
-      if (!baseMessage.streaming && !settledMessage.changed) return message
-      changed = true
-      return interruptMessage(baseMessage)
-    }
-
-    const hasRunningSubAgent = subAgents.some((sub: any) => sub.status === 'running')
-    const hasUndeliveredTerminalSubAgent = Boolean(
-      baseMessage.streaming && subAgents.some((sub: any) =>
-        sub.status === 'completed' || sub.status === 'failed'
-      )
-    )
-    const healedSubAgents = subAgents.map((sub: any) => {
-      const settledSubAgent = settleRunningExecutionState(sub, completedAt)
-      if (settledSubAgent.changed) changed = true
-      if (sub.status === 'running') {
-        return {
-          ...settledSubAgent.owner,
-          status: 'interrupted',
-          interruptionReason: 'runtime_missing',
-          completedAt: sub.completedAt || Date.now(),
-          result: {
-            ...sub.result,
-            output: sub.result?.output || 'SubAgent runtime disappeared before completion.',
-            toolCallCount: sub.result?.toolCallCount ?? sub.toolCalls?.length ?? 0,
-            handoff: sub.result?.handoff || buildRecoveredSubAgentHandoff(sub)
-          }
-        }
-      }
-      if (baseMessage.streaming && (sub.status === 'completed' || sub.status === 'failed')) {
-        return {
-          ...settledSubAgent.owner,
-          interruptionReason: 'parent_delivery_missing',
-          result: {
-            ...sub.result,
-            output: sub.result?.output || sub.content || 'SubAgent result delivery was interrupted.',
-            toolCallCount: sub.result?.toolCallCount ?? sub.toolCalls?.length ?? 0,
-            handoff: sub.result?.handoff || buildRecoveredSubAgentHandoff(
-              sub,
-              'parent_delivery_missing'
-            )
-          }
-        }
-      }
-      return settledSubAgent.owner
-    })
-    const subAgentExecutionChanged = healedSubAgents.some(
-      (subAgent: any, index: number) => subAgent !== subAgents[index]
-    )
-    if (!hasRunningSubAgent && !hasUndeliveredTerminalSubAgent) {
-      if (!baseMessage.streaming && !settledMessage.changed) {
-        return subAgentExecutionChanged
-          ? { ...baseMessage, subAgents: healedSubAgents }
-          : message
-      }
-      changed = true
-      return interruptMessage(baseMessage, healedSubAgents)
-    }
-
+    const settled = settleRunningExecutionState(message, completedAt)
+    if (!message.streaming && !settled.changed) return message
     changed = true
-    baseMessage = { ...baseMessage, subAgents: healedSubAgents }
-    return interruptMessage(baseMessage, healedSubAgents)
-  })
-
-  return {
-    messages: healedMessages,
-    changed
-  }
-}
-
-function hasNewerSettledSubAgent(messagesFromDisk: any[], messagesInMemory: any[]): boolean {
-  const settledIds = new Set<string>()
-  for (const message of messagesInMemory) {
-    for (const subAgent of message.subAgents || []) {
-      if (subAgent.status !== 'running') settledIds.add(subAgent.id)
+    return {
+      ...settled.owner,
+      streaming: false,
+      streamPhase: undefined,
+      responseWaitWarning: undefined,
+      interrupted: true,
+      executionStatus: 'interrupted' as const
     }
-  }
-  return messagesFromDisk.some((message) =>
-    message.subAgents?.some((subAgent: any) =>
-      subAgent.status === 'running' && settledIds.has(subAgent.id)
-    )
-  )
+  })
+  return { messages: healedMessages, changed }
 }
-
 export interface SessionSlice {
   sessions: ChatSession[]
   activeSessionId: string | null
@@ -513,20 +299,14 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
       // 防止竞态：IPC 返回时用户可能已切换到其他会话
       if (seq !== _selectSessionSeq) return
       if (freshSession) {
-        const runtimeActive = runtimeStatus.mainRunnerActive ||
-          runtimeStatus.activeSubAgentIds.length > 0 ||
-          Boolean(get().streamCleanups[sessionId])
+        const runtimeActive = runtimeStatus.mainRunnerActive || Boolean(get().streamCleanups[sessionId])
         const cachedSession = get().sessions.find((session) => session.id === sessionId)
         const freshMessages = freshSession.messages.map((message) => normalizeMessage(message as ChatMessage))
         const cachedMessages = cachedSession?.messages.map(normalizeMessage) || []
-        const memoryHasNewerTerminalState = Boolean(cachedSession) &&
-          hasNewerSettledSubAgent(freshMessages, cachedMessages)
-        const sourceMessages = cachedSession && (runtimeActive || memoryHasNewerTerminalState)
-          ? cachedMessages
-          : freshMessages
+        const sourceMessages = cachedSession && runtimeActive ? cachedMessages : freshMessages
         const healed = runtimeActive
           ? { messages: sourceMessages, changed: false }
-          : healInterruptedSubAgents(sourceMessages)
+          : healInterruptedMessages(sourceMessages)
         const interruptedRequests = interruptPendingRequests(healed.messages, runtimeStatus)
         const normalizedFreshSession = normalizeSession(freshSession)
         const healedSession: ChatSession = {

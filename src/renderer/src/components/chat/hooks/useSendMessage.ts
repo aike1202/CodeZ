@@ -64,11 +64,6 @@ export function useSendMessage() {
   const addPermissionRequest = useChatStore((s) => s.addPermissionRequest)
   const addAskUserRequest = useChatStore((s) => s.addAskUserRequest)
   const setDiffEntries = useChatStore((s) => s.setDiffEntries)
-  const startSubAgent = useChatStore((s) => s.startSubAgent)
-  const appendSubAgentChunk = useChatStore((s) => s.appendSubAgentChunk)
-  const startSubAgentToolCall = useChatStore((s) => s.startSubAgentToolCall)
-  const finishSubAgentToolCall = useChatStore((s) => s.finishSubAgentToolCall)
-  const endSubAgent = useChatStore((s) => s.endSubAgent)
   const removeMessages = useChatStore((s) => s.removeMessages)
 
   const handleSendMessage = useCallback(
@@ -241,9 +236,6 @@ export function useSendMessage() {
       const streamUpdates = createStreamUpdateBatcher({
         appendMain: (delta, reasoningDelta) => {
           appendStreamChunk(activeAgentId, delta, reasoningDelta)
-        },
-        appendSubAgent: (subAgentId, delta, reasoningDelta) => {
-          appendSubAgentChunk(activeAgentId, subAgentId, delta, reasoningDelta)
         }
       })
 
@@ -285,7 +277,7 @@ export function useSendMessage() {
               .find((message) => message.id === activeAgentId)
             const hasVisibleProgress = Boolean(
               activeMessage?.content || activeMessage?.reasoningContent ||
-              activeMessage?.toolCalls?.length || activeMessage?.subAgents?.length
+              activeMessage?.toolCalls?.length
             )
             if (hasVisibleProgress) {
               finishStreaming(activeAgentId)
@@ -404,32 +396,6 @@ export function useSendMessage() {
             } as const
             useChatStore.getState().setCompactionState(sid, state)
             useChatStore.getState().updateCompactionTimeline(activeAgentId, state)
-          },
-          onSubAgentStart: (subAgentId: string, meta: any) => {
-            markResponseActivity()
-            streamUpdates.flush()
-            startSubAgent(activeAgentId, subAgentId, meta)
-            useChatStore.getState().persistSession(sid)
-          },
-          onSubAgentChunk: (subAgentId: string, delta: string, reasoningDelta: string) => {
-            streamUpdates.pushSubAgent(subAgentId, delta, reasoningDelta)
-          },
-          onSubAgentToolStart: (subAgentId: string, toolCallId: string, name: string, args: string, thoughtSignature?: string) => {
-            streamUpdates.flush()
-            startSubAgentToolCall(activeAgentId, subAgentId, {
-              id: toolCallId || genId(),
-              name,
-              args,
-              thoughtSignature
-            })
-          },
-          onSubAgentToolEnd: (subAgentId: string, toolCallId: string, result: string) => {
-            finishSubAgentToolCall(activeAgentId, subAgentId, toolCallId, result)
-          },
-          onSubAgentEnd: (subAgentId: string, result: any) => {
-            streamUpdates.flush()
-            endSubAgent(activeAgentId, subAgentId, result)
-            useChatStore.getState().persistSession(sid)
           }
         },
         ws.rootPath
@@ -507,11 +473,6 @@ export function useSendMessage() {
       addPermissionRequest,
       addAskUserRequest,
       setDiffEntries,
-      startSubAgent,
-      appendSubAgentChunk,
-      startSubAgentToolCall,
-      finishSubAgentToolCall,
-      endSubAgent,
       removeMessages
     ]
   )

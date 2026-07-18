@@ -3,9 +3,9 @@
     editing::EditingModule, engineering_philosophy::EngineeringPhilosophyModule,
     environment::EnvironmentModule, git_status::GitStatusModule, identity::IdentityModule,
     memory::MemoryModule, output_policy::OutputPolicyModule,
-    repository_rules::RepositoryRulesModule, skills::SkillsModule, sub_agents::SubAgentsModule,
+    repository_rules::RepositoryRulesModule, skills::SkillsModule,
     todo_management::TodoManagementModule, verification::VerificationModule,
-    verification_strategy::VerificationStrategyModule, worker_delegation::WorkerDelegationModule,
+    verification_strategy::VerificationStrategyModule,
 };
 use crate::chat::prompt::pipeline::PromptPipeline;
 
@@ -27,10 +27,8 @@ pub fn create_default_pipeline() -> PromptPipeline {
         .register(VerificationModule)
         // Layer 3: Execution — Workflow Gates
         .register(TodoManagementModule)
-        .register(WorkerDelegationModule)
         // Layer 3: Execution — Support
         .register(OutputPolicyModule)
         // Layer 4: Dynamic — Runtime Injection
         .register(AvailableToolsModule)
-        .register(SubAgentsModule)
 }

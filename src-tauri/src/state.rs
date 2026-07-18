@@ -1,11 +1,14 @@
-﻿use std::sync::Arc;
+use std::sync::Arc;
 
+use crate::{
+    chat_runtime::ChatRuntime, error::ErrorReporter, logging::LoggingGuard,
+    mcp_runtime::McpRuntimeManager,
+};
 use codez_core::{AppPaths, AtomicPersistence};
 use codez_mcp::{McpProjectConfigService, McpSecretService, McpUserConfigService};
 use codez_platform::ResourceLocator;
 use codez_platform::{NativeProcessRunner, PtyManager};
 use codez_providers::service::ProviderService;
-use codez_runtime::agent::collaboration::AgentRuntime;
 use codez_runtime::attachment::AttachmentService;
 use codez_runtime::context::ledger::ModelLedgerStore;
 use codez_runtime::edit_transaction::EditTransactionService;
@@ -18,12 +21,6 @@ use codez_runtime::session_maintenance::SessionMaintenanceCoordinator;
 use codez_runtime::todo::TodoStore;
 use codez_runtime::{CancellationTree, HostPreferences, ShutdownCoordinator, SystemService};
 use codez_storage::{AtomicFileStore, OsCredentialStore, RecentProjectsStore};
-use tokio::sync::Mutex;
-
-use crate::{
-    chat_runtime::ChatRuntime, error::ErrorReporter, logging::LoggingGuard,
-    mcp_runtime::McpRuntimeManager, subagent_runtime::SubAgentRuntime,
-};
 
 #[allow(dead_code)]
 pub(crate) struct AppState {
@@ -49,9 +46,6 @@ pub(crate) struct AppState {
     pub(crate) process_runner: Arc<NativeProcessRunner>,
     pub(crate) pty_manager: Arc<PtyManager>,
     pub(crate) provider_service: Arc<ProviderService>,
-    pub(crate) subagent_settings: Mutex<()>,
-    pub(crate) subagent_runtime: Arc<SubAgentRuntime>,
-    pub(crate) agent_runtime: Arc<AgentRuntime>,
     pub(crate) todo_store: Arc<TodoStore>,
     pub(crate) workspace_permissions: Arc<WorkspacePermissionStore>,
     pub(crate) mcp_config: Arc<McpUserConfigService>,

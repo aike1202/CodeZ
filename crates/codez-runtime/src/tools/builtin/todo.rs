@@ -543,7 +543,7 @@ fn update_schema() -> Value {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 32768,
-                "description": "Required for cancel, reopen, or dependency changes."
+                "description": "Required for cancel, reopen, dependencies, or multi-item scope changes."
             },
             "updates": {
                 "type": "array",

@@ -9,7 +9,7 @@ import AskUserQuestionWidget from '../AskUserQuestionWidget'
 import { ChatAreaLayout } from '../ChatAreaLayout'
 import { parseArgs } from '../../../utils/parseArgs'
 import { computeEditStats, handleDiffClickForFile } from '../../../utils/editDiffUtils'
-import { useChatStore, type ChatMessage, type SubAgentRecord } from '../../../stores/chatStore'
+import { useChatStore, type ChatMessage } from '../../../stores/chatStore'
 import { useSendMessage } from '../hooks/useSendMessage'
 import { ChatMessageList } from './components/ChatMessageList'
 import ConversationNavigator from '../ConversationNavigator'
@@ -100,7 +100,6 @@ export interface ChatAreaProps {
   workspace: WorkspaceInfo | null
   panelOpen: boolean
   handleFileClick: (filePath: string, virtualContent?: string) => Promise<void>
-  handleSubAgentClick: (subAgent: SubAgentRecord) => void
   handleDiffClick: (
     filePath: string,
     editInfo: {
@@ -120,7 +119,6 @@ export default function ChatArea({
   workspace,
   panelOpen,
   handleFileClick,
-  handleSubAgentClick,
   handleDiffClick,
   handleOpenRecentProject,
   onOpenSettings
@@ -223,7 +221,7 @@ export default function ChatArea({
   useEffect(() => {
     if (!activeSessionId || pendingInternalContinuation || queuedPrompts.length === 0) return
     if (streamCleanups[activeSessionId]) return
-    if (activeRuntimeStatus?.mainRunnerActive || activeRuntimeStatus?.activeSubAgentIds.length) return
+    if (activeRuntimeStatus?.mainRunnerActive) return
     const prompt = queuedPrompts[0]
     if (prompt.status === 'failed') return
     if (queuedDispatchRef.current) return
@@ -367,7 +365,6 @@ export default function ChatArea({
                 messages={messages}
                 lastStreamingMsgId={lastStreamingMsgId}
                 handleFileClick={handleFileClick}
-                handleSubAgentClick={handleSubAgentClick}
                 handleDiffClick={handleDiffClick}
               />
             </div>

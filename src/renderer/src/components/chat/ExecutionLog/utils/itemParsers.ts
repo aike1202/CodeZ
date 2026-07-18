@@ -78,13 +78,6 @@ export function getToolNoun(toolName: string): string {
       return '代码搜索'
     case 'get_symbol_map':
       return '符号索引'
-    case 'submit_result':
-    case 'submit':
-      return '提交结果'
-    case 'SubAgentRunner':
-    case 'spawn':
-    case 'delegate':
-      return '子任务'
     case 'Write':
     case 'write_to_file':
       return '保存文件'

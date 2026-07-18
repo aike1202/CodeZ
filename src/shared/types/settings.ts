@@ -25,10 +25,6 @@ export interface GeneralSettings {
   archiveRetentionDays: number;
   dataStoragePath: string;
   experienceOptimization: boolean;
-  // SubAgents — 被禁用的子智能体 type 列表（不在列表中即为启用）
-  disabledSubAgents: string[];
-  // SubAgents — 手动模型配置；未配置的智能体使用其默认模型策略
-  subAgentModels: Record<string, Array<{ providerId: string; model: string }>>;
 
   // WebSearch — 联网搜索配置
   webSearch: WebSearchSettings;
@@ -78,7 +74,5 @@ export const defaultSettings: GeneralSettings = {
   archiveRetentionDays: 7,
   dataStoragePath: '',
   experienceOptimization: true,
-  disabledSubAgents: [],
-  subAgentModels: {},
   webSearch: defaultWebSearchSettings
 };

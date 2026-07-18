@@ -2,7 +2,6 @@
 import type { SessionRuntimeRef } from './context'
 import type { ImageAttachment } from './attachment'
 import type { QueuedPrompt } from './queuedPrompt'
-import type { AgentRuntimeSnapshot } from './subagent'
 
 export interface SessionData {
   id: string
@@ -19,6 +18,4 @@ export interface SessionData {
   toolRuntime?: {
     activatedDeferredTools?: Record<string, string[]>
   }
-  /** Durable addressable SubAgent identities and mailbox messages. */
-  agentRuntime?: AgentRuntimeSnapshot
 }
