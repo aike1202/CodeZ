@@ -1,4 +1,4 @@
-import type { StateCreator } from 'zustand'
+﻿import type { StateCreator } from 'zustand'
 import type {
   ChatState,
   ChatMessage,
@@ -13,7 +13,7 @@ import type {
   ChatSession,
   PendingInternalContinuation
 } from '../types'
-import type { TaskItem } from '../../../../../shared/types/task'
+import type { TodoItem } from '../../../../../shared/types/todo'
 import type { ImageAttachment, PendingPromptDraft } from '../../../../../shared/types/attachment'
 import type { SubAgentHandoff } from '../../../../../shared/types/subagent'
 import { desktopApi } from '../../../shared/desktop'
@@ -39,7 +39,7 @@ let _planStateListenerCleanup: (() => void) | null = null
 export interface MessageSlice {
   messages: ChatMessage[]
   streamCleanups: Record<string, (() => void) | null>
-  expandedCapsule: 'task' | 'plan' | null
+  expandedCapsule: 'todo' | 'plan' | null
   subAgentStatus: 'idle' | 'running' | 'completed' | 'failed'
   planListModalOpen: boolean
   activePlan: any | null
@@ -48,7 +48,7 @@ export interface MessageSlice {
   pendingPrompt: PendingPromptDraft | null
   composerDrafts: Record<string, PendingPromptDraft | undefined>
   pendingInternalContinuation: PendingInternalContinuation | null
-  tasks: TaskItem[]
+  todos: TodoItem[]
 
   addUserMessage: (content: string, attachments?: ImageAttachment[], sessionId?: string) => ChatMessage
   removeMessages: (messageIds: string[]) => void
@@ -99,7 +99,7 @@ export interface MessageSlice {
     subAgentId: string,
     result: { status: 'completed' | 'failed' | 'interrupted'; output?: string; qualitySummary?: any; toolCallCount: number; filesExamined?: string[]; handoff?: SubAgentHandoff }
   ) => void
-  setExpandedCapsule: (capsule: 'task' | 'plan' | null) => void
+  setExpandedCapsule: (capsule: 'todo' | 'plan' | null) => void
   setSubAgentStatus: (status: 'idle' | 'running' | 'completed' | 'failed') => void
   initPlanStateListener: () => () => void
   setPlanListModalOpen: (open: boolean) => void
@@ -111,8 +111,8 @@ export interface MessageSlice {
   setPendingInternalContinuation: (continuation: PendingInternalContinuation | null) => void
   consumeInternalContinuation: (sessionId: string) => PendingInternalContinuation | null
   markActiveRunUserAborted: (sessionId: string) => void
-  setTasks: (tasks: TaskItem[]) => void
-  setSessionTasks: (sessionId: string, tasks: TaskItem[]) => void
+  setTodos: (todos: TodoItem[]) => void
+  setSessionTodos: (sessionId: string, todos: TodoItem[]) => void
   revertToMessage: (msgId: string) => Promise<boolean>
   previewRevertMessage: (msgId: string) => Promise<{ toDelete: string[], toRestore: string[] } | null>
 }
@@ -283,7 +283,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
   pendingPrompt: null,
   composerDrafts: {},
   pendingInternalContinuation: null,
-  tasks: [],
+  todos: [],
 
   addUserMessage: (content: string, attachments?: ImageAttachment[], sessionId?: string) => {
     const msg: ChatMessage = {
@@ -1003,17 +1003,17 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
     })
     void get().persistSession(sessionId)
   },
-  setTasks: (tasks) => set((s) => ({
-    tasks,
+  setTodos: (todos) => set((s) => ({
+    todos,
     sessions: s.sessions.map((session) =>
-      session.id === s.activeSessionId ? { ...session, tasks } : session
+      session.id === s.activeSessionId ? { ...session, todos } : session
     )
   })),
-  setSessionTasks: (sessionId, tasks) => set((s) => {
+  setSessionTodos: (sessionId, todos) => set((s) => {
     const sessions = s.sessions.map((session) =>
-      session.id === sessionId ? { ...session, tasks } : session
+      session.id === sessionId ? { ...session, todos } : session
     )
-    return s.activeSessionId === sessionId ? { sessions, tasks } : { sessions }
+    return s.activeSessionId === sessionId ? { sessions, todos } : { sessions }
   }),
 
   revertToMessage: async (msgId: string) => {

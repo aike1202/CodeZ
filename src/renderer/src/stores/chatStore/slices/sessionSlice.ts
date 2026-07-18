@@ -1,4 +1,4 @@
-import type { StateCreator } from 'zustand'
+﻿import type { StateCreator } from 'zustand'
 import type {
   AgentState,
   ChatMessage,
@@ -24,8 +24,8 @@ function genId(): string {
 // 防竞态：每次 selectSession 分配递增序号，IPC 返回时检查是否仍是最新请求
 let _selectSessionSeq = 0
 
-function hasUnfinishedTasks(tasks: Array<{ status: string }> | undefined): boolean {
-  return Boolean(tasks?.some((task) => task.status === 'pending' || task.status === 'in_progress'))
+function hasUnfinishedTodos(todos: Array<{ status: string }> | undefined): boolean {
+  return Boolean(todos?.some((todo) => todo.status === 'pending' || todo.status === 'in_progress'))
 }
 
 function inactiveRuntimeStatus(sessionId: string): SessionRuntimeStatus {
@@ -42,6 +42,7 @@ const normalizeMessage = (message: ChatMessage): ChatMessage => ({
 function normalizeSession(session: SessionData): ChatSession {
   return {
     ...session,
+    todos: [],
     messages: Array.isArray(session.messages)
       ? session.messages.map((message) => normalizeMessage(message as ChatMessage))
       : [],
@@ -55,6 +56,11 @@ function normalizeSession(session: SessionData): ChatSession {
         }))
       : []
   }
+}
+
+function persistedSession(session: ChatSession): SessionData {
+  const { todos, ...rest } = session
+  return rest
 }
 
 const RUNTIME_INTERRUPTED_ERROR =
@@ -476,15 +482,15 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
       summary: '新会话',
       relativeTime: '刚刚',
       messages: [],
-      tasks: [],
+      todos: [],
       queuedPrompts: []
     }
     set((s) => ({
       sessions: [session, ...s.sessions],
       activeSessionId: id,
       messages: [],
-      tasks: [],
-      expandedCapsule: s.expandedCapsule === 'task' ? null : s.expandedCapsule
+      todos: [],
+      expandedCapsule: s.expandedCapsule === 'todo' ? null : s.expandedCapsule
     }))
     get().persistCurrentSession()
     return id
@@ -524,8 +530,8 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
           : healInterruptedSubAgents(sourceMessages)
         const interruptedRequests = interruptPendingRequests(healed.messages, runtimeStatus)
         const normalizedFreshSession = normalizeSession(freshSession)
-        const healedSession = {
-          ...freshSession,
+        const healedSession: ChatSession = {
+          ...normalizedFreshSession,
           messages: interruptedRequests.messages,
           queuedPrompts: normalizedFreshSession.queuedPrompts
         }
@@ -537,10 +543,10 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
             sessions,
             activeSessionId: sessionId,
             messages: healedSession.messages,
-            tasks: freshSession.tasks || [],
-            expandedCapsule: hasUnfinishedTasks(freshSession.tasks)
-              ? 'task'
-              : s.expandedCapsule === 'task'
+            todos: healedSession.todos || [],
+            expandedCapsule: hasUnfinishedTodos(healedSession.todos)
+              ? 'todo'
+              : s.expandedCapsule === 'todo'
                 ? null
                 : s.expandedCapsule,
             pendingInternalContinuation: null,
@@ -548,7 +554,7 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
           }
         })
         if (healed.changed || interruptedRequests.changed) {
-          await desktopApi.session.save(healedSession)
+          await desktopApi.session.save(persistedSession(healedSession))
         }
         if (desktopApi.capabilities.plan && freshSession.linkedPlanSlug) {
           try {
@@ -581,10 +587,10 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
           : item),
         activeSessionId: sessionId,
         messages,
-        tasks: (session as any).tasks || [],
-        expandedCapsule: hasUnfinishedTasks((session as any).tasks)
-          ? 'task'
-          : s.expandedCapsule === 'task'
+        todos: session.todos || [],
+        expandedCapsule: hasUnfinishedTodos(session.todos)
+          ? 'todo'
+          : s.expandedCapsule === 'todo'
             ? null
             : s.expandedCapsule,
         pendingInternalContinuation: null,
@@ -637,7 +643,7 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     const session = sessions.find((s) => s.id === activeSessionId)
     if (session) {
       try {
-        await desktopApi.session.save(session)
+        await desktopApi.session.save(persistedSession(session))
       } catch (err) {
         console.error('[sessionSlice.persistCurrentSession] Failed:', err)
       }
@@ -649,7 +655,7 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     const session = sessions.find((s) => s.id === sessionId)
     if (session) {
       try {
-        await desktopApi.session.save(session)
+        await desktopApi.session.save(persistedSession(session))
       } catch (err) {
         console.error('[sessionSlice.persistSession] Failed:', err)
       }
@@ -740,7 +746,7 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     const session = get().sessions.find((s) => s.id === sessionId)
     if (session) {
       try {
-        await desktopApi.session.save(session)
+        await desktopApi.session.save(persistedSession(session))
       } catch (err) {
         console.error('[sessionSlice] persist failed:', err)
       }
@@ -836,7 +842,7 @@ export const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> =
     const session = get().sessions.find((s) => s.id === sessionId)
     if (session) {
       try {
-        await desktopApi.session.save(session)
+        await desktopApi.session.save(persistedSession(session))
       } catch (err) {
         console.error('[sessionSlice] persist failed:', err)
       }

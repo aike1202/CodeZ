@@ -1,4 +1,4 @@
-use std::{
+﻿use std::{
     collections::{HashMap, HashSet, VecDeque},
     io,
     path::{Path, PathBuf},
@@ -54,15 +54,20 @@ use codez_providers::{
 use codez_runtime::attachment::{AttachmentService, ResolvedSessionImage};
 use codez_runtime::{
     CancellationTree,
-    agent::collaboration::{
-        AgentAttemptOutput, AgentAttemptRequest, AgentMailboxMessage, AgentMessageType,
+    agent::{
+        collaboration::{
+            AgentAttemptOutput, AgentAttemptRequest, AgentMailboxMessage, AgentMessageType,
+        },
+        registry::get_builtin_subagents,
     },
     cancellation::SessionCancellation,
     chat::{
         prompt::{
             builder::create_default_pipeline,
             pipeline::PromptPipeline,
-            types::{PromptContext, PromptSkillSummary, PromptToolSummary},
+            types::{
+                PromptAgentSummary, PromptContext, PromptSkillSummary, PromptToolSummary,
+            },
         },
         stream_state::{ChatStreamState, ChatStreamStateMachine},
     },
@@ -99,7 +104,8 @@ use codez_runtime::{
     },
     session_maintenance::SessionActivityLease,
     tools::types::{
-        NormalizedToolCall as RuntimeToolCall, ToolExecutionResult, ToolPipelineResult,
+        DeferredToolSummary, NormalizedToolCall as RuntimeToolCall, ToolExecutionResult,
+        ToolPipelineResult,
     },
 };
 use futures_util::{StreamExt, stream::BoxStream};
@@ -209,6 +215,7 @@ struct ChatPromptBuildInput<'a> {
     session_id: &'a SessionId,
     workspace_root: Option<&'a WorkspaceRoot>,
     tool_schemas: &'a [ToolDefinition],
+    deferred_tools: &'a [DeferredToolSummary],
     scope: &'a SessionRuntimeScopeSnapshot,
     now: &'a DateTime<Utc>,
     cancellation: &'a CancellationToken,
@@ -325,7 +332,8 @@ impl ChatPromptAssembler {
             permission_mode: permission_mode?,
             thinking_enabled: Some(input.resolved.thinking.enabled),
             available_tools: Some(prompt_tool_summaries(input.tool_schemas)),
-            deferred_tools: Some(Vec::new()),
+            deferred_tools: Some(prompt_deferred_tool_summaries(input.deferred_tools)),
+            available_agents: prompt_agent_summaries(input.tool_schemas),
             available_skills: available_skills?,
             active_skills: active_prompt_skills(input.scope),
             todo_state: input.todo_state.map(str::to_string),
@@ -508,6 +516,38 @@ fn prompt_tool_summaries(tool_schemas: &[ToolDefinition]) -> Vec<PromptToolSumma
             summary: schema.function.description.clone(),
         })
         .collect()
+}
+
+fn prompt_deferred_tool_summaries(
+    deferred_tools: &[DeferredToolSummary],
+) -> Vec<PromptToolSummary> {
+    deferred_tools
+        .iter()
+        .map(|tool| PromptToolSummary {
+            name: tool.name.clone(),
+            summary: tool.summary.clone(),
+        })
+        .collect()
+}
+
+fn prompt_agent_summaries(tool_schemas: &[ToolDefinition]) -> Option<Vec<PromptAgentSummary>> {
+    if !tool_schemas
+        .iter()
+        .any(|schema| schema.function.name == "spawn_agent")
+    {
+        return None;
+    }
+    let agents = get_builtin_subagents()
+        .into_iter()
+        .map(|agent| PromptAgentSummary {
+            role: agent.r#type,
+            description: agent.description,
+            when_to_use: agent.when_to_use,
+            when_not_to_use: agent.when_not_to_use,
+            cost_hint: agent.cost_hint,
+        })
+        .collect::<Vec<_>>();
+    (!agents.is_empty()).then_some(agents)
 }
 
 fn active_prompt_skills(scope: &SessionRuntimeScopeSnapshot) -> Option<Vec<PromptSkillSummary>> {
@@ -2702,6 +2742,7 @@ struct PrepareProviderRequestInput<'a> {
     conversation: &'a ConversationLedger,
     workspace_root: Option<&'a WorkspaceRoot>,
     tool_schemas: &'a [ToolDefinition],
+    deferred_tools: &'a [DeferredToolSummary],
     prompt_now: &'a DateTime<Utc>,
     todo_state: Option<&'a str>,
 }
@@ -2760,6 +2801,7 @@ async fn prepare_provider_request(
         conversation,
         workspace_root,
         tool_schemas,
+        deferred_tools,
         prompt_now,
         todo_state,
     } = input;
@@ -2810,6 +2852,7 @@ async fn prepare_provider_request(
                 session_id: &conversation.session_id,
                 workspace_root,
                 tool_schemas,
+                deferred_tools,
                 scope: &scope,
                 now: prompt_now,
                 cancellation,
@@ -3438,8 +3481,14 @@ async fn run_provider_conversation(
                 }
             },
         };
-        let provider_tools =
-            tool_run.map(|run| tools.provider_tool_definitions_for_run(run));
+        let provider_surface =
+            tool_run.map(|run| tools.provider_tool_surface_for_run(run));
+        let provider_tools = provider_surface
+            .as_ref()
+            .map_or(&[][..], |surface| surface.definitions.as_slice());
+        let deferred_tools = provider_surface
+            .as_ref()
+            .map_or(&[][..], |surface| surface.deferred_tools.as_slice());
         let todo_state = match tools.todo_prompt_state(&conversation.session_id).await {
             Ok(state) => state,
             Err(error) => {
@@ -3458,7 +3507,8 @@ async fn run_provider_conversation(
                 cancellation: &cancellation,
                 conversation,
                 workspace_root: tool_run.map(ChatToolRunContext::workspace_root),
-                tool_schemas: provider_tools.as_deref().unwrap_or_default(),
+                tool_schemas: provider_tools,
+                deferred_tools,
                 prompt_now: &prompt_now,
                 todo_state: todo_state.as_deref(),
             },
@@ -3524,7 +3574,9 @@ async fn run_provider_conversation(
             match open_provider_stream(
                 attempt_config,
                 messages.clone(),
-                provider_tools.clone(),
+                provider_surface
+                    .as_ref()
+                    .map(|surface| surface.definitions.clone()),
                 cancellation.clone(),
             )
             .await
@@ -5622,7 +5674,7 @@ mod tests {
                     None,
                 ));
                 let edit_transaction = Arc::new(EditTransactionService::new(Arc::clone(&paths)));
-                let task_store = Arc::new(codez_runtime::task::TaskStore::new(
+                let todo_store = Arc::new(codez_runtime::todo::TodoStore::new(
                     paths.data_directory(),
                     Arc::clone(&persistence),
                 ));
@@ -5646,7 +5698,7 @@ mod tests {
                             fingerprint_store: Arc::new(ReadFingerprintStore::default()),
                             mutation_coordinator: Arc::new(FileMutationCoordinator::default()),
                             edit_transaction_service: Arc::clone(&edit_transaction),
-                            task_store,
+                            todo_store,
                             agent_runtime: Arc::clone(&agent_runtime),
                             process_runner: native_process_runner,
                             notification_port: Arc::new(

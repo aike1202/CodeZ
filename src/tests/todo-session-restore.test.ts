@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { TaskItem } from '../shared/types/task'
+﻿import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { TodoItem } from '../shared/types/todo'
 
 vi.mock('../renderer/src/stores/workspaceStore', () => ({
   useWorkspaceStore: {
@@ -22,8 +22,8 @@ function imageAttachmentFixture() {
   }
 }
 
-describe('chat store task session restore', () => {
-  const unfinishedTasks: TaskItem[] = [
+describe('chat store Todo session restore', () => {
+  const unfinishedTodos: TodoItem[] = [
     { id: 't1', subject: 'Continue persistence work', description: '', status: 'in_progress' },
     { id: 't2', subject: 'Verify restore', description: '', status: 'pending' }
   ]
@@ -47,35 +47,35 @@ describe('chat store task session restore', () => {
     }
   })
 
-  it('selectSession loads persisted unfinished tasks and expands task capsule', async () => {
+  it('selectSession loads persisted unfinished Todos and expands the Todo capsule', async () => {
     const { useChatStore } = await import('../renderer/src/stores/chatStore')
     const session = {
       id: 's1',
       projectId: 'p1',
-      summary: 'Task session',
+      summary: 'Todo session',
       relativeTime: 'now',
       messages: [],
-      tasks: unfinishedTasks
+      tasks: unfinishedTodos
     }
 
     ;(window as any).api.session.get.mockResolvedValue(session)
     useChatStore.setState({
-      sessions: [{ ...session, tasks: [] } as any],
+      sessions: [{ ...session, todos: [] } as any],
       activeSessionId: null,
       messages: [],
-      tasks: [],
+      todos: [],
       expandedCapsule: null
     })
 
     await useChatStore.getState().selectSession('s1')
 
-    expect(useChatStore.getState().tasks).toEqual(unfinishedTasks)
-    expect(useChatStore.getState().expandedCapsule).toBe('task')
+    expect(useChatStore.getState().todos).toEqual(unfinishedTodos)
+    expect(useChatStore.getState().expandedCapsule).toBe('todo')
   })
 
-  it('selectSession loads completed tasks without auto-expanding task capsule', async () => {
+  it('selectSession loads completed Todos without auto-expanding the Todo capsule', async () => {
     const { useChatStore } = await import('../renderer/src/stores/chatStore')
-    const completedTasks: TaskItem[] = [
+    const completedTodos: TodoItem[] = [
       { id: 't1', subject: 'Done', description: '', status: 'completed' }
     ]
     const session = {
@@ -84,25 +84,25 @@ describe('chat store task session restore', () => {
       summary: 'Done session',
       relativeTime: 'now',
       messages: [],
-      tasks: completedTasks
+      tasks: completedTodos
     }
 
     ;(window as any).api.session.get.mockResolvedValue(session)
     useChatStore.setState({
-      sessions: [{ ...session, tasks: [] } as any],
+      sessions: [{ ...session, todos: [] } as any],
       activeSessionId: null,
       messages: [],
-      tasks: [],
+      todos: [],
       expandedCapsule: null
     })
 
     await useChatStore.getState().selectSession('s1')
 
-    expect(useChatStore.getState().tasks).toEqual(completedTasks)
+    expect(useChatStore.getState().todos).toEqual(completedTodos)
     expect(useChatStore.getState().expandedCapsule).toBeNull()
   })
 
-  it('createSession clears task presentation state and invalidates a pending selection', async () => {
+  it('createSession clears Todo presentation state and invalidates a pending selection', async () => {
     const { useChatStore } = await import('../renderer/src/stores/chatStore')
     let resolveSelection: ((session: any) => void) | undefined
     ;(window as any).api.session.get.mockReturnValue(new Promise((resolve) => {
@@ -117,13 +117,13 @@ describe('chat store task session restore', () => {
           summary: 'Old session',
           relativeTime: 'now',
           messages: [],
-          tasks: unfinishedTasks
+          todos: unfinishedTodos
         } as any
       ],
       activeSessionId: 'old',
       messages: [],
-      tasks: unfinishedTasks,
-      expandedCapsule: 'task'
+      todos: unfinishedTodos,
+      expandedCapsule: 'todo'
     })
 
     const pendingSelection = useChatStore.getState().selectSession('old')
@@ -134,15 +134,15 @@ describe('chat store task session restore', () => {
       summary: 'Old session',
       relativeTime: 'now',
       messages: [],
-      tasks: unfinishedTasks
+      tasks: unfinishedTodos
     })
     await pendingSelection
 
     const state = useChatStore.getState()
     expect(state.activeSessionId).toBe(newSessionId)
-    expect(state.tasks).toEqual([])
+    expect(state.todos).toEqual([])
     expect(state.expandedCapsule).toBeNull()
-    expect(state.sessions.find((session) => session.id === newSessionId)?.tasks).toEqual([])
+    expect(state.sessions.find((session) => session.id === newSessionId)?.todos).toEqual([])
   })
 
   it('createSession remains active when an older selection rejects after creation', async () => {
@@ -161,13 +161,13 @@ describe('chat store task session restore', () => {
           summary: 'Old session',
           relativeTime: 'now',
           messages: [],
-          tasks: unfinishedTasks
+          todos: unfinishedTodos
         } as any
       ],
       activeSessionId: 'old',
       messages: [],
-      tasks: unfinishedTasks,
-      expandedCapsule: 'task'
+      todos: unfinishedTodos,
+      expandedCapsule: 'todo'
     })
 
     const pendingSelection = useChatStore.getState().selectSession('old')
@@ -177,7 +177,7 @@ describe('chat store task session restore', () => {
 
     const state = useChatStore.getState()
     expect(state.activeSessionId).toBe(newSessionId)
-    expect(state.tasks).toEqual([])
+    expect(state.todos).toEqual([])
     expect(state.expandedCapsule).toBeNull()
     expect(errorSpy).toHaveBeenCalledWith(
       '[sessionSlice.selectSession] Failed to load from disk:',
@@ -186,19 +186,19 @@ describe('chat store task session restore', () => {
     errorSpy.mockRestore()
   })
 
-  it('selectSession closes an inherited task capsule when the target has no active tasks', async () => {
+  it('selectSession closes an inherited Todo capsule when the target has no active Todos', async () => {
     const { useChatStore } = await import('../renderer/src/stores/chatStore')
-    const terminalTasks: TaskItem[] = [
+    const terminalTodos: TodoItem[] = [
       { id: 't1', subject: 'Done', description: '', status: 'completed' },
       { id: 't2', subject: 'Stopped', description: '', status: 'cancelled' }
     ]
     const session = {
       id: 'done',
       projectId: 'p1',
-      summary: 'Terminal tasks',
+      summary: 'Terminal Todos',
       relativeTime: 'now',
       messages: [],
-      tasks: terminalTasks
+      tasks: terminalTodos
     }
 
     ;(window as any).api.session.get.mockResolvedValue(session)
@@ -206,63 +206,92 @@ describe('chat store task session restore', () => {
       sessions: [session as any],
       activeSessionId: 'other',
       messages: [],
-      tasks: unfinishedTasks,
-      expandedCapsule: 'task'
+      todos: unfinishedTodos,
+      expandedCapsule: 'todo'
     })
 
     await useChatStore.getState().selectSession('done')
 
-    expect(useChatStore.getState().tasks).toEqual(terminalTasks)
+    expect(useChatStore.getState().todos).toEqual(terminalTodos)
     expect(useChatStore.getState().expandedCapsule).toBeNull()
   })
 
-  it('setTasks also updates the active session so persisted session data stays current', async () => {
+  it('setTodos also updates the active session so persisted session data stays current', async () => {
     const { useChatStore } = await import('../renderer/src/stores/chatStore')
     useChatStore.setState({
       sessions: [
         {
           id: 's1',
           projectId: 'p1',
-          summary: 'Task session',
+          summary: 'Todo session',
           relativeTime: 'now',
           messages: [],
-          tasks: []
+          todos: []
         } as any
       ],
       activeSessionId: 's1',
       messages: [],
-      tasks: []
+      todos: []
     })
 
-    useChatStore.getState().setTasks(unfinishedTasks)
+    useChatStore.getState().setTodos(unfinishedTodos)
 
-    expect(useChatStore.getState().sessions[0].tasks).toEqual(unfinishedTasks)
+    expect(useChatStore.getState().sessions[0].todos).toEqual(unfinishedTodos)
   })
 
-  it('setSessionTasks updates a background session without replacing visible tasks', async () => {
+  it('setSessionTodos updates a background session without replacing visible Todos', async () => {
     const { useChatStore } = await import('../renderer/src/stores/chatStore')
-    const backgroundTasks: TaskItem[] = [
+    const backgroundTodos: TodoItem[] = [
       { id: 't9', subject: 'Background Executor', description: '', status: 'in_progress' }
     ]
-    const activeUpdateTasks: TaskItem[] = [
+    const activeUpdateTodos: TodoItem[] = [
       { id: 't1', subject: 'Active Executor completed', description: '', status: 'completed' }
     ]
     useChatStore.setState({
       sessions: [
-        { id: 's1', projectId: 'p1', summary: 'Active', relativeTime: 'now', messages: [], tasks: unfinishedTasks } as any,
-        { id: 's2', projectId: 'p1', summary: 'Background', relativeTime: 'now', messages: [], tasks: [] } as any
+        { id: 's1', projectId: 'p1', summary: 'Active', relativeTime: 'now', messages: [], todos: unfinishedTodos } as any,
+        { id: 's2', projectId: 'p1', summary: 'Background', relativeTime: 'now', messages: [], todos: [] } as any
       ],
       activeSessionId: 's1',
-      tasks: unfinishedTasks
+      todos: unfinishedTodos
     })
 
-    useChatStore.getState().setSessionTasks('s2', backgroundTasks)
+    useChatStore.getState().setSessionTodos('s2', backgroundTodos)
 
-    expect(useChatStore.getState().tasks).toEqual(unfinishedTasks)
-    expect(useChatStore.getState().sessions.find(session => session.id === 's2')?.tasks).toEqual(backgroundTasks)
+    expect(useChatStore.getState().todos).toEqual(unfinishedTodos)
+    expect(useChatStore.getState().sessions.find(session => session.id === 's2')?.todos).toEqual(backgroundTodos)
 
-    useChatStore.getState().setSessionTasks('s1', activeUpdateTasks)
-    expect(useChatStore.getState().tasks).toEqual(activeUpdateTasks)
+    useChatStore.getState().setSessionTodos('s1', activeUpdateTodos)
+    expect(useChatStore.getState().todos).toEqual(activeUpdateTodos)
+  })
+
+  it('does not write legacy Executor state back through the Todo compatibility field', async () => {
+    const { useChatStore } = await import('../renderer/src/stores/chatStore')
+    const session = {
+      id: 's1',
+      projectId: 'p1',
+      summary: 'Legacy Todo session',
+      relativeTime: 'now',
+      messages: [],
+      tasks: [{
+        ...unfinishedTodos[0],
+        executorRuntime: { executionId: 'legacy-execution' }
+      }]
+    }
+    ;(window as any).api.session.get.mockResolvedValue(session)
+    useChatStore.setState({
+      sessions: [{ ...session, todos: [] } as any],
+      activeSessionId: null,
+      messages: [],
+      todos: []
+    })
+
+    await useChatStore.getState().selectSession('s1')
+    await useChatStore.getState().persistCurrentSession()
+
+    const savedSession = (window as any).api.session.save.mock.calls.at(-1)?.[0]
+    expect(savedSession.tasks[0]).not.toHaveProperty('executorRuntime')
+    expect(savedSession).not.toHaveProperty('todos')
   })
 
   it('revert restores text and images as one pending composer draft', async () => {

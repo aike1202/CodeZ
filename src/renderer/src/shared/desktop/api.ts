@@ -1,4 +1,4 @@
-import { Channel, invoke } from '@tauri-apps/api/core'
+﻿import { Channel, invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 
 import type {
@@ -48,8 +48,8 @@ import type {
   SubAgentSettingsDetail,
   AgentActiveIdsResult,
   AgentRuntimeSnapshot,
-  TodoItem as WireTaskItem,
-  TodoListSnapshot as TaskSnapshot,
+  TodoItem as WireTodoItem,
+  TodoListSnapshot,
 } from './generated/contracts'
 import type {
   ContextBudgetSnapshot,
@@ -98,7 +98,7 @@ import type {
   McpServerStatus,
 } from '../../components/SettingsMcpTab/types'
 import { normalizeDesktopError } from './errors'
-import { desktopEvents, getLegacyTaskRevision } from './events'
+import { desktopEvents, getLegacyTodoRevision } from './events'
 
 type RendererLogLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -373,7 +373,20 @@ async function skillCommand<T>(
   }
 }
 
-async function taskCommand<T>(
+async function executionHistoryCommand<T>(
+  name: string,
+  args: Record<string, unknown> | undefined,
+  electron: () => Promise<T>
+): Promise<T> {
+  if (isTauriRuntime()) return command<T>(name, args)
+  try {
+    return await electron()
+  } catch (error) {
+    throw normalizeDesktopError(error)
+  }
+}
+
+async function todoCommand<T>(
   name: string,
   args: Record<string, unknown> | undefined,
   electron: () => Promise<T>
@@ -428,7 +441,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-export interface TaskHistoryRecord {
+export interface ExecutionHistoryRecord {
   id: string
   projectId?: string
   title?: string
@@ -460,7 +473,7 @@ function optionalStringArray(value: unknown, field: string): string[] | undefine
   throw new Error(`The desktop returned a task with an invalid ${field}.`)
 }
 
-function normalizeTaskHistoryRecord(value: unknown): TaskHistoryRecord {
+function normalizeExecutionHistoryRecord(value: unknown): ExecutionHistoryRecord {
   if (!isRecord(value) || typeof value.id !== 'string' || value.id.length === 0) {
     throw new Error('The desktop returned a task without a valid id.')
   }
@@ -477,14 +490,14 @@ function normalizeTaskHistoryRecord(value: unknown): TaskHistoryRecord {
   }
 }
 
-function normalizeTaskHistoryRecords(value: unknown): TaskHistoryRecord[] {
+function normalizeExecutionHistoryRecords(value: unknown): ExecutionHistoryRecord[] {
   if (!Array.isArray(value)) {
     throw new Error('The desktop returned an invalid task list.')
   }
-  return value.map(normalizeTaskHistoryRecord)
+  return value.map(normalizeExecutionHistoryRecord)
 }
 
-function legacyTaskItem(task: import('@shared/types/task').TaskItem): WireTaskItem {
+function legacyTodoItem(task: import('@shared/types/todo').TodoItem): WireTodoItem {
   const requiresApproval = task.requiresApproval === true
   return {
     id: task.id,
@@ -505,14 +518,14 @@ function legacyTaskItem(task: import('@shared/types/task').TaskItem): WireTaskIt
   }
 }
 
-async function legacyTaskSnapshot(sessionId: string): Promise<TaskSnapshot> {
+async function legacyTodoSnapshot(sessionId: string): Promise<TodoListSnapshot> {
   const session = await legacySession().get(sessionId)
   return {
     version: 1,
     sessionId,
-    revision: getLegacyTaskRevision(sessionId),
+    revision: getLegacyTodoRevision(sessionId),
     nextSequence: 0,
-    items: (session?.tasks ?? []).map(legacyTaskItem)
+    items: (session?.tasks ?? []).map(legacyTodoItem)
   }
 }
 
@@ -984,10 +997,12 @@ export interface DesktopApi {
     importSingle(sourceName: string, dirName: string, rootPath?: string | null): Promise<boolean>
     remove(rootPath: string | null, id: string): Promise<boolean>
   }
-  task: {
-    snapshot(sessionId: string): Promise<TaskSnapshot>
-    getByProject(projectId: string): Promise<TaskHistoryRecord[]>
-    delete(taskId: string): Promise<void>
+  todo: {
+    snapshot(sessionId: string): Promise<TodoListSnapshot>
+  }
+  executionHistory: {
+    getByProject(projectId: string): Promise<ExecutionHistoryRecord[]>
+    delete(executionId: string): Promise<void>
   }
   agent: {
     snapshot(sessionId: string): Promise<AgentRuntimeSnapshot>
@@ -1627,21 +1642,23 @@ export const desktopApi: DesktopApi = {
     remove: (rootPath, id) =>
       skillCommand('skill_remove', { rootPath, id }, () => legacySkill().remove(rootPath, id))
   },
-  task: {
-    snapshot: (sessionId) => taskCommand<TaskSnapshot>(
+  todo: {
+    snapshot: (sessionId) => todoCommand<TodoListSnapshot>(
       'todo_list',
       { request: { sessionId } },
-      () => legacyTaskSnapshot(sessionId)
-    ),
-    getByProject: async (projectId) => normalizeTaskHistoryRecords(await taskCommand<unknown>(
+      () => legacyTodoSnapshot(sessionId)
+    )
+  },
+  executionHistory: {
+    getByProject: async (projectId) => normalizeExecutionHistoryRecords(await executionHistoryCommand<unknown>(
       'task_get_by_project',
       { projectId },
       () => legacyTask().getByProject(projectId)
     )),
-    delete: (taskId) => taskCommand<void>(
+    delete: (executionId) => executionHistoryCommand<void>(
       'task_delete',
-      { taskId },
-      () => legacyTask().delete(taskId)
+      { taskId: executionId },
+      () => legacyTask().delete(executionId)
     )
   },
   agent: {

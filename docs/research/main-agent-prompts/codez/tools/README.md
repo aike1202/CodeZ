@@ -1,4 +1,4 @@
-# CodeZ 工具系统
+﻿# CodeZ 工具系统
 
 ## 当前目录规模
 
@@ -20,7 +20,7 @@ MCP provider tools: 0 on current ChatToolRuntime path
 - `grep-glob-list.md`：不经过 shell 的 bundled ripgrep 与目录读取。
 - `shell.md`：Bash/PowerShell、命令任务、权限解析和 UTF-8 修正。
 - `agent-tools.md`：spawn/followup/send/list/wait/interrupt。
-- `task-skill-deferred.md`：Task、Skill、ToolSearch 和 deferred exposure。
+- `todo-skill-deferred.md`：Task、Skill、ToolSearch 和 deferred exposure。
 - `permission-pipeline.md`：验证、effects、授权、调度、执行和 journal。
 - `large-results-web.md`：大结果 handle、Web SSRF 防护和通知限流。
 

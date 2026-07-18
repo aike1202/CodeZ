@@ -1,4 +1,4 @@
-use std::{
+﻿use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
     fs,
@@ -35,7 +35,7 @@ use codez_runtime::{
         service::{PermissionApprovalHandler, PermissionService},
         store::{PermissionRuleStore, PermissionStoreError, WorkspacePermissionStore},
     },
-    task::TaskStore,
+    todo::TodoStore,
     tools::{
         authorization::AuthorizationBinding,
         builtin::{
@@ -48,7 +48,7 @@ use codez_runtime::{
             notebook_edit::NotebookEditTool,
             powershell::{PowerShellHost, PowerShellTool},
             read::ReadTool,
-            task::TodoTool,
+            todo::TodoTool,
             tool_result_read::ToolResultReadTool,
             tool_search::ToolSearchTool,
             write::WriteTool,
@@ -67,8 +67,8 @@ use codez_runtime::{
         scheduler::ToolScheduler,
         spawn::{CommandTaskError, CommandTaskRegistry},
         types::{
-            AgentRole, NormalizedToolCall, PreparedToolCall, ToolEffect, ToolExecutionError,
-            ToolExecutionResult, ToolPipelineResult,
+            AgentRole, DeferredToolSummary, NormalizedToolCall, PreparedToolCall, ToolEffect,
+            ToolExecutionError, ToolExecutionResult, ToolPipelineResult,
         },
         validation::ToolInputValidator,
     },
@@ -324,9 +324,14 @@ pub(crate) struct ChatToolRuntime {
     exposure_state: Arc<ToolExposureState>,
     skills: Arc<SkillsService>,
     agent_runtime: Arc<AgentRuntime>,
-    task_store: Arc<TaskStore>,
+    todo_store: Arc<TodoStore>,
     bash: Option<Arc<BashTool>>,
     powershell: Option<Arc<PowerShellTool>>,
+}
+
+pub(crate) struct ProviderToolSurface {
+    pub(crate) definitions: Vec<ToolDefinition>,
+    pub(crate) deferred_tools: Vec<DeferredToolSummary>,
 }
 
 pub(crate) struct ChatToolRuntimeDependencies {
@@ -337,7 +342,7 @@ pub(crate) struct ChatToolRuntimeDependencies {
     pub(crate) fingerprint_store: Arc<ReadFingerprintStore>,
     pub(crate) mutation_coordinator: Arc<FileMutationCoordinator>,
     pub(crate) edit_transaction_service: Arc<EditTransactionService>,
-    pub(crate) task_store: Arc<TaskStore>,
+    pub(crate) todo_store: Arc<TodoStore>,
     pub(crate) agent_runtime: Arc<AgentRuntime>,
     pub(crate) process_runner: Arc<NativeProcessRunner>,
     pub(crate) notification_port: Arc<dyn NotificationPort>,
@@ -366,7 +371,7 @@ impl ChatToolRuntime {
             fingerprint_store,
             mutation_coordinator,
             edit_transaction_service,
-            task_store,
+            todo_store,
             agent_runtime,
             process_runner,
             notification_port,
@@ -424,7 +429,7 @@ impl ChatToolRuntime {
             bash: bash.clone(),
             powershell: powershell.clone(),
             result_store: Arc::clone(&result_store),
-            task_store: Arc::clone(&task_store),
+            todo_store: Arc::clone(&todo_store),
             agent_runtime: Arc::clone(&agent_runtime),
             exposure_state: Arc::clone(&exposure_state),
             skills: Arc::clone(&skills),
@@ -457,24 +462,35 @@ impl ChatToolRuntime {
             exposure_state,
             skills,
             agent_runtime,
-            task_store,
+            todo_store,
             bash,
             powershell,
         })
     }
 
-    /// Returns the exact schemas exposed to a chat provider for this immutable catalog.
-    #[must_use]
-    pub(crate) fn provider_tool_definitions_for_run(
+    #[cfg(test)]
+    fn provider_tool_definitions_for_run(
         &self,
         run: &ChatToolRunContext,
     ) -> Vec<ToolDefinition> {
+        self.provider_tool_surface_for_run(run).definitions
+    }
+
+    /// Resolves the eager Provider schemas and deferred capability directory from one plan.
+    #[must_use]
+    pub(crate) fn provider_tool_surface_for_run(
+        &self,
+        run: &ChatToolRunContext,
+    ) -> ProviderToolSurface {
         let exposure = self.exposure_for_run(run);
         let mut definitions = provider_definitions(exposure.eager_tools.iter());
         if run.agent_policy.is_none() {
             definitions.push(ask_user_tool_definition());
         }
-        definitions
+        ProviderToolSurface {
+            definitions,
+            deferred_tools: exposure.deferred_tools,
+        }
     }
 
     pub(crate) fn skill_service(&self) -> Arc<SkillsService> {
@@ -485,10 +501,10 @@ impl ChatToolRuntime {
         &self,
         session_id: &SessionId,
     ) -> Result<Option<String>, AppError> {
-        self.task_store
+        self.todo_store
             .snapshot(session_id)
             .await
-            .map(|snapshot| codez_runtime::task::todo_prompt_state(&snapshot))
+            .map(|snapshot| codez_runtime::todo::todo_prompt_state(&snapshot))
     }
 
     /// Waits for direct root Agents that still owe the main conversation mailbox updates.
@@ -891,7 +907,7 @@ struct BuiltinCatalogDependencies {
     bash: Option<Arc<BashTool>>,
     powershell: Option<Arc<PowerShellTool>>,
     result_store: Arc<LargeToolResultStore>,
-    task_store: Arc<TaskStore>,
+    todo_store: Arc<TodoStore>,
     agent_runtime: Arc<AgentRuntime>,
     exposure_state: Arc<ToolExposureState>,
     skills: Arc<SkillsService>,
@@ -909,7 +925,7 @@ fn builtin_catalog(
         bash,
         powershell,
         result_store,
-        task_store,
+        todo_store,
         agent_runtime,
         exposure_state,
         skills,
@@ -948,8 +964,8 @@ fn builtin_catalog(
             Arc::clone(&model_ledger),
         )),
         Arc::new(SkillTool::deactivate(skills, model_ledger)),
-        Arc::new(TodoTool::create(Arc::clone(&task_store))),
-        Arc::new(TodoTool::update(task_store)),
+        Arc::new(TodoTool::create(Arc::clone(&todo_store))),
+        Arc::new(TodoTool::update(todo_store)),
         Arc::new(AgentTool::spawn(Arc::clone(&agent_runtime))),
         Arc::new(AgentTool::followup(Arc::clone(&agent_runtime))),
         Arc::new(AgentTool::send(Arc::clone(&agent_runtime))),
@@ -1263,7 +1279,7 @@ mod tests {
             let edit_transaction = Arc::new(
                 codez_runtime::edit_transaction::EditTransactionService::new(Arc::clone(&paths)),
             );
-            let task_store = Arc::new(codez_runtime::task::TaskStore::new(
+            let todo_store = Arc::new(codez_runtime::todo::TodoStore::new(
                 paths.data_directory(),
                 Arc::clone(&persistence),
             ));
@@ -1286,7 +1302,7 @@ mod tests {
                         codez_runtime::mutation_coordinator::FileMutationCoordinator::default(),
                     ),
                     edit_transaction_service: Arc::clone(&edit_transaction),
-                    task_store,
+                    todo_store,
                     agent_runtime,
                     process_runner: Arc::new(codez_platform::NativeProcessRunner::new()),
                     notification_port: Arc::new(UnsupportedNotificationPort),

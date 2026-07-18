@@ -329,7 +329,7 @@
   margin-top: 2px;
 }
 
-.exe-log-task-detail {
+.exe-log-todo-detail {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -339,14 +339,14 @@
   background: var(--bg-panel);
 }
 
-.exe-log-task-detail-row {
+.exe-log-todo-detail-row {
   display: grid;
   grid-template-columns: 72px minmax(0, 1fr);
   gap: 8px;
   align-items: start;
 }
 
-.exe-log-task-command {
+.exe-log-todo-command {
   min-width: 0;
   color: var(--text-main);
   white-space: pre-wrap;
@@ -354,7 +354,7 @@
 }
 
 @media (max-width: 680px) {
-  .exe-log-task-detail-row {
+  .exe-log-todo-detail-row {
     grid-template-columns: 1fr;
     gap: 2px;
   }

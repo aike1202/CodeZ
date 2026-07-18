@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 并行 Plan 执行相关类型。
  *
  * ExecutionPlanner 输出分波方案，编排协调器按波执行 Worker，
@@ -130,13 +130,13 @@ export interface ParallelExecutionEvent {
 export interface ExecutionWave {
   /** 波次序号，从 0 递增 */
   index: number
-  /** 本波并行执行的步骤 ID（引用 PlanStep.id 或 TaskItem.id） */
+  /** 本波并行执行的步骤 ID（引用 PlanStep.id 或 TodoItem.id） */
   stepIds: string[]
 }
 
 /**
  * 通用执行单元 —— orchestrator 不再直接依赖 Plan/PlanStep。
- * PlanStep 与 TaskItem 都可映射为 ExecUnit（两者字段是其超集）。
+ * PlanStep 与 TodoItem 都可映射为 ExecUnit（两者字段是其超集）。
  */
 export interface ExecUnit {
   /** 单元 ID（波次的 stepIds 引用此 ID） */
@@ -148,7 +148,7 @@ export interface ExecUnit {
   /** 涉及文件路径列表（冲突校验 + shared 档写权限范围） */
   files?: string[]
   /** 研究与 Plan 阶段传递给 Executor 的上下文胶囊。 */
-  contextBundle?: import('./task').TaskContextBundle
+  contextBundle?: import('./todo').TodoContextBundle
   acceptanceCriteria?: string[]
   verificationCommand?: string
 }

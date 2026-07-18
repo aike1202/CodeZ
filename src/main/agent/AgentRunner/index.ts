@@ -1,4 +1,4 @@
-import { ChatService } from '../../services/ChatService'
+﻿import { ChatService } from '../../services/ChatService'
 import { ToolManager } from '../../tools/ToolManager'
 import { EditTransactionService, getEditTransactionService } from '../../services/EditTransactionService'
 import {
@@ -7,7 +7,6 @@ import {
   type PermissionToolAuthorization
 } from '../../services/PermissionManager'
 import { normalizeAskUserTextFallback } from '../../tools/builtin/AskUserQuestionTool'
-import { TodoStore } from '../../services/TaskStore'
 import { SubAgentManager } from '../SubAgentManager'
 import { RulesResolver } from '../RulesResolver'
 import type { ChatProviderErrorCode, ProviderTokenUsage, ToolDefinition } from '../../../shared/types/provider'
@@ -100,10 +99,8 @@ export function resolveAgentTransition(input: {
   isVerificationFailure: boolean | null
   verificationRetryCount: number
   maxVerificationRetries: number
-  consecutiveIdleTurns: number
   repeatedFailureLimitReached?: boolean
   stopReason?: import('../../../shared/types/provider').AgentStopReason
-  hasPendingTasks?: boolean
   assistantContent?: string
 }): TransitionEvent {
   if (input.repeatedFailureLimitReached) {
@@ -118,30 +115,7 @@ export function resolveAgentTransition(input: {
     return TransitionEvent.RetryRequested
   }
 
-  if (input.hasPendingTasks) {
-    return input.consecutiveIdleTurns >= 3
-      ? TransitionEvent.MaxIdleReached
-      : TransitionEvent.SchedulerContinue
-  }
-
   return TransitionEvent.Completed
-}
-
-export function updateConsecutiveIdleTurns(input: {
-  previous: number
-  toolCallCount: number
-  hasPendingTasks: boolean
-  taskStatusChanged: boolean
-  hadSuccessfulToolExecution: boolean
-}): number {
-  if (input.taskStatusChanged || input.hadSuccessfulToolExecution || !input.hasPendingTasks) {
-    return 0
-  }
-  return input.toolCallCount === 0 ? input.previous + 1 : input.previous
-}
-
-function createTodoStatusSnapshot(todoStore: TodoStore, sessionId: string): string {
-  return todoStore.list(sessionId).map(todo => `${todo.id}:${todo.status}`).join('|')
 }
 
 export class AgentRunner {
@@ -215,7 +189,6 @@ export class AgentRunner {
     let verificationRetryCount = 0
     const MAX_VERIFICATION_RETRIES = 3
 
-    const todoStore = TodoStore.getInstance()
     const configuredTools: ToolDefinition[] = config.tools || this.toolManager.getToolDefinitions()
     let availableTools: ToolDefinition[] = configuredTools
 
@@ -227,13 +200,6 @@ export class AgentRunner {
       const restoredTools = session?.toolRuntime?.activatedDeferredTools?.[runtimeTurn!.contextScopeId]
       if (restoredTools?.length) {
         getToolExposureState().activate(`${sessionId}:${runtimeTurn!.contextScopeId}`, restoredTools)
-      }
-
-      // ─── 恢复 Task 状态到会话内存 ──────────────────
-      if (session && session.tasks && session.tasks.length > 0) {
-        if (todoStore.list(sessionId).length === 0) {
-          todoStore.restore(sessionId, session.tasks)
-        }
       }
     } catch (e) {
       console.error('[AgentRunner] Failed to load active plan:', e)
@@ -261,8 +227,6 @@ export class AgentRunner {
       }
     }
 
-    let consecutiveIdleTurns = 0
-    let lastTodoStatusSnapshot = createTodoStatusSnapshot(todoStore, sessionId)
     let currentState = AgentState.Running
     const contextBudgetService = new ContextBudgetService()
     const runtimeToolManager = typeof (this.toolManager as any).createCatalogSnapshot === 'function'
@@ -344,8 +308,6 @@ export class AgentRunner {
           activatedDeferredTools
         })
         availableTools = runtimeToolManager.getToolDefinitionsForExposure(exposurePlan)
-        const todoStateInstruction = todoStore.promptState(sessionId)
-
         const built = await config.contextBuilder!.build({
           sessionId,
           contextScopeId: runtimeTurn!.contextScopeId,
@@ -356,7 +318,6 @@ export class AgentRunner {
           toolSchemas: availableTools,
           instructions: [
             ...runtimeInstructions,
-            ...(todoStateInstruction ? [todoStateInstruction] : []),
             agentRuntimeInstruction
           ],
           providerRequestProfile: {
@@ -626,7 +587,6 @@ export class AgentRunner {
         })
 
         let repeatedFailureLimitReached = false
-        let hadSuccessfulToolExecution = false
 
         if (toolCallsArray.length > 0) {
           let pipelineResults: ToolPipelineResult[]
@@ -819,30 +779,16 @@ export class AgentRunner {
 
           const hasSuccess = pipelineResults.some((item) => item.result.status === 'success')
           if (hasSuccess) {
-            hadSuccessfulToolExecution = true
             consecutiveFailures = 0
           } else if (!repeatedFailureLimitReached) {
             consecutiveFailures++
           }
         }
 
-        const currentTodoStatusSnapshot = createTodoStatusSnapshot(todoStore, sessionId)
-        const taskStatusChanged = currentTodoStatusSnapshot !== lastTodoStatusSnapshot
-        const hasPendingTasks = todoStore.list(sessionId).some(t => t.status === 'pending' || t.status === 'in_progress')
-        consecutiveIdleTurns = updateConsecutiveIdleTurns({
-          previous: consecutiveIdleTurns,
-          toolCallCount: toolCallsArray.length,
-          hasPendingTasks,
-          taskStatusChanged,
-          hadSuccessfulToolExecution
-        })
-        lastTodoStatusSnapshot = currentTodoStatusSnapshot
-
         const isVerificationFailure = filesModifiedInSession && lastVerificationResult && !lastVerificationResult.success;
         
         const lateContinuations = await flushPendingSteers() + await flushAgentMailbox()
         if (lateContinuations > 0) {
-          consecutiveIdleTurns = 0
           currentState = AgentState.Running
           continue
         }
@@ -852,10 +798,8 @@ export class AgentRunner {
           isVerificationFailure,
           verificationRetryCount,
           maxVerificationRetries: MAX_VERIFICATION_RETRIES,
-          consecutiveIdleTurns,
           repeatedFailureLimitReached,
           stopReason: currentStopReason,
-          hasPendingTasks,
           assistantContent: currentFullContent
         });
 
@@ -904,24 +848,7 @@ export class AgentRunner {
           continue; // Loop continues naturally to process new messages (tool results)
         }
 
-        if (transitionEvent === TransitionEvent.SchedulerContinue) {
-          const continuationMessage = [
-            '<internal_continuation>',
-            `Active Todo items remain (${todoStore.summary(sessionId)}).`,
-            'Continue the work with the available tools, update Todo state when work changes, or use AskUserQuestion only when required user input is the actual blocker.',
-            '</internal_continuation>'
-          ].join('\n')
-          await runtimeCoordinator!.recordUserContinuation(runtimeTurn!, continuationMessage)
-          log.info('[AgentRunner] continuing active tasks after text-only turn', {
-            sessionId,
-            loopCount,
-            consecutiveIdleTurns
-          })
-          continue
-        }
-
         if (transitionEvent === TransitionEvent.RetryRequested) {
-          consecutiveIdleTurns = 0;
           verificationRetryCount++;
           log.info('[AgentRunner] verification intercept', {
             command: lastVerificationResult!.command,

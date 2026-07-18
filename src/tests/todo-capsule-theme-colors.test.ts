@@ -1,10 +1,10 @@
-import { readFileSync } from 'node:fs'
+﻿import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-const css = readFileSync(resolve(process.cwd(), 'src/renderer/src/components/chat/TaskCapsule.css'), 'utf8')
+const css = readFileSync(resolve(process.cwd(), 'src/renderer/src/components/chat/TodoCapsule.css'), 'utf8')
 
-describe('TaskCapsule theme colors', () => {
+describe('TodoCapsule theme colors', () => {
   it('uses app theme tokens for surfaces and text instead of missing light fallbacks', () => {
     expect(css).toContain('background: var(--bg-panel);')
     expect(css).toContain('color: var(--text-main);')
@@ -17,7 +17,7 @@ describe('TaskCapsule theme colors', () => {
   })
 
   it('keeps dark floating-card depth inside the dark theme', () => {
-    expect(css).toContain('.dark .task-capsule-wrapper .plan-capsule')
-    expect(css).toContain('.dark .task-capsule-wrapper .plan-capsule-popover')
+    expect(css).toContain('.dark .todo-capsule-wrapper .plan-capsule')
+    expect(css).toContain('.dark .todo-capsule-wrapper .plan-capsule-popover')
   })
 })

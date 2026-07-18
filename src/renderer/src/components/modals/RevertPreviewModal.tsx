@@ -1,10 +1,10 @@
-import React from 'react'
+﻿import React from 'react'
 import Button from '../ui/Button'
 import Flex from '../ui/Flex'
 import Stack from '../ui/Stack'
 import Card from '../ui/Card'
 import IconClose from '../icons/IconClose'
-import './TaskHistoryModal.css' // Reusing the modal overlay and card styles
+import './ExecutionHistoryModal.css' // Reusing the modal overlay and card styles
 
 interface RevertPreviewModalProps {
   toDelete: string[]

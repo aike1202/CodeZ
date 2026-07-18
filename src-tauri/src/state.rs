@@ -1,4 +1,4 @@
-use std::sync::Arc;
+﻿use std::sync::Arc;
 
 use codez_core::{AppPaths, AtomicPersistence};
 use codez_mcp::{McpProjectConfigService, McpSecretService, McpUserConfigService};
@@ -15,7 +15,7 @@ use codez_runtime::mutation_coordinator::FileMutationCoordinator;
 use codez_runtime::permission::store::WorkspacePermissionStore;
 use codez_runtime::session_deletion::SessionDeletionService;
 use codez_runtime::session_maintenance::SessionMaintenanceCoordinator;
-use codez_runtime::task::TaskStore;
+use codez_runtime::todo::TodoStore;
 use codez_runtime::{CancellationTree, HostPreferences, ShutdownCoordinator, SystemService};
 use codez_storage::{AtomicFileStore, OsCredentialStore, RecentProjectsStore};
 use tokio::sync::Mutex;
@@ -52,7 +52,7 @@ pub(crate) struct AppState {
     pub(crate) subagent_settings: Mutex<()>,
     pub(crate) subagent_runtime: Arc<SubAgentRuntime>,
     pub(crate) agent_runtime: Arc<AgentRuntime>,
-    pub(crate) task_store: Arc<TaskStore>,
+    pub(crate) todo_store: Arc<TodoStore>,
     pub(crate) workspace_permissions: Arc<WorkspacePermissionStore>,
     pub(crate) mcp_config: Arc<McpUserConfigService>,
     pub(crate) mcp_project_config: Arc<McpProjectConfigService>,

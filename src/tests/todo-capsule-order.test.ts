@@ -1,18 +1,18 @@
-import { describe, expect, it } from 'vitest'
-import type { TaskItem } from '../shared/types/task'
+﻿import { describe, expect, it } from 'vitest'
+import type { TodoItem } from '../shared/types/todo'
 import {
-  getRemainingTaskCount,
-  getTaskDisplayTasks
-} from '../renderer/src/components/chat/TaskCapsule.order'
+  getRemainingTodoCount,
+  getTodoDisplayItems
+} from '../renderer/src/components/chat/TodoCapsule.order'
 
-const task = (id: string, status: TaskItem['status']): TaskItem => ({
+const task = (id: string, status: TodoItem['status']): TodoItem => ({
   id,
   status,
   subject: id,
   description: id
 })
 
-describe('TaskCapsule task projection', () => {
+describe('TodoCapsule task projection', () => {
   it('keeps every task visible in original list order', () => {
     const tasks = [
       task('completed-first', 'completed'),
@@ -22,7 +22,7 @@ describe('TaskCapsule task projection', () => {
       task('pending-fifth', 'pending')
     ]
 
-    expect(getTaskDisplayTasks(tasks).map((item) => item.id)).toEqual([
+    expect(getTodoDisplayItems(tasks).map((item) => item.id)).toEqual([
       'completed-first',
       'pending-second',
       'running-third',
@@ -37,12 +37,12 @@ describe('TaskCapsule task projection', () => {
       task('stopped', 'cancelled')
     ]
 
-    expect(getTaskDisplayTasks(tasks)).toEqual(tasks)
-    expect(getRemainingTaskCount(tasks)).toBe(0)
+    expect(getTodoDisplayItems(tasks)).toEqual(tasks)
+    expect(getRemainingTodoCount(tasks)).toBe(0)
   })
 
   it('counts only pending and in-progress tasks as remaining', () => {
-    expect(getRemainingTaskCount([
+    expect(getRemainingTodoCount([
       task('done', 'completed'),
       task('waiting', 'pending'),
       task('running', 'in_progress'),

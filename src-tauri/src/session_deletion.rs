@@ -1,4 +1,4 @@
-use std::sync::Arc;
+﻿use std::sync::Arc;
 
 use codez_core::{AppError, PortFuture, SessionId};
 use codez_runtime::{
@@ -9,7 +9,7 @@ use codez_runtime::{
     fingerprint::ReadFingerprintStore,
     history_revert::HistoryRevertService,
     session_deletion::{SessionDeletionOperations, SessionDeletionStep},
-    task::TaskStore,
+    todo::TodoStore,
 };
 use codez_storage::SessionStore;
 
@@ -21,7 +21,7 @@ pub(crate) struct SessionDeletionDependencies {
     pub(crate) edit_transaction: Arc<EditTransactionService>,
     pub(crate) subagent_runtime: Arc<SubAgentRuntime>,
     pub(crate) agent_runtime: Arc<AgentRuntime>,
-    pub(crate) task_store: Arc<TaskStore>,
+    pub(crate) todo_store: Arc<TodoStore>,
     pub(crate) attachment: Arc<AttachmentService>,
     pub(crate) model_ledger: Arc<ModelLedgerStore>,
     pub(crate) fingerprint: Arc<ReadFingerprintStore>,
@@ -70,9 +70,9 @@ impl SessionDeletionOperations for DesktopSessionDeletionOperations {
                         .cleanup_session(session_id)
                         .await?;
                 }
-                SessionDeletionStep::Tasks => {
+                SessionDeletionStep::Todos => {
                     self.dependencies
-                        .task_store
+                        .todo_store
                         .cleanup_session(session_id)
                         .await?;
                 }

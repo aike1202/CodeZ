@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+﻿import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'fs/promises'
 import os from 'os'
 import path from 'path'
@@ -6,14 +6,11 @@ import { AgentRunner, unwrapModelToolResultForUi } from '../main/agent/AgentRunn
 import { ModelLedgerStore } from '../main/services/context/ModelLedgerStore'
 import { SessionRuntimeCoordinator } from '../main/services/context/SessionRuntimeCoordinator'
 import { ModelContextBuilder } from '../main/services/context/ModelContextBuilder'
-import { TaskStore } from '../main/services/TaskStore'
 import type { ContextBudgetSnapshot } from '../shared/types/context'
 
 const dirs: string[] = []
-const taskSessions: string[] = []
 afterEach(async () => {
   delete process.env.CODEZ_TOOL_RUNTIME_V2
-  for (const sessionId of taskSessions.splice(0)) TaskStore.getInstance().restore(sessionId, [])
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
@@ -35,7 +32,7 @@ describe('AgentRunner canonical ledger path', () => {
     const ledger = new ModelLedgerStore(path.join(root, 'runtime'))
     const runtime = new SessionRuntimeCoordinator(ledger)
     const turn = await runtime.beginTurn({
-      sessionId: 's1', contextScopeId: 'main', text: 'list tasks', providerId: 'p1', model: 'm1'
+      sessionId: 's1', contextScopeId: 'main', text: 'list files', providerId: 'p1', model: 'm1'
     })
     const builder = new ModelContextBuilder(ledger)
     const order: string[] = []
@@ -51,7 +48,7 @@ describe('AgentRunner canonical ledger path', () => {
       streamChat: vi.fn(async (_config: unknown, callbacks: any) => {
         sample++
         if (sample === 1) {
-          callbacks.onChunk('', '', [{ index: 0, id: 'c1', function: { name: 'TodoUpdate', arguments: '{"updates":[{"todoId":"t1","status":"completed"}]}' } }])
+          callbacks.onChunk('', '', [{ index: 0, id: 'c1', function: { name: 'list_files', arguments: '{}' } }])
           callbacks.onDone('', 'tool_calls')
         } else {
           callbacks.onChunk('done', '')
@@ -63,7 +60,7 @@ describe('AgentRunner canonical ledger path', () => {
     }
     const toolManager = {
       getToolDefinitions: () => [],
-      getTool: () => ({ execute: async () => 'task result' })
+      getTool: () => ({ execute: async () => 'file list result' })
     }
     const transaction = {
       beginTransaction: async () => 'tx1',
@@ -77,7 +74,7 @@ describe('AgentRunner canonical ledger path', () => {
 
     await runner.run({
       baseUrl: 'https://example.test', apiKey: 'key', model: 'm1', workspaceRoot: root,
-      tools: [{ type: 'function', function: { name: 'TodoUpdate', description: 'update', parameters: { type: 'object' } } }],
+      tools: [{ type: 'function', function: { name: 'list_files', description: 'list', parameters: { type: 'object' } } }],
       providerId: 'p1', runtimeTurn: turn, runtimeCoordinator: runtime, contextBuilder: builder,
       contextCapabilities: { contextWindowTokens: 10_000, maxOutputTokens: 2_000 },
       systemPrompt: 'system'
@@ -110,10 +107,6 @@ describe('AgentRunner canonical ledger path', () => {
     const turn = await runtime.beginTurn({
       sessionId: 'unbounded-s1', contextScopeId: 'main', text: 'inspect repeatedly', providerId: 'p1', model: 'm1'
     })
-    taskSessions.push('unbounded-s1')
-    TaskStore.getInstance().restore('unbounded-s1', [{
-      id: 't1', subject: 'Exercise long tool loop', description: '', status: 'pending'
-    }])
     let sample = 0
     const chatService = {
       streamChat: vi.fn(async (_config: unknown, callbacks: any) => {
@@ -123,14 +116,8 @@ describe('AgentRunner canonical ledger path', () => {
             index: 0,
             id: `call-${sample}`,
             function: {
-              name: 'TodoUpdate',
-              arguments: JSON.stringify({
-                updates: [{
-                  todoId: 't1',
-                  subject: `Exercise long tool loop ${sample}`,
-                  ...(sample === 31 ? { status: 'completed' } : {})
-                }]
-              })
+              name: 'list_files',
+              arguments: '{}'
             }
           }])
           callbacks.onDone('', 'tool_calls')
@@ -159,7 +146,7 @@ describe('AgentRunner canonical ledger path', () => {
 
     await runner.run({
       baseUrl: 'https://example.test', apiKey: 'key', model: 'm1', workspaceRoot: root,
-      tools: [{ type: 'function', function: { name: 'TodoUpdate', description: 'update', parameters: { type: 'object' } } }],
+      tools: [{ type: 'function', function: { name: 'list_files', description: 'list', parameters: { type: 'object' } } }],
       providerId: 'p1', runtimeTurn: turn, runtimeCoordinator: runtime,
       contextBuilder: new ModelContextBuilder(ledger),
       contextCapabilities: { contextWindowTokens: 100_000, maxOutputTokens: 2_000 },
@@ -236,62 +223,6 @@ describe('AgentRunner canonical ledger path', () => {
     expect(onDone).toHaveBeenCalledWith('', 'tool_calls', 'tx-failure-limit')
     expect(rollback).not.toHaveBeenCalled()
     expect((await ledger.load('failure-s1')).scopes.main.lastCompletedTurnId).toBe(turn.turnId)
-  })
-
-  it('pauses after three unchanged text-only turns with active tasks', async () => {
-    const sessionId = 'idle-s1'
-    taskSessions.push(sessionId)
-    TaskStore.getInstance().restore(sessionId, [{
-      id: 't1',
-      subject: 'Finish implementation',
-      description: '',
-      status: 'in_progress'
-    }])
-    const root = await mkdtemp(path.join(os.tmpdir(), 'codez-runner-idle-'))
-    dirs.push(root)
-    const ledger = new ModelLedgerStore(path.join(root, 'runtime'))
-    const runtime = new SessionRuntimeCoordinator(ledger)
-    const continuationSpy = vi.spyOn(runtime, 'recordUserContinuation')
-    const turn = await runtime.beginTurn({
-      sessionId, contextScopeId: 'main', text: 'finish the task', providerId: 'p1', model: 'm1'
-    })
-    let sample = 0
-    const chatService = {
-      streamChat: vi.fn(async (_config: unknown, callbacks: any) => {
-        sample++
-        const content = `progress update ${sample}`
-        callbacks.onChunk(content, '')
-        callbacks.onDone(content, 'stop')
-      }),
-      abort: vi.fn()
-    }
-    const runner = new AgentRunner({
-      chatService: chatService as any,
-      toolManager: { getToolDefinitions: () => [] } as any,
-      editTransactionService: {
-        beginTransaction: async () => 'tx-idle',
-        rollback: async () => undefined
-      } as any
-    })
-    const onDone = vi.fn()
-
-    await runner.run({
-      baseUrl: 'https://example.test', apiKey: 'key', model: 'm1', workspaceRoot: root,
-      tools: [], providerId: 'p1', runtimeTurn: turn, runtimeCoordinator: runtime,
-      contextBuilder: new ModelContextBuilder(ledger),
-      contextCapabilities: { contextWindowTokens: 10_000, maxOutputTokens: 2_000 },
-      systemPrompt: 'system'
-    }, {
-      onChunk: () => undefined,
-      onDone,
-      onError: (error) => { throw new Error(error) }
-    })
-
-    expect(chatService.streamChat).toHaveBeenCalledTimes(3)
-    expect(continuationSpy).toHaveBeenCalledTimes(2)
-    expect(continuationSpy.mock.calls.every(([, message]) => message.includes('<internal_continuation>'))).toBe(true)
-    expect(onDone).toHaveBeenCalledWith('progress update 3', 'stop', 'tx-idle')
-    expect((await ledger.load(sessionId)).scopes.main.lastCompletedTurnId).toBe(turn.turnId)
   })
 
   it('converts a degraded text clarification to an AskUserQuestion tool call', async () => {

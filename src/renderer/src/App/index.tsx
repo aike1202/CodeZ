@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+﻿import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import Sidebar from '../components/Sidebar'
 import TopBar from '../components/TopBar'
 import AppLayout from '../components/layout/AppLayout'
@@ -7,7 +7,7 @@ import McpReverseRequestApproval from '../components/McpReverseRequestApproval'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useProviderStore } from '../stores/providerStore'
 import { useChatStore, type SubAgentRecord } from '../stores/chatStore'
-import TaskHistoryModal from '../components/modals/TaskHistoryModal'
+import ExecutionHistoryModal from '../components/modals/ExecutionHistoryModal'
 import PlanListModal from '../components/chat/PlanListModal'
 import ChatArea from '../components/chat/ChatArea'
 import RightWorkspacePanel, {
@@ -339,7 +339,7 @@ function ActiveApp(): React.ReactElement {
       />
 
       {taskModalOpen && workspace && (
-        <TaskHistoryModal
+        <ExecutionHistoryModal
           workspaceId={workspace.id}
           onClose={() => setTaskModalOpen(false)}
         />

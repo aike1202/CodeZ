@@ -1,4 +1,4 @@
-import React from 'react'
+﻿import React from 'react'
 import { Braces, Check, FileText, MessageCircleQuestion, X } from 'lucide-react'
 import { getFileIconComponent } from '../ExecutionLog/utils'
 import { FolderIcon } from '@react-symbols/icons/utils'
@@ -6,7 +6,7 @@ import { parseArgs } from '../../../utils/parseArgs'
 import IconSkills from '../../icons/IconSkills'
 import MarkdownDetail from '../MarkdownDetail'
 import type { ExecutionLogDetailProps } from './types'
-import { parseTaskUpdateDetail } from './taskUpdateDetail'
+import { parseTodoUpdateDetail } from './todoUpdateDetail'
 import './ExecutionLogDetail.css'
 
 function SkillValue({ value }: { value: unknown }): React.ReactElement {
@@ -393,43 +393,43 @@ export default function ExecutionLogDetail({
         if (item.detail) parsedResult = JSON.parse(item.detail)
       } catch {}
 
-      const taskUpdateDetail = isTodoUpdate
-        ? parseTaskUpdateDetail(item.detail)
+      const todoUpdateDetail = isTodoUpdate
+        ? parseTodoUpdateDetail(item.detail)
         : null
-      const task = taskUpdateDetail?.task
-      const isTerminalTask = task?.status === 'completed' || task?.status === 'cancelled'
-      const terminalStatusLabel = task?.status === 'completed' ? '已完成' : '已取消'
+      const todo = todoUpdateDetail?.todo
+      const isTerminalTodo = todo?.status === 'completed' || todo?.status === 'cancelled'
+      const terminalStatusLabel = todo?.status === 'completed' ? '已完成' : '已取消'
 
       return (
         <div className="exe-log-cmd-details-box">
-          {isTodoUpdate && task && isTerminalTask && (
-            <div className="exe-log-task-detail">
-              <div className="exe-log-task-detail-row">
+          {isTodoUpdate && todo && isTerminalTodo && (
+            <div className="exe-log-todo-detail">
+              <div className="exe-log-todo-detail-row">
                 <span className="exe-log-param-key">最终状态</span>
                 <span className="exe-log-param-val">{terminalStatusLabel}</span>
               </div>
-              {task.description && (
-                <div className="exe-log-task-detail-row">
+              {todo.description && (
+                <div className="exe-log-todo-detail-row">
                   <span className="exe-log-param-key">描述</span>
-                  <span className="exe-log-param-val">{task.description}</span>
+                  <span className="exe-log-param-val">{todo.description}</span>
                 </div>
               )}
-              {task.files && task.files.length > 0 && (
-                <div className="exe-log-task-detail-row">
+              {todo.files && todo.files.length > 0 && (
+                <div className="exe-log-todo-detail-row">
                   <span className="exe-log-param-key">涉及文件</span>
-                  <span className="exe-log-param-val">{task.files.join('\n')}</span>
+                  <span className="exe-log-param-val">{todo.files.join('\n')}</span>
                 </div>
               )}
-              {task.acceptanceCriteria && task.acceptanceCriteria.length > 0 && (
-                <div className="exe-log-task-detail-row">
+              {todo.acceptanceCriteria && todo.acceptanceCriteria.length > 0 && (
+                <div className="exe-log-todo-detail-row">
                   <span className="exe-log-param-key">验收标准</span>
-                  <span className="exe-log-param-val">{task.acceptanceCriteria.join('\n')}</span>
+                  <span className="exe-log-param-val">{todo.acceptanceCriteria.join('\n')}</span>
                 </div>
               )}
-              {task.verificationCommand && (
-                <div className="exe-log-task-detail-row">
+              {todo.verificationCommand && (
+                <div className="exe-log-todo-detail-row">
                   <span className="exe-log-param-key">验证命令</span>
-                  <code className="exe-log-task-command">{task.verificationCommand}</code>
+                  <code className="exe-log-todo-command">{todo.verificationCommand}</code>
                 </div>
               )}
             </div>

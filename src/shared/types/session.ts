@@ -1,4 +1,4 @@
-import type { TaskItem } from './task'
+﻿import type { TodoItem } from './todo'
 import type { SessionRuntimeRef } from './context'
 import type { ImageAttachment } from './attachment'
 import type { QueuedPrompt } from './queuedPrompt'
@@ -14,8 +14,6 @@ export interface SessionData {
   isDeleted?: boolean
   deletedAt?: number
   linkedPlanSlug?: string
-  /** 轻量任务清单——落盘持久化，会话恢复时加载 */
-  tasks?: TaskItem[]
   queuedPrompts?: QueuedPrompt[]
   runtime?: SessionRuntimeRef
   toolRuntime?: {

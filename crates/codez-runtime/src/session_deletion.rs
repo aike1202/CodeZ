@@ -1,4 +1,4 @@
-use std::{
+﻿use std::{
     collections::HashSet,
     fs, io,
     path::{Path, PathBuf},
@@ -25,7 +25,7 @@ pub enum SessionDeletionStep {
     /// Removes persisted terminal sub-agent runs.
     SubAgentRuns,
     /// Removes the session task snapshot.
-    Tasks,
+    Todos,
     /// Removes promoted image attachments.
     Attachments,
     /// Removes the model context ledger.
@@ -40,7 +40,7 @@ const DELETION_STEPS: [SessionDeletionStep; 8] = [
     SessionDeletionStep::Permissions,
     SessionDeletionStep::EditTransactions,
     SessionDeletionStep::SubAgentRuns,
-    SessionDeletionStep::Tasks,
+    SessionDeletionStep::Todos,
     SessionDeletionStep::Attachments,
     SessionDeletionStep::Ledger,
     SessionDeletionStep::Fingerprints,
@@ -1243,7 +1243,7 @@ mod tests {
         subagent_run_failure_retains_tombstone,
         SessionDeletionStep::SubAgentRuns
     );
-    deletion_step_failure_test!(task_failure_retains_tombstone, SessionDeletionStep::Tasks);
+    deletion_step_failure_test!(todo_failure_retains_tombstone, SessionDeletionStep::Todos);
     deletion_step_failure_test!(
         attachment_failure_retains_tombstone,
         SessionDeletionStep::Attachments

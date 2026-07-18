@@ -53,7 +53,7 @@ export interface PermissionToolAuthorization {
   permissionMode?: PermissionMode
 }
 
-const READ_ONLY_TOOLS = new Set(['Read', 'list_files', 'Glob', 'Grep', 'Skill', 'ActivateSkill', 'DeactivateSkill', 'TodoCreate', 'TodoUpdate', 'update_resume_state', 'AskUserQuestion', 'ToolSearch', 'ToolResultRead', 'ListMcpResourcesTool', 'ReadMcpResourceTool', 'ListMcpResources', 'ReadMcpResource', 'GetMcpPrompt'])
+const READ_ONLY_TOOLS = new Set(['Read', 'list_files', 'Glob', 'Grep', 'Skill', 'ActivateSkill', 'DeactivateSkill', 'update_resume_state', 'AskUserQuestion', 'ToolSearch', 'ToolResultRead', 'ListMcpResourcesTool', 'ReadMcpResourceTool', 'ListMcpResources', 'ReadMcpResource', 'GetMcpPrompt'])
 const WRITE_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
 const WEB_TOOLS = new Set(['WebSearch', 'WebFetch'])
 const EXTERNAL_EFFECT_TOOLS = new Map<string, { reason: string; ruleId: string; riskLevel: PermissionRiskLevel }>([

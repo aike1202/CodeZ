@@ -1,12 +1,12 @@
-import React from 'react'
+﻿import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { TaskCapsule } from '../renderer/src/components/chat/TaskCapsule'
-import type { TaskItem } from '../shared/types/task'
+import { TodoCapsule } from '../renderer/src/components/chat/TodoCapsule'
+import type { TodoItem } from '../shared/types/todo'
 
 const mockChatState = vi.hoisted(() => ({
-  tasks: [] as TaskItem[],
-  expandedCapsule: null as 'task' | 'plan' | null,
+  tasks: [] as TodoItem[],
+  expandedCapsule: null as 'todo' | 'plan' | null,
   setExpandedCapsule: vi.fn()
 }))
 
@@ -14,7 +14,7 @@ vi.mock('../renderer/src/stores/chatStore', () => ({
   useChatStore: (selector: (state: typeof mockChatState) => unknown) => selector(mockChatState)
 }))
 
-const activeTasks: TaskItem[] = [
+const activeTasks: TodoItem[] = [
   {
     id: 't1',
     subject: 'Keep Task state session-scoped',
@@ -23,7 +23,7 @@ const activeTasks: TaskItem[] = [
   }
 ]
 
-describe('TaskCapsule session state', () => {
+describe('TodoCapsule session state', () => {
   beforeEach(() => {
     mockChatState.tasks = activeTasks
     mockChatState.expandedCapsule = null
@@ -31,11 +31,11 @@ describe('TaskCapsule session state', () => {
   })
 
   it('renders its popover only when the session-scoped task capsule is expanded', () => {
-    const collapsed = renderToStaticMarkup(React.createElement(TaskCapsule))
+    const collapsed = renderToStaticMarkup(React.createElement(TodoCapsule))
     expect(collapsed).not.toContain('plan-capsule-popover')
 
-    mockChatState.expandedCapsule = 'task'
-    const expanded = renderToStaticMarkup(React.createElement(TaskCapsule))
+    mockChatState.expandedCapsule = 'todo'
+    const expanded = renderToStaticMarkup(React.createElement(TodoCapsule))
     expect(expanded).toContain('plan-capsule-popover')
     expect(expanded).toContain('Keep Task state session-scoped')
   })
@@ -55,9 +55,9 @@ describe('TaskCapsule session state', () => {
         status: 'pending',
       },
     ]
-    mockChatState.expandedCapsule = 'task'
+    mockChatState.expandedCapsule = 'todo'
 
-    const rendered = renderToStaticMarkup(React.createElement(TaskCapsule))
+    const rendered = renderToStaticMarkup(React.createElement(TodoCapsule))
 
     expect(rendered).toContain('Implement the active Todo')
     expect(rendered).toContain('执行中')
@@ -82,9 +82,9 @@ describe('TaskCapsule session state', () => {
         approvalStatus: 'pending',
       },
     ]
-    mockChatState.expandedCapsule = 'task'
+    mockChatState.expandedCapsule = 'todo'
 
-    const rendered = renderToStaticMarkup(React.createElement(TaskCapsule))
+    const rendered = renderToStaticMarkup(React.createElement(TodoCapsule))
 
     expect(rendered).toContain('已阻塞')
     expect(rendered).toContain('等待审批 · 等待: Complete prerequisite')

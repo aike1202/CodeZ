@@ -1,17 +1,17 @@
-import { create } from 'zustand'
+﻿import { create } from 'zustand'
 
 import type {
   AgentRuntimeSnapshot,
-  TodoListSnapshot as TaskSnapshot
+  TodoListSnapshot
 } from '../shared/desktop/generated/contracts'
 
 export type SnapshotApplyResult = 'applied' | 'ignored' | 'gap'
 
 interface DesktopLifecycleState {
-  taskSnapshots: Record<string, TaskSnapshot | undefined>
+  todoSnapshots: Record<string, TodoListSnapshot | undefined>
   agentSnapshots: Record<string, AgentRuntimeSnapshot | undefined>
-  applyTaskEvent(snapshot: TaskSnapshot): SnapshotApplyResult
-  applyTaskSnapshot(snapshot: TaskSnapshot): SnapshotApplyResult
+  applyTodoEvent(snapshot: TodoListSnapshot): SnapshotApplyResult
+  applyTodoSnapshot(snapshot: TodoListSnapshot): SnapshotApplyResult
   applyAgentEvent(snapshot: AgentRuntimeSnapshot): SnapshotApplyResult
   applyAgentSnapshot(snapshot: AgentRuntimeSnapshot): SnapshotApplyResult
   clearSession(sessionId: string): void
@@ -28,32 +28,32 @@ function classifyRevision(
 }
 
 export const useDesktopLifecycleStore = create<DesktopLifecycleState>((set, get) => ({
-  taskSnapshots: {},
+  todoSnapshots: {},
   agentSnapshots: {},
 
-  applyTaskEvent: (snapshot) => {
+  applyTodoEvent: (snapshot) => {
     const result = classifyRevision(
-      get().taskSnapshots[snapshot.sessionId]?.revision,
+      get().todoSnapshots[snapshot.sessionId]?.revision,
       snapshot.revision,
       false
     )
     if (result === 'applied') {
       set((state) => ({
-        taskSnapshots: { ...state.taskSnapshots, [snapshot.sessionId]: snapshot }
+        todoSnapshots: { ...state.todoSnapshots, [snapshot.sessionId]: snapshot }
       }))
     }
     return result
   },
 
-  applyTaskSnapshot: (snapshot) => {
+  applyTodoSnapshot: (snapshot) => {
     const result = classifyRevision(
-      get().taskSnapshots[snapshot.sessionId]?.revision,
+      get().todoSnapshots[snapshot.sessionId]?.revision,
       snapshot.revision,
       true
     )
     if (result === 'applied') {
       set((state) => ({
-        taskSnapshots: { ...state.taskSnapshots, [snapshot.sessionId]: snapshot }
+        todoSnapshots: { ...state.todoSnapshots, [snapshot.sessionId]: snapshot }
       }))
     }
     return result
@@ -88,10 +88,10 @@ export const useDesktopLifecycleStore = create<DesktopLifecycleState>((set, get)
   },
 
   clearSession: (sessionId) => set((state) => {
-    const taskSnapshots = { ...state.taskSnapshots }
+    const todoSnapshots = { ...state.todoSnapshots }
     const agentSnapshots = { ...state.agentSnapshots }
-    delete taskSnapshots[sessionId]
+    delete todoSnapshots[sessionId]
     delete agentSnapshots[sessionId]
-    return { taskSnapshots, agentSnapshots }
+    return { todoSnapshots, agentSnapshots }
   })
 }))

@@ -1,20 +1,20 @@
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+﻿import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
 import type {
   AgentUpdatedEvent,
   DesktopEvent,
   SubAgentRunState,
-  TodoItem as TaskItem,
-  TodoUpdatedEvent as TaskUpdatedEvent,
+  TodoItem,
+  TodoUpdatedEvent,
   ThemeInfo
 } from './generated/contracts'
 
 const THEME_CHANGED_EVENT = 'desktop://theme-changed'
-const TASK_UPDATED_EVENT = 'todo:updated'
+const TODO_UPDATED_EVENT = 'todo:updated'
 const AGENT_UPDATED_EVENT = 'agent:updated'
 const SUBAGENT_STATE_EVENT = 'subagent:state'
 
-const legacyTaskRevisions = new Map<string, number>()
+const legacyTodoRevisions = new Map<string, number>()
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -30,7 +30,7 @@ function isTauriRuntime(): boolean {
   return !(window as unknown as { api?: Window['api'] }).api
 }
 
-export function isTaskUpdatedEvent(value: unknown): value is TaskUpdatedEvent {
+export function isTodoUpdatedEvent(value: unknown): value is TodoUpdatedEvent {
   if (!isRecord(value) || !isRecord(value.snapshot)) return false
   return value.version === 1
     && typeof value.sessionId === 'string'
@@ -65,7 +65,7 @@ function isSubAgentRunState(value: unknown): value is SubAgentRunState {
     && ['running', 'completed', 'failed', 'interrupted'].includes(String(value.status))
 }
 
-function legacyTaskItems(value: unknown): TaskItem[] {
+function legacyTodoItems(value: unknown): TodoItem[] {
   if (!Array.isArray(value)) return []
   return value.filter(isRecord).flatMap((item) => {
     if (
@@ -83,11 +83,11 @@ function legacyTaskItems(value: unknown): TaskItem[] {
       approvalStatus: typeof item.approvalStatus === 'string'
         ? item.approvalStatus
         : requiresApproval ? 'pending' : 'not_required'
-    } as TaskItem]
+    } as TodoItem]
   })
 }
 
-function legacyTaskListener(callback: (event: TaskUpdatedEvent) => void): UnlistenFn {
+function legacyTodoListener(callback: (event: TodoUpdatedEvent) => void): UnlistenFn {
   const task = (window as unknown as {
     api?: {
       task?: {
@@ -100,8 +100,8 @@ function legacyTaskListener(callback: (event: TaskUpdatedEvent) => void): Unlist
   if (!task?.subscribe) return () => undefined
   return task.subscribe((payload) => {
     if (!payload || typeof payload.sessionId !== 'string' || payload.sessionId.length === 0) return
-    const revision = (legacyTaskRevisions.get(payload.sessionId) ?? 0) + 1
-    legacyTaskRevisions.set(payload.sessionId, revision)
+    const revision = (legacyTodoRevisions.get(payload.sessionId) ?? 0) + 1
+    legacyTodoRevisions.set(payload.sessionId, revision)
     callback({
       version: 1,
       sessionId: payload.sessionId,
@@ -111,22 +111,22 @@ function legacyTaskListener(callback: (event: TaskUpdatedEvent) => void): Unlist
         sessionId: payload.sessionId,
         revision,
         nextSequence: 0,
-        items: legacyTaskItems(payload.tasks)
+        items: legacyTodoItems(payload.tasks)
       }
     })
   })
 }
 
-export function getLegacyTaskRevision(sessionId: string): number {
-  return legacyTaskRevisions.get(sessionId) ?? 0
+export function getLegacyTodoRevision(sessionId: string): number {
+  return legacyTodoRevisions.get(sessionId) ?? 0
 }
 
 export interface DesktopEvents {
   theme: {
     onChanged(callback: (event: DesktopEvent<ThemeInfo>) => void): Promise<UnlistenFn>
   }
-  task: {
-    onUpdated(callback: (event: TaskUpdatedEvent) => void): Promise<UnlistenFn>
+  todo: {
+    onUpdated(callback: (event: TodoUpdatedEvent) => void): Promise<UnlistenFn>
   }
   agent: {
     onUpdated(callback: (event: AgentUpdatedEvent) => void): Promise<UnlistenFn>
@@ -142,11 +142,11 @@ export const desktopEvents: DesktopEvents = {
       return listen<DesktopEvent<ThemeInfo>>(THEME_CHANGED_EVENT, (event) => callback(event.payload))
     }
   },
-  task: {
+  todo: {
     onUpdated: async (callback) => {
-      if (!isTauriRuntime()) return legacyTaskListener(callback)
-      return listen<unknown>(TASK_UPDATED_EVENT, (event) => {
-        if (isTaskUpdatedEvent(event.payload)) callback(event.payload)
+      if (!isTauriRuntime()) return legacyTodoListener(callback)
+      return listen<unknown>(TODO_UPDATED_EVENT, (event) => {
+        if (isTodoUpdatedEvent(event.payload)) callback(event.payload)
       })
     }
   },

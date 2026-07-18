@@ -1,10 +1,10 @@
-use crate::chat::prompt::modules::{
+﻿use crate::chat::prompt::modules::{
     available_tools::AvailableToolsModule, context_management::ContextManagementModule,
     editing::EditingModule, engineering_philosophy::EngineeringPhilosophyModule,
     environment::EnvironmentModule, git_status::GitStatusModule, identity::IdentityModule,
     memory::MemoryModule, output_policy::OutputPolicyModule,
     repository_rules::RepositoryRulesModule, skills::SkillsModule, sub_agents::SubAgentsModule,
-    task_management::TodoManagementModule, verification::VerificationModule,
+    todo_management::TodoManagementModule, verification::VerificationModule,
     verification_strategy::VerificationStrategyModule, worker_delegation::WorkerDelegationModule,
 };
 use crate::chat::prompt::pipeline::PromptPipeline;

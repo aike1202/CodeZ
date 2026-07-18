@@ -1,4 +1,4 @@
-.task-history-modal-overlay {
+﻿.execution-history-modal-overlay {
   position: fixed;
   inset: 0;
   z-index: 9999;
@@ -10,7 +10,7 @@
   justify-content: center;
 }
 
-.task-history-modal-card {
+.execution-history-modal-card {
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
   width: 100%;
   max-width: 48rem;
@@ -18,104 +18,104 @@
   height: 80vh;
 }
 
-.task-history-modal-header {
+.execution-history-modal-header {
   padding: 16px 20px;
   border-bottom: 1px solid var(--border-light);
   background-color: var(--bg-hover-light);
 }
 
-.task-history-modal-title {
+.execution-history-modal-title {
   font-size: 18px;
   font-weight: 500;
   color: var(--text-main);
   margin: 0;
 }
 
-.task-history-close-btn {
+.execution-history-close-btn {
   padding: 4px;
   color: var(--text-muted);
   border-radius: 6px;
   transition: all 0.2s;
 }
 
-.task-history-close-btn:hover {
+.execution-history-close-btn:hover {
   color: var(--text-main);
   background-color: var(--bg-hover);
 }
 
-.task-history-modal-content {
+.execution-history-modal-content {
   flex: 1;
   overflow-y: auto;
   padding: 20px;
   background-color: rgba(249, 250, 251, 0.3);
 }
 
-.task-history-empty {
+.execution-history-empty {
   text-align: center;
   color: var(--text-muted);
   padding: 40px 0;
 }
 
-.task-card-item {
+.execution-card-item {
   overflow: hidden;
   transition: border-color 0.2s ease;
 }
 
-.task-card-item:hover {
+.execution-card-item:hover {
   border-color: var(--border-hover);
 }
 
-.task-item-header {
+.execution-item-header {
   padding: 12px 16px;
   cursor: pointer;
 }
 
-.task-title {
+.execution-title {
   font-size: 14px;
   font-weight: 500;
   color: var(--text-main);
 }
 
-.task-time {
+.execution-time {
   font-size: 12px;
   color: var(--text-muted);
   margin-top: 4px;
 }
 
-.task-badge {
+.execution-badge {
   font-size: 12px;
   padding: 2px 8px;
   border-radius: 9999px;
 }
 
-.task-badge-completed {
+.execution-badge-completed {
   background-color: var(--bg-success-light);
   color: var(--text-success);
 }
 
-.task-badge-failed {
+.execution-badge-failed {
   background-color: var(--bg-danger-light);
   color: var(--text-danger);
 }
 
-.task-badge-running {
+.execution-badge-running {
   background-color: var(--bg-info-light);
   color: var(--text-info);
 }
 
-.task-delete-btn {
+.execution-delete-btn {
   padding: 6px;
   color: var(--text-muted);
   border-radius: 6px;
   transition: all 0.2s ease;
 }
 
-.task-delete-btn:hover {
+.execution-delete-btn:hover {
   color: var(--text-danger);
   background-color: var(--bg-danger-hover);
 }
 
-.task-details-box {
+.execution-details-box {
   padding: 16px;
   border-top: 1px solid var(--border-light);
   margin-top: 8px;
@@ -124,20 +124,20 @@
   background-color: var(--bg-hover-light);
 }
 
-.task-detail-section-title {
+.execution-detail-section-title {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-muted);
   margin-bottom: 4px;
 }
 
-.task-file-list {
+.execution-file-list {
   list-style-type: disc;
   list-style-position: inside;
   color: var(--text-muted);
 }
 
-.task-cmd-list {
+.execution-cmd-list {
   list-style-type: disc;
   list-style-position: inside;
   color: var(--text-muted);

@@ -1,4 +1,4 @@
-// src/main/services/prompts/PromptBuilder.ts
+﻿// src/main/services/prompts/PromptBuilder.ts
 //
 // 注册顺序 = Agent 生命周期顺序。
 // Transformer 顺序阅读 Prompt，顺序直接影响规则遵守概率：
@@ -26,8 +26,6 @@ import { VerificationStrategyModule } from './context/VerificationStrategy'
 // 顺序 = Agent 执行管线：Investigate → Edit → Verify → Recover → Complete
 import { EditingModule } from './execution/Editing'
 import { VerificationModule } from './execution/Verification'
-// ── Layer 3: Execution — Workflow Gates ──────────
-import { TodoManagementModule } from './execution/TaskManagement'
 import { WorkerDelegationModule } from './execution/WorkerDelegation'
 // ── Layer 3: Execution — Support ─────────────────
 import { OutputPolicyModule } from './execution/OutputPolicy'
@@ -55,7 +53,6 @@ export function createDefaultPipeline(): PromptPipeline {
     .register(EditingModule)
     .register(VerificationModule)
     // Layer 3: Execution — Workflow Gates
-    .register(TodoManagementModule)
     .register(WorkerDelegationModule)
     // Layer 3: Execution — Support
     .register(OutputPolicyModule)

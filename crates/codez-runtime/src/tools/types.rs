@@ -99,7 +99,8 @@ pub enum ToolEffect {
         execution_id: String,
         action: String,
     },
-    MutateTaskState {
+    #[serde(rename = "mutate-task-state")]
+    MutateTodoState {
         session_id: Option<String>,
     },
     ReadMemory {

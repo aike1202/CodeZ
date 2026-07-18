@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+﻿use std::path::PathBuf;
 
 use codez_contracts::CommandError;
 use codez_core::{AppError, SessionId};
@@ -233,7 +233,7 @@ mod tests {
                     SessionDeletionStep::Permissions
                     | SessionDeletionStep::EditTransactions
                     | SessionDeletionStep::SubAgentRuns
-                    | SessionDeletionStep::Tasks
+                    | SessionDeletionStep::Todos
                     | SessionDeletionStep::Fingerprints => {}
                 }
                 Ok(())
@@ -433,7 +433,7 @@ mod tests {
                     SessionDeletionStep::Permissions,
                     SessionDeletionStep::EditTransactions,
                     SessionDeletionStep::SubAgentRuns,
-                    SessionDeletionStep::Tasks,
+                    SessionDeletionStep::Todos,
                     SessionDeletionStep::Attachments,
                     SessionDeletionStep::Ledger,
                     SessionDeletionStep::Fingerprints,

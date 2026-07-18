@@ -14,11 +14,11 @@ import { fingerprint } from './canonicalJson'
 
 const READ_ONLY = new Set([
   'Read', 'list_files', 'Glob', 'Grep', 'Skill', 'ActivateSkill', 'DeactivateSkill',
-  'TodoCreate', 'TodoUpdate', 'update_resume_state', 'AskUserQuestion', 'ToolSearch', 'ToolResultRead',
+  'update_resume_state', 'AskUserQuestion', 'ToolSearch', 'ToolResultRead',
   'ListMcpResourcesTool', 'ReadMcpResourceTool', 'GetMcpPrompt', 'wait_agent', 'list_agents'
 ])
 const APPROVAL_NOT_APPLICABLE = new Set([
-  'Read', 'list_files', 'Glob', 'Grep', 'TodoCreate', 'TodoUpdate',
+  'Read', 'list_files', 'Glob', 'Grep',
   'AskUserQuestion', 'ToolSearch', 'ToolResultRead', 'ListMcpResourcesTool',
   'ReadMcpResourceTool', 'GetMcpPrompt', 'send_message', 'wait_agent', 'list_agents',
   'interrupt_agent'
@@ -34,8 +34,6 @@ const DEFERRED = new Set([
   'followup_task', 'send_message', 'wait_agent', 'list_agents', 'interrupt_agent'
 ])
 const EXCLUSIVE = new Set(['AskUserQuestion'])
-const TODO_TOOLS = new Set(['TodoCreate', 'TodoUpdate'])
-const MUTATING_TODO_TOOLS = new Set(['TodoCreate', 'TodoUpdate'])
 const COMPATIBILITY_ALIASES: Readonly<Record<string, readonly string[]>> = Object.freeze({
   ListMcpResourcesTool: ['ListMcpResources'],
   ReadMcpResourceTool: ['ReadMcpResource']
@@ -164,7 +162,7 @@ async function planLegacyEffects(
       executionId: String(input.execution_id || ''),
       action: String(input.action || '')
     })
-  } else if (MUTATING_TODO_TOOLS.has(name) || name === 'update_resume_state') {
+  } else if (name === 'update_resume_state') {
     effects.push({ kind: 'mutate-task-state', sessionId: context.sessionId })
   } else if (name === 'AskUserQuestion') {
     effects.push({ kind: 'user-interaction', channel: 'ask-user' })
@@ -211,7 +209,6 @@ async function resourceKeysFor(
     const access = ['Edit', 'Write', 'NotebookEdit'].includes(name) ? 'write' : 'read'
     return [`file:${resolvePath(filePath, context.workspaceRoot)}:${access}`]
   }
-  if (TODO_TOOLS.has(name)) return [`session:${context.sessionId || 'unknown'}:todos`]
   if (name === 'Skill' || name === 'ActivateSkill' || name === 'DeactivateSkill') {
     return [`session:${context.sessionId || 'unknown'}:skills`]
   }
@@ -254,7 +251,7 @@ export class LegacyToolAdapter implements ToolHandler<Record<string, unknown>, u
         concurrency: EXCLUSIVE.has(legacyTool.name)
           ? 'exclusive'
           : [
-              'Edit', 'Write', 'NotebookEdit', 'TodoCreate', 'TodoUpdate',
+              'Edit', 'Write', 'NotebookEdit',
               'Skill', 'ActivateSkill', 'DeactivateSkill', 'spawn_agent', 'followup_task',
               'send_message', 'interrupt_agent'
             ].includes(legacyTool.name)

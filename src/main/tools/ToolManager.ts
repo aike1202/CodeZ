@@ -1,4 +1,4 @@
-import { Tool } from './Tool'
+﻿import { Tool } from './Tool'
 import { ListFilesTool } from './builtin/ListFilesTool'
 import { ReadTool } from './builtin/ReadTool'
 import { EditTool } from './builtin/EditTool'
@@ -11,8 +11,6 @@ import { PowerShellTool } from './builtin/PowerShellTool'
 import { AskUserQuestionTool } from './builtin/AskUserQuestionTool'
 import { PushNotificationTool } from './builtin/PushNotificationTool'
 import { SubAgentRunnerTool } from './builtin/SubAgentRunnerTool'
-import { TodoCreateTool } from './builtin/TaskCreateTool'
-import { TodoUpdateTool } from './builtin/TaskUpdateTool'
 import { ActivateSkillTool, SkillTool } from './builtin/SkillTool'
 import { DeactivateSkillTool } from './builtin/DeactivateSkillTool'
 import { RollbackLastEditTool } from './builtin/RollbackLastEditTool'
@@ -95,9 +93,7 @@ export class ToolManager {
       new WaitAgentTool(),
       new ListAgentsTool(),
       new InterruptAgentTool(),
-      new SubAgentRunnerTool(),
-      new TodoCreateTool(),
-      new TodoUpdateTool()
+      new SubAgentRunnerTool()
     ]
     
     for (const tool of builtinTools) {

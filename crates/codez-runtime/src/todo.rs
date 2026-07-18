@@ -1,4 +1,4 @@
-use std::{
+﻿use std::{
     collections::HashSet,
     path::{Component, Path, PathBuf},
     sync::Arc,
@@ -9,10 +9,11 @@ use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-const TASK_DIRECTORY: &str = "tasks";
-const TASK_SNAPSHOT_VERSION: u16 = 1;
-const MAX_TASK_DOCUMENT_BYTES: usize = 2 * 1024 * 1024;
-const MAX_TASKS: usize = 256;
+// Keep the legacy directory name so existing sessions remain readable after the Todo rename.
+const TODO_DIRECTORY: &str = "tasks";
+const TODO_SNAPSHOT_VERSION: u16 = 1;
+const MAX_TODO_DOCUMENT_BYTES: usize = 2 * 1024 * 1024;
+const MAX_TODOS: usize = 256;
 const MAX_SUBJECT_BYTES: usize = 512;
 const MAX_DESCRIPTION_BYTES: usize = 32 * 1024;
 const MAX_LABEL_BYTES: usize = 1024;
@@ -27,14 +28,14 @@ const MAX_PROMPT_DETAIL_CHARS: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TaskStatus {
+pub enum TodoStatus {
     Pending,
     InProgress,
     Completed,
     Cancelled,
 }
 
-impl TaskStatus {
+impl TodoStatus {
     #[must_use]
     pub const fn is_terminal(self) -> bool {
         matches!(self, Self::Completed | Self::Cancelled)
@@ -43,7 +44,7 @@ impl TaskStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum TaskRiskLevel {
+pub enum TodoRiskLevel {
     Low,
     Medium,
     High,
@@ -51,7 +52,7 @@ pub enum TaskRiskLevel {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TaskApprovalStatus {
+pub enum TodoApprovalStatus {
     NotRequired,
     Pending,
     Approved,
@@ -61,7 +62,7 @@ pub enum TaskApprovalStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct TaskContextBundle {
+pub struct TodoContextBundle {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub known_facts: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -76,11 +77,11 @@ pub struct TaskContextBundle {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct TaskItem {
+pub struct TodoItem {
     pub id: String,
     pub subject: String,
     pub description: String,
-    pub status: TaskStatus,
+    pub status: TodoStatus,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blocked_by: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -94,42 +95,43 @@ pub struct TaskItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub group_subtitle: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub risk_level: Option<TaskRiskLevel>,
+    pub risk_level: Option<TodoRiskLevel>,
     pub requires_approval: bool,
-    pub approval_status: TaskApprovalStatus,
+    pub approval_status: TodoApprovalStatus,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub acceptance_criteria: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verification_command: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub context_bundle: Option<TaskContextBundle>,
+    pub context_bundle: Option<TodoContextBundle>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct TaskSnapshot {
+pub struct TodoListSnapshot {
     pub version: u16,
     pub session_id: SessionId,
     pub revision: u64,
     pub next_sequence: u64,
-    pub tasks: Vec<TaskItem>,
+    #[serde(default, rename = "tasks", alias = "items")]
+    pub items: Vec<TodoItem>,
 }
 
-impl TaskSnapshot {
+impl TodoListSnapshot {
     fn empty(session_id: SessionId) -> Self {
         Self {
-            version: TASK_SNAPSHOT_VERSION,
+            version: TODO_SNAPSHOT_VERSION,
             session_id,
             revision: 0,
             next_sequence: 1,
-            tasks: Vec::new(),
+            items: Vec::new(),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct TaskCreateInput {
+pub struct TodoCreateInput {
     pub subject: String,
     #[serde(default)]
     pub description: String,
@@ -144,22 +146,22 @@ pub struct TaskCreateInput {
     #[serde(default)]
     pub group_subtitle: Option<String>,
     #[serde(default)]
-    pub risk_level: Option<TaskRiskLevel>,
+    pub risk_level: Option<TodoRiskLevel>,
     #[serde(default)]
     pub requires_approval: bool,
     #[serde(default)]
-    pub approval_status: Option<TaskApprovalStatus>,
+    pub approval_status: Option<TodoApprovalStatus>,
     #[serde(default)]
     pub acceptance_criteria: Vec<String>,
     #[serde(default)]
     pub verification_command: Option<String>,
     #[serde(default)]
-    pub context_bundle: Option<TaskContextBundle>,
+    pub context_bundle: Option<TodoContextBundle>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct TaskUpdateInput {
+pub struct TodoItemPatch {
     #[serde(default)]
     pub expected_revision: Option<u64>,
     #[serde(default)]
@@ -167,7 +169,7 @@ pub struct TaskUpdateInput {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
-    pub status: Option<TaskStatus>,
+    pub status: Option<TodoStatus>,
     #[serde(default)]
     pub add_blocked_by: Vec<String>,
     #[serde(default)]
@@ -183,115 +185,103 @@ pub struct TaskUpdateInput {
     #[serde(default)]
     pub group_subtitle: Option<String>,
     #[serde(default)]
-    pub risk_level: Option<TaskRiskLevel>,
+    pub risk_level: Option<TodoRiskLevel>,
     #[serde(default)]
     pub requires_approval: Option<bool>,
     #[serde(default)]
-    pub approval_status: Option<TaskApprovalStatus>,
+    pub approval_status: Option<TodoApprovalStatus>,
     #[serde(default)]
     pub acceptance_criteria: Option<Vec<String>>,
     #[serde(default)]
     pub verification_command: Option<String>,
     #[serde(default)]
-    pub context_bundle: Option<TaskContextBundle>,
+    pub context_bundle: Option<TodoContextBundle>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskItemUpdate {
-    pub task_id: String,
-    pub patch: TaskUpdateInput,
+pub struct TodoItemUpdate {
+    pub todo_id: String,
+    pub patch: TodoItemPatch,
 }
 
-pub type TodoStatus = TaskStatus;
-pub type TodoRiskLevel = TaskRiskLevel;
-pub type TodoApprovalStatus = TaskApprovalStatus;
-pub type TodoContextBundle = TaskContextBundle;
-pub type TodoItem = TaskItem;
-pub type TodoListSnapshot = TaskSnapshot;
-pub type TodoCreateInput = TaskCreateInput;
-pub type TodoItemPatch = TaskUpdateInput;
-pub type TodoItemUpdate = TaskItemUpdate;
-
-pub trait TaskEventSink: Send + Sync {
-    fn emit(&self, snapshot: &TaskSnapshot) -> Result<(), AppError>;
+pub trait TodoEventSink: Send + Sync {
+    fn emit(&self, snapshot: &TodoListSnapshot) -> Result<(), AppError>;
 }
 
 #[derive(Default)]
-struct NoopTaskEventSink;
+struct NoopTodoEventSink;
 
-impl TaskEventSink for NoopTaskEventSink {
-    fn emit(&self, _snapshot: &TaskSnapshot) -> Result<(), AppError> {
+impl TodoEventSink for NoopTodoEventSink {
+    fn emit(&self, _snapshot: &TodoListSnapshot) -> Result<(), AppError> {
         Ok(())
     }
 }
 
 #[derive(Default)]
-struct SessionTaskState {
-    snapshot: Option<TaskSnapshot>,
+struct SessionTodoState {
+    snapshot: Option<TodoListSnapshot>,
 }
 
-/// Durable, session-scoped owner for lightweight task tracking state.
-pub struct TaskStore {
+/// Durable, session-scoped owner for lightweight todo tracking state.
+pub struct TodoStore {
     root: PathBuf,
     persistence: Arc<dyn AtomicPersistence>,
-    events: Arc<dyn TaskEventSink>,
-    sessions: DashMap<SessionId, Arc<Mutex<SessionTaskState>>>,
+    events: Arc<dyn TodoEventSink>,
+    sessions: DashMap<SessionId, Arc<Mutex<SessionTodoState>>>,
 }
 
-pub type TodoStore = TaskStore;
-
-impl TaskStore {
+impl TodoStore {
     #[must_use]
     pub fn new(data_directory: &Path, persistence: Arc<dyn AtomicPersistence>) -> Self {
-        Self::with_event_sink(data_directory, persistence, Arc::new(NoopTaskEventSink))
+        Self::with_event_sink(data_directory, persistence, Arc::new(NoopTodoEventSink))
     }
 
     #[must_use]
     pub fn with_event_sink(
         data_directory: &Path,
         persistence: Arc<dyn AtomicPersistence>,
-        events: Arc<dyn TaskEventSink>,
+        events: Arc<dyn TodoEventSink>,
     ) -> Self {
         Self {
-            root: data_directory.join(TASK_DIRECTORY),
+            root: data_directory.join(TODO_DIRECTORY),
             persistence,
             events,
             sessions: DashMap::new(),
         }
     }
 
-    pub async fn snapshot(&self, session_id: &SessionId) -> Result<TaskSnapshot, AppError> {
+    pub async fn snapshot(&self, session_id: &SessionId) -> Result<TodoListSnapshot, AppError> {
         let state = self.session_state(session_id);
         let mut state = state.lock().await;
         self.ensure_loaded(session_id, &mut state).await?;
         state
             .snapshot
             .clone()
-            .ok_or_else(|| AppError::internal("task snapshot was not loaded"))
+            .ok_or_else(|| AppError::internal("todo snapshot was not loaded"))
     }
 
-    pub async fn get(&self, session_id: &SessionId, task_id: &str) -> Result<TaskItem, AppError> {
-        validate_task_id(task_id).map_err(AppError::validation)?;
+    pub async fn get(&self, session_id: &SessionId, todo_id: &str) -> Result<TodoItem, AppError> {
+        validate_todo_id(todo_id).map_err(AppError::validation)?;
         self.snapshot(session_id)
             .await?
-            .tasks
+            .items
             .into_iter()
-            .find(|task| task.id == task_id)
-            .ok_or_else(|| AppError::not_found("The task was not found"))
+            .find(|todo| todo.id == todo_id)
+            .ok_or_else(|| AppError::not_found("The todo was not found"))
     }
 
     pub async fn create(
         &self,
         session_id: &SessionId,
-        inputs: Vec<TaskCreateInput>,
-    ) -> Result<TaskSnapshot, AppError> {
+        inputs: Vec<TodoCreateInput>,
+    ) -> Result<TodoListSnapshot, AppError> {
         if inputs.is_empty() {
             return Err(AppError::validation(
-                "Task creation requires at least one task",
+                "Todo creation requires at least one todo",
             ));
         }
-        if inputs.len() > MAX_TASKS {
-            return Err(AppError::validation("Too many tasks were requested"));
+        if inputs.len() > MAX_TODOS {
+            return Err(AppError::validation("Too many items were requested"));
         }
         for input in &inputs {
             validate_create_input(input)?;
@@ -303,24 +293,24 @@ impl TaskStore {
         let mut next = state
             .snapshot
             .clone()
-            .ok_or_else(|| AppError::internal("task snapshot was not loaded"))?;
-        if next.tasks.iter().all(|task| task.status.is_terminal()) {
-            next.tasks.clear();
+            .ok_or_else(|| AppError::internal("todo snapshot was not loaded"))?;
+        if next.items.iter().all(|todo| todo.status.is_terminal()) {
+            next.items.clear();
         }
-        if next.tasks.len().saturating_add(inputs.len()) > MAX_TASKS {
-            return Err(AppError::conflict("The session task limit was reached"));
+        if next.items.len().saturating_add(inputs.len()) > MAX_TODOS {
+            return Err(AppError::conflict("The session todo limit was reached"));
         }
 
         for input in inputs {
             let sequence = next.next_sequence;
             next.next_sequence = sequence.checked_add(1).ok_or_else(|| {
                 AppError::storage(
-                    "Task state cannot allocate another identifier",
-                    "task sequence overflowed",
+                    "Todo state cannot allocate another identifier",
+                    "todo sequence overflowed",
                     false,
                 )
             })?;
-            next.tasks.push(task_from_create(sequence, input));
+            next.items.push(todo_from_create(sequence, input));
         }
         bump_revision(&mut next)?;
         self.commit(&mut state, next).await
@@ -329,15 +319,15 @@ impl TaskStore {
     pub async fn update(
         &self,
         session_id: &SessionId,
-        task_id: &str,
-        mut patch: TaskUpdateInput,
-    ) -> Result<TaskSnapshot, AppError> {
+        todo_id: &str,
+        mut patch: TodoItemPatch,
+    ) -> Result<TodoListSnapshot, AppError> {
         let expected_revision = patch.expected_revision.take();
         self.update_batch(
             session_id,
             expected_revision,
-            vec![TaskItemUpdate {
-                task_id: task_id.to_string(),
+            vec![TodoItemUpdate {
+                todo_id: todo_id.to_string(),
                 patch,
             }],
         )
@@ -348,20 +338,20 @@ impl TaskStore {
         &self,
         session_id: &SessionId,
         expected_revision: Option<u64>,
-        updates: Vec<TaskItemUpdate>,
-    ) -> Result<TaskSnapshot, AppError> {
+        updates: Vec<TodoItemUpdate>,
+    ) -> Result<TodoListSnapshot, AppError> {
         if updates.is_empty() {
             return Err(AppError::validation(
                 "TodoUpdate requires at least one update",
             ));
         }
-        if updates.len() > MAX_TASKS {
+        if updates.len() > MAX_TODOS {
             return Err(AppError::validation("Too many Todo updates were requested"));
         }
         let mut identifiers = HashSet::with_capacity(updates.len());
         for update in &updates {
-            validate_task_id(&update.task_id).map_err(AppError::validation)?;
-            if !identifiers.insert(update.task_id.as_str()) {
+            validate_todo_id(&update.todo_id).map_err(AppError::validation)?;
+            if !identifiers.insert(update.todo_id.as_str()) {
                 return Err(AppError::validation(
                     "TodoUpdate cannot update the same item more than once",
                 ));
@@ -375,7 +365,7 @@ impl TaskStore {
         let mut next = state
             .snapshot
             .clone()
-            .ok_or_else(|| AppError::internal("task snapshot was not loaded"))?;
+            .ok_or_else(|| AppError::internal("todo snapshot was not loaded"))?;
         if let Some(expected_revision) = expected_revision {
             if expected_revision != next.revision {
                 return Err(AppError::conflict(format!(
@@ -385,26 +375,26 @@ impl TaskStore {
             }
         }
 
-        let previous = next.tasks.clone();
+        let previous = next.items.clone();
         for update in updates {
-            let task = next
-                .tasks
+            let todo = next
+                .items
                 .iter_mut()
-                .find(|task| task.id == update.task_id)
+                .find(|todo| todo.id == update.todo_id)
                 .ok_or_else(|| AppError::not_found("The Todo item was not found"))?;
-            apply_patch(task, update.patch);
+            apply_patch(todo, update.patch);
         }
-        for task in &next.tasks {
-            validate_task(task)?;
+        for todo in &next.items {
+            validate_todo(todo)?;
         }
-        validate_task_graph(&next.tasks)?;
-        for task_index in 0..next.tasks.len() {
-            validate_task_admission(&next.tasks, task_index)?;
+        validate_todo_graph(&next.items)?;
+        for todo_index in 0..next.items.len() {
+            validate_todo_admission(&next.items, todo_index)?;
         }
         if next
-            .tasks
+            .items
             .iter()
-            .filter(|task| task.status == TaskStatus::InProgress)
+            .filter(|todo| todo.status == TodoStatus::InProgress)
             .count()
             > 1
         {
@@ -412,7 +402,7 @@ impl TaskStore {
                 "Another Todo item is already in progress for this session",
             ));
         }
-        if next.tasks == previous {
+        if next.items == previous {
             return Ok(next);
         }
         bump_revision(&mut next)?;
@@ -422,23 +412,23 @@ impl TaskStore {
     pub async fn delete(
         &self,
         session_id: &SessionId,
-        task_id: &str,
-    ) -> Result<TaskSnapshot, AppError> {
-        validate_task_id(task_id).map_err(AppError::validation)?;
+        todo_id: &str,
+    ) -> Result<TodoListSnapshot, AppError> {
+        validate_todo_id(todo_id).map_err(AppError::validation)?;
         let state = self.session_state(session_id);
         let mut state = state.lock().await;
         self.ensure_loaded(session_id, &mut state).await?;
         let mut next = state
             .snapshot
             .clone()
-            .ok_or_else(|| AppError::internal("task snapshot was not loaded"))?;
-        let previous_len = next.tasks.len();
-        next.tasks.retain(|task| task.id != task_id);
-        if next.tasks.len() == previous_len {
-            return Err(AppError::not_found("The task was not found"));
+            .ok_or_else(|| AppError::internal("todo snapshot was not loaded"))?;
+        let previous_len = next.items.len();
+        next.items.retain(|todo| todo.id != todo_id);
+        if next.items.len() == previous_len {
+            return Err(AppError::not_found("The todo was not found"));
         }
-        for task in &mut next.tasks {
-            task.blocked_by.retain(|dependency| dependency != task_id);
+        for todo in &mut next.items {
+            todo.blocked_by.retain(|dependency| dependency != todo_id);
         }
         bump_revision(&mut next)?;
         self.commit(&mut state, next).await
@@ -448,14 +438,14 @@ impl TaskStore {
         let state = self.session_state(session_id);
         let mut state = state.lock().await;
         self.persistence.remove(&self.path_for(session_id)).await?;
-        state.snapshot = Some(TaskSnapshot::empty(session_id.clone()));
+        state.snapshot = Some(TodoListSnapshot::empty(session_id.clone()));
         Ok(())
     }
 
     async fn ensure_loaded(
         &self,
         session_id: &SessionId,
-        state: &mut SessionTaskState,
+        state: &mut SessionTodoState,
     ) -> Result<(), AppError> {
         if state.snapshot.is_some() {
             return Ok(());
@@ -463,7 +453,7 @@ impl TaskStore {
         let path = self.path_for(session_id);
         let snapshot = match self.persistence.read(&path).await? {
             Some(bytes) => decode_snapshot(session_id, &path, &bytes)?,
-            None => TaskSnapshot::empty(session_id.clone()),
+            None => TodoListSnapshot::empty(session_id.clone()),
         };
         state.snapshot = Some(snapshot);
         Ok(())
@@ -471,31 +461,31 @@ impl TaskStore {
 
     async fn commit(
         &self,
-        state: &mut SessionTaskState,
-        snapshot: TaskSnapshot,
-    ) -> Result<TaskSnapshot, AppError> {
+        state: &mut SessionTodoState,
+        snapshot: TodoListSnapshot,
+    ) -> Result<TodoListSnapshot, AppError> {
         let path = self.path_for(&snapshot.session_id);
         let bytes = serde_json::to_vec_pretty(&snapshot).map_err(|source| {
             AppError::internal(format!(
-                "serialize task snapshot {}: {source}",
+                "serialize todo snapshot {}: {source}",
                 path.display()
             ))
         })?;
-        if bytes.len() > MAX_TASK_DOCUMENT_BYTES {
-            return Err(AppError::validation("The task snapshot is too large"));
+        if bytes.len() > MAX_TODO_DOCUMENT_BYTES {
+            return Err(AppError::validation("The todo snapshot is too large"));
         }
         self.persistence.replace(&path, &bytes).await?;
         state.snapshot = Some(snapshot.clone());
         if let Err(error) = self.events.emit(&snapshot) {
-            tracing::warn!(diagnostic = ?error.diagnostic(), "task snapshot event could not be emitted");
+            tracing::warn!(diagnostic = ?error.diagnostic(), "todo snapshot event could not be emitted");
         }
         Ok(snapshot)
     }
 
-    fn session_state(&self, session_id: &SessionId) -> Arc<Mutex<SessionTaskState>> {
+    fn session_state(&self, session_id: &SessionId) -> Arc<Mutex<SessionTodoState>> {
         self.sessions
             .entry(session_id.clone())
-            .or_insert_with(|| Arc::new(Mutex::new(SessionTaskState::default())))
+            .or_insert_with(|| Arc::new(Mutex::new(SessionTodoState::default())))
             .clone()
     }
 
@@ -505,56 +495,11 @@ impl TaskStore {
 }
 
 #[must_use]
-pub fn todo_prompt_state(snapshot: &TaskSnapshot) -> Option<String> {
-    if snapshot.tasks.is_empty() {
+pub fn todo_prompt_state(snapshot: &TodoListSnapshot) -> Option<String> {
+    if snapshot.items.is_empty() {
         return None;
     }
-    let active = snapshot
-        .tasks
-        .iter()
-        .find(|task| task.status == TaskStatus::InProgress)
-        .map(active_todo_prompt_value);
-    let items = snapshot
-        .tasks
-        .iter()
-        .take(MAX_PROMPT_TODO_ITEMS)
-        .map(|task| {
-            serde_json::json!({
-                "id": task.id,
-                "subject": bounded_prompt_text(&task.subject, MAX_PROMPT_SUBJECT_CHARS),
-                "status": task.status,
-                "blockedBy": bounded_prompt_list(&task.blocked_by),
-                "requiresApproval": task.requires_approval,
-                "approvalStatus": task.approval_status,
-            })
-        })
-        .collect::<Vec<_>>();
-    let completed = snapshot
-        .tasks
-        .iter()
-        .filter(|task| task.status == TaskStatus::Completed)
-        .count();
-    let pending = snapshot
-        .tasks
-        .iter()
-        .filter(|task| task.status == TaskStatus::Pending)
-        .count();
-    let cancelled = snapshot
-        .tasks
-        .iter()
-        .filter(|task| task.status == TaskStatus::Cancelled)
-        .count();
-    let value = serde_json::json!({
-        "summary": {
-            "total": snapshot.tasks.len(),
-            "completed": completed,
-            "pending": pending,
-            "cancelled": cancelled,
-            "omitted": snapshot.tasks.len().saturating_sub(items.len()),
-        },
-        "active": active,
-        "items": items,
-    });
+    let value = todo_model_state(snapshot);
     let encoded = serde_json::to_string(&value)
         .ok()?
         .replace('<', "\\u003c")
@@ -565,8 +510,59 @@ pub fn todo_prompt_state(snapshot: &TaskSnapshot) -> Option<String> {
     ))
 }
 
-fn active_todo_prompt_value(task: &TaskItem) -> serde_json::Value {
-    let context_bundle = task.context_bundle.as_ref().map(|bundle| {
+/// Builds the bounded authoritative projection used in prompts and tool conflict responses.
+#[must_use]
+pub fn todo_model_state(snapshot: &TodoListSnapshot) -> serde_json::Value {
+    let active = snapshot
+        .items
+        .iter()
+        .find(|todo| todo.status == TodoStatus::InProgress)
+        .map(active_todo_prompt_value);
+    let items = snapshot
+        .items
+        .iter()
+        .take(MAX_PROMPT_TODO_ITEMS)
+        .map(|todo| {
+            serde_json::json!({
+                "id": todo.id,
+                "subject": bounded_prompt_text(&todo.subject, MAX_PROMPT_SUBJECT_CHARS),
+                "status": todo.status,
+                "blockedBy": bounded_prompt_list(&todo.blocked_by),
+                "requiresApproval": todo.requires_approval,
+                "approvalStatus": todo.approval_status,
+            })
+        })
+        .collect::<Vec<_>>();
+    let completed = snapshot
+        .items
+        .iter()
+        .filter(|todo| todo.status == TodoStatus::Completed)
+        .count();
+    let pending = snapshot
+        .items
+        .iter()
+        .filter(|todo| todo.status == TodoStatus::Pending)
+        .count();
+    let cancelled = snapshot
+        .items
+        .iter()
+        .filter(|todo| todo.status == TodoStatus::Cancelled)
+        .count();
+    serde_json::json!({
+        "summary": {
+            "total": snapshot.items.len(),
+            "completed": completed,
+            "pending": pending,
+            "cancelled": cancelled,
+            "omitted": snapshot.items.len().saturating_sub(items.len()),
+        },
+        "active": active,
+        "items": items,
+    })
+}
+
+fn active_todo_prompt_value(todo: &TodoItem) -> serde_json::Value {
+    let context_bundle = todo.context_bundle.as_ref().map(|bundle| {
         serde_json::json!({
             "knownFacts": bounded_prompt_list(&bundle.known_facts),
             "decisions": bounded_prompt_list(&bundle.decisions),
@@ -576,17 +572,17 @@ fn active_todo_prompt_value(task: &TaskItem) -> serde_json::Value {
         })
     });
     serde_json::json!({
-        "id": task.id,
-        "subject": bounded_prompt_text(&task.subject, MAX_PROMPT_SUBJECT_CHARS),
-        "description": bounded_prompt_text(&task.description, MAX_PROMPT_DESCRIPTION_CHARS),
-        "status": task.status,
-        "blockedBy": bounded_prompt_list(&task.blocked_by),
-        "files": bounded_prompt_list(&task.files),
-        "riskLevel": task.risk_level,
-        "requiresApproval": task.requires_approval,
-        "approvalStatus": task.approval_status,
-        "acceptanceCriteria": bounded_prompt_list(&task.acceptance_criteria),
-        "verificationCommand": task.verification_command.as_deref().map(|value| bounded_prompt_text(value, MAX_PROMPT_DETAIL_CHARS)),
+        "id": todo.id,
+        "subject": bounded_prompt_text(&todo.subject, MAX_PROMPT_SUBJECT_CHARS),
+        "description": bounded_prompt_text(&todo.description, MAX_PROMPT_DESCRIPTION_CHARS),
+        "status": todo.status,
+        "blockedBy": bounded_prompt_list(&todo.blocked_by),
+        "files": bounded_prompt_list(&todo.files),
+        "riskLevel": todo.risk_level,
+        "requiresApproval": todo.requires_approval,
+        "approvalStatus": todo.approval_status,
+        "acceptanceCriteria": bounded_prompt_list(&todo.acceptance_criteria),
+        "verificationCommand": todo.verification_command.as_deref().map(|value| bounded_prompt_text(value, MAX_PROMPT_DETAIL_CHARS)),
         "contextBundle": context_bundle,
     })
 }
@@ -611,15 +607,15 @@ fn decode_snapshot(
     expected_session_id: &SessionId,
     path: &Path,
     bytes: &[u8],
-) -> Result<TaskSnapshot, AppError> {
-    if bytes.len() > MAX_TASK_DOCUMENT_BYTES {
-        return Err(task_document_error(
+) -> Result<TodoListSnapshot, AppError> {
+    if bytes.len() > MAX_TODO_DOCUMENT_BYTES {
+        return Err(todo_document_error(
             path,
             format!("document has {} bytes", bytes.len()),
         ));
     }
-    let snapshot: TaskSnapshot = serde_json::from_slice(bytes)
-        .map_err(|source| task_document_error(path, format!("parse JSON: {source}")))?;
+    let snapshot: TodoListSnapshot = serde_json::from_slice(bytes)
+        .map_err(|source| todo_document_error(path, format!("parse JSON: {source}")))?;
     validate_snapshot(expected_session_id, path, &snapshot)?;
     Ok(snapshot)
 }
@@ -627,31 +623,31 @@ fn decode_snapshot(
 fn validate_snapshot(
     expected_session_id: &SessionId,
     path: &Path,
-    snapshot: &TaskSnapshot,
+    snapshot: &TodoListSnapshot,
 ) -> Result<(), AppError> {
-    if snapshot.version != TASK_SNAPSHOT_VERSION {
-        return Err(task_document_error(
+    if snapshot.version != TODO_SNAPSHOT_VERSION {
+        return Err(todo_document_error(
             path,
             format!("unsupported version {}", snapshot.version),
         ));
     }
     if &snapshot.session_id != expected_session_id {
-        return Err(task_document_error(path, "session identity mismatch"));
+        return Err(todo_document_error(path, "session identity mismatch"));
     }
-    if snapshot.tasks.len() > MAX_TASKS || snapshot.next_sequence == 0 {
-        return Err(task_document_error(path, "invalid task snapshot bounds"));
+    if snapshot.items.len() > MAX_TODOS || snapshot.next_sequence == 0 {
+        return Err(todo_document_error(path, "invalid todo snapshot bounds"));
     }
-    let mut identifiers = HashSet::with_capacity(snapshot.tasks.len());
+    let mut identifiers = HashSet::with_capacity(snapshot.items.len());
     let mut largest_sequence = 0;
-    for task in &snapshot.tasks {
+    for todo in &snapshot.items {
         let sequence =
-            validate_task_id(&task.id).map_err(|message| task_document_error(path, message))?;
-        if !identifiers.insert(task.id.as_str()) {
-            return Err(task_document_error(path, "duplicate task identifier"));
+            validate_todo_id(&todo.id).map_err(|message| todo_document_error(path, message))?;
+        if !identifiers.insert(todo.id.as_str()) {
+            return Err(todo_document_error(path, "duplicate todo identifier"));
         }
         largest_sequence = largest_sequence.max(sequence);
-        validate_task(task).map_err(|error| {
-            task_document_error(
+        validate_todo(todo).map_err(|error| {
+            todo_document_error(
                 path,
                 error
                     .diagnostic()
@@ -661,25 +657,25 @@ fn validate_snapshot(
         })?;
     }
     if snapshot.next_sequence <= largest_sequence {
-        return Err(task_document_error(
+        return Err(todo_document_error(
             path,
-            "next sequence does not follow persisted task identifiers",
+            "next sequence does not follow persisted todo identifiers",
         ));
     }
     if snapshot
-        .tasks
+        .items
         .iter()
-        .filter(|task| task.status == TaskStatus::InProgress)
+        .filter(|todo| todo.status == TodoStatus::InProgress)
         .count()
         > 1
     {
-        return Err(task_document_error(
+        return Err(todo_document_error(
             path,
-            "multiple tasks are marked in progress",
+            "multiple items are marked in progress",
         ));
     }
-    validate_task_graph(&snapshot.tasks).map_err(|error| {
-        task_document_error(
+    validate_todo_graph(&snapshot.items).map_err(|error| {
+        todo_document_error(
             path,
             error
                 .diagnostic()
@@ -687,9 +683,9 @@ fn validate_snapshot(
                 .to_string(),
         )
     })?;
-    for index in 0..snapshot.tasks.len() {
-        validate_task_admission(&snapshot.tasks, index).map_err(|error| {
-            task_document_error(
+    for index in 0..snapshot.items.len() {
+        validate_todo_admission(&snapshot.items, index).map_err(|error| {
+            todo_document_error(
                 path,
                 error
                     .diagnostic()
@@ -701,36 +697,36 @@ fn validate_snapshot(
     Ok(())
 }
 
-fn task_document_error(path: &Path, diagnostic: impl Into<String>) -> AppError {
+fn todo_document_error(path: &Path, diagnostic: impl Into<String>) -> AppError {
     AppError::storage(
-        "The saved task state is invalid",
-        format!("task document {}: {}", path.display(), diagnostic.into()),
+        "The saved todo state is invalid",
+        format!("todo document {}: {}", path.display(), diagnostic.into()),
         false,
     )
 }
 
-fn bump_revision(snapshot: &mut TaskSnapshot) -> Result<(), AppError> {
+fn bump_revision(snapshot: &mut TodoListSnapshot) -> Result<(), AppError> {
     snapshot.revision = snapshot.revision.checked_add(1).ok_or_else(|| {
         AppError::storage(
-            "Task state cannot be updated",
-            "task revision overflowed",
+            "Todo state cannot be updated",
+            "todo revision overflowed",
             false,
         )
     })?;
     Ok(())
 }
 
-fn task_from_create(sequence: u64, input: TaskCreateInput) -> TaskItem {
+fn todo_from_create(sequence: u64, input: TodoCreateInput) -> TodoItem {
     let approval_status = input.approval_status.unwrap_or(if input.requires_approval {
-        TaskApprovalStatus::Pending
+        TodoApprovalStatus::Pending
     } else {
-        TaskApprovalStatus::NotRequired
+        TodoApprovalStatus::NotRequired
     });
-    TaskItem {
+    TodoItem {
         id: format!("t{sequence}"),
         subject: input.subject.trim().to_string(),
         description: input.description,
-        status: TaskStatus::Pending,
+        status: TodoStatus::Pending,
         blocked_by: Vec::new(),
         files: input.files,
         active_form: input.active_form,
@@ -746,98 +742,98 @@ fn task_from_create(sequence: u64, input: TaskCreateInput) -> TaskItem {
     }
 }
 
-fn apply_patch(task: &mut TaskItem, patch: TaskUpdateInput) {
+fn apply_patch(todo: &mut TodoItem, patch: TodoItemPatch) {
     if let Some(subject) = patch.subject {
-        task.subject = subject.trim().to_string();
+        todo.subject = subject.trim().to_string();
     }
     if let Some(description) = patch.description {
-        task.description = description;
+        todo.description = description;
     }
     if let Some(status) = patch.status {
-        task.status = status;
+        todo.status = status;
     }
     if !patch.remove_blocked_by.is_empty() {
-        task.blocked_by
+        todo.blocked_by
             .retain(|dependency| !patch.remove_blocked_by.contains(dependency));
     }
-    task.blocked_by.extend(patch.add_blocked_by);
+    todo.blocked_by.extend(patch.add_blocked_by);
     if let Some(files) = patch.files {
-        task.files = files;
+        todo.files = files;
     }
     if let Some(active_form) = patch.active_form {
-        task.active_form = Some(active_form);
+        todo.active_form = Some(active_form);
     }
     if let Some(group_id) = patch.group_id {
-        task.group_id = Some(group_id);
+        todo.group_id = Some(group_id);
     }
     if let Some(group_title) = patch.group_title {
-        task.group_title = Some(group_title);
+        todo.group_title = Some(group_title);
     }
     if let Some(group_subtitle) = patch.group_subtitle {
-        task.group_subtitle = Some(group_subtitle);
+        todo.group_subtitle = Some(group_subtitle);
     }
     if let Some(risk_level) = patch.risk_level {
-        task.risk_level = Some(risk_level);
+        todo.risk_level = Some(risk_level);
     }
     if let Some(requires_approval) = patch.requires_approval {
-        task.requires_approval = requires_approval;
+        todo.requires_approval = requires_approval;
     }
     if let Some(approval_status) = patch.approval_status {
-        task.approval_status = approval_status;
+        todo.approval_status = approval_status;
     }
     if let Some(acceptance_criteria) = patch.acceptance_criteria {
-        task.acceptance_criteria = acceptance_criteria;
+        todo.acceptance_criteria = acceptance_criteria;
     }
     if let Some(verification_command) = patch.verification_command {
-        task.verification_command = Some(verification_command);
+        todo.verification_command = Some(verification_command);
     }
     if let Some(context_bundle) = patch.context_bundle {
-        task.context_bundle = Some(context_bundle);
+        todo.context_bundle = Some(context_bundle);
     }
 }
 
-fn validate_create_input(input: &TaskCreateInput) -> Result<(), AppError> {
-    let task = task_from_create(1, input.clone());
-    validate_task(&task)
+fn validate_create_input(input: &TodoCreateInput) -> Result<(), AppError> {
+    let todo = todo_from_create(1, input.clone());
+    validate_todo(&todo)
 }
 
-fn validate_update_input(input: &TaskUpdateInput) -> Result<(), AppError> {
-    if !has_task_mutation(input) {
+fn validate_update_input(input: &TodoItemPatch) -> Result<(), AppError> {
+    if !has_todo_mutation(input) {
         return Err(AppError::validation(
-            "TaskUpdate requires at least one change",
+            "TodoUpdate requires at least one change",
         ));
     }
     if let Some(subject) = &input.subject {
-        validate_required_text("Task subject", subject, MAX_SUBJECT_BYTES)?;
+        validate_required_text("Todo subject", subject, MAX_SUBJECT_BYTES)?;
     }
     if let Some(description) = &input.description {
-        validate_text("Task description", description, MAX_DESCRIPTION_BYTES)?;
+        validate_text("Todo description", description, MAX_DESCRIPTION_BYTES)?;
     }
     validate_dependency_patch(input)?;
     if let Some(files) = &input.files {
         validate_files(files)?;
     }
     validate_optional_text(
-        "Task active form",
+        "Todo active form",
         input.active_form.as_deref(),
         MAX_LABEL_BYTES,
     )?;
-    validate_optional_text("Task group ID", input.group_id.as_deref(), MAX_LABEL_BYTES)?;
+    validate_optional_text("Todo group ID", input.group_id.as_deref(), MAX_LABEL_BYTES)?;
     validate_optional_text(
-        "Task group title",
+        "Todo group title",
         input.group_title.as_deref(),
         MAX_LABEL_BYTES,
     )?;
     validate_optional_text(
-        "Task group subtitle",
+        "Todo group subtitle",
         input.group_subtitle.as_deref(),
         MAX_LABEL_BYTES,
     )?;
     if let Some(criteria) = &input.acceptance_criteria {
-        validate_string_list("Task acceptance criteria", criteria)?;
+        validate_string_list("Todo acceptance criteria", criteria)?;
     }
     validate_optional_text(
-        "Task verification command",
+        "Todo verification command",
         input.verification_command.as_deref(),
         MAX_COMMAND_BYTES,
     )?;
@@ -847,51 +843,51 @@ fn validate_update_input(input: &TaskUpdateInput) -> Result<(), AppError> {
     Ok(())
 }
 
-fn validate_task(task: &TaskItem) -> Result<(), AppError> {
-    validate_task_id(&task.id).map_err(AppError::validation)?;
-    validate_required_text("Task subject", &task.subject, MAX_SUBJECT_BYTES)?;
-    validate_text("Task description", &task.description, MAX_DESCRIPTION_BYTES)?;
-    validate_dependency_list(task)?;
-    validate_files(&task.files)?;
+fn validate_todo(todo: &TodoItem) -> Result<(), AppError> {
+    validate_todo_id(&todo.id).map_err(AppError::validation)?;
+    validate_required_text("Todo subject", &todo.subject, MAX_SUBJECT_BYTES)?;
+    validate_text("Todo description", &todo.description, MAX_DESCRIPTION_BYTES)?;
+    validate_dependency_list(todo)?;
+    validate_files(&todo.files)?;
     validate_optional_text(
-        "Task active form",
-        task.active_form.as_deref(),
+        "Todo active form",
+        todo.active_form.as_deref(),
         MAX_LABEL_BYTES,
     )?;
-    validate_optional_text("Task group ID", task.group_id.as_deref(), MAX_LABEL_BYTES)?;
+    validate_optional_text("Todo group ID", todo.group_id.as_deref(), MAX_LABEL_BYTES)?;
     validate_optional_text(
-        "Task group title",
-        task.group_title.as_deref(),
+        "Todo group title",
+        todo.group_title.as_deref(),
         MAX_LABEL_BYTES,
     )?;
     validate_optional_text(
-        "Task group subtitle",
-        task.group_subtitle.as_deref(),
+        "Todo group subtitle",
+        todo.group_subtitle.as_deref(),
         MAX_LABEL_BYTES,
     )?;
-    validate_string_list("Task acceptance criteria", &task.acceptance_criteria)?;
+    validate_string_list("Todo acceptance criteria", &todo.acceptance_criteria)?;
     validate_optional_text(
-        "Task verification command",
-        task.verification_command.as_deref(),
+        "Todo verification command",
+        todo.verification_command.as_deref(),
         MAX_COMMAND_BYTES,
     )?;
-    if let Some(bundle) = &task.context_bundle {
+    if let Some(bundle) = &todo.context_bundle {
         validate_context_bundle(bundle)?;
     }
-    if task.requires_approval && task.approval_status == TaskApprovalStatus::NotRequired {
+    if todo.requires_approval && todo.approval_status == TodoApprovalStatus::NotRequired {
         return Err(AppError::validation(
-            "A task requiring approval cannot be marked not required",
+            "A todo requiring approval cannot be marked not required",
         ));
     }
-    if !task.requires_approval && task.approval_status != TaskApprovalStatus::NotRequired {
+    if !todo.requires_approval && todo.approval_status != TodoApprovalStatus::NotRequired {
         return Err(AppError::validation(
-            "A task without approval requirements must be marked not required",
+            "A todo without approval requirements must be marked not required",
         ));
     }
     Ok(())
 }
 
-fn has_task_mutation(input: &TaskUpdateInput) -> bool {
+fn has_todo_mutation(input: &TodoItemPatch) -> bool {
     input.subject.is_some()
         || input.description.is_some()
         || input.status.is_some()
@@ -910,146 +906,146 @@ fn has_task_mutation(input: &TaskUpdateInput) -> bool {
         || input.context_bundle.is_some()
 }
 
-fn validate_dependency_patch(input: &TaskUpdateInput) -> Result<(), AppError> {
-    validate_task_ids("Task dependencies to add", &input.add_blocked_by)?;
-    validate_task_ids("Task dependencies to remove", &input.remove_blocked_by)?;
+fn validate_dependency_patch(input: &TodoItemPatch) -> Result<(), AppError> {
+    validate_todo_ids("Todo dependencies to add", &input.add_blocked_by)?;
+    validate_todo_ids("Todo dependencies to remove", &input.remove_blocked_by)?;
     if input
         .add_blocked_by
         .iter()
         .any(|dependency| input.remove_blocked_by.contains(dependency))
     {
         return Err(AppError::validation(
-            "A task dependency cannot be added and removed in the same update",
+            "A todo dependency cannot be added and removed in the same update",
         ));
     }
     Ok(())
 }
 
-fn validate_dependency_list(task: &TaskItem) -> Result<(), AppError> {
-    validate_task_ids("Task blockedBy", &task.blocked_by)?;
-    if task
+fn validate_dependency_list(todo: &TodoItem) -> Result<(), AppError> {
+    validate_todo_ids("Todo blockedBy", &todo.blocked_by)?;
+    if todo
         .blocked_by
         .iter()
-        .any(|dependency| dependency == &task.id)
+        .any(|dependency| dependency == &todo.id)
     {
-        return Err(AppError::validation("A task cannot depend on itself"));
+        return Err(AppError::validation("A todo cannot depend on itself"));
     }
     Ok(())
 }
 
-fn validate_task_ids(field: &str, task_ids: &[String]) -> Result<(), AppError> {
-    if task_ids.len() > MAX_LIST_ITEMS {
+fn validate_todo_ids(field: &str, todo_ids: &[String]) -> Result<(), AppError> {
+    if todo_ids.len() > MAX_LIST_ITEMS {
         return Err(AppError::validation(format!("{field} is too large")));
     }
-    let mut identifiers = HashSet::with_capacity(task_ids.len());
-    for task_id in task_ids {
-        validate_task_id(task_id).map_err(AppError::validation)?;
-        if !identifiers.insert(task_id.as_str()) {
+    let mut identifiers = HashSet::with_capacity(todo_ids.len());
+    for todo_id in todo_ids {
+        validate_todo_id(todo_id).map_err(AppError::validation)?;
+        if !identifiers.insert(todo_id.as_str()) {
             return Err(AppError::validation(format!(
-                "{field} contains a duplicate task identifier"
+                "{field} contains a duplicate todo identifier"
             )));
         }
     }
     Ok(())
 }
 
-fn validate_task_graph(tasks: &[TaskItem]) -> Result<(), AppError> {
-    for task in tasks {
-        for dependency in &task.blocked_by {
-            if !tasks.iter().any(|candidate| candidate.id == *dependency) {
+fn validate_todo_graph(items: &[TodoItem]) -> Result<(), AppError> {
+    for todo in items {
+        for dependency in &todo.blocked_by {
+            if !items.iter().any(|candidate| candidate.id == *dependency) {
                 return Err(AppError::conflict(format!(
-                    "Task {} depends on missing task {dependency}",
-                    task.id
+                    "Todo {} depends on missing todo {dependency}",
+                    todo.id
                 )));
             }
         }
     }
 
-    let mut states = vec![0_u8; tasks.len()];
-    for index in 0..tasks.len() {
-        visit_task_dependencies(tasks, index, &mut states)?;
+    let mut states = vec![0_u8; items.len()];
+    for index in 0..items.len() {
+        visit_todo_dependencies(items, index, &mut states)?;
     }
     Ok(())
 }
 
-fn visit_task_dependencies(
-    tasks: &[TaskItem],
+fn visit_todo_dependencies(
+    items: &[TodoItem],
     index: usize,
     states: &mut [u8],
 ) -> Result<(), AppError> {
     match states[index] {
         1 => {
             return Err(AppError::conflict(
-                "Task dependencies cannot contain a cycle",
+                "Todo dependencies cannot contain a cycle",
             ));
         }
         2 => return Ok(()),
         _ => {}
     }
     states[index] = 1;
-    for dependency in &tasks[index].blocked_by {
-        let dependency_index = tasks
+    for dependency in &items[index].blocked_by {
+        let dependency_index = items
             .iter()
             .position(|candidate| candidate.id == *dependency)
             .ok_or_else(|| {
                 AppError::conflict(format!(
-                    "Task {} depends on missing task {dependency}",
-                    tasks[index].id
+                    "Todo {} depends on missing todo {dependency}",
+                    items[index].id
                 ))
             })?;
-        visit_task_dependencies(tasks, dependency_index, states)?;
+        visit_todo_dependencies(items, dependency_index, states)?;
     }
     states[index] = 2;
     Ok(())
 }
 
-fn validate_task_admission(tasks: &[TaskItem], index: usize) -> Result<(), AppError> {
-    let task = &tasks[index];
-    if !matches!(task.status, TaskStatus::InProgress | TaskStatus::Completed) {
+fn validate_todo_admission(items: &[TodoItem], index: usize) -> Result<(), AppError> {
+    let todo = &items[index];
+    if !matches!(todo.status, TodoStatus::InProgress | TodoStatus::Completed) {
         return Ok(());
     }
-    if task.requires_approval && task.approval_status != TaskApprovalStatus::Approved {
+    if todo.requires_approval && todo.approval_status != TodoApprovalStatus::Approved {
         return Err(AppError::conflict(format!(
-            "Task {} requires approval before it can start or complete",
-            task.id
+            "Todo {} requires approval before it can start or complete",
+            todo.id
         )));
     }
-    let unfinished = task
+    let unfinished = todo
         .blocked_by
         .iter()
         .filter(|dependency| {
-            tasks
+            items
                 .iter()
                 .find(|candidate| candidate.id == dependency.as_str())
-                .is_none_or(|candidate| candidate.status != TaskStatus::Completed)
+                .is_none_or(|candidate| candidate.status != TodoStatus::Completed)
         })
         .cloned()
         .collect::<Vec<_>>();
     if !unfinished.is_empty() {
         return Err(AppError::conflict(format!(
-            "Task {} is blocked by unfinished dependencies: {}",
-            task.id,
+            "Todo {} is blocked by unfinished dependencies: {}",
+            todo.id,
             unfinished.join(", ")
         )));
     }
     Ok(())
 }
 
-fn validate_task_id(value: &str) -> Result<u64, &'static str> {
+fn validate_todo_id(value: &str) -> Result<u64, &'static str> {
     let digits = value
         .strip_prefix('t')
-        .ok_or("Task identifiers must use the t<number> format")?;
+        .ok_or("Todo identifiers must use the t<number> format")?;
     if digits.is_empty()
         || digits.starts_with('0')
         || !digits.bytes().all(|byte| byte.is_ascii_digit())
     {
-        return Err("Task identifiers must use the t<number> format");
+        return Err("Todo identifiers must use the t<number> format");
     }
     digits
         .parse::<u64>()
         .ok()
         .filter(|sequence| *sequence > 0)
-        .ok_or("Task identifier is out of range")
+        .ok_or("Todo identifier is out of range")
 }
 
 fn validate_required_text(field: &str, value: &str, maximum_bytes: usize) -> Result<(), AppError> {
@@ -1081,10 +1077,10 @@ fn validate_text(field: &str, value: &str, maximum_bytes: usize) -> Result<(), A
 
 fn validate_files(files: &[String]) -> Result<(), AppError> {
     if files.len() > MAX_LIST_ITEMS {
-        return Err(AppError::validation("Task file list is too large"));
+        return Err(AppError::validation("Todo file list is too large"));
     }
     for file in files {
-        validate_required_text("Task file", file, MAX_LIST_ITEM_BYTES)?;
+        validate_required_text("Todo file", file, MAX_LIST_ITEM_BYTES)?;
         let path = Path::new(file);
         if path.is_absolute()
             || path.components().any(|component| {
@@ -1095,7 +1091,7 @@ fn validate_files(files: &[String]) -> Result<(), AppError> {
             })
         {
             return Err(AppError::validation(
-                "Task files must be relative workspace paths",
+                "Todo files must be relative workspace paths",
             ));
         }
     }
@@ -1112,12 +1108,12 @@ fn validate_string_list(field: &str, values: &[String]) -> Result<(), AppError> 
     Ok(())
 }
 
-fn validate_context_bundle(bundle: &TaskContextBundle) -> Result<(), AppError> {
-    validate_string_list("Task known facts", &bundle.known_facts)?;
-    validate_string_list("Task decisions", &bundle.decisions)?;
-    validate_string_list("Task constraints", &bundle.constraints)?;
-    validate_string_list("Task excluded directions", &bundle.excluded_directions)?;
-    validate_string_list("Task source references", &bundle.source_references)
+fn validate_context_bundle(bundle: &TodoContextBundle) -> Result<(), AppError> {
+    validate_string_list("Todo known facts", &bundle.known_facts)?;
+    validate_string_list("Todo decisions", &bundle.decisions)?;
+    validate_string_list("Todo constraints", &bundle.constraints)?;
+    validate_string_list("Todo excluded directions", &bundle.excluded_directions)?;
+    validate_string_list("Todo source references", &bundle.source_references)
 }
 
 #[cfg(test)]
@@ -1136,8 +1132,8 @@ mod tests {
     use codez_storage::AtomicFileStore;
 
     use super::{
-        TaskApprovalStatus, TaskCreateInput, TaskEventSink, TaskItem, TaskItemUpdate, TaskSnapshot,
-        TaskStatus, TaskStore, TaskUpdateInput, todo_prompt_state,
+        TodoApprovalStatus, TodoCreateInput, TodoEventSink, TodoItem, TodoItemUpdate, TodoListSnapshot,
+        TodoStatus, TodoStore, TodoItemPatch, todo_prompt_state,
     };
 
     #[derive(Default)]
@@ -1145,8 +1141,8 @@ mod tests {
         revisions: StdMutex<Vec<u64>>,
     }
 
-    impl TaskEventSink for RecordingEvents {
-        fn emit(&self, snapshot: &TaskSnapshot) -> Result<(), AppError> {
+    impl TodoEventSink for RecordingEvents {
+        fn emit(&self, snapshot: &TodoListSnapshot) -> Result<(), AppError> {
             self.revisions
                 .lock()
                 .expect("event fixture lock must remain available")
@@ -1178,8 +1174,8 @@ mod tests {
             Box::pin(async move {
                 if self.fail_next_replace.swap(false, Ordering::SeqCst) {
                     return Err(AppError::storage(
-                        "The task state could not be saved",
-                        "injected task persistence failure",
+                        "The todo state could not be saved",
+                        "injected todo persistence failure",
                         true,
                     ));
                 }
@@ -1208,8 +1204,8 @@ mod tests {
         SessionId::parse(value).expect("fixture session ID must be valid")
     }
 
-    fn input(subject: impl Into<String>) -> TaskCreateInput {
-        TaskCreateInput {
+    fn input(subject: impl Into<String>) -> TodoCreateInput {
+        TodoCreateInput {
             subject: subject.into(),
             description: String::new(),
             files: Vec::new(),
@@ -1227,10 +1223,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn concurrent_creates_preserve_every_task_and_revision() {
+    async fn concurrent_creates_preserve_every_todo_and_revision() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
         let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
-        let store = Arc::new(TaskStore::new(directory.path(), persistence));
+        let store = Arc::new(TodoStore::new(directory.path(), persistence));
         let session_id = session("session-1");
         let mut workers = Vec::new();
         for index in 0..32 {
@@ -1238,24 +1234,24 @@ mod tests {
             let session_id = session_id.clone();
             workers.push(tokio::spawn(async move {
                 store
-                    .create(&session_id, vec![input(format!("task {index}"))])
+                    .create(&session_id, vec![input(format!("todo {index}"))])
                     .await
             }));
         }
         for worker in workers {
             worker
                 .await
-                .expect("task worker must join")
-                .expect("concurrent task create must succeed");
+                .expect("todo worker must join")
+                .expect("concurrent todo create must succeed");
         }
 
         let snapshot = store
             .snapshot(&session_id)
             .await
-            .expect("task snapshot must load");
+            .expect("todo snapshot must load");
         assert_eq!(
             (
-                snapshot.tasks.len(),
+                snapshot.items.len(),
                 snapshot.revision,
                 snapshot.next_sequence
             ),
@@ -1269,21 +1265,21 @@ mod tests {
         let persistence = Arc::new(FailingPersistence::new());
         let events = Arc::new(RecordingEvents::default());
         let store =
-            TaskStore::with_event_sink(directory.path(), persistence.clone(), events.clone());
+            TodoStore::with_event_sink(directory.path(), persistence.clone(), events.clone());
         let session_id = session("session-1");
         store
             .create(&session_id, vec![input("first")])
             .await
-            .expect("initial task create must succeed");
+            .expect("initial todo create must succeed");
         persistence.fail_next_replace.store(true, Ordering::SeqCst);
 
         let error = store
             .update(
                 &session_id,
                 "t1",
-                TaskUpdateInput {
-                    status: Some(TaskStatus::InProgress),
-                    ..TaskUpdateInput::default()
+                TodoItemPatch {
+                    status: Some(TodoStatus::InProgress),
+                    ..TodoItemPatch::default()
                 },
             )
             .await
@@ -1291,11 +1287,11 @@ mod tests {
         let snapshot = store
             .snapshot(&session_id)
             .await
-            .expect("old task snapshot must remain readable");
+            .expect("old todo snapshot must remain readable");
         assert_eq!(error.kind(), AppErrorKind::Storage);
         assert_eq!(
-            (snapshot.revision, snapshot.tasks[0].status),
-            (1, TaskStatus::Pending)
+            (snapshot.revision, snapshot.items[0].status),
+            (1, TodoStatus::Pending)
         );
         assert_eq!(
             events
@@ -1312,26 +1308,47 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
         let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
         let session_id = session("session-1");
-        TaskStore::new(directory.path(), Arc::clone(&persistence))
+        TodoStore::new(directory.path(), Arc::clone(&persistence))
             .create(&session_id, vec![input("persisted")])
             .await
-            .expect("task create must persist");
-        let restarted = TaskStore::new(directory.path(), Arc::clone(&persistence));
+            .expect("todo create must persist");
+        let restarted = TodoStore::new(directory.path(), Arc::clone(&persistence));
         let recovered = restarted
             .snapshot(&session_id)
             .await
-            .expect("task snapshot must recover");
-        assert_eq!(recovered.tasks[0].subject, "persisted");
+            .expect("todo snapshot must recover");
+        assert_eq!(recovered.items[0].subject, "persisted");
 
         restarted
             .cleanup_session(&session_id)
             .await
-            .expect("task cleanup must succeed");
-        let after_cleanup = TaskStore::new(directory.path(), persistence)
+            .expect("todo cleanup must succeed");
+        let after_cleanup = TodoStore::new(directory.path(), persistence)
             .snapshot(&session_id)
             .await
-            .expect("cleaned task snapshot must be empty");
-        assert!(after_cleanup.tasks.is_empty() && after_cleanup.revision == 0);
+            .expect("cleaned todo snapshot must be empty");
+        assert!(after_cleanup.items.is_empty() && after_cleanup.revision == 0);
+    }
+
+    #[tokio::test]
+    async fn persisted_snapshot_keeps_the_legacy_tasks_field() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let store = TodoStore::new(
+            directory.path(),
+            Arc::new(AtomicFileStore::default()),
+        );
+        let session_id = session("session-1");
+        store
+            .create(&session_id, vec![input("persisted")])
+            .await
+            .expect("Todo create must persist");
+
+        let document = std::fs::read_to_string(directory.path().join("tasks/session-1.json"))
+            .expect("persisted Todo document must be readable");
+        let value: serde_json::Value =
+            serde_json::from_str(&document).expect("persisted Todo document must be valid JSON");
+
+        assert!(value.get("tasks").is_some() && value.get("items").is_none());
     }
 
     #[tokio::test]
@@ -1343,16 +1360,16 @@ mod tests {
         ];
         for document in cases {
             let directory = tempfile::tempdir().expect("temporary directory must be available");
-            let task_directory = directory.path().join("tasks");
-            std::fs::create_dir_all(&task_directory)
-                .expect("task fixture directory must be created");
-            std::fs::write(task_directory.join("session-1.json"), document)
-                .expect("invalid task fixture must be written");
-            let store = TaskStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+            let todo_directory = directory.path().join("tasks");
+            std::fs::create_dir_all(&todo_directory)
+                .expect("todo fixture directory must be created");
+            std::fs::write(todo_directory.join("session-1.json"), document)
+                .expect("invalid todo fixture must be written");
+            let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
             let error = store
                 .snapshot(&session("session-1"))
                 .await
-                .expect_err("invalid task document must fail closed");
+                .expect_err("invalid todo document must fail closed");
             assert_eq!(error.kind(), AppErrorKind::Storage);
         }
     }
@@ -1361,36 +1378,36 @@ mod tests {
     async fn oversized_document_and_cross_session_access_fail_closed() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
         let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
-        let store = TaskStore::new(directory.path(), Arc::clone(&persistence));
+        let store = TodoStore::new(directory.path(), Arc::clone(&persistence));
         let owner = session("session-1");
         store
             .create(&owner, vec![input("owned")])
             .await
-            .expect("owner task create must succeed");
+            .expect("owner todo create must succeed");
         let error = store
             .get(&session("session-2"), "t1")
             .await
-            .expect_err("another session must not access the task");
+            .expect_err("another session must not access the todo");
         assert_eq!(error.kind(), AppErrorKind::NotFound);
 
         let oversized_session = session("session-3");
         let oversized_path = directory.path().join("tasks/session-3.json");
         std::fs::write(
             &oversized_path,
-            vec![b' '; super::MAX_TASK_DOCUMENT_BYTES + 1],
+            vec![b' '; super::MAX_TODO_DOCUMENT_BYTES + 1],
         )
-        .expect("oversized task fixture must be written");
+        .expect("oversized todo fixture must be written");
         let error = store
             .snapshot(&oversized_session)
             .await
-            .expect_err("oversized task document must fail closed");
+            .expect_err("oversized todo document must fail closed");
         assert_eq!(error.kind(), AppErrorKind::Storage);
     }
 
     #[tokio::test]
     async fn in_progress_admission_is_atomic() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
-        let store = Arc::new(TaskStore::new(
+        let store = Arc::new(TodoStore::new(
             directory.path(),
             Arc::new(AtomicFileStore::default()),
         ));
@@ -1398,19 +1415,19 @@ mod tests {
         store
             .create(&session_id, vec![input("first"), input("second")])
             .await
-            .expect("task create must succeed");
+            .expect("todo create must succeed");
         let mut workers = Vec::new();
-        for task_id in ["t1", "t2"] {
+        for todo_id in ["t1", "t2"] {
             let store = Arc::clone(&store);
             let session_id = session_id.clone();
             workers.push(tokio::spawn(async move {
                 store
                     .update(
                         &session_id,
-                        task_id,
-                        TaskUpdateInput {
-                            status: Some(TaskStatus::InProgress),
-                            ..TaskUpdateInput::default()
+                        todo_id,
+                        TodoItemPatch {
+                            status: Some(TodoStatus::InProgress),
+                            ..TodoItemPatch::default()
                         },
                     )
                     .await
@@ -1418,20 +1435,20 @@ mod tests {
         }
         let mut successes = 0;
         for worker in workers {
-            if worker.await.expect("task worker must join").is_ok() {
+            if worker.await.expect("todo worker must join").is_ok() {
                 successes += 1;
             }
         }
         let snapshot = store
             .snapshot(&session_id)
             .await
-            .expect("task snapshot must load");
+            .expect("todo snapshot must load");
         assert_eq!(successes, 1);
         assert_eq!(
             snapshot
-                .tasks
+                .items
                 .iter()
-                .filter(|task| task.status == TaskStatus::InProgress)
+                .filter(|todo| todo.status == TodoStatus::InProgress)
                 .count(),
             1
         );
@@ -1440,19 +1457,19 @@ mod tests {
     #[tokio::test]
     async fn unfinished_dependency_blocks_start_until_completed() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
-        let store = TaskStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
         let session_id = session("session-1");
         store
             .create(&session_id, vec![input("dependency"), input("dependent")])
             .await
-            .expect("task create must succeed");
+            .expect("todo create must succeed");
         store
             .update(
                 &session_id,
                 "t2",
-                TaskUpdateInput {
+                TodoItemPatch {
                     add_blocked_by: vec!["t1".to_string()],
-                    ..TaskUpdateInput::default()
+                    ..TodoItemPatch::default()
                 },
             )
             .await
@@ -1462,9 +1479,9 @@ mod tests {
             .update(
                 &session_id,
                 "t2",
-                TaskUpdateInput {
-                    status: Some(TaskStatus::InProgress),
-                    ..TaskUpdateInput::default()
+                TodoItemPatch {
+                    status: Some(TodoStatus::InProgress),
+                    ..TodoItemPatch::default()
                 },
             )
             .await
@@ -1475,9 +1492,9 @@ mod tests {
             .update(
                 &session_id,
                 "t1",
-                TaskUpdateInput {
-                    status: Some(TaskStatus::InProgress),
-                    ..TaskUpdateInput::default()
+                TodoItemPatch {
+                    status: Some(TodoStatus::InProgress),
+                    ..TodoItemPatch::default()
                 },
             )
             .await
@@ -1486,9 +1503,9 @@ mod tests {
             .update(
                 &session_id,
                 "t1",
-                TaskUpdateInput {
-                    status: Some(TaskStatus::Completed),
-                    ..TaskUpdateInput::default()
+                TodoItemPatch {
+                    status: Some(TodoStatus::Completed),
+                    ..TodoItemPatch::default()
                 },
             )
             .await
@@ -1497,33 +1514,33 @@ mod tests {
             .update(
                 &session_id,
                 "t2",
-                TaskUpdateInput {
-                    status: Some(TaskStatus::InProgress),
-                    ..TaskUpdateInput::default()
+                TodoItemPatch {
+                    status: Some(TodoStatus::InProgress),
+                    ..TodoItemPatch::default()
                 },
             )
             .await
             .expect("completed dependency must unblock admission");
 
-        assert_eq!(snapshot.tasks[1].status, TaskStatus::InProgress);
+        assert_eq!(snapshot.items[1].status, TodoStatus::InProgress);
     }
 
     #[tokio::test]
     async fn unfinished_dependency_blocks_completion() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
-        let store = TaskStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
         let session_id = session("session-1");
         store
             .create(&session_id, vec![input("dependency"), input("dependent")])
             .await
-            .expect("task create must succeed");
+            .expect("todo create must succeed");
         store
             .update(
                 &session_id,
                 "t2",
-                TaskUpdateInput {
+                TodoItemPatch {
                     add_blocked_by: vec!["t1".to_string()],
-                    ..TaskUpdateInput::default()
+                    ..TodoItemPatch::default()
                 },
             )
             .await
@@ -1533,9 +1550,9 @@ mod tests {
             .update(
                 &session_id,
                 "t2",
-                TaskUpdateInput {
-                    status: Some(TaskStatus::Completed),
-                    ..TaskUpdateInput::default()
+                TodoItemPatch {
+                    status: Some(TodoStatus::Completed),
+                    ..TodoItemPatch::default()
                 },
             )
             .await
@@ -1549,47 +1566,47 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
         let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
         let session_id = session("session-1");
-        let store = TaskStore::new(directory.path(), Arc::clone(&persistence));
+        let store = TodoStore::new(directory.path(), Arc::clone(&persistence));
         store
             .create(&session_id, vec![input("dependency"), input("dependent")])
             .await
-            .expect("task create must succeed");
+            .expect("todo create must succeed");
         store
             .update(
                 &session_id,
                 "t2",
-                TaskUpdateInput {
+                TodoItemPatch {
                     add_blocked_by: vec!["t1".to_string()],
-                    ..TaskUpdateInput::default()
+                    ..TodoItemPatch::default()
                 },
             )
             .await
             .expect("dependency update must persist");
 
-        let recovered = TaskStore::new(directory.path(), persistence)
+        let recovered = TodoStore::new(directory.path(), persistence)
             .snapshot(&session_id)
             .await
-            .expect("task snapshot must recover");
+            .expect("todo snapshot must recover");
 
-        assert_eq!(recovered.tasks[1].blocked_by, ["t1"]);
+        assert_eq!(recovered.items[1].blocked_by, ["t1"]);
     }
 
     #[tokio::test]
     async fn reopening_dependency_cannot_reblock_active_dependent() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
-        let store = TaskStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
         let session_id = session("session-1");
         store
             .create(&session_id, vec![input("dependency"), input("dependent")])
             .await
-            .expect("task create must succeed");
+            .expect("todo create must succeed");
         store
             .update(
                 &session_id,
                 "t2",
-                TaskUpdateInput {
+                TodoItemPatch {
                     add_blocked_by: vec!["t1".to_string()],
-                    ..TaskUpdateInput::default()
+                    ..TodoItemPatch::default()
                 },
             )
             .await
@@ -1598,9 +1615,9 @@ mod tests {
             .update(
                 &session_id,
                 "t1",
-                TaskUpdateInput {
-                    status: Some(TaskStatus::Completed),
-                    ..TaskUpdateInput::default()
+                TodoItemPatch {
+                    status: Some(TodoStatus::Completed),
+                    ..TodoItemPatch::default()
                 },
             )
             .await
@@ -1609,9 +1626,9 @@ mod tests {
             .update(
                 &session_id,
                 "t2",
-                TaskUpdateInput {
-                    status: Some(TaskStatus::InProgress),
-                    ..TaskUpdateInput::default()
+                TodoItemPatch {
+                    status: Some(TodoStatus::InProgress),
+                    ..TodoItemPatch::default()
                 },
             )
             .await
@@ -1621,9 +1638,9 @@ mod tests {
             .update(
                 &session_id,
                 "t1",
-                TaskUpdateInput {
-                    status: Some(TaskStatus::Pending),
-                    ..TaskUpdateInput::default()
+                TodoItemPatch {
+                    status: Some(TodoStatus::Pending),
+                    ..TodoItemPatch::default()
                 },
             )
             .await
@@ -1635,20 +1652,20 @@ mod tests {
     #[tokio::test]
     async fn dependency_update_rejects_self_dependency() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
-        let store = TaskStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
         let session_id = session("session-1");
         store
-            .create(&session_id, vec![input("task")])
+            .create(&session_id, vec![input("todo")])
             .await
-            .expect("task create must succeed");
+            .expect("todo create must succeed");
 
         let error = store
             .update(
                 &session_id,
                 "t1",
-                TaskUpdateInput {
+                TodoItemPatch {
                     add_blocked_by: vec!["t1".to_string()],
-                    ..TaskUpdateInput::default()
+                    ..TodoItemPatch::default()
                 },
             )
             .await
@@ -1658,22 +1675,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dependency_update_rejects_missing_task() {
+    async fn dependency_update_rejects_missing_todo() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
-        let store = TaskStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
         let session_id = session("session-1");
         store
-            .create(&session_id, vec![input("task")])
+            .create(&session_id, vec![input("todo")])
             .await
-            .expect("task create must succeed");
+            .expect("todo create must succeed");
 
         let error = store
             .update(
                 &session_id,
                 "t1",
-                TaskUpdateInput {
+                TodoItemPatch {
                     add_blocked_by: vec!["t2".to_string()],
-                    ..TaskUpdateInput::default()
+                    ..TodoItemPatch::default()
                 },
             )
             .await
@@ -1685,20 +1702,20 @@ mod tests {
     #[tokio::test]
     async fn dependency_update_rejects_duplicate_identifier() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
-        let store = TaskStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
         let session_id = session("session-1");
         store
             .create(&session_id, vec![input("dependency"), input("dependent")])
             .await
-            .expect("task create must succeed");
+            .expect("todo create must succeed");
 
         let error = store
             .update(
                 &session_id,
                 "t2",
-                TaskUpdateInput {
+                TodoItemPatch {
                     add_blocked_by: vec!["t1".to_string(), "t1".to_string()],
-                    ..TaskUpdateInput::default()
+                    ..TodoItemPatch::default()
                 },
             )
             .await
@@ -1710,19 +1727,19 @@ mod tests {
     #[tokio::test]
     async fn dependency_update_rejects_cycle() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
-        let store = TaskStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
         let session_id = session("session-1");
         store
             .create(&session_id, vec![input("first"), input("second")])
             .await
-            .expect("task create must succeed");
+            .expect("todo create must succeed");
         store
             .update(
                 &session_id,
                 "t1",
-                TaskUpdateInput {
+                TodoItemPatch {
                     add_blocked_by: vec!["t2".to_string()],
-                    ..TaskUpdateInput::default()
+                    ..TodoItemPatch::default()
                 },
             )
             .await
@@ -1732,9 +1749,9 @@ mod tests {
             .update(
                 &session_id,
                 "t2",
-                TaskUpdateInput {
+                TodoItemPatch {
                     add_blocked_by: vec!["t1".to_string()],
-                    ..TaskUpdateInput::default()
+                    ..TodoItemPatch::default()
                 },
             )
             .await
@@ -1746,21 +1763,21 @@ mod tests {
     #[tokio::test]
     async fn stale_expected_revision_rejects_update() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
-        let store = TaskStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
         let session_id = session("session-1");
         store
-            .create(&session_id, vec![input("task")])
+            .create(&session_id, vec![input("todo")])
             .await
-            .expect("task create must succeed");
+            .expect("todo create must succeed");
 
         let error = store
             .update(
                 &session_id,
                 "t1",
-                TaskUpdateInput {
+                TodoItemPatch {
                     expected_revision: Some(0),
                     subject: Some("stale update".to_string()),
-                    ..TaskUpdateInput::default()
+                    ..TodoItemPatch::default()
                 },
             )
             .await
@@ -1770,24 +1787,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn approval_required_task_cannot_start_before_approval() {
+    async fn approval_required_todo_cannot_start_before_approval() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
-        let store = TaskStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
         let session_id = session("session-1");
-        let mut approval_task = input("approval task");
-        approval_task.requires_approval = true;
+        let mut approval_todo = input("approval todo");
+        approval_todo.requires_approval = true;
         store
-            .create(&session_id, vec![approval_task])
+            .create(&session_id, vec![approval_todo])
             .await
-            .expect("task create must succeed");
+            .expect("todo create must succeed");
 
         let error = store
             .update(
                 &session_id,
                 "t1",
-                TaskUpdateInput {
-                    status: Some(TaskStatus::InProgress),
-                    ..TaskUpdateInput::default()
+                TodoItemPatch {
+                    status: Some(TodoStatus::InProgress),
+                    ..TodoItemPatch::default()
                 },
             )
             .await
@@ -1798,29 +1815,29 @@ mod tests {
             .update(
                 &session_id,
                 "t1",
-                TaskUpdateInput {
-                    status: Some(TaskStatus::InProgress),
-                    approval_status: Some(TaskApprovalStatus::Approved),
-                    ..TaskUpdateInput::default()
+                TodoItemPatch {
+                    status: Some(TodoStatus::InProgress),
+                    approval_status: Some(TodoApprovalStatus::Approved),
+                    ..TodoItemPatch::default()
                 },
             )
             .await
             .expect("approval and admission may be committed atomically");
-        assert_eq!(snapshot.tasks[0].status, TaskStatus::InProgress);
+        assert_eq!(snapshot.items[0].status, TodoStatus::InProgress);
     }
 
     #[tokio::test]
     async fn empty_update_is_rejected() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
-        let store = TaskStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
         let session_id = session("session-1");
         store
-            .create(&session_id, vec![input("task")])
+            .create(&session_id, vec![input("todo")])
             .await
-            .expect("task create must succeed");
+            .expect("todo create must succeed");
 
         let error = store
-            .update(&session_id, "t1", TaskUpdateInput::default())
+            .update(&session_id, "t1", TodoItemPatch::default())
             .await
             .expect_err("empty update must be rejected");
 
@@ -1828,21 +1845,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn deleting_task_removes_it_from_dependencies() {
+    async fn deleting_todo_removes_it_from_dependencies() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
-        let store = TaskStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
         let session_id = session("session-1");
         store
             .create(&session_id, vec![input("dependency"), input("dependent")])
             .await
-            .expect("task create must succeed");
+            .expect("todo create must succeed");
         store
             .update(
                 &session_id,
                 "t2",
-                TaskUpdateInput {
+                TodoItemPatch {
                     add_blocked_by: vec!["t1".to_string()],
-                    ..TaskUpdateInput::default()
+                    ..TodoItemPatch::default()
                 },
             )
             .await
@@ -1851,17 +1868,17 @@ mod tests {
         let snapshot = store
             .delete(&session_id, "t1")
             .await
-            .expect("task deletion must succeed");
+            .expect("todo deletion must succeed");
 
-        assert!(snapshot.tasks[0].blocked_by.is_empty());
+        assert!(snapshot.items[0].blocked_by.is_empty());
     }
 
     #[tokio::test]
     async fn batch_update_validates_the_final_state_and_emits_once() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
         let events = Arc::new(RecordingEvents::default());
-        let event_sink: Arc<dyn TaskEventSink> = events.clone();
-        let store = TaskStore::with_event_sink(
+        let event_sink: Arc<dyn TodoEventSink> = events.clone();
+        let store = TodoStore::with_event_sink(
             directory.path(),
             Arc::new(AtomicFileStore::default()),
             event_sink,
@@ -1875,9 +1892,9 @@ mod tests {
             .update(
                 &session_id,
                 "t1",
-                TaskUpdateInput {
-                    status: Some(TaskStatus::InProgress),
-                    ..TaskUpdateInput::default()
+                TodoItemPatch {
+                    status: Some(TodoStatus::InProgress),
+                    ..TodoItemPatch::default()
                 },
             )
             .await
@@ -1888,18 +1905,18 @@ mod tests {
                 &session_id,
                 Some(2),
                 vec![
-                    TaskItemUpdate {
-                        task_id: "t1".to_string(),
-                        patch: TaskUpdateInput {
-                            status: Some(TaskStatus::Completed),
-                            ..TaskUpdateInput::default()
+                    TodoItemUpdate {
+                        todo_id: "t1".to_string(),
+                        patch: TodoItemPatch {
+                            status: Some(TodoStatus::Completed),
+                            ..TodoItemPatch::default()
                         },
                     },
-                    TaskItemUpdate {
-                        task_id: "t2".to_string(),
-                        patch: TaskUpdateInput {
-                            status: Some(TaskStatus::InProgress),
-                            ..TaskUpdateInput::default()
+                    TodoItemUpdate {
+                        todo_id: "t2".to_string(),
+                        patch: TodoItemPatch {
+                            status: Some(TodoStatus::InProgress),
+                            ..TodoItemPatch::default()
                         },
                     },
                 ],
@@ -1910,8 +1927,8 @@ mod tests {
         assert_eq!(
             (
                 snapshot.revision,
-                snapshot.tasks[0].status,
-                snapshot.tasks[1].status,
+                snapshot.items[0].status,
+                snapshot.items[1].status,
                 events
                     .revisions
                     .lock()
@@ -1920,8 +1937,8 @@ mod tests {
             ),
             (
                 3,
-                TaskStatus::Completed,
-                TaskStatus::InProgress,
+                TodoStatus::Completed,
+                TodoStatus::InProgress,
                 &[1, 2, 3][..],
             )
         );
@@ -1930,7 +1947,7 @@ mod tests {
     #[tokio::test]
     async fn batch_update_rejects_duplicate_ids_without_mutating_state() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
-        let store = TaskStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
+        let store = TodoStore::new(directory.path(), Arc::new(AtomicFileStore::default()));
         let session_id = session("session-1");
         store
             .create(&session_id, vec![input("first")])
@@ -1942,18 +1959,18 @@ mod tests {
                 &session_id,
                 Some(1),
                 vec![
-                    TaskItemUpdate {
-                        task_id: "t1".to_string(),
-                        patch: TaskUpdateInput {
+                    TodoItemUpdate {
+                        todo_id: "t1".to_string(),
+                        patch: TodoItemPatch {
                             subject: Some("changed once".to_string()),
-                            ..TaskUpdateInput::default()
+                            ..TodoItemPatch::default()
                         },
                     },
-                    TaskItemUpdate {
-                        task_id: "t1".to_string(),
-                        patch: TaskUpdateInput {
+                    TodoItemUpdate {
+                        todo_id: "t1".to_string(),
+                        patch: TodoItemPatch {
                             subject: Some("changed twice".to_string()),
-                            ..TaskUpdateInput::default()
+                            ..TodoItemPatch::default()
                         },
                     },
                 ],
@@ -1969,7 +1986,7 @@ mod tests {
             (
                 error.kind(),
                 snapshot.revision,
-                snapshot.tasks[0].subject.as_str()
+                snapshot.items[0].subject.as_str()
             ),
             (AppErrorKind::Validation, 1, "first")
         );
@@ -1977,16 +1994,16 @@ mod tests {
 
     #[test]
     fn todo_prompt_state_is_bounded_and_escapes_markup() {
-        let snapshot = TaskSnapshot {
+        let snapshot = TodoListSnapshot {
             version: 1,
             session_id: session("session-1"),
             revision: 7,
             next_sequence: 2,
-            tasks: vec![TaskItem {
+            items: vec![TodoItem {
                 id: "t1".to_string(),
                 subject: "active <item>".to_string(),
                 description: "x".repeat(super::MAX_PROMPT_DESCRIPTION_CHARS + 100),
-                status: TaskStatus::InProgress,
+                status: TodoStatus::InProgress,
                 blocked_by: Vec::new(),
                 files: Vec::new(),
                 active_form: None,
@@ -1995,7 +2012,7 @@ mod tests {
                 group_subtitle: None,
                 risk_level: None,
                 requires_approval: false,
-                approval_status: TaskApprovalStatus::NotRequired,
+                approval_status: TodoApprovalStatus::NotRequired,
                 acceptance_criteria: Vec::new(),
                 verification_command: None,
                 context_bundle: None,

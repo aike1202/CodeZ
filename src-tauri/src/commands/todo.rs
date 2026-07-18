@@ -1,6 +1,6 @@
-use codez_contracts::{
+﻿use codez_contracts::{
     CommandError,
-    task::{
+    todo::{
         TODO_EVENT_VERSION, TODO_UPDATED_EVENT, TodoApprovalStatus, TodoContextBundle,
         TodoCreateInput, TodoCreateRequest, TodoGetRequest, TodoItem, TodoItemUpdate,
         TodoListRequest, TodoListSnapshot, TodoMutationResult, TodoRiskLevel, TodoStatus,
@@ -8,12 +8,12 @@ use codez_contracts::{
     },
 };
 use codez_core::{AppError, SessionId};
-use codez_runtime::task::{
-    TaskApprovalStatus as RuntimeApprovalStatus, TaskContextBundle as RuntimeContextBundle,
-    TaskCreateInput as RuntimeCreateInput, TaskEventSink, TaskItem as RuntimeTaskItem,
-    TaskItemUpdate as RuntimeItemUpdate, TaskRiskLevel as RuntimeRiskLevel,
-    TaskSnapshot as RuntimeSnapshot, TaskStatus as RuntimeStatus,
-    TaskUpdateInput as RuntimeUpdateInput,
+use codez_runtime::todo::{
+    TodoApprovalStatus as RuntimeApprovalStatus, TodoContextBundle as RuntimeContextBundle,
+    TodoCreateInput as RuntimeCreateInput, TodoEventSink, TodoItem as RuntimeTodoItem,
+    TodoItemPatch as RuntimeItemPatch, TodoItemUpdate as RuntimeItemUpdate,
+    TodoListSnapshot as RuntimeSnapshot, TodoRiskLevel as RuntimeRiskLevel,
+    TodoStatus as RuntimeStatus,
 };
 use tauri::{AppHandle, Emitter, State, command};
 
@@ -30,7 +30,7 @@ impl DesktopTodoEventSink {
     }
 }
 
-impl TaskEventSink for DesktopTodoEventSink {
+impl TodoEventSink for DesktopTodoEventSink {
     fn emit(&self, snapshot: &RuntimeSnapshot) -> Result<(), AppError> {
         let snapshot = snapshot_contract(snapshot);
         let event = TodoUpdatedEvent {
@@ -57,7 +57,7 @@ pub async fn todo_list(
     let result = async {
         let session_id = parse_session_id(request.session_id)?;
         state
-            .task_store
+            .todo_store
             .snapshot(&session_id)
             .await
             .map(|snapshot| snapshot_contract(&snapshot))
@@ -74,10 +74,10 @@ pub async fn todo_get(
     let result = async {
         let session_id = parse_session_id(request.session_id)?;
         state
-            .task_store
+            .todo_store
             .get(&session_id, &request.todo_id)
             .await
-            .map(|task| task_contract(&task))
+            .map(|todo| todo_contract(&todo))
     }
     .await;
     command_result(&state.errors, result)
@@ -91,7 +91,7 @@ pub async fn todo_create(
     let result = async {
         let session_id = parse_session_id(request.session_id)?;
         let items = request.items.into_iter().map(create_input).collect();
-        let snapshot = state.task_store.create(&session_id, items).await?;
+        let snapshot = state.todo_store.create(&session_id, items).await?;
         Ok(TodoMutationResult {
             snapshot: snapshot_contract(&snapshot),
         })
@@ -108,7 +108,7 @@ pub async fn todo_update(
     let result = async {
         let session_id = parse_session_id(request.session_id)?;
         let snapshot = state
-            .task_store
+            .todo_store
             .update_batch(
                 &session_id,
                 request.expected_revision,
@@ -132,7 +132,7 @@ pub async fn todo_delete(
     let result = async {
         let session_id = parse_session_id(session_id)?;
         state
-            .task_store
+            .todo_store
             .delete(&session_id, &todo_id)
             .await
             .map(|snapshot| snapshot_contract(&snapshot))
@@ -166,8 +166,8 @@ fn create_input(input: TodoCreateInput) -> RuntimeCreateInput {
 
 fn update_input(input: TodoItemUpdate) -> RuntimeItemUpdate {
     RuntimeItemUpdate {
-        task_id: input.todo_id,
-        patch: RuntimeUpdateInput {
+        todo_id: input.todo_id,
+        patch: RuntimeItemPatch {
             expected_revision: None,
             subject: input.subject,
             description: input.description,
@@ -205,28 +205,28 @@ fn snapshot_contract(snapshot: &RuntimeSnapshot) -> TodoListSnapshot {
         session_id: snapshot.session_id.as_str().to_string(),
         revision: snapshot.revision,
         next_sequence: snapshot.next_sequence,
-        items: snapshot.tasks.iter().map(task_contract).collect(),
+        items: snapshot.items.iter().map(todo_contract).collect(),
     }
 }
 
-fn task_contract(task: &RuntimeTaskItem) -> TodoItem {
+fn todo_contract(todo: &RuntimeTodoItem) -> TodoItem {
     TodoItem {
-        id: task.id.clone(),
-        subject: task.subject.clone(),
-        description: task.description.clone(),
-        status: status_contract(task.status),
-        blocked_by: non_empty(task.blocked_by.clone()),
-        files: non_empty(task.files.clone()),
-        active_form: task.active_form.clone(),
-        group_id: task.group_id.clone(),
-        group_title: task.group_title.clone(),
-        group_subtitle: task.group_subtitle.clone(),
-        risk_level: task.risk_level.map(risk_contract),
-        requires_approval: task.requires_approval,
-        approval_status: approval_contract(task.approval_status),
-        acceptance_criteria: non_empty(task.acceptance_criteria.clone()),
-        verification_command: task.verification_command.clone(),
-        context_bundle: task.context_bundle.as_ref().map(context_contract),
+        id: todo.id.clone(),
+        subject: todo.subject.clone(),
+        description: todo.description.clone(),
+        status: status_contract(todo.status),
+        blocked_by: non_empty(todo.blocked_by.clone()),
+        files: non_empty(todo.files.clone()),
+        active_form: todo.active_form.clone(),
+        group_id: todo.group_id.clone(),
+        group_title: todo.group_title.clone(),
+        group_subtitle: todo.group_subtitle.clone(),
+        risk_level: todo.risk_level.map(risk_contract),
+        requires_approval: todo.requires_approval,
+        approval_status: approval_contract(todo.approval_status),
+        acceptance_criteria: non_empty(todo.acceptance_criteria.clone()),
+        verification_command: todo.verification_command.clone(),
+        context_bundle: todo.context_bundle.as_ref().map(context_contract),
     }
 }
 
@@ -301,22 +301,22 @@ const fn approval_runtime(status: TodoApprovalStatus) -> RuntimeApprovalStatus {
 #[cfg(test)]
 mod tests {
     use codez_core::SessionId;
-    use codez_runtime::task::{TaskApprovalStatus, TaskItem, TaskSnapshot, TaskStatus};
+    use codez_runtime::todo::{TodoApprovalStatus, TodoItem, TodoListSnapshot, TodoStatus};
 
     use super::snapshot_contract;
 
     #[test]
     fn snapshot_conversion_preserves_identity_revision_and_optional_fields() {
-        let snapshot = TaskSnapshot {
+        let snapshot = TodoListSnapshot {
             version: 1,
             session_id: SessionId::parse("session-1").expect("fixture session ID must be valid"),
             revision: 4,
             next_sequence: 2,
-            tasks: vec![TaskItem {
+            items: vec![TodoItem {
                 id: "t1".to_string(),
-                subject: "Implement task events".to_string(),
+                subject: "Implement todo events".to_string(),
                 description: String::new(),
-                status: TaskStatus::Pending,
+                status: TodoStatus::Pending,
                 blocked_by: Vec::new(),
                 files: Vec::new(),
                 active_form: None,
@@ -325,7 +325,7 @@ mod tests {
                 group_subtitle: None,
                 risk_level: None,
                 requires_approval: false,
-                approval_status: TaskApprovalStatus::NotRequired,
+                approval_status: TodoApprovalStatus::NotRequired,
                 acceptance_criteria: Vec::new(),
                 verification_command: None,
                 context_bundle: None,

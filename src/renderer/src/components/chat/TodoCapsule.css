@@ -1,4 +1,4 @@
-/* Task 是默认工作流胶囊，固定在聊天区右上角。 */
+﻿/* Task 是默认工作流胶囊，固定在聊天区右上角。 */
 .plan-capsule-wrapper {
   position: sticky;
   top: 16px;
@@ -58,7 +58,7 @@
   color: var(--color-danger, #dc2626);
 }
 
-.task-capsule-wrapper .step-icon {
+.todo-capsule-wrapper .step-icon {
   flex: 0 0 18px;
   width: 18px;
   height: 18px;
@@ -70,10 +70,10 @@
 }
 
 .spin {
-  animation: task-capsule-spin 1s linear infinite;
+  animation: todo-capsule-spin 1s linear infinite;
 }
 
-@keyframes task-capsule-spin {
+@keyframes todo-capsule-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
@@ -104,11 +104,11 @@
   overflow: hidden;
 }
 
-.dark .task-capsule-wrapper .plan-capsule {
+.dark .todo-capsule-wrapper .plan-capsule {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.34);
 }
 
-.dark .task-capsule-wrapper .plan-capsule-popover {
+.dark .todo-capsule-wrapper .plan-capsule-popover {
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.44);
 }
 
@@ -165,7 +165,7 @@
   gap: 2px;
 }
 
-.task-step-title-row {
+.todo-step-title-row {
   display: flex;
   align-items: baseline;
   gap: 8px;
@@ -181,7 +181,7 @@
   overflow-wrap: anywhere;
 }
 
-.task-status-label {
+.todo-status-label {
   flex: 0 0 auto;
   font-size: 0.68rem;
   line-height: 1.35;
@@ -189,41 +189,41 @@
   white-space: nowrap;
 }
 
-.task-status-label.status-running,
-.task-status-label.status-in_progress,
-.task-status-label.status-integrating,
-.task-status-label.status-stopping {
+.todo-status-label.status-running,
+.todo-status-label.status-in_progress,
+.todo-status-label.status-integrating,
+.todo-status-label.status-stopping {
   color: var(--primary-color);
 }
 
-.task-status-label.status-failed,
-.task-status-label.status-interrupted,
-.task-status-label.status-lost,
-.task-status-label.status-blocked,
-.task-block-reason {
+.todo-status-label.status-failed,
+.todo-status-label.status-interrupted,
+.todo-status-label.status-lost,
+.todo-status-label.status-blocked,
+.todo-block-reason {
   color: var(--color-danger, #dc2626);
 }
 
-.task-capsule-wrapper .step-item.status-completed .step-title {
+.todo-capsule-wrapper .step-item.status-completed .step-title {
   color: var(--text-muted);
   text-decoration: line-through;
 }
 
-.task-capsule-wrapper .step-item.status-completed .step-desc {
+.todo-capsule-wrapper .step-item.status-completed .step-desc {
   opacity: 0.65;
 }
 
-.task-capsule-wrapper .step-icon.cancelled {
+.todo-capsule-wrapper .step-icon.cancelled {
   color: var(--text-light);
 }
 
-.task-capsule-wrapper .step-item.status-cancelled .step-title {
+.todo-capsule-wrapper .step-item.status-cancelled .step-title {
   color: var(--text-muted);
   text-decoration: line-through;
   opacity: 0.7;
 }
 
-.task-capsule-wrapper .plan-capsule-popover .task-list-subtitle {
+.todo-capsule-wrapper .plan-capsule-popover .todo-list-subtitle {
   margin: 2px 0 0;
   font-size: 0.75rem;
   color: var(--text-muted);
@@ -232,7 +232,7 @@
   text-overflow: ellipsis;
 }
 
-.task-capsule-wrapper .step-desc {
+.todo-capsule-wrapper .step-desc {
   font-size: 0.72rem;
   color: var(--text-light);
   line-height: 1.35;

@@ -1,8 +1,8 @@
-/**
+﻿/**
  * 会话级 Todo 类型定义。
  *
- * `SessionData.tasks` 仅保留为旧会话的持久化字段名。Todo 描述工作状态，
- * 不拥有 Agent 或 Executor 生命周期。
+ * Todo 描述工作状态，不拥有 Agent 或 Executor 生命周期。权威状态由
+ * Rust TodoStore 持久化。
  */
 
 export type TodoStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
@@ -36,15 +36,15 @@ export interface TodoItem {
   status: TodoStatus
   /** 当前 Todo 必须等待完成的其他 Todo ID；反向 blocks 由此派生。 */
   blockedBy?: string[]
-  /** TaskGroup 标识；同一组任务共享审批与目标上下文 */
+  /** Todo group 标识；同一组 Todo 共享审批与目标上下文 */
   groupId?: string
-  /** TaskGroup 展示标题；前端优先使用该字段作为清单头 */
+  /** Todo group 展示标题；前端优先使用该字段作为清单头 */
   groupTitle?: string
-  /** TaskGroup 副标题/摘要 */
+  /** Todo group 副标题/摘要 */
   groupSubtitle?: string
   /** 风险等级：high 通常需要用户审批后再执行 */
   riskLevel?: TodoRiskLevel
-  /** 是否要求用户审批该 TaskGroup */
+  /** 是否要求用户审批该 Todo group */
   requiresApproval?: boolean
   /** 审批状态；requiresApproval=false 时为 not_required */
   approvalStatus?: TodoApprovalStatus
@@ -65,11 +65,3 @@ export interface TodoUpdatePayload {
   sessionId: string
   items: TodoItem[]
 }
-
-// Persisted Electron sessions and older renderer code still use these type names.
-export type TaskStatus = TodoStatus
-export type TaskRiskLevel = TodoRiskLevel
-export type TaskApprovalStatus = TodoApprovalStatus
-export type TaskContextBundle = TodoContextBundle
-export type TaskItem = TodoItem
-export type TaskUpdatePayload = { sessionId: string; tasks: TodoItem[] }

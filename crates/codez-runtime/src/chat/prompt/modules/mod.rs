@@ -1,4 +1,4 @@
-pub mod available_tools;
+﻿pub mod available_tools;
 pub mod context_management;
 pub mod editing;
 pub mod engineering_philosophy;
@@ -10,7 +10,7 @@ pub mod output_policy;
 pub mod repository_rules;
 pub mod skills;
 pub mod sub_agents;
-pub mod task_management;
+pub mod todo_management;
 pub mod verification;
 pub mod verification_strategy;
 pub mod worker_delegation;

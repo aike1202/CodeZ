@@ -1,8 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+﻿import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type {
   AgentUpdatedEvent,
-  TodoUpdatedEvent as TaskUpdatedEvent
+  TodoUpdatedEvent
 } from '../renderer/src/shared/desktop/generated/contracts'
 
 const tauriMocks = vi.hoisted(() => ({
@@ -18,10 +18,10 @@ vi.mock('@tauri-apps/api/event', () => ({
 import {
   desktopEvents,
   isAgentUpdatedEvent,
-  isTaskUpdatedEvent
+  isTodoUpdatedEvent
 } from '../renderer/src/shared/desktop/events'
 
-const taskEvent: TaskUpdatedEvent = {
+const todoEvent: TodoUpdatedEvent = {
   version: 1,
   sessionId: 'session-1',
   revision: 1,
@@ -78,32 +78,32 @@ describe('desktop lifecycle event facade', () => {
     })
   })
 
-  it('delivers only consistent Task and Agent envelopes and returns the native unlisteners', async () => {
-    const taskCallback = vi.fn()
+  it('delivers only consistent Todo and Agent envelopes and returns the native unlisteners', async () => {
+    const todoCallback = vi.fn()
     const agentCallback = vi.fn()
-    const unlistenTask = await desktopEvents.task.onUpdated(taskCallback)
+    const unlistenTodo = await desktopEvents.todo.onUpdated(todoCallback)
     const unlistenAgent = await desktopEvents.agent.onUpdated(agentCallback)
 
-    tauriMocks.listeners.get('todo:updated')?.({ payload: taskEvent })
+    tauriMocks.listeners.get('todo:updated')?.({ payload: todoEvent })
     tauriMocks.listeners.get('todo:updated')?.({
-      payload: { ...taskEvent, revision: 2 }
+      payload: { ...todoEvent, revision: 2 }
     })
     tauriMocks.listeners.get('agent:updated')?.({ payload: agentEvent })
     tauriMocks.listeners.get('agent:updated')?.({
       payload: { ...agentEvent, sessionId: 'other-session' }
     })
-    unlistenTask()
+    unlistenTodo()
     unlistenAgent()
 
-    expect(taskCallback).toHaveBeenCalledOnce()
+    expect(todoCallback).toHaveBeenCalledOnce()
     expect(agentCallback).toHaveBeenCalledOnce()
     expect(tauriMocks.unlisten).toHaveBeenCalledTimes(2)
   })
 
   it('rejects envelope revisions that disagree with their snapshots', () => {
-    expect(isTaskUpdatedEvent(taskEvent)).toBe(true)
+    expect(isTodoUpdatedEvent(todoEvent)).toBe(true)
     expect(isAgentUpdatedEvent(agentEvent)).toBe(true)
-    expect(isTaskUpdatedEvent({ ...taskEvent, revision: 2 })).toBe(false)
+    expect(isTodoUpdatedEvent({ ...todoEvent, revision: 2 })).toBe(false)
     expect(isAgentUpdatedEvent({ ...agentEvent, revision: 2 })).toBe(false)
   })
 })

@@ -1,4 +1,4 @@
-import { execFileSync } from 'child_process'
+﻿import { execFileSync } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
 import { BrowserWindow } from 'electron'
@@ -63,7 +63,7 @@ export interface ParallelOrchestratorConfig {
  * 执行来源钩子 —— 让 orchestrator 与具体数据源（Plan / Task）解耦。
  *
  * orchestrator 只认 ExecUnit + onStatusChange 回调；由调用方（Plan 或 Task 适配器）
- * 负责把状态写回各自的存储（PlanStore 落盘 / TaskStore 内存）。
+ * 负责把状态写回 PlanStore。
  */
 export interface ExecutionHooks {
   /** 来源标识：`plan:<slug>` 或 `task:<sessionId>` */
@@ -484,7 +484,7 @@ function safeName(source: string, unitId: string): string {
  *
  * orchestrator 不依赖 Plan/Task —— 数据源通过 units 传入，状态回写通过 hooks.onStatusChange。
  *
- * @param units 待执行单元（PlanStep / TaskItem 映射而来）
+ * @param units 待执行单元（PlanStep / TodoItem 映射而来）
  * @param completedUnitIds 已完成的单元 ID（halted 后重跑时自动跳过）
  * @param grouping ExecutionPlanner / 模型给出的分波方案
  * @param isolation 最终隔离档

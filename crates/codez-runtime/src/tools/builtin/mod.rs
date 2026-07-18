@@ -1,4 +1,4 @@
-pub mod agent;
+﻿pub mod agent;
 pub mod bash;
 pub mod edit;
 mod file_mutation;
@@ -11,7 +11,7 @@ pub mod powershell;
 pub mod read;
 mod search_support;
 mod shell_workspace;
-pub mod task;
+pub mod todo;
 pub mod tool_result_read;
 pub mod tool_search;
 pub mod write;

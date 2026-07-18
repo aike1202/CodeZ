@@ -621,12 +621,12 @@ async fn classify_effect(effect: &ToolEffect, workspace_root: &Path) -> Vec<Effe
             },
             false,
         )],
-        ToolEffect::MutateTaskState { session_id } => vec![EffectClassification::new(
+        ToolEffect::MutateTodoState { session_id } => vec![EffectClassification::new(
             PermissionCapability::Edit,
             session_id
                 .clone()
-                .unwrap_or_else(|| "task-state".to_string()),
-            "Modify task state",
+                .unwrap_or_else(|| "todo-state".to_string()),
+            "Modify Todo state",
             false,
         )],
         ToolEffect::UserInteraction { channel } => vec![EffectClassification::new(

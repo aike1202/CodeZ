@@ -45,7 +45,7 @@ use codez_contracts::{
         SubAgentOutputSpec, SubAgentRunCancelResult, SubAgentRunRequest, SubAgentRunState,
         SubAgentRunStatus, SubAgentSettingsDetail, SubAgentUnavailableDetail,
     },
-    task::{
+    todo::{
         TodoApprovalStatus, TodoContextBundle, TodoCreateInput, TodoCreateRequest, TodoGetRequest,
         TodoItem, TodoItemUpdate, TodoListRequest, TodoListSnapshot, TodoMutationResult,
         TodoRiskLevel, TodoStatus, TodoUpdateRequest, TodoUpdatedEvent,

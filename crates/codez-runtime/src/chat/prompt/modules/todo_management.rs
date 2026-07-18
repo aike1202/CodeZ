@@ -55,7 +55,7 @@ mod tests {
     use super::TEXT;
 
     #[test]
-    fn policy_should_keep_tasks_separate_from_agent_instances() {
+    fn policy_should_keep_todos_separate_from_agent_instances() {
         assert!(
             TEXT.contains("Todo items describe work, not Agent instances")
                 && TEXT.contains("never implies spawning or assigning an Agent")
@@ -74,7 +74,7 @@ mod tests {
     }
 
     #[test]
-    fn policy_should_start_and_complete_tasks_at_truthful_boundaries() {
+    fn policy_should_start_and_complete_todos_at_truthful_boundaries() {
         assert!(
             TEXT.contains("in_progress immediately before starting")
                 && TEXT.contains("Keep at most one item in_progress")

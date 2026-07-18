@@ -1,12 +1,12 @@
-use std::sync::Arc;
+﻿use std::sync::Arc;
 
 use codez_core::{AppError, AppErrorKind, SessionId};
 use serde_json::{Map, Value};
 
 use crate::{
-    task::{
+    todo::{
         TodoCreateInput, TodoItem, TodoItemPatch, TodoItemUpdate, TodoListSnapshot, TodoStatus,
-        TodoStore,
+        TodoStore, todo_model_state,
     },
     tools::{
         registry::{
@@ -98,7 +98,7 @@ impl TodoTool {
 
     fn effect(&self, session_id: Option<&str>) -> ToolEffect {
         match self.kind {
-            TodoToolKind::Create | TodoToolKind::Update => ToolEffect::MutateTaskState {
+            TodoToolKind::Create | TodoToolKind::Update => ToolEffect::MutateTodoState {
                 session_id: session_id.map(str::to_string),
             },
         }
@@ -128,7 +128,7 @@ impl ToolHandler for TodoTool {
         _input: &'a Value,
         context: &'a ToolPlanningContext,
     ) -> BoxFuture<'a, Vec<String>> {
-        Box::pin(async move { vec![task_resource(context.session_id.as_deref())] })
+        Box::pin(async move { vec![todo_resource(context.session_id.as_deref())] })
     }
 
     fn execute<'a>(
@@ -158,7 +158,7 @@ impl ToolHandler for TodoTool {
                             .snapshot(&session_id)
                             .await
                             .ok()
-                            .map(snapshot_result)
+                            .map(latest_state_result)
                     } else {
                         None
                     };
@@ -184,9 +184,23 @@ async fn execute_create(
         .get("items")
         .cloned()
         .ok_or_else(|| AppError::validation("TodoCreate requires items"))?;
-    let items: Vec<TodoCreateInput> = serde_json::from_value(items)
+    let mut items: Vec<TodoCreateInput> = serde_json::from_value(items)
         .map_err(|source| AppError::validation(format!("TodoCreate input is invalid: {source}")))?;
-    store.create(session_id, items).await.map(snapshot_result)
+    for item in &mut items {
+        if item.approval_status.is_some() {
+            return Err(AppError::validation(
+                "TodoCreate cannot set approvalStatus; the runtime derives it from requiresApproval",
+            ));
+        }
+        item.approval_status = Some(if item.requires_approval {
+            crate::todo::TodoApprovalStatus::Pending
+        } else {
+            crate::todo::TodoApprovalStatus::NotRequired
+        });
+    }
+    let created_count = items.len();
+    let snapshot = store.create(session_id, items).await?;
+    Ok(created_result(&snapshot, created_count))
 }
 
 async fn execute_update(
@@ -213,36 +227,74 @@ async fn execute_update(
             serde_json::from_value(Value::Object(patch)).map_err(|source| {
                 AppError::validation(format!("TodoUpdate input is invalid: {source}"))
             })?;
-        parsed_updates.push(TodoItemUpdate {
-            task_id: todo_id,
-            patch,
-        });
+        if patch.requires_approval.is_some() || patch.approval_status.is_some() {
+            return Err(AppError::validation(
+                "TodoUpdate cannot change approval policy or approval status",
+            ));
+        }
+        parsed_updates.push(TodoItemUpdate { todo_id, patch });
     }
+    let updated_ids = parsed_updates
+        .iter()
+        .map(|update| update.todo_id.clone())
+        .collect::<Vec<_>>();
     let snapshot = store
         .update_batch(session_id, expected_revision, parsed_updates)
         .await?;
-    Ok(serde_json::json!({
-        "summary": todo_summary(&snapshot),
-        "todoStates": todo_states(&snapshot),
-        "snapshot": todo_snapshot_value(&snapshot)
-    }))
+    Ok(updated_result(&snapshot, &updated_ids))
 }
 
-fn snapshot_result(snapshot: TodoListSnapshot) -> Value {
+fn created_result(snapshot: &TodoListSnapshot, created_count: usize) -> Value {
+    let created = snapshot
+        .items
+        .iter()
+        .rev()
+        .take(created_count)
+        .rev()
+        .map(todo_brief)
+        .collect::<Vec<_>>();
     serde_json::json!({
+        "revision": snapshot.revision,
         "summary": todo_summary(&snapshot),
-        "todoStates": todo_states(&snapshot),
-        "snapshot": todo_snapshot_value(&snapshot)
+        "created": created,
+        "state": todo_model_state(snapshot)
     })
 }
 
-fn todo_snapshot_value(snapshot: &TodoListSnapshot) -> Value {
+fn updated_result(snapshot: &TodoListSnapshot, updated_ids: &[String]) -> Value {
+    let updated = updated_ids
+        .iter()
+        .filter_map(|id| {
+            snapshot
+                .items
+                .iter()
+                .find(|todo| todo.id == id.as_str())
+        })
+        .map(todo_brief)
+        .collect::<Vec<_>>();
     serde_json::json!({
-        "version": snapshot.version,
-        "sessionId": snapshot.session_id,
         "revision": snapshot.revision,
-        "nextSequence": snapshot.next_sequence,
-        "items": snapshot.tasks
+        "summary": todo_summary(snapshot),
+        "updated": updated,
+        "state": todo_model_state(snapshot)
+    })
+}
+
+fn latest_state_result(snapshot: TodoListSnapshot) -> Value {
+    serde_json::json!({
+        "revision": snapshot.revision,
+        "state": todo_model_state(&snapshot)
+    })
+}
+
+fn todo_brief(todo: &TodoItem) -> Value {
+    serde_json::json!({
+        "id": todo.id,
+        "subject": todo.subject,
+        "status": todo.status,
+        "blockedBy": todo.blocked_by,
+        "requiresApproval": todo.requires_approval,
+        "approvalStatus": todo.approval_status
     })
 }
 
@@ -251,16 +303,16 @@ fn todo_summary(snapshot: &TodoListSnapshot) -> String {
     let in_progress = count_status(snapshot, TodoStatus::InProgress);
     let cancelled = count_status(snapshot, TodoStatus::Cancelled);
     let ready = snapshot
-        .tasks
+        .items
         .iter()
-        .filter(|task| task_is_ready(snapshot, task))
+        .filter(|todo| todo_is_ready(snapshot, todo))
         .count();
     let blocked = snapshot
-        .tasks
+        .items
         .iter()
-        .filter(|task| task_is_blocked(snapshot, task))
+        .filter(|todo| todo_is_blocked(snapshot, todo))
         .count();
-    let mut parts = vec![format!("{completed}/{} completed", snapshot.tasks.len())];
+    let mut parts = vec![format!("{completed}/{} completed", snapshot.items.len())];
     if in_progress > 0 {
         parts.push(format!("{in_progress} in progress"));
     }
@@ -276,76 +328,35 @@ fn todo_summary(snapshot: &TodoListSnapshot) -> String {
     parts.join(", ")
 }
 
-fn todo_states(snapshot: &TodoListSnapshot) -> Value {
-    let states = snapshot
-        .tasks
-        .iter()
-        .map(|task| (task.id.clone(), todo_state(snapshot, task)))
-        .collect::<Map<_, _>>();
-    Value::Object(states)
+fn todo_is_ready(snapshot: &TodoListSnapshot, todo: &TodoItem) -> bool {
+    todo.status == TodoStatus::Pending && !todo_is_blocked(snapshot, todo)
 }
 
-fn todo_state(snapshot: &TodoListSnapshot, task: &TodoItem) -> Value {
-    let unfinished_dependencies = task
-        .blocked_by
-        .iter()
-        .filter(|dependency| {
-            snapshot
-                .tasks
-                .iter()
-                .find(|candidate| candidate.id == dependency.as_str())
-                .is_none_or(|candidate| candidate.status != TodoStatus::Completed)
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    let blocks = snapshot
-        .tasks
-        .iter()
-        .filter(|candidate| candidate.blocked_by.contains(&task.id))
-        .map(|candidate| candidate.id.clone())
-        .collect::<Vec<_>>();
-    let waiting_for_approval = task_waits_for_approval(task);
-    let blocked = task.status == TodoStatus::Pending
-        && (waiting_for_approval || !unfinished_dependencies.is_empty());
-    let ready = task.status == TodoStatus::Pending && !blocked;
-    serde_json::json!({
-        "ready": ready,
-        "blocked": blocked,
-        "unfinishedDependencies": unfinished_dependencies,
-        "blocks": blocks,
-        "waitingForApproval": waiting_for_approval
-    })
-}
-
-fn task_is_ready(snapshot: &TodoListSnapshot, task: &TodoItem) -> bool {
-    task.status == TodoStatus::Pending && !task_is_blocked(snapshot, task)
-}
-
-fn task_is_blocked(snapshot: &TodoListSnapshot, task: &TodoItem) -> bool {
-    task.status == TodoStatus::Pending
-        && (task_waits_for_approval(task)
-            || task.blocked_by.iter().any(|dependency| {
+fn todo_is_blocked(snapshot: &TodoListSnapshot, todo: &TodoItem) -> bool {
+    todo.status == TodoStatus::Pending
+        && (todo_waits_for_approval(todo)
+            || todo.blocked_by.iter().any(|dependency| {
                 snapshot
-                    .tasks
+                    .items
                     .iter()
                     .find(|candidate| candidate.id == dependency.as_str())
                     .is_none_or(|candidate| candidate.status != TodoStatus::Completed)
             }))
 }
 
-fn task_waits_for_approval(task: &TodoItem) -> bool {
-    task.requires_approval && task.approval_status != crate::task::TodoApprovalStatus::Approved
+fn todo_waits_for_approval(todo: &TodoItem) -> bool {
+    todo.requires_approval && todo.approval_status != crate::todo::TodoApprovalStatus::Approved
 }
 
 fn count_status(snapshot: &TodoListSnapshot, status: TodoStatus) -> usize {
     snapshot
-        .tasks
+        .items
         .iter()
-        .filter(|task| task.status == status)
+        .filter(|todo| todo.status == status)
         .count()
 }
 
-fn task_resource(session_id: Option<&str>) -> String {
+fn todo_resource(session_id: Option<&str>) -> String {
     format!("session:{}:todos", session_id.unwrap_or("unavailable"))
 }
 
@@ -414,7 +425,7 @@ fn create_schema() -> Value {
                 "type": "array",
                 "minItems": 1,
                 "maxItems": 256,
-                "items": task_fields_schema(true)
+                "items": todo_fields_schema(true)
             }
         },
         "required": ["items"]
@@ -439,13 +450,13 @@ fn update_schema() -> Value {
 }
 
 fn todo_update_item_schema() -> Value {
-    let mut properties = task_properties();
+    let mut properties = todo_properties(false);
     properties.insert(
         "todoId".to_string(),
         serde_json::json!({ "type": "string", "pattern": "^t[1-9][0-9]*$" }),
     );
-    properties.insert("addBlockedBy".to_string(), task_id_list_schema());
-    properties.insert("removeBlockedBy".to_string(), task_id_list_schema());
+    properties.insert("addBlockedBy".to_string(), todo_id_list_schema());
+    properties.insert("removeBlockedBy".to_string(), todo_id_list_schema());
     serde_json::json!({
         "type": "object",
         "additionalProperties": false,
@@ -463,8 +474,6 @@ fn todo_update_item_schema() -> Value {
             { "required": ["groupTitle"] },
             { "required": ["groupSubtitle"] },
             { "required": ["riskLevel"] },
-            { "required": ["requiresApproval"] },
-            { "required": ["approvalStatus"] },
             { "required": ["acceptanceCriteria"] },
             { "required": ["verificationCommand"] },
             { "required": ["contextBundle"] }
@@ -472,8 +481,8 @@ fn todo_update_item_schema() -> Value {
     })
 }
 
-fn task_fields_schema(require_subject: bool) -> Value {
-    let mut properties = task_properties();
+fn todo_fields_schema(require_subject: bool) -> Value {
+    let mut properties = todo_properties(true);
     if require_subject {
         properties.remove("status");
     }
@@ -488,7 +497,7 @@ fn task_fields_schema(require_subject: bool) -> Value {
     schema
 }
 
-fn task_properties() -> Map<String, Value> {
+fn todo_properties(allow_requires_approval: bool) -> Map<String, Value> {
     let fields = serde_json::json!({
         "subject": { "type": "string", "minLength": 1, "maxLength": 512 },
         "description": { "type": "string", "maxLength": 32768 },
@@ -499,8 +508,6 @@ fn task_properties() -> Map<String, Value> {
         "groupTitle": { "type": "string", "minLength": 1, "maxLength": 1024 },
         "groupSubtitle": { "type": "string", "minLength": 1, "maxLength": 1024 },
         "riskLevel": { "type": "string", "enum": ["low", "medium", "high"] },
-        "requiresApproval": { "type": "boolean" },
-        "approvalStatus": { "type": "string", "enum": ["not_required", "pending", "approved", "changes_requested", "rejected"] },
         "acceptanceCriteria": string_list_schema(),
         "verificationCommand": { "type": "string", "minLength": 1, "maxLength": 8192 },
         "contextBundle": {
@@ -515,7 +522,14 @@ fn task_properties() -> Map<String, Value> {
             }
         }
     });
-    fields.as_object().cloned().unwrap_or_default()
+    let mut fields = fields.as_object().cloned().unwrap_or_default();
+    if allow_requires_approval {
+        fields.insert(
+            "requiresApproval".to_string(),
+            serde_json::json!({ "type": "boolean" }),
+        );
+    }
+    fields
 }
 
 fn string_list_schema() -> Value {
@@ -527,7 +541,7 @@ fn string_list_schema() -> Value {
     })
 }
 
-fn task_id_list_schema() -> Value {
+fn todo_id_list_schema() -> Value {
     serde_json::json!({
         "type": "array",
         "maxItems": 128,
@@ -545,7 +559,7 @@ mod tests {
 
     use super::TodoTool;
     use crate::{
-        task::TaskStore,
+        todo::TodoStore,
         tools::{
             registry::{ToolContext, ToolHandler},
             types::{ToolEffect, ToolEffectPlan, ToolExecutionResult},
@@ -563,7 +577,7 @@ mod tests {
             workspace_root: root.to_path_buf(),
             cancellation: CancellationToken::new(),
             authorized_effects: ToolEffectPlan {
-                effects: vec![ToolEffect::MutateTaskState {
+                effects: vec![ToolEffect::MutateTodoState {
                     session_id: Some("session-1".to_string()),
                 }],
                 analysis_status: "parsed".to_string(),
@@ -577,7 +591,7 @@ mod tests {
     async fn todo_create_returns_items_from_the_shared_store() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
         let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
-        let store = Arc::new(TaskStore::new(directory.path(), persistence));
+        let store = Arc::new(TodoStore::new(directory.path(), persistence));
         let create = TodoTool::create(Arc::clone(&store));
         let context = context(directory.path());
 
@@ -590,7 +604,9 @@ mod tests {
         assert!(matches!(
             created,
             ToolExecutionResult::Success { data: Some(ref value), .. }
-                if value["snapshot"]["items"][0]["id"] == "t1"
+                if value["revision"] == 1
+                    && value["created"][0]["id"] == "t1"
+                    && value["state"]["items"][0]["id"] == "t1"
         ));
     }
 
@@ -598,7 +614,7 @@ mod tests {
     async fn todo_update_commits_a_complete_and_start_transition_atomically() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
         let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
-        let store = Arc::new(TaskStore::new(directory.path(), persistence));
+        let store = Arc::new(TodoStore::new(directory.path(), persistence));
         let create = TodoTool::create(Arc::clone(&store));
         let update = TodoTool::update(Arc::clone(&store));
         let context = context(directory.path());
@@ -636,9 +652,9 @@ mod tests {
         assert!(matches!(
             updated,
             ToolExecutionResult::Success { data: Some(ref value), .. }
-                if value["snapshot"]["revision"] == 3
-                    && value["snapshot"]["items"][0]["status"] == "completed"
-                    && value["snapshot"]["items"][1]["status"] == "in_progress"
+                if value["revision"] == 3
+                    && value["updated"][0]["status"] == "completed"
+                    && value["updated"][1]["status"] == "in_progress"
         ));
     }
 
@@ -646,7 +662,7 @@ mod tests {
     async fn todo_update_conflict_returns_the_latest_snapshot() {
         let directory = tempfile::tempdir().expect("temporary directory must be available");
         let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
-        let store = Arc::new(TaskStore::new(directory.path(), persistence));
+        let store = Arc::new(TodoStore::new(directory.path(), persistence));
         let create = TodoTool::create(Arc::clone(&store));
         let update = TodoTool::update(store);
         let context = context(directory.path());
@@ -671,7 +687,45 @@ mod tests {
             conflicted,
             ToolExecutionResult::Error { error, .. }
                 if error.code == "TODO_CONFLICT"
-                    && error.details.as_ref().is_some_and(|value| value["snapshot"]["revision"] == 1)
+                    && error.details.as_ref().is_some_and(|value| {
+                        value["revision"] == 1 && value["state"]["items"][0]["id"] == "t1"
+                    })
+        ));
+    }
+
+    #[tokio::test]
+    async fn todo_update_conflict_returns_a_bounded_latest_state() {
+        let directory = tempfile::tempdir().expect("temporary directory must be available");
+        let persistence: Arc<dyn AtomicPersistence> = Arc::new(AtomicFileStore::default());
+        let store = Arc::new(TodoStore::new(directory.path(), persistence));
+        let create = TodoTool::create(Arc::clone(&store));
+        let update = TodoTool::update(store);
+        let context = context(directory.path());
+        let items = (1..=45)
+            .map(|index| serde_json::json!({ "subject": format!("todo {index}") }))
+            .collect::<Vec<_>>();
+        create
+            .execute(&serde_json::json!({ "items": items }), &context)
+            .await;
+
+        let conflicted = update
+            .execute(
+                &serde_json::json!({
+                    "expectedRevision": 0,
+                    "updates": [{ "todoId": "t1", "status": "in_progress" }]
+                }),
+                &context,
+            )
+            .await;
+
+        assert!(matches!(
+            conflicted,
+            ToolExecutionResult::Error { error, .. }
+                if error.details.as_ref().is_some_and(|value| {
+                    value["state"]["items"].as_array().is_some_and(|items| items.len() == 40)
+                        && value["state"]["summary"]["omitted"] == 5
+                        && value.get("snapshot").is_none()
+                })
         ));
     }
 }

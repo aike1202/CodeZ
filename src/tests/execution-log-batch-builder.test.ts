@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+﻿import { describe, expect, it } from 'vitest'
 import type {
   ParallelToolBatchItem,
   UnifiedTimelineItem
@@ -11,7 +11,7 @@ import {
   groupParallelToolBatches
 } from '../renderer/src/components/chat/ExecutionLog/utils'
 import type { ExecutionTimelineItem } from '../renderer/src/stores/chatStore'
-import { parseTaskUpdateDetail } from '../renderer/src/components/chat/ExecutionLogDetail/taskUpdateDetail'
+import { parseTodoUpdateDetail } from '../renderer/src/components/chat/ExecutionLogDetail/todoUpdateDetail'
 
 const toolItem = (
   id: string,
@@ -539,15 +539,15 @@ describe('TaskUpdate execution log', () => {
     }]
 
     const items = buildUnifiedTimeline(timeline, [], [], undefined, false)
-    const terminalItem = items.find((item) => item.id === 'delegate_task_t1')
+    const terminalItem = items.find((item) => item.id === 'delegate_todo_t1')
 
     expect(terminalItem).toMatchObject({
       toolName: 'TodoUpdate',
-      target: '完成任务：Delegated task',
+      target: '完成待办：Delegated task',
       status: 'success'
     })
-    expect(parseTaskUpdateDetail(terminalItem?.detail)).toMatchObject({
-      task: {
+    expect(parseTodoUpdateDetail(terminalItem?.detail)).toMatchObject({
+      todo: {
         id: 't1',
         description: 'Completed by a Worker',
         files: ['src/delegated.ts']
@@ -557,8 +557,8 @@ describe('TaskUpdate execution log', () => {
 
   it('parses complete TaskUpdate detail and tolerates legacy reduced snapshots', () => {
     const [fullItem] = buildUnifiedTimeline(taskUpdateTimeline('completed'), [], [], undefined, false)
-    expect(parseTaskUpdateDetail(fullItem.detail)).toMatchObject({
-      task: {
+    expect(parseTodoUpdateDetail(fullItem.detail)).toMatchObject({
+      todo: {
         description: 'Detailed terminal snapshot',
         files: ['src/task.ts'],
         acceptanceCriteria: ['Terminal state is logged'],
@@ -566,14 +566,14 @@ describe('TaskUpdate execution log', () => {
       }
     })
 
-    expect(parseTaskUpdateDetail(JSON.stringify({
+    expect(parseTodoUpdateDetail(JSON.stringify({
       ok: true,
       data: { task: { id: 't1', subject: 'Legacy', status: 'completed' } }
-    }))).toMatchObject({ task: { subject: 'Legacy', status: 'completed' } })
+    }))).toMatchObject({ todo: { subject: 'Legacy', status: 'completed' } })
   })
 
   it('drops malformed optional Task fields before structured rendering', () => {
-    const parsed = parseTaskUpdateDetail(JSON.stringify({
+    const parsed = parseTodoUpdateDetail(JSON.stringify({
       ok: true,
       data: {
         task: {
@@ -587,10 +587,10 @@ describe('TaskUpdate execution log', () => {
       }
     }))
 
-    expect(parsed?.task).toMatchObject({ id: 't1', subject: 'Legacy' })
-    expect(parsed?.task.status).toBeUndefined()
-    expect(parsed?.task.files).toBeUndefined()
-    expect(parsed?.task.acceptanceCriteria).toBeUndefined()
-    expect(parsed?.task.verificationCommand).toBeUndefined()
+    expect(parsed?.todo).toMatchObject({ id: 't1', subject: 'Legacy' })
+    expect(parsed?.todo.status).toBeUndefined()
+    expect(parsed?.todo.files).toBeUndefined()
+    expect(parsed?.todo.acceptanceCriteria).toBeUndefined()
+    expect(parsed?.todo.verificationCommand).toBeUndefined()
   })
 })

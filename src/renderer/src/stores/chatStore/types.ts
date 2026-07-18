@@ -1,4 +1,4 @@
-import type { TaskItem } from '../../../../shared/types/task'
+﻿import type { TodoItem } from '../../../../shared/types/todo'
 import type { PermissionApprovalResponse, PermissionRequest } from '../../../../shared/types/permission'
 import type { CompactionTrigger, ContextBudgetSnapshot } from '../../../../shared/types/context'
 import type { ImageAttachment, PendingPromptDraft } from '../../../../shared/types/attachment'
@@ -184,7 +184,7 @@ export interface ChatSession {
   isDeleted?: boolean
   deletedAt?: number
   linkedPlanSlug?: string
-  tasks?: TaskItem[]
+  todos?: TodoItem[]
   queuedPrompts?: QueuedPrompt[]
 }
 
@@ -206,7 +206,7 @@ export interface ChatState {
   activeSessionId: string | null
   messages: ChatMessage[]
   streamCleanups: Record<string, (() => void) | null>
-  expandedCapsule: 'task' | 'plan' | null
+  expandedCapsule: 'todo' | 'plan' | null
   subAgentStatus: 'idle' | 'running' | 'completed' | 'failed'
   planListModalOpen: boolean
   activePlan: any | null
@@ -215,7 +215,7 @@ export interface ChatState {
   pendingPrompt: PendingPromptDraft | null
   composerDrafts: Record<string, PendingPromptDraft | undefined>
   pendingInternalContinuation: PendingInternalContinuation | null
-  tasks: TaskItem[]
+  todos: TodoItem[]
   contextBudgets: Record<string, ContextBudgetSnapshot | undefined>
   compactionStates: Record<string, CompactionUiState | undefined>
   runtimeStatuses: Record<string, SessionRuntimeStatusChanged | undefined>
@@ -307,7 +307,7 @@ export interface ChatState {
     result: { status: 'completed' | 'failed' | 'interrupted'; output?: string; qualitySummary?: any; toolCallCount: number; filesExamined?: string[]; handoff?: SubAgentHandoff }
   ) => void
 
-  setExpandedCapsule: (capsule: 'task' | 'plan' | null) => void
+  setExpandedCapsule: (capsule: 'todo' | 'plan' | null) => void
   setSubAgentStatus: (status: 'idle' | 'running' | 'completed' | 'failed') => void
   initPlanStateListener: () => () => void
   setPlanListModalOpen: (open: boolean) => void
@@ -321,6 +321,6 @@ export interface ChatState {
   setPendingInternalContinuation: (continuation: PendingInternalContinuation | null) => void
   consumeInternalContinuation: (sessionId: string) => PendingInternalContinuation | null
   markActiveRunUserAborted: (sessionId: string) => void
-  setTasks: (tasks: TaskItem[]) => void
-  setSessionTasks: (sessionId: string, tasks: TaskItem[]) => void
+  setTodos: (todos: TodoItem[]) => void
+  setSessionTodos: (sessionId: string, todos: TodoItem[]) => void
 }

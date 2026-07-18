@@ -1,6 +1,6 @@
-import React, { ReactNode } from 'react';
+﻿import React, { ReactNode } from 'react';
 import Stack from '../ui/Stack';
-import { TaskCapsule } from './TaskCapsule';
+import { TodoCapsule } from './TodoCapsule';
 import { useParallelExecSubscription } from './hooks/useParallelExecSubscription';
 import { useDesktopLifecycleSubscription } from './hooks/useDesktopLifecycleSubscription';
 import { useChatStore } from '../../stores/chatStore';
@@ -41,7 +41,7 @@ export const ChatAreaLayout: React.FC<ChatAreaLayoutProps> = ({
           onScroll={onScroll}
           onWheel={onWheel}
         >
-          <TaskCapsule />
+          <TodoCapsule />
           {messageArea}
         </Stack>
         {navigationRail}

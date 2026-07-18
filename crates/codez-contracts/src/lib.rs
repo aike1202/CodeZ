@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+﻿#![forbid(unsafe_code)]
 
 pub mod agent;
 pub mod chat;
@@ -8,7 +8,7 @@ pub mod migration;
 pub mod permission;
 pub mod provider;
 pub mod subagent;
-pub mod task;
+pub mod todo;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;

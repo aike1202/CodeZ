@@ -1,4 +1,4 @@
-pub mod agent;
+﻿pub mod agent;
 pub mod attachment;
 pub mod chat;
 pub mod context;
@@ -15,7 +15,7 @@ pub mod settings;
 pub mod skills;
 pub mod subagent;
 pub mod system;
-pub mod task;
+pub mod todo;
 pub mod terminal;
 pub mod theme;
 pub mod workspace;

@@ -1,4 +1,4 @@
-# CodeZ 主 Agent 提示词与工具优化蓝图
+﻿# CodeZ 主 Agent 提示词与工具优化蓝图
 
 ## 结论
 
@@ -75,7 +75,7 @@ ready | blocked | unfinishedDependencies[] | blocks[] | waitingForApproval
 8. 模型只看到 `TodoCreate` 与 `TodoUpdate`；Get/List 是内部 UI/恢复能力，权威状态每个 Provider round 自动注入。
 9. 一批 patch 在克隆快照上完成后校验最终图和状态，只增加一次 revision、持久化一次、发出一次事件。
 
-对应落点：`crates/codez-runtime/src/task.rs`、`tools/builtin/task.rs`、contracts/Tauri 转换、Todo capsule 和 Todo/Doing-tasks prompt modules。旧 `tasks/` 目录与 `SessionData.tasks` 仅作为数据兼容层。
+对应落点：`crates/codez-runtime/src/todo.rs`、`tools/builtin/todo.rs`、contracts/Tauri 转换、Todo capsule 和 Todo/Doing-tasks prompt modules。旧 `tasks/` 目录与 `SessionData.tasks` 仅作为数据兼容层。
 
 ## 目标架构
 

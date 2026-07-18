@@ -1,4 +1,4 @@
-import type { ExecutionTimelineItem, ReasoningTimelineItem } from '../../../../stores/chatStore'
+﻿import type { ExecutionTimelineItem, ReasoningTimelineItem } from '../../../../stores/chatStore'
 import { parseArgs } from '../../../../utils/parseArgs'
 import { computeEditStats } from '../../../../utils/editDiffUtils'
 import type { CommandItem, EditItemWithStatus, UnifiedTimelineItem } from './types'
@@ -10,7 +10,7 @@ import {
   getToolNoun,
   getToolTarget
 } from './itemParsers'
-import { parseTaskUpdateDetail } from '../../ExecutionLogDetail/taskUpdateDetail'
+import { parseTodoUpdateDetail } from '../../ExecutionLogDetail/todoUpdateDetail'
 
 function getReadFileStatuses(
   result: string | undefined,
@@ -462,8 +462,8 @@ export function buildUnifiedTimeline(
             const res = JSON.parse(tc.result || '{}')
             const created = res.data?.created || res.snapshot?.items || res.data?.snapshot?.items || []
             if (created.length > 0) {
-              const firstTask = created[0].subject
-              targetDisplay = created.length > 1 ? `创建 ${created.length} 个待办 (如: ${firstTask})` : `创建待办: ${firstTask}`
+              const firstTodo = created[0].subject
+              targetDisplay = created.length > 1 ? `创建 ${created.length} 个待办 (如: ${firstTodo})` : `创建待办: ${firstTodo}`
             } else {
               targetDisplay = '创建待办'
             }
@@ -476,16 +476,16 @@ export function buildUnifiedTimeline(
         if (tc.name === 'TodoUpdate' || tc.name === 'TaskUpdate') {
           try {
             const res = JSON.parse(tc.result || '{}')
-            const task = res.data?.updated?.[0] || res.data?.task
-            if (task) {
-              if (task.status === 'completed') {
-                targetDisplay = `完成待办：${task.subject}`
-              } else if (task.status === 'in_progress') {
-                targetDisplay = `开始执行: ${task.subject}`
-              } else if (task.status === 'cancelled') {
-                targetDisplay = `取消待办：${task.subject}`
+            const todo = res.data?.updated?.[0] || res.data?.todo || res.data?.task
+            if (todo) {
+              if (todo.status === 'completed') {
+                targetDisplay = `完成待办：${todo.subject}`
+              } else if (todo.status === 'in_progress') {
+                targetDisplay = `开始执行: ${todo.subject}`
+              } else if (todo.status === 'cancelled') {
+                targetDisplay = `取消待办：${todo.subject}`
               } else {
-                targetDisplay = `更新待办: ${task.subject}`
+                targetDisplay = `更新待办: ${todo.subject}`
               }
             } else {
               targetDisplay = '更新待办状态'
@@ -517,33 +517,33 @@ export function buildUnifiedTimeline(
         if (tc.name === 'DelegateTasks' && tc.status === 'success') {
           try {
             const result = JSON.parse(tc.result || '{}')
-            const terminalTasks = Array.isArray(result?.data?.terminalTasks)
+            const legacyTerminalTasks = Array.isArray(result?.data?.terminalTasks)
               ? result.data.terminalTasks
               : []
 
-            terminalTasks.forEach((rawTask: unknown, index: number) => {
+            legacyTerminalTasks.forEach((legacyTodo: unknown, index: number) => {
               const detail = JSON.stringify({
                 ok: true,
                 data: {
-                  task: rawTask,
+                  task: legacyTodo,
                   summary: result.data.status
                 }
               })
-              const task = parseTaskUpdateDetail(detail)?.task
-              const isTerminal = task?.status === 'completed' || task?.status === 'cancelled'
-              if (!isTerminal || !task.id || !task.subject) return
+              const todo = parseTodoUpdateDetail(detail)?.todo
+              const isTerminal = todo?.status === 'completed' || todo?.status === 'cancelled'
+              if (!isTerminal || !todo.id || !todo.subject) return
 
               list.push({
-                id: `${tc.id}_task_${task.id}`,
+                id: `${tc.id}_todo_${todo.id}`,
                 type: 'tool',
                 timestamp: (tc.completedAt ?? tc.startedAt) + index + 1,
                 completedAt: tc.completedAt,
                 status: 'success',
                 verb: 'Executed',
-                target: task.status === 'completed'
-                  ? `完成任务：${task.subject}`
-                  : `取消任务：${task.subject}`,
-                args: JSON.stringify({ taskId: task.id, status: task.status }),
+                target: todo.status === 'completed'
+                  ? `完成待办：${todo.subject}`
+                  : `取消待办：${todo.subject}`,
+                args: JSON.stringify({ todoId: todo.id, status: todo.status }),
                 detail,
                 toolName: 'TodoUpdate'
               })

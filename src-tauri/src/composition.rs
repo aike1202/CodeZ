@@ -1,4 +1,4 @@
-use std::{
+﻿use std::{
     fs,
     path::{Path, PathBuf},
     sync::Arc,
@@ -14,7 +14,7 @@ use codez_runtime::{
     permission::store::{PermissionStoreError, WorkspacePermissionStore},
     session_deletion::SessionDeletionService,
     session_maintenance::{SessionMaintenanceCoordinator, SessionMaintenanceError},
-    task::{TaskEventSink, TaskStore},
+    todo::{TodoEventSink, TodoStore},
 };
 use codez_storage::{AtomicFileStore, OsCredentialStore, RecentProjectsStore, SessionStore};
 use tauri::{App, Manager};
@@ -24,7 +24,7 @@ use crate::{
     agent_runtime::DesktopAgentAttemptExecutor,
     chat_runtime::{ChatPromptSources, ChatRuntime},
     chat_tool_runtime::{ChatToolRuntime, ChatToolRuntimeDependencies},
-    commands::{agent::DesktopAgentEventSink, task::DesktopTodoEventSink},
+    commands::{agent::DesktopAgentEventSink, todo::DesktopTodoEventSink},
     error::ErrorReporter,
     logging::{self, LoggingError},
     mcp_boundary::StorageMcpSecretStore,
@@ -124,12 +124,12 @@ pub(crate) fn compose_app_state(
     let fingerprint = Arc::new(codez_runtime::fingerprint::ReadFingerprintStore::default());
     let mutation_coordinator =
         Arc::new(codez_runtime::mutation_coordinator::FileMutationCoordinator::default());
-    let task_events: Arc<dyn TaskEventSink> =
+    let todo_events: Arc<dyn TodoEventSink> =
         Arc::new(DesktopTodoEventSink::new(app.handle().clone()));
-    let task_store = Arc::new(TaskStore::with_event_sink(
+    let todo_store = Arc::new(TodoStore::with_event_sink(
         paths.data_directory(),
         Arc::clone(&persistence),
-        task_events,
+        todo_events,
     ));
     let process_runner = Arc::new(codez_platform::NativeProcessRunner::new());
     let edit_transaction =
@@ -197,7 +197,7 @@ pub(crate) fn compose_app_state(
             fingerprint_store: Arc::clone(&fingerprint),
             mutation_coordinator: Arc::clone(&mutation_coordinator),
             edit_transaction_service: Arc::clone(&edit_transaction),
-            task_store: Arc::clone(&task_store),
+            todo_store: Arc::clone(&todo_store),
             agent_runtime: Arc::clone(&agent_runtime),
             process_runner: Arc::clone(&process_runner),
             notification_port: Arc::new(TauriNotificationPort::new(app.handle().clone())),
@@ -235,7 +235,7 @@ pub(crate) fn compose_app_state(
             edit_transaction: Arc::clone(&edit_transaction),
             subagent_runtime: Arc::clone(&subagent_runtime),
             agent_runtime: Arc::clone(&agent_runtime),
-            task_store: Arc::clone(&task_store),
+            todo_store: Arc::clone(&todo_store),
             attachment: Arc::clone(&attachment),
             model_ledger: Arc::clone(&model_ledger),
             fingerprint: Arc::clone(&fingerprint),
@@ -302,7 +302,7 @@ pub(crate) fn compose_app_state(
         subagent_settings: tokio::sync::Mutex::new(()),
         subagent_runtime,
         agent_runtime,
-        task_store,
+        todo_store,
         workspace_permissions,
         mcp_config,
         mcp_project_config,

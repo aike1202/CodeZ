@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+﻿#![forbid(unsafe_code)]
 
 mod agent_runtime;
 mod attachment_boundary;
@@ -156,11 +156,11 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::settings::session_get,
             commands::settings::session_save,
             commands::settings::session_delete,
-            commands::task::todo_list,
-            commands::task::todo_get,
-            commands::task::todo_create,
-            commands::task::todo_update,
-            commands::task::todo_delete,
+            commands::todo::todo_list,
+            commands::todo::todo_get,
+            commands::todo::todo_create,
+            commands::todo::todo_update,
+            commands::todo::todo_delete,
             commands::agent::agent_snapshot,
             commands::agent::agent_active_ids,
             commands::rules::rules_get_list,

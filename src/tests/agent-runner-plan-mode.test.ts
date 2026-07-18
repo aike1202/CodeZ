@@ -41,12 +41,12 @@ describe('ToolManager.getReadOnlyTools()', () => {
 })
 
 describe('Plan mode 工具一致性', () => {
-  it('默认工具集只暴露 TodoCreate 和 TodoUpdate', () => {
+  it('旧 Electron 默认工具集不再暴露 Todo 工具', () => {
     const tm = new ToolManager()
     const names = new Set(tm.getToolDefinitions().map(t => t.function.name))
 
-    expect(names.has('TodoCreate')).toBe(true)
-    expect(names.has('TodoUpdate')).toBe(true)
+    expect(names.has('TodoCreate')).toBe(false)
+    expect(names.has('TodoUpdate')).toBe(false)
     expect(names.has('TaskGet')).toBe(false)
     expect(names.has('TaskList')).toBe(false)
     expect(names.has('DelegateTasks')).toBe(false)

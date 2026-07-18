@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+﻿import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const tauriMocks = vi.hoisted(() => ({
   invoke: vi.fn()
@@ -100,8 +100,8 @@ describe('desktop task and sub-agent adapter', () => {
       .mockResolvedValueOnce(runState)
       .mockResolvedValueOnce({ accepted: false, state: runState })
 
-    await expect(desktopApi.task.getByProject('workspace-1')).resolves.toEqual([task])
-    await desktopApi.task.delete(task.id)
+    await expect(desktopApi.executionHistory.getByProject('workspace-1')).resolves.toEqual([task])
+    await desktopApi.executionHistory.delete(task.id)
     await expect(desktopApi.subAgent.list()).resolves.toEqual([subAgent])
     await desktopApi.subAgent.toggle('Explore', false)
     await expect(desktopApi.subAgent.getDetail('Explore')).resolves.toEqual(detail)
@@ -129,14 +129,14 @@ describe('desktop task and sub-agent adapter', () => {
     ])
   })
 
-  it('maps typed Task and Agent lifecycle snapshots to their Tauri commands', async () => {
+  it('maps typed Todo and Agent lifecycle snapshots to their Tauri commands', async () => {
     setWindow({ __TAURI_INTERNALS__: {} })
-    const taskSnapshot = {
+    const todoSnapshot = {
       version: 1,
       sessionId: 'session-1',
       revision: 2,
       nextSequence: 3,
-      tasks: []
+      items: []
     }
     const agentSnapshot = {
       version: 1,
@@ -147,11 +147,11 @@ describe('desktop task and sub-agent adapter', () => {
     }
     const activeIds = { agentIds: ['agent-1'], revision: 4 }
     tauriMocks.invoke
-      .mockResolvedValueOnce(taskSnapshot)
+      .mockResolvedValueOnce(todoSnapshot)
       .mockResolvedValueOnce(agentSnapshot)
       .mockResolvedValueOnce(activeIds)
 
-    await expect(desktopApi.task.snapshot('session-1')).resolves.toEqual(taskSnapshot)
+    await expect(desktopApi.todo.snapshot('session-1')).resolves.toEqual(todoSnapshot)
     await expect(desktopApi.agent.snapshot('session-1')).resolves.toEqual(agentSnapshot)
     await expect(desktopApi.agent.activeIds('session-1')).resolves.toEqual(activeIds)
 
@@ -179,8 +179,8 @@ describe('desktop task and sub-agent adapter', () => {
     }
     setWindow({ api: { task: legacyTask, subAgent: legacySubAgent } })
 
-    await expect(desktopApi.task.getByProject('workspace-1')).resolves.toEqual([task])
-    await desktopApi.task.delete(task.id)
+    await expect(desktopApi.executionHistory.getByProject('workspace-1')).resolves.toEqual([task])
+    await desktopApi.executionHistory.delete(task.id)
     await expect(desktopApi.subAgent.list()).resolves.toEqual([subAgent])
     await desktopApi.subAgent.toggle('Explore', false)
     await expect(desktopApi.subAgent.getDetail('Explore')).resolves.toEqual(detail.detail)
@@ -205,6 +205,6 @@ describe('desktop task and sub-agent adapter', () => {
     setWindow({ __TAURI_INTERNALS__: {} })
     tauriMocks.invoke.mockResolvedValueOnce([{ id: 42 }])
 
-    await expect(desktopApi.task.getByProject('workspace-1')).rejects.toThrow('without a valid id')
+    await expect(desktopApi.executionHistory.getByProject('workspace-1')).rejects.toThrow('without a valid id')
   })
 })
