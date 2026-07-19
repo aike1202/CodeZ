@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod agent;
 mod app_paths;
 mod attachment;
 pub mod context;
@@ -22,7 +23,10 @@ pub use attachment::{
 pub use error::{AppError, AppErrorKind};
 pub use git::{GitSnapshotResult, WorktreeInfo};
 pub use host::HostThemeSource;
-pub use identifiers::{AgentRunId, IdentifierError, ProcessId, SessionId, StreamId, ToolCallId};
+pub use identifiers::{
+    AgentAttemptId, AgentId, AgentRunId, ArtifactId, IdentifierError, MessageId, ProcessId,
+    RootRunId, SessionId, StreamId, TaskId, ToolCallId,
+};
 pub use persistence::{AtomicCreateOutcome, AtomicPersistence};
 pub use ports::{
     Clock, DirectoryEntry, DirectoryListing, EventSink, FileKind, FileMetadata, FileSystem,

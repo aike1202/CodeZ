@@ -4,32 +4,45 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use thiserror::Error;
 
 use crate::{
-    ComposerImageAttachment,
+    AgentId, ComposerImageAttachment, IdentifierError,
     provider::{AgentStopReason, ProviderTokenUsage},
 };
 
 pub const MAIN_CONTEXT_SCOPE: &str = "main";
+pub const AGENT_CONTEXT_SCOPE_PREFIX: &str = "agent:";
 pub const CONTEXT_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ContextScopeId {
     Main,
+    Agent(AgentId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
-#[error("context scope must be 'main'")]
-pub struct ContextScopeIdError;
+pub enum ContextScopeIdError {
+    #[error("context scope must be 'main' or 'agent:<agent-id>'")]
+    Unsupported,
+    #[error("context scope contains an invalid agent identifier: {0}")]
+    InvalidAgentId(#[from] IdentifierError),
+}
 
 impl ContextScopeId {
     pub fn parse(value: &str) -> Result<Self, ContextScopeIdError> {
-        (value == MAIN_CONTEXT_SCOPE)
-            .then_some(Self::Main)
-            .ok_or(ContextScopeIdError)
+        if value == MAIN_CONTEXT_SCOPE {
+            return Ok(Self::Main);
+        }
+        let agent_id = value
+            .strip_prefix(AGENT_CONTEXT_SCOPE_PREFIX)
+            .ok_or(ContextScopeIdError::Unsupported)?;
+        Ok(Self::Agent(AgentId::parse(agent_id)?))
     }
 
     #[must_use]
     pub fn as_key(&self) -> Cow<'_, str> {
-        Cow::Borrowed(MAIN_CONTEXT_SCOPE)
+        match self {
+            Self::Main => Cow::Borrowed(MAIN_CONTEXT_SCOPE),
+            Self::Agent(agent_id) => Cow::Owned(format!("{AGENT_CONTEXT_SCOPE_PREFIX}{agent_id}")),
+        }
     }
 }
 

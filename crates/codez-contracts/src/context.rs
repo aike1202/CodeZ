@@ -6,6 +6,7 @@ use ts_rs::TS;
 use crate::{ComposerImageAttachment, chat::AgentStopReason, provider::ProviderTokenUsage};
 
 pub const MAIN_CONTEXT_SCOPE: &str = "main";
+pub const AGENT_CONTEXT_SCOPE_PREFIX: &str = "agent:";
 pub const CONTEXT_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -56,28 +57,44 @@ pub struct ContextBudgetSnapshot {
 #[ts(type = "string")]
 pub enum ContextScopeId {
     Main,
+    Agent(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("context scope must be 'main'")]
-pub struct ContextScopeIdError;
+pub enum ContextScopeIdError {
+    #[error("context scope must be 'main' or 'agent:<agent-id>'")]
+    Unsupported,
+    #[error("agent context scope identifier is invalid")]
+    InvalidAgentId,
+}
 
 impl ContextScopeId {
     /// Parses the stable wire representation used by Electron and Tauri.
     ///
     /// # Errors
     ///
-    /// Returns [`ContextScopeIdError`] for every value other than `main`.
+    /// Returns [`ContextScopeIdError`] for values outside the stable main or
+    /// per-agent scope formats.
     pub fn parse(value: &str) -> Result<Self, ContextScopeIdError> {
-        (value == MAIN_CONTEXT_SCOPE)
-            .then_some(Self::Main)
-            .ok_or(ContextScopeIdError)
+        if value == MAIN_CONTEXT_SCOPE {
+            return Ok(Self::Main);
+        }
+        let agent_id = value
+            .strip_prefix(AGENT_CONTEXT_SCOPE_PREFIX)
+            .ok_or(ContextScopeIdError::Unsupported)?;
+        if agent_id.is_empty() || agent_id.len() > 160 || agent_id.chars().any(char::is_control) {
+            return Err(ContextScopeIdError::InvalidAgentId);
+        }
+        Ok(Self::Agent(agent_id.to_string()))
     }
 
     /// Returns the stable map key used in runtime snapshots.
     #[must_use]
     pub fn as_key(&self) -> Cow<'_, str> {
-        Cow::Borrowed(MAIN_CONTEXT_SCOPE)
+        match self {
+            Self::Main => Cow::Borrowed(MAIN_CONTEXT_SCOPE),
+            Self::Agent(agent_id) => Cow::Owned(format!("{AGENT_CONTEXT_SCOPE_PREFIX}{agent_id}")),
+        }
     }
 }
 

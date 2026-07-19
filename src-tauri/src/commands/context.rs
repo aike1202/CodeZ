@@ -20,7 +20,7 @@ pub async fn ledger_append_event(
 ) -> Result<LedgerEvent, CommandError> {
     let result = async {
         let activity = begin_session_activity(&state.session_maintenance, &session_id)?;
-        let event = append_request_from_wire(event);
+        let event = append_request_from_wire(event)?;
         state
             .model_ledger
             .append_event_for(activity.session_id(), event)

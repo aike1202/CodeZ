@@ -2,21 +2,22 @@ use std::collections::HashMap;
 
 use codez_contracts::context as wire;
 use codez_core::context as domain;
+use codez_core::{AgentId, AppError};
 
 use crate::{attachment_boundary::composer_to_wire, provider_boundary::usage_to_wire};
 
 pub(crate) fn append_request_from_wire(
     value: wire::LedgerAppendRequest,
-) -> domain::LedgerAppendRequest {
-    domain::LedgerAppendRequest {
+) -> Result<domain::LedgerAppendRequest, AppError> {
+    Ok(domain::LedgerAppendRequest {
         event_id: value.event_id,
         session_id: value.session_id,
-        context_scope_id: scope_from_wire(value.context_scope_id),
+        context_scope_id: scope_from_wire(value.context_scope_id)?,
         turn_id: value.turn_id,
         created_at: value.created_at,
         r#type: event_type_from_wire(value.r#type),
         payload: value.payload,
-    }
+    })
 }
 
 pub(crate) fn event_to_wire(value: domain::LedgerEvent) -> wire::LedgerEvent {
@@ -50,15 +51,21 @@ pub(crate) fn snapshot_to_wire(
     }
 }
 
-fn scope_from_wire(value: wire::ContextScopeId) -> domain::ContextScopeId {
+fn scope_from_wire(value: wire::ContextScopeId) -> Result<domain::ContextScopeId, AppError> {
     match value {
-        wire::ContextScopeId::Main => domain::ContextScopeId::Main,
+        wire::ContextScopeId::Main => Ok(domain::ContextScopeId::Main),
+        wire::ContextScopeId::Agent(agent_id) => AgentId::parse(agent_id)
+            .map(domain::ContextScopeId::Agent)
+            .map_err(|error| AppError::validation(error.to_string())),
     }
 }
 
 fn scope_to_wire(value: domain::ContextScopeId) -> wire::ContextScopeId {
     match value {
         domain::ContextScopeId::Main => wire::ContextScopeId::Main,
+        domain::ContextScopeId::Agent(agent_id) => {
+            wire::ContextScopeId::Agent(agent_id.as_str().to_string())
+        }
     }
 }
 
@@ -333,7 +340,7 @@ mod tests {
             payload: serde_json::json!({"status": "success"}),
         };
 
-        let converted = append_request_from_wire(source);
+        let converted = append_request_from_wire(source).expect("fixture scope must convert");
 
         assert_eq!(
             (

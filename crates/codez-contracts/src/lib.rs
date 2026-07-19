@@ -1,5 +1,6 @@
 ﻿#![forbid(unsafe_code)]
 
+pub mod agent;
 pub mod chat;
 pub mod context;
 pub mod mcp;

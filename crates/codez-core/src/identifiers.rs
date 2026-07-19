@@ -1,3 +1,5 @@
+use std::fmt;
+
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use thiserror::Error;
 
@@ -27,7 +29,7 @@ fn validate_identifier(value: &str) -> Result<(), IdentifierError> {
 
 macro_rules! identifier {
     ($name:ident) => {
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
         #[serde(transparent)]
         pub struct $name(String);
 
@@ -41,6 +43,12 @@ macro_rules! identifier {
             #[must_use]
             pub fn as_str(&self) -> &str {
                 &self.0
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str(&self.0)
             }
         }
     };
@@ -112,6 +120,12 @@ identifier!(StreamId);
 identifier!(ToolCallId);
 identifier!(AgentRunId);
 identifier!(ProcessId);
+identifier!(RootRunId);
+identifier!(AgentId);
+identifier!(AgentAttemptId);
+identifier!(TaskId);
+identifier!(MessageId);
+identifier!(ArtifactId);
 
 #[cfg(test)]
 mod tests {
