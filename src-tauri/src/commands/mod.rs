@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod attachment;
 pub mod chat;
 pub mod context;

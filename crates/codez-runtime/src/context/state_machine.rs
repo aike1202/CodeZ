@@ -3,10 +3,10 @@ use thiserror::Error;
 
 use codez_core::context::{
     AssistantMessagePayload, CompactionCompletedPayload, CompactionFailedPayload,
-    CompactionStartedPayload, HistoryRevertedPayload, LedgerEvent, LedgerEventType,
-    LegacyImportCompletedPayload, ResumeStateUpdatedPayload, SessionRuntimeScopeSnapshot,
-    SessionSkillState, SkillStateUpdatedPayload, ToolResultPayload, TurnCompletedPayload,
-    TurnInterruptedPayload, UserMessagePayload,
+    CompactionStartedPayload, ContextForkedPayload, HistoryRevertedPayload, LedgerEvent,
+    LedgerEventType, LegacyImportCompletedPayload, ResumeStateUpdatedPayload,
+    SessionRuntimeScopeSnapshot, SessionSkillState, SkillStateUpdatedPayload, ToolResultPayload,
+    TurnCompletedPayload, TurnInterruptedPayload, UserMessagePayload,
 };
 
 use crate::context::{
@@ -36,6 +36,16 @@ pub fn apply_event(
     event: &LedgerEvent,
 ) -> Result<(), StateMachineError> {
     match event.r#type {
+        LedgerEventType::ContextForked => {
+            let payload: ContextForkedPayload = parse_payload(event)?;
+            let mut scope = payload.scope;
+            scope.history_version = event.history_version;
+            clear_provider_usage(&mut scope);
+            state
+                .snapshot
+                .scopes
+                .insert(event.context_scope_id.as_key().into_owned(), scope);
+        }
         LedgerEventType::UserMessage => {
             let payload: UserMessagePayload = parse_payload(event)?;
             let scope = scope_for_event(state, event);
@@ -366,8 +376,9 @@ fn apply_compaction(
 mod tests {
     use std::collections::HashMap;
 
+    use codez_core::AgentId;
     use codez_core::context::{
-        CONTEXT_SCHEMA_VERSION, ContextScopeId, LedgerEvent, LedgerEventType,
+        CONTEXT_SCHEMA_VERSION, ContextForkedPayload, ContextScopeId, LedgerEvent, LedgerEventType,
         SessionRuntimeSnapshot,
     };
 
@@ -479,6 +490,49 @@ mod tests {
                 runtime.snapshot.through_sequence
             ),
             (Some(1), Some(1), Some("turn-1"), 3)
+        );
+    }
+
+    #[test]
+    fn context_fork_copies_parent_state_into_an_independent_agent_scope() {
+        let mut runtime = runtime();
+        let input = event(
+            1,
+            1,
+            LedgerEventType::UserMessage,
+            serde_json::json!({
+                "message": message("message-1", "user"),
+                "providerId": "provider-1",
+                "model": "model-1"
+            }),
+        );
+        apply_event(&mut runtime, &input).expect("source message must apply");
+        let source = runtime.snapshot.scopes["main"].clone();
+        let mut fork = event(
+            2,
+            1,
+            LedgerEventType::ContextForked,
+            serde_json::to_value(ContextForkedPayload {
+                source_context_scope_id: ContextScopeId::Main,
+                source_history_version: source.history_version,
+                scope: source,
+            })
+            .expect("fork payload must serialize"),
+        );
+        let agent_id = AgentId::parse("agent-child").expect("agent ID must parse");
+        fork.context_scope_id = ContextScopeId::Agent(agent_id);
+
+        apply_event(&mut runtime, &fork).expect("context fork must apply");
+        let child = &runtime.snapshot.scopes["agent:agent-child"];
+
+        assert_eq!(
+            (
+                child.history_version,
+                child.active_messages[0].id.as_str(),
+                child.last_provider_id.as_deref(),
+                child.last_provider_usage.as_ref(),
+            ),
+            (1, "message-1", Some("provider-1"), None)
         );
     }
 

@@ -1,3 +1,4 @@
+pub mod agent_runtime;
 pub mod available_tools;
 pub mod context_management;
 pub mod editing;
@@ -10,5 +11,6 @@ pub mod output_policy;
 pub mod repository_rules;
 pub mod skills;
 pub mod todo_management;
+pub mod tool_usage;
 pub mod verification;
 pub mod verification_strategy;

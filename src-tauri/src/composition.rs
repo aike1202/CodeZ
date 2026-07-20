@@ -1,4 +1,4 @@
-﻿use std::{
+use std::{
     fs,
     path::{Path, PathBuf},
     sync::Arc,
@@ -7,8 +7,13 @@
 use codez_core::{AppError, AppPathError, AppPaths, AtomicPersistence};
 use codez_mcp::{McpProjectConfigService, McpSecretService, McpUserConfigService};
 use codez_platform::ResourceLocator;
+use codez_platform::{GitInstallation, SystemClock, UuidGenerator};
 use codez_runtime::{
     CancellationTree, HostPreferences, ShutdownCoordinator, SystemService,
+    agent::{
+        AgentArtifactStore, AgentBudgetManager, AgentControlStore, AgentScheduler, AgentSupervisor,
+        AgentSupervisorConfig, DurableMailbox, SchedulerConfig, WorkspaceBroker,
+    },
     history_revert::{HistoryRevertError, HistoryRevertService, HistoryRevertWorkspace},
     permission::store::{PermissionStoreError, WorkspacePermissionStore},
     session_deletion::SessionDeletionService,
@@ -20,8 +25,12 @@ use tauri::{App, Manager};
 use thiserror::Error;
 
 use crate::{
+    agent_ui_runtime::{AgentUiEventStore, AgentUiProjector},
     chat_runtime::{ChatPromptSources, ChatRuntime},
     chat_tool_runtime::{ChatToolRuntime, ChatToolRuntimeDependencies},
+    child_agent_runtime::{
+        ChildAgentInteractionDependencies, ChildAgentRuntime, ChildAgentRuntimeDependencies,
+    },
     commands::todo::DesktopTodoEventSink,
     error::ErrorReporter,
     logging::{self, LoggingError},
@@ -73,6 +82,11 @@ pub(crate) enum CompositionError {
     },
     #[error(transparent)]
     ChatTools(#[from] crate::chat_tool_runtime::ChatToolRuntimeError),
+    #[error("failed to recover interrupted Agent attempts: {source}")]
+    AgentRecovery {
+        #[source]
+        source: codez_runtime::agent::SupervisorError,
+    },
 }
 
 pub(crate) fn compose_app_state(
@@ -91,6 +105,7 @@ pub(crate) fn compose_app_state(
     let logging = logging::initialize(paths.log_directory())?;
     let storage = Arc::new(AtomicFileStore::default());
     let persistence: Arc<dyn AtomicPersistence> = storage.clone();
+    let process_runner = Arc::new(codez_platform::NativeProcessRunner::new());
     let credentials = Arc::new(OsCredentialStore::default());
     let cancellation = Arc::new(CancellationTree::new());
     let session_maintenance = Arc::new(SessionMaintenanceCoordinator::new());
@@ -99,6 +114,84 @@ pub(crate) fn compose_app_state(
         paths.data_directory().join("session-runtime"),
         Arc::clone(&persistence),
     ));
+    let agent_runtime_root = paths.data_directory().join("agent-runtime");
+    let agent_control_store = Arc::new(AgentControlStore::new(
+        &agent_runtime_root,
+        Arc::clone(&persistence),
+    ));
+    let agent_mailbox = Arc::new(DurableMailbox::new(
+        &agent_runtime_root,
+        Arc::clone(&persistence),
+    ));
+    let agent_artifacts = Arc::new(AgentArtifactStore::new(
+        agent_runtime_root.join("artifacts"),
+        Arc::clone(&persistence),
+    ));
+    let agent_scheduler = Arc::new(AgentScheduler::new(SchedulerConfig::default()));
+    let agent_workspace_broker = match GitInstallation::discover() {
+        Ok(installation) => {
+            let (git_program, git_environment) = installation.into_parts();
+            Some(Arc::new(WorkspaceBroker::new(
+                paths.data_directory().join("agent-workspaces"),
+                git_program,
+                git_environment,
+                process_runner.clone(),
+                Arc::clone(&persistence),
+            )))
+        }
+        Err(error) => {
+            tracing::warn!(
+                diagnostic = %error,
+                "Git isolation is unavailable; writable child Agents will fail closed"
+            );
+            None
+        }
+    };
+    if let Some(workspaces) = agent_workspace_broker.as_ref() {
+        match tauri::async_runtime::block_on(workspaces.scan_recovery()) {
+            Ok(records) => {
+                for record in records.iter().filter(|record| {
+                    record.disposition
+                        == codez_runtime::agent::WorkspaceRecoveryDisposition::ManualIntervention
+                }) {
+                    tracing::warn!(
+                        attempt_id = record.attempt_id.as_deref().unwrap_or("unknown"),
+                        status = %record.status,
+                        detail = %record.detail,
+                        "Agent workspace recovery requires manual inspection"
+                    );
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    diagnostic = %error,
+                    "Agent workspace recovery state could not be scanned"
+                );
+            }
+        }
+    }
+    let mut supervisor = AgentSupervisor::new(
+        AgentSupervisorConfig::default(),
+        Arc::clone(&agent_control_store),
+        Arc::clone(&agent_mailbox),
+        agent_scheduler,
+        Arc::new(AgentBudgetManager::new()),
+        Arc::new(SystemClock),
+        Arc::new(UuidGenerator),
+    )
+    .with_artifact_store(Arc::clone(&agent_artifacts));
+    if let Some(workspaces) = agent_workspace_broker.as_ref() {
+        supervisor = supervisor.with_workspace_broker(Arc::clone(workspaces));
+    }
+    let agent_supervisor = Arc::new(supervisor);
+    tauri::async_runtime::block_on(agent_supervisor.recover_orphaned_attempts())
+        .map_err(|source| CompositionError::AgentRecovery { source })?;
+    let agent_ui_events = Arc::new(AgentUiEventStore::new(
+        Arc::clone(&agent_control_store),
+        Arc::clone(&persistence),
+    ));
+    let agent_ui_projector =
+        AgentUiProjector::start(app.handle().clone(), Arc::clone(&agent_ui_events));
     let workspace_permissions = Arc::new(WorkspacePermissionStore::new(
         paths.data_directory(),
         Arc::clone(&persistence),
@@ -113,7 +206,6 @@ pub(crate) fn compose_app_state(
         Arc::clone(&persistence),
         todo_events,
     ));
-    let process_runner = Arc::new(codez_platform::NativeProcessRunner::new());
     let edit_transaction =
         Arc::new(codez_runtime::edit_transaction::EditTransactionService::new(paths.clone()));
     let history_workspace: Arc<dyn HistoryRevertWorkspace> =
@@ -160,6 +252,8 @@ pub(crate) fn compose_app_state(
             permission_ai_classifier: Some(Arc::new(ProviderPermissionAiClassifier::new(
                 Arc::clone(&provider_service),
             ))),
+            agent_supervisor: Arc::clone(&agent_supervisor),
+            workspace_broker: agent_workspace_broker.clone(),
         },
     )?);
     let attachment = Arc::new(codez_runtime::attachment::AttachmentService::new(
@@ -172,6 +266,7 @@ pub(crate) fn compose_app_state(
         Arc::clone(&attachment),
         Arc::clone(&chat_tools),
         Arc::clone(&edit_transaction),
+        Arc::clone(&agent_supervisor),
         ChatPromptSources::new(
             paths.data_directory().to_path_buf(),
             Arc::clone(&workspace_permissions),
@@ -179,6 +274,23 @@ pub(crate) fn compose_app_state(
         )
         .with_skills(chat_tools.skill_service()),
     ));
+    let child_agent_runtime = Arc::new(ChildAgentRuntime::new(
+        Arc::clone(&agent_supervisor),
+        ChildAgentRuntimeDependencies {
+            providers: Arc::clone(&provider_service),
+            tools: Arc::clone(&chat_tools),
+            ledger: Arc::clone(&model_ledger),
+            prompt: chat_runtime.prompt_assembler(),
+            events: agent_ui_projector.clone(),
+            workspace_broker: agent_workspace_broker.clone(),
+            cancellation: cancellation.application_token(),
+            interaction: Some(ChildAgentInteractionDependencies {
+                app: app.handle().clone(),
+                chat_runtime: Arc::clone(&chat_runtime),
+            }),
+        },
+    ));
+    child_agent_runtime.start();
     let session_deletion = Arc::new(SessionDeletionService::new(
         paths.data_directory(),
         Arc::clone(&persistence),
@@ -257,6 +369,14 @@ pub(crate) fn compose_app_state(
         mcp_secrets,
         mcp_runtime,
         model_ledger,
+        agent_control_store,
+        agent_mailbox,
+        agent_artifacts,
+        agent_supervisor,
+        agent_workspace_broker,
+        agent_ui_events,
+        _agent_ui_projector: agent_ui_projector,
+        _child_agent_runtime: child_agent_runtime,
         chat_runtime,
     })
 }

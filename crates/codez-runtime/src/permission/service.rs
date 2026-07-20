@@ -79,6 +79,10 @@ pub trait PermissionApprovalHandler: Send + Sync {
     ) -> Result<PermissionApprovalResponse, Box<dyn std::error::Error + Send + Sync>>;
 }
 
+pub trait PermissionCheckConstraint: Send + Sync {
+    fn denial_reason(&self, check: &EvaluatedPermissionCheck) -> Option<String>;
+}
+
 #[derive(Clone)]
 pub struct PermissionService {
     modes: Arc<WorkspacePermissionStore>,
@@ -127,6 +131,34 @@ impl PermissionService {
         ai_context: Option<&PermissionAiContext>,
         approval_handler: Option<&dyn PermissionApprovalHandler>,
     ) -> Result<ToolAuthorizationDecision, PermissionServiceError> {
+        self.authorize_with_constraint(
+            prepared,
+            workspace_root,
+            session_id,
+            agent_role,
+            approval_preference,
+            ai_context,
+            approval_handler,
+            None,
+        )
+        .await
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "permission authorization keeps policy, AI, approval, and Agent constraints explicit"
+    )]
+    pub async fn authorize_with_constraint(
+        &self,
+        prepared: &PreparedToolCall,
+        workspace_root: &Path,
+        session_id: Option<&str>,
+        agent_role: &str,
+        approval_preference: Option<ToolApprovalPreference>,
+        ai_context: Option<&PermissionAiContext>,
+        approval_handler: Option<&dyn PermissionApprovalHandler>,
+        constraint: Option<&dyn PermissionCheckConstraint>,
+    ) -> Result<ToolAuthorizationDecision, PermissionServiceError> {
         let canonical_workspace = tokio::fs::canonicalize(workspace_root)
             .await
             .map_err(|_| PermissionStoreError::InvalidWorkspace)?;
@@ -159,6 +191,14 @@ impl PermissionService {
                 )
                 .await?;
             checks.push(fallback);
+        }
+        if let Some(constraint) = constraint {
+            for check in &mut checks {
+                if let Some(reason) = constraint.denial_reason(check) {
+                    check.action = PermissionAction::Deny;
+                    check.reason = reason;
+                }
+            }
         }
         let action = PermissionDecisionEngine::aggregate(
             &checks

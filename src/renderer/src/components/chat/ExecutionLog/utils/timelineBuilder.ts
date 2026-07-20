@@ -11,20 +11,19 @@ import {
   getToolTarget
 } from './itemParsers'
 
-function getReadFileStatuses(
-  result: string | undefined,
-  count: number,
-  fallback: UnifiedTimelineItem['status']
-): UnifiedTimelineItem['status'][] {
-  if (!result || fallback === 'running') return Array(count).fill(fallback)
+function getToolResultPayload(result?: string): Record<string, any> {
+  if (!result) return {}
 
-  const blocks = Array.from(result.matchAll(/<file path="[^"]*">\r?\n([\s\S]*?)\r?\n<\/file>/g))
-  return Array.from({ length: count }, (_, index) => {
-    const content = blocks[index]?.[1] || ''
-    return content.startsWith('Error:') || content.startsWith('Cannot read binary file.')
-      ? 'error'
-      : fallback
-  })
+  try {
+    const parsed = JSON.parse(result)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    if (parsed.data && typeof parsed.data === 'object' && !Array.isArray(parsed.data)) {
+      return parsed.data
+    }
+    return parsed
+  } catch {
+    return {}
+  }
 }
 
 export function buildFallbackTimeline(
@@ -131,70 +130,9 @@ export function buildUnifiedTimeline(
 
       if (tc.name === 'Read') {
         const argsObj = parseArgs(tc.args)
-        const files = Array.isArray(argsObj.files) ? argsObj.files : []
-        const fileStatuses = getReadFileStatuses(tc.result, files.length, tc.status)
-
-        if (files.length > 1) {
-          if (tc.batchId) {
-            const failed = fileStatuses.some((status) => status === 'error')
-            list.push({
-              id: tc.id,
-              type: 'tool',
-              timestamp: tc.startedAt,
-              completedAt: tc.completedAt,
-              status: failed ? 'error' : tc.status,
-              verb: tc.status === 'running' ? 'Analyzing' : 'Analyzed',
-              target: `${files.length} 个文件`,
-              args: tc.args,
-              detail: tc.result,
-              duration,
-              toolName: tc.name,
-              batchId: tc.batchId,
-              batchIndex: tc.batchIndex,
-              batchSize: tc.batchSize,
-              batchKind: 'tools'
-            })
-            return
-          }
-
-          const readBatchId = tc.batchId ?? `read_batch_${tc.id}`
-          files.forEach((file: any, index: number) => {
-            const filePath = typeof file?.file_path === 'string' ? file.file_path : ''
-            const offset = file?.offset
-            const limit = file?.limit
-            const targetText = formatFileDisplayTarget(
-              filePath,
-              typeof offset === 'number' ? offset : undefined,
-              typeof offset === 'number' && typeof limit === 'number' ? offset + limit - 1 : undefined
-            )
-
-            list.push({
-              id: `${tc.id}_${index}`,
-              type: 'tool',
-              timestamp: tc.startedAt,
-              completedAt: tc.completedAt,
-              status: fileStatuses[index] ?? tc.status,
-              verb: tc.status === 'running' ? 'Analyzing' : 'Analyzed',
-              target: targetText,
-              realPath: filePath,
-              fileName: filePath ? getFileDisplayName(filePath) : undefined,
-              args: tc.args,
-              detail: index === 0 ? tc.result : undefined,
-              duration,
-              toolName: tc.name,
-              batchId: readBatchId,
-              batchIndex: tc.batchId ? tc.batchIndex : index,
-              batchSize: tc.batchId ? tc.batchSize : files.length,
-              batchKind: tc.batchId ? 'tools' : 'read'
-            })
-          })
-          return
-        }
-
-        const file = files[0]
-        const filePath = typeof file?.file_path === 'string' ? file.file_path : ''
-        const offset = file?.offset
-        const limit = file?.limit
+        const filePath = typeof argsObj.file_path === 'string' ? argsObj.file_path : ''
+        const offset = argsObj.offset
+        const limit = argsObj.limit
         const targetText = formatFileDisplayTarget(
           filePath,
           typeof offset === 'number' ? offset : undefined,
@@ -204,7 +142,7 @@ export function buildUnifiedTimeline(
           id: tc.id,
           type: 'tool',
           timestamp: tc.startedAt,
-          status: fileStatuses[0] ?? tc.status,
+          status: tc.status,
           verb: tc.status === 'running' ? 'Analyzing' : 'Analyzed',
           target: targetText,
           realPath: filePath,
@@ -416,38 +354,36 @@ export function buildUnifiedTimeline(
         }
 
         if (tc.name === 'TodoCreate') {
-          try {
-            const res = JSON.parse(tc.result || '{}')
-            const created = res.data?.created || res.snapshot?.items || res.data?.snapshot?.items || []
-            if (created.length > 0) {
-              const firstTodo = created[0].subject
-              targetDisplay = created.length > 1 ? `创建 ${created.length} 个待办 (如: ${firstTodo})` : `创建待办: ${firstTodo}`
-            } else {
-              targetDisplay = '创建待办'
-            }
-          } catch {
-            targetDisplay = '创建待办'
-          }
+          const result = getToolResultPayload(tc.result)
+          const args = parseArgs(tc.args)
+          const created = Array.isArray(result.created)
+            ? result.created
+            : Array.isArray(result.snapshot?.items)
+              ? result.snapshot.items
+              : []
+          const inputItems = Array.isArray(args.items) ? args.items : []
+          const groupTitle = inputItems.find(
+            (todo: any) => typeof todo?.groupTitle === 'string' && todo.groupTitle.trim()
+          )?.groupTitle?.trim()
+          const fallbackTitle = typeof created[0]?.subject === 'string' ? created[0].subject : ''
+          const title = groupTitle || fallbackTitle
+          targetDisplay = title ? `创建代办：${title}` : '创建代办'
         }
 
         if (tc.name === 'TodoUpdate') {
-          try {
-            const res = JSON.parse(tc.result || '{}')
-            const todo = res.data?.updated?.[0] || res.data?.todo
-            if (todo) {
-              if (todo.status === 'completed') {
-                targetDisplay = `完成待办：${todo.subject}`
-              } else if (todo.status === 'in_progress') {
-                targetDisplay = `开始执行: ${todo.subject}`
-              } else if (todo.status === 'cancelled') {
-                targetDisplay = `取消待办：${todo.subject}`
-              } else {
-                targetDisplay = `更新待办: ${todo.subject}`
-              }
+          const result = getToolResultPayload(tc.result)
+          const todo = Array.isArray(result.updated) ? result.updated[0] : result.todo
+          if (todo?.subject) {
+            if (todo.status === 'completed') {
+              targetDisplay = `完成待办：${todo.subject}`
+            } else if (todo.status === 'in_progress') {
+              targetDisplay = `开始 ${todo.subject}`
+            } else if (todo.status === 'cancelled') {
+              targetDisplay = `取消待办：${todo.subject}`
             } else {
-              targetDisplay = '更新待办状态'
+              targetDisplay = `更新待办：${todo.subject}`
             }
-          } catch {
+          } else {
             targetDisplay = '更新待办状态'
           }
         }

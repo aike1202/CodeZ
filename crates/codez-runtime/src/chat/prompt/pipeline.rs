@@ -1,9 +1,24 @@
 use futures::future::join_all;
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
 use super::types::{PromptContext, PromptLayer, PromptModule};
 
 pub const SYSTEM_PROMPT_DYNAMIC_BOUNDARY: &str = "<codez_dynamic_capabilities>";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptModuleSnapshot {
+    pub id: String,
+    pub layer: PromptLayer,
+    pub priority: i32,
+    pub content_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptPipelineOutput {
+    pub text: String,
+    pub modules: Vec<PromptModuleSnapshot>,
+}
 
 #[derive(Default)]
 pub struct PromptPipeline {
@@ -49,6 +64,10 @@ impl PromptPipeline {
     }
 
     pub async fn run(&self, ctx: &PromptContext) -> String {
+        self.run_with_metadata(ctx).await.text
+    }
+
+    pub async fn run_with_metadata(&self, ctx: &PromptContext) -> PromptPipelineOutput {
         let sorted = self.sorted_modules();
         let futures = sorted.into_iter().map(|module| async move {
             let m = module.clone();
@@ -78,19 +97,28 @@ impl PromptPipeline {
             .map(|(_, text)| text.clone())
             .collect();
 
-        if static_sections.is_empty() {
-            return dynamic_sections.join("\n\n");
-        }
-        if dynamic_sections.is_empty() {
-            return static_sections.join("\n\n");
-        }
-
-        format!(
-            "{}\n\n{}\n\n{}",
-            static_sections.join("\n\n"),
-            SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+        let text = if static_sections.is_empty() {
             dynamic_sections.join("\n\n")
-        )
+        } else if dynamic_sections.is_empty() {
+            static_sections.join("\n\n")
+        } else {
+            format!(
+                "{}\n\n{}\n\n{}",
+                static_sections.join("\n\n"),
+                SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+                dynamic_sections.join("\n\n")
+            )
+        };
+        let modules = active
+            .into_iter()
+            .map(|(module, content)| PromptModuleSnapshot {
+                id: module.id().to_string(),
+                layer: module.layer(),
+                priority: module.priority(),
+                content_hash: hex::encode(Sha256::digest(content.as_bytes())),
+            })
+            .collect();
+        PromptPipelineOutput { text, modules }
     }
 
     pub async fn list_enabled(&self, ctx: &PromptContext) -> Vec<(&'static str, PromptLayer, i32)> {

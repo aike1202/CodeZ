@@ -18,6 +18,7 @@ import './ExecutionLog.css'
 import type { ExecutionLogProps } from './types'
 import { LogItemRow } from './components/LogItemRow'
 import { ParallelToolBatchCard } from './components/ParallelToolBatchCard'
+import SubAgentRunMarker, { isSubAgentSpawnItem } from './components/SubAgentRunMarker'
 
 export default function ExecutionLog({
   timeline,
@@ -27,7 +28,9 @@ export default function ExecutionLog({
   onFileClick,
   onDiffClick,
   streaming,
-  interrupted
+  interrupted,
+  sessionId = null,
+  onOpenSubAgent
 }: ExecutionLogProps): React.ReactElement | null {
   const [expanded, setExpanded] = useState(false)
   const [expandedMap, setExpandedMap] = useState<Record<string, boolean>>({})
@@ -162,15 +165,39 @@ export default function ExecutionLog({
         <Stack className="timeline-list">
           {displayItems.map((item, idx) => {
             if (item.type === 'parallel-batch') {
+              const spawnItems = item.items.filter(isSubAgentSpawnItem)
+              const regularItems = item.items.filter((entry) => !isSubAgentSpawnItem(entry))
               return (
-                <ParallelToolBatchCard
+                <React.Fragment key={item.id}>
+                  {regularItems.length > 0 ? (
+                    <ParallelToolBatchCard
+                      batch={{ ...item, items: regularItems, batchSize: regularItems.length }}
+                      expandedMap={expandedMap}
+                      hasItemDetail={hasDetail}
+                      toggleItemExpand={toggleItemExpand}
+                      onFileClick={onFileClick}
+                      onDiffClick={onDiffClick}
+                    />
+                  ) : null}
+                  {spawnItems.map((spawn) => (
+                    <SubAgentRunMarker
+                      key={`spawn:${spawn.id}`}
+                      item={spawn}
+                      sessionId={sessionId}
+                      onOpenSubAgent={onOpenSubAgent}
+                    />
+                  ))}
+                </React.Fragment>
+              )
+            }
+
+            if (isSubAgentSpawnItem(item)) {
+              return (
+                <SubAgentRunMarker
                   key={item.id}
-                  batch={item}
-                  expandedMap={expandedMap}
-                  hasItemDetail={hasDetail}
-                  toggleItemExpand={toggleItemExpand}
-                  onFileClick={onFileClick}
-                  onDiffClick={onDiffClick}
+                  item={item}
+                  sessionId={sessionId}
+                  onOpenSubAgent={onOpenSubAgent}
                 />
               )
             }

@@ -30,7 +30,7 @@
 - `npm.cmd run build`：Electron main/preload/renderer 生产构建通过。
 - `npm.cmd run build:tauri -- --debug --no-bundle`：通过，生成 `target/debug/codez-desktop.exe`。
 - `npm.cmd run build:renderer:tauri`：通过。
-- `npm.cmd run dev:tauri`：真实 Windows 进程启动并保持响应，renderer 使用 `http://localhost:1420/tauri.html`；Electron 占用全局快捷键时降级为告警而不终止 Tauri。
+- `npm.cmd run dev:tauri`：真实 Windows 进程启动并保持响应，renderer 使用 `http://localhost:27183/tauri.html`；Electron 占用全局快捷键时降级为告警而不终止 Tauri。
 - 迁移清单重复生成 SHA-256 稳定，当前 119 个声明 channel、0 个未声明 transport 引用。
 - Windows `safeStorage` sentinel spike：通过，确认旧密文需要 `Local State` DPAPI 主密钥 + Chromium `v10` AES-256-GCM 只读兼容层；见 `docs/migration/spikes/windows-safe-storage.md`。
 - Rust MCP SDK spike：通过，采用 `rmcp 2.2.0` 作为协议核心，legacy SSE、严格 session recovery 和安全策略由 CodeZ adapter 负责；见 `docs/migration/spikes/rust-mcp-sdk.md`。

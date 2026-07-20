@@ -111,6 +111,7 @@ export interface ChatAreaProps {
   ) => void
   handleOpenRecentProject: (project: any) => Promise<void>
   onOpenSettings: (tab?: string) => void
+  onOpenSubAgent?: (agentId: string) => void
 }
 
 export default function ChatArea({
@@ -121,7 +122,8 @@ export default function ChatArea({
   handleFileClick,
   handleDiffClick,
   handleOpenRecentProject,
-  onOpenSettings
+  onOpenSettings,
+  onOpenSubAgent
 }: ChatAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -366,6 +368,8 @@ export default function ChatArea({
                 lastStreamingMsgId={lastStreamingMsgId}
                 handleFileClick={handleFileClick}
                 handleDiffClick={handleDiffClick}
+                sessionId={activeSessionId}
+                onOpenSubAgent={onOpenSubAgent}
               />
             </div>
           ) : (

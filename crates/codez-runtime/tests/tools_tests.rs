@@ -826,10 +826,7 @@ async fn pipeline_overwrite_rejects_content_changed_after_read_delivery() {
         .await
         .expect("fixture file must be written");
     let read = harness
-        .execute(
-            "Read",
-            serde_json::json!({"files": [{"file_path": "stale.txt"}]}),
-        )
+        .execute("Read", serde_json::json!({"file_path": "stale.txt"}))
         .await;
     tokio::fs::write(&target, "external version")
         .await
@@ -867,10 +864,7 @@ async fn pipeline_no_op_write_does_not_register_a_mutation() {
         .await
         .expect("fixture file must be written");
     let _read = harness
-        .execute(
-            "Read",
-            serde_json::json!({"files": [{"file_path": "same.txt"}]}),
-        )
+        .execute("Read", serde_json::json!({"file_path": "same.txt"}))
         .await;
 
     let write = harness
@@ -905,7 +899,7 @@ async fn pipeline_read_failures_after_staging_or_prepare_leave_no_stale_record()
             .await
             .expect("read failure fixture must be written");
         let _read = harness
-            .execute("Read", serde_json::json!({"files": [{"file_path": name}]}))
+            .execute("Read", serde_json::json!({"file_path": name}))
             .await;
         let root = WorkspaceRoot::from_canonical(
             std::fs::canonicalize(&harness.context.workspace_root)
@@ -961,7 +955,7 @@ async fn pipeline_resolve_and_authorization_failures_after_prepare_discard_backu
             .await
             .expect("resolve failure fixture must be written");
         let _read = harness
-            .execute("Read", serde_json::json!({"files": [{"file_path": name}]}))
+            .execute("Read", serde_json::json!({"file_path": name}))
             .await;
         let root = WorkspaceRoot::from_canonical(
             std::fs::canonicalize(&harness.context.workspace_root)
@@ -1008,7 +1002,7 @@ async fn pipeline_cancelled_second_write_restores_previous_intent_across_restart
     let _original_read = harness
         .execute(
             "Read",
-            serde_json::json!({"files": [{"file_path": "cancelled-second.txt"}]}),
+            serde_json::json!({"file_path": "cancelled-second.txt"}),
         )
         .await;
     let first = harness
@@ -1020,7 +1014,7 @@ async fn pipeline_cancelled_second_write_restores_previous_intent_across_restart
     let _first_read = harness
         .execute(
             "Read",
-            serde_json::json!({"files": [{"file_path": "cancelled-second.txt"}]}),
+            serde_json::json!({"file_path": "cancelled-second.txt"}),
         )
         .await;
     let root = WorkspaceRoot::from_canonical(
@@ -1139,10 +1133,7 @@ async fn pipeline_read_rejects_a_path_changed_after_authorization() {
     });
 
     let result = harness
-        .execute(
-            "Read",
-            serde_json::json!({"files": [{"file_path": "authorized.txt"}]}),
-        )
+        .execute("Read", serde_json::json!({"file_path": "authorized.txt"}))
         .await;
 
     assert!(matches!(
@@ -1257,16 +1248,52 @@ async fn cancellation_prevents_an_authorized_handler_from_starting() {
     harness.context.cancellation.cancel();
 
     let result = harness
-        .execute(
-            "Read",
-            serde_json::json!({"files": [{"file_path": "read.txt"}]}),
-        )
+        .execute("Read", serde_json::json!({"file_path": "read.txt"}))
         .await;
 
     assert!(
         matches!(result, ToolExecutionResult::Cancelled { .. }),
         "unexpected pipeline result: {result:?}"
     );
+}
+
+#[tokio::test]
+async fn read_rejects_the_removed_multi_file_input_contract() {
+    let harness = Harness::new(vec![Arc::new(ReadTool::new())], None).await;
+
+    let result = harness
+        .execute(
+            "Read",
+            serde_json::json!({"files": [{"file_path": "one.txt"}]}),
+        )
+        .await;
+
+    assert!(matches!(
+        result,
+        ToolExecutionResult::Error { error, .. } if error.code == "TOOL_INPUT_INVALID"
+    ));
+}
+
+#[tokio::test]
+async fn read_missing_file_reports_the_requested_path_and_discovery_hint() {
+    let harness = Harness::new(vec![Arc::new(ReadTool::new())], None).await;
+
+    let result = harness
+        .execute(
+            "Read",
+            serde_json::json!({"file_path": "src/missing-entry.ts"}),
+        )
+        .await;
+
+    assert!(matches!(
+        result,
+        ToolExecutionResult::Error { error, .. }
+            if error.code == "TOOL_FILE_NOT_FOUND"
+                && error.message.contains("src/missing-entry.ts")
+                && error.suggestion.as_deref().is_some_and(|suggestion| {
+                    suggestion.contains("Glob") && suggestion.contains("list_files")
+                })
+    ));
 }
 
 #[tokio::test]
@@ -1551,10 +1578,7 @@ fn notebook_fixture(source: &str) -> String {
 
 async fn deliver_notebook(harness: &Harness, relative_path: &str) -> ToolExecutionResult {
     harness
-        .execute(
-            "Read",
-            serde_json::json!({"files": [{"file_path": relative_path}]}),
-        )
+        .execute("Read", serde_json::json!({"file_path": relative_path}))
         .await
 }
 

@@ -27,6 +27,10 @@ use codez_contracts::context::{
     ContextEstimateSource as WireContextEstimateSource,
     ContextPressureLevel as WireContextPressureLevel,
 };
+use codez_core::agent::{
+    AGENT_SCHEMA_VERSION, AgentBudget, AgentMessage, AgentPolicy, AgentProfile, AgentState,
+    DelegatedTask, ResultSchema, WorkspaceAssignment, WorkspaceMode,
+};
 use codez_core::context::{
     AssistantMessagePayload, ContextScopeId, LedgerAppendRequest, LedgerEventType,
     ModelContextItem, ModelContextItemMessage, NormalizedModelMessage,
@@ -40,8 +44,8 @@ use codez_core::provider::{
     ToolCall as ProviderToolCall, ToolDefinition,
 };
 use codez_core::{
-    AppError, CancellationToken, FileKind, FileSystem, ProcessRunner, SessionId,
-    SessionImageAttachment, StreamId, ToolCallId, WorkspaceRoot, redact_sensitive_text,
+    AppError, CancellationToken, FileKind, FileSystem, ProcessRunner, RootRunId, SessionId,
+    SessionImageAttachment, StreamId, TaskId, ToolCallId, WorkspaceRoot, redact_sensitive_text,
 };
 use codez_platform::{GitInstallation, NativeFileSystem, NativeFileSystemError};
 use codez_providers::{
@@ -54,12 +58,23 @@ use codez_providers::{
 use codez_runtime::attachment::{AttachmentService, ResolvedSessionImage};
 use codez_runtime::{
     CancellationTree,
+    agent::{
+        AgentExecutionContext, AgentExecutionError, AgentExecutionEvent, AgentExecutionEventSink,
+        AgentExecutor, AgentFileChange, AgentLedgerPort, AgentPortError, AgentPromptPort,
+        AgentPromptRequest, AgentPromptSnapshot, AgentProviderPort, AgentProviderRequest,
+        AgentProviderTurn, AgentSupervisor, AgentToolBatchResult, AgentToolPort, AgentToolResult,
+        AgentToolUsage, AgentTurnControlPort, AgentTurnDirective, NoopAgentExecutionEventSink,
+        ScheduledAgent, SpawnAgentInput,
+    },
     cancellation::SessionCancellation,
     chat::{
         prompt::{
             builder::create_default_pipeline,
             pipeline::PromptPipeline,
-            types::{PromptContext, PromptSkillSummary, PromptToolSummary},
+            types::{
+                PromptAgentContext, PromptAgentIdentity, PromptAgentLimits, PromptContext,
+                PromptSkillSummary, PromptToolSummary,
+            },
         },
         stream_state::{ChatStreamState, ChatStreamStateMachine},
     },
@@ -96,21 +111,24 @@ use codez_runtime::{
     },
     session_maintenance::SessionActivityLease,
     tools::types::{
-        DeferredToolSummary, NormalizedToolCall as RuntimeToolCall, ToolExecutionResult,
-        ToolPipelineResult,
+        DeferredToolSummary, NormalizedToolCall as RuntimeToolCall, ToolEffect,
+        ToolExecutionResult, ToolPipelineResult,
     },
 };
 use futures_util::{StreamExt, stream::BoxStream};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, ipc::Channel};
 use thiserror::Error;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
 
 use crate::{
     attachment_boundary::session_from_wire,
     chat_compaction::{AutoCompactionRequest, compact_active_chat_context},
     chat_interaction::AskUserResponseRegistry,
-    chat_tool_runtime::{AskUserHandler, ChatToolRunContext, ChatToolRuntime},
+    chat_tool_runtime::{
+        AskUserHandler, ChatAgentRunIdentity, ChatToolRunContext, ChatToolRuntime,
+    },
     commands::skills::SkillsService,
     error::ErrorReporter,
     provider_boundary::{chat_message_from_wire, stop_reason_to_wire, usage_to_wire},
@@ -124,7 +142,7 @@ const MAX_CHAT_INPUT_BYTES: usize = 1024 * 1024;
 const MAX_STEER_INPUT_BYTES: usize = 3 * 1024;
 const MAX_PREDICTION_INPUT_BYTES: usize = 1024 * 1024;
 const MAX_PROVIDER_SELECTOR_BYTES: usize = 512;
-const MAX_PROVIDER_OPEN_ATTEMPTS: u32 = 5;
+pub(crate) const MAX_PROVIDER_OPEN_ATTEMPTS: u32 = 5;
 const PROVIDER_OPEN_RETRY_BASE_DELAY: Duration = Duration::from_millis(250);
 const TERMINAL_ACK_TIMEOUT: Duration = Duration::from_secs(2);
 const CONTROL_RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -145,6 +163,7 @@ const MAX_PROVIDER_TOOL_CALLS: usize = 32;
 const MAX_PROVIDER_TOOL_CALL_ID_BYTES: usize = 512;
 const MAX_PROVIDER_TOOL_NAME_BYTES: usize = 512;
 const MAX_PROVIDER_TOOL_ARGUMENT_BYTES: usize = 128 * 1024;
+#[cfg(test)]
 const MAX_TOOL_ROUNDS_PER_RUN: usize = 64;
 const MAX_CHAT_IMAGE_ATTACHMENTS: usize = 500;
 const MAX_CONTEXT_PREPARATION_ATTEMPTS: usize = 2;
@@ -160,13 +179,14 @@ pub(crate) struct ChatRuntime {
     attachment: Arc<AttachmentService>,
     tools: Arc<ChatToolRuntime>,
     edit_transaction: Arc<EditTransactionService>,
+    agent_supervisor: Arc<AgentSupervisor>,
     prompt: Arc<ChatPromptAssembler>,
     registry: Mutex<RegistryState>,
     ask_user_responses: Arc<AskUserResponseRegistry>,
     permission_responses: Arc<PermissionResponseRegistry>,
 }
 
-struct ChatPromptAssembler {
+pub(crate) struct ChatPromptAssembler {
     data_root: PathBuf,
     workspace_permissions: Arc<WorkspacePermissionStore>,
     process_runner: Arc<dyn ProcessRunner>,
@@ -201,21 +221,22 @@ impl ChatPromptSources {
     }
 }
 
-struct ChatPromptBuildInput<'a> {
-    resolved: &'a ResolvedProviderChatConfig,
-    session_id: &'a SessionId,
-    workspace_root: Option<&'a WorkspaceRoot>,
-    tool_schemas: &'a [ToolDefinition],
-    deferred_tools: &'a [DeferredToolSummary],
-    scope: &'a SessionRuntimeScopeSnapshot,
-    now: &'a DateTime<Utc>,
-    cancellation: &'a CancellationToken,
-    system_addendum: Option<&'a str>,
-    todo_state: Option<&'a str>,
+pub(crate) struct ChatPromptBuildInput<'a> {
+    pub(crate) resolved: &'a ResolvedProviderChatConfig,
+    pub(crate) session_id: &'a SessionId,
+    pub(crate) workspace_root: Option<&'a WorkspaceRoot>,
+    pub(crate) tool_schemas: &'a [ToolDefinition],
+    pub(crate) deferred_tools: &'a [DeferredToolSummary],
+    pub(crate) scope: &'a SessionRuntimeScopeSnapshot,
+    pub(crate) now: &'a DateTime<Utc>,
+    pub(crate) cancellation: &'a CancellationToken,
+    pub(crate) system_addendum: Option<&'a str>,
+    pub(crate) todo_state: Option<&'a str>,
+    pub(crate) agent: Option<&'a PromptAgentContext>,
 }
 
 #[derive(Debug, Error)]
-enum ChatPromptError {
+pub(crate) enum ChatPromptError {
     #[error("system prompt preparation was cancelled")]
     Cancelled,
     #[error(transparent)]
@@ -295,7 +316,10 @@ impl ChatPromptAssembler {
         }
     }
 
-    async fn build(&self, input: ChatPromptBuildInput<'_>) -> Result<String, ChatPromptError> {
+    pub(crate) async fn build(
+        &self,
+        input: ChatPromptBuildInput<'_>,
+    ) -> Result<String, ChatPromptError> {
         ensure_prompt_not_cancelled(input.cancellation)?;
         let global_rules = self.load_global_rules(input.cancellation);
         let workspace_rules = self.load_workspace_rules(input.workspace_root, input.cancellation);
@@ -332,6 +356,7 @@ impl ChatPromptAssembler {
             directory_rules: None,
             git_status,
             now: Some(input.now.to_owned()),
+            agent: input.agent.cloned(),
         };
         let mut prompt = self.pipeline.run(&context).await;
         if prompt.trim().is_empty() {
@@ -861,8 +886,15 @@ struct ProviderRunRequest {
     input: ChatStreamInput,
     attachments: Vec<SessionImageAttachment>,
     resolved: ResolvedProviderChatConfig,
+    root_agent: PreparedRootAgent,
     tool_run: Option<Arc<ChatToolRunContext>>,
     events: Channel<ChatStreamFrame>,
+}
+
+#[derive(Clone)]
+struct PreparedRootAgent {
+    identity: ChatAgentRunIdentity,
+    scheduled: ScheduledAgent,
 }
 
 enum RunControl {
@@ -938,7 +970,9 @@ trait ProviderConversationSink: Send {
     ) -> Result<(), AppError>;
     async fn send_event(&mut self, event: ChatStreamFrameEvent) -> Result<(), AppError>;
     async fn receive_control(&mut self) -> Result<(), AppError>;
+    #[cfg(test)]
     fn drain_controls(&mut self);
+    #[cfg(test)]
     fn take_next_steer(&mut self) -> Option<ChatSteerInput>;
 }
 
@@ -966,6 +1000,7 @@ struct ConversationLedger {
     provider_id: String,
     model_id: String,
     context_scope_id: ContextScopeId,
+    agent: Option<PromptAgentContext>,
     system_prompt_addendum: Option<String>,
     current_input_message_id: String,
     next_record: u32,
@@ -973,9 +1008,15 @@ struct ConversationLedger {
 }
 
 impl ConversationLedger {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "ledger authority, Agent scope, input, attachments, and Provider identity are explicit"
+    )]
     async fn begin(
         store: Arc<ModelLedgerStore>,
         entry: &RunEntry,
+        context_scope_id: ContextScopeId,
+        agent: Option<PromptAgentContext>,
         input: &ChatStreamInput,
         input_attachments: &[SessionImageAttachment],
         attachment_service: &AttachmentService,
@@ -988,7 +1029,8 @@ impl ConversationLedger {
             run_id: entry.run_id.clone(),
             provider_id: resolved.provider_id.clone(),
             model_id: resolved.model.id.clone(),
-            context_scope_id: codez_core::context::ContextScopeId::Main,
+            context_scope_id,
+            agent,
             system_prompt_addendum: None,
             current_input_message_id: String::new(),
             next_record: 0,
@@ -1195,7 +1237,23 @@ impl ConversationLedger {
         self.interrupted_content = Some(bounded_text(&content, MAX_INTERRUPTED_CONTENT_BYTES));
     }
 
+    #[cfg(test)]
     async fn persist_terminal(&mut self, outcome: &TerminalOutcome) -> Result<(), AppError> {
+        self.persist_terminal_inner(outcome, true).await
+    }
+
+    async fn persist_executor_terminal(
+        &mut self,
+        outcome: &TerminalOutcome,
+    ) -> Result<(), AppError> {
+        self.persist_terminal_inner(outcome, false).await
+    }
+
+    async fn persist_terminal_inner(
+        &mut self,
+        outcome: &TerminalOutcome,
+        append_completed_assistant: bool,
+    ) -> Result<(), AppError> {
         match outcome {
             TerminalOutcome::Completed {
                 full_content,
@@ -1203,12 +1261,14 @@ impl ConversationLedger {
                 usage,
                 request_fingerprint,
             } => {
-                self.record_assistant(
-                    full_content.clone(),
-                    usage.clone(),
-                    request_fingerprint.clone(),
-                )
-                .await?;
+                if append_completed_assistant {
+                    self.record_assistant(
+                        full_content.clone(),
+                        usage.clone(),
+                        request_fingerprint.clone(),
+                    )
+                    .await?;
+                }
                 let (record_id, completed_at) = self.next_record("completed")?;
                 self.append_payload(
                     record_id,
@@ -1318,8 +1378,855 @@ impl ConversationLedger {
     }
 }
 
+struct RootAgentExecutionState {
+    conversation: ConversationLedger,
+    prepared: Option<PreparedRootProviderTurn>,
+    provider_code: Option<ChatProviderErrorCode>,
+    last_usage: Option<ProviderTokenUsage>,
+    last_stop_reason: Option<DomainAgentStopReason>,
+    transaction_registered: bool,
+    transaction_id: Option<String>,
+    transaction_finalized: bool,
+}
+
+struct PreparedRootProviderTurn {
+    messages: Vec<ProviderChatMessage>,
+    request_fingerprint: String,
+    budget: ContextBudgetSnapshot,
+    prompt_request: AgentPromptRequest,
+}
+
+struct RootAgentRequestPreparer {
+    providers: Arc<ProviderService>,
+    attachment: Arc<AttachmentService>,
+    prompt: Arc<ChatPromptAssembler>,
+    tools: Arc<ChatToolRuntime>,
+    supervisor: Arc<AgentSupervisor>,
+    edit_transaction: Arc<EditTransactionService>,
+    tool_run: Option<Arc<ChatToolRunContext>>,
+    state: Arc<AsyncMutex<RootAgentExecutionState>>,
+    sink: Arc<AsyncMutex<FrameSink>>,
+    cancellation: CancellationToken,
+    prompt_now: DateTime<Utc>,
+}
+
+impl RootAgentRequestPreparer {
+    async fn prepare(
+        &self,
+        request: AgentPromptRequest,
+    ) -> Result<AgentPromptSnapshot, AgentPortError> {
+        self.ensure_transaction_registered().await?;
+        let resolved = self
+            .providers
+            .resolve_chat_config(
+                Some(&request.context.attempt.provider_id),
+                Some(&request.context.attempt.model_id),
+            )
+            .await
+            .map_err(|error| root_port_error("ROOT_PROVIDER_RESOLVE_FAILED", error, false))?;
+        let provider_surface = self
+            .tool_run
+            .as_ref()
+            .map(|run| self.tools.provider_tool_surface_for_run(run));
+        let definitions = provider_surface
+            .as_ref()
+            .map_or(&[][..], |surface| surface.definitions.as_slice());
+        let deferred_tools = provider_surface
+            .as_ref()
+            .map_or(&[][..], |surface| surface.deferred_tools.as_slice());
+        let todo_state = self
+            .tools
+            .todo_prompt_state(&request.context.node.root_session_id)
+            .await
+            .map_err(|error| root_port_error("ROOT_TODO_PROMPT_FAILED", error, false))?;
+        let prompt_agent = root_prompt_agent_context(
+            self.supervisor.as_ref(),
+            &request.context,
+            request.mailbox_delta.clone(),
+            request.finalization_required,
+        )
+        .await?;
+        let mut state = self.state.lock().await;
+        state.conversation.agent = Some(prompt_agent);
+        let mut sink = self.sink.lock().await;
+        let prepared = prepare_provider_request(
+            PrepareProviderRequestInput {
+                providers: &self.providers,
+                attachment_service: self.attachment.as_ref(),
+                prompt: self.prompt.as_ref(),
+                resolved: &resolved,
+                cancellation: &self.cancellation,
+                conversation: &state.conversation,
+                workspace_root: self
+                    .tool_run
+                    .as_deref()
+                    .map(ChatToolRunContext::workspace_root),
+                tool_schemas: definitions,
+                deferred_tools,
+                prompt_now: &self.prompt_now,
+                todo_state: todo_state.as_deref(),
+            },
+            &mut *sink,
+        )
+        .await
+        .map_err(|error| root_port_error("ROOT_CONTEXT_PREPARE_FAILED", error, false))?;
+        sink.send_event(ChatStreamFrameEvent::ContextBudget(context_budget_to_wire(
+            &prepared.budget,
+        )))
+        .await
+        .map_err(|error| root_port_error("ROOT_CONTEXT_EVENT_FAILED", error, false))?;
+        let fingerprint = prepared.request_fingerprint.clone();
+        state.prepared = Some(PreparedRootProviderTurn {
+            messages: prepared.messages,
+            request_fingerprint: prepared.request_fingerprint,
+            budget: prepared.budget,
+            prompt_request: request,
+        });
+        Ok(AgentPromptSnapshot {
+            text: String::new(),
+            schema_version: AGENT_SCHEMA_VERSION,
+            module_hashes: vec![fingerprint.clone()],
+            dynamic_snapshot_hash: fingerprint,
+            result_contract_version: AGENT_SCHEMA_VERSION,
+        })
+    }
+
+    async fn ensure_transaction_registered(&self) -> Result<(), AgentPortError> {
+        if self.state.lock().await.transaction_registered {
+            return Ok(());
+        }
+        let Some(tool_run) = self.tool_run.as_deref() else {
+            self.state.lock().await.transaction_registered = true;
+            return Ok(());
+        };
+        self.edit_transaction
+            .register_chat_transaction(
+                tool_run.transaction_id(),
+                EditTransactionRegistration {
+                    session_id: tool_run.session_id().clone(),
+                    context_scope_id: tool_run.context_scope_id().clone(),
+                    turn_id: tool_run.run_id().clone(),
+                    workspace_root: tool_run.workspace_root().clone(),
+                },
+            )
+            .await
+            .map_err(|error| {
+                root_port_error("ROOT_EDIT_TRANSACTION_REGISTER_FAILED", error, false)
+            })?;
+        self.state.lock().await.transaction_registered = true;
+        Ok(())
+    }
+
+    async fn prepared_messages(&self) -> Result<Vec<ProviderChatMessage>, AgentPortError> {
+        self.state
+            .lock()
+            .await
+            .prepared
+            .as_ref()
+            .map(|prepared| prepared.messages.clone())
+            .ok_or_else(|| {
+                AgentPortError::new(
+                    "ROOT_CONTEXT_NOT_PREPARED",
+                    "root Agent Provider context was not prepared",
+                    false,
+                )
+            })
+    }
+
+    async fn compact_after_overflow(
+        &self,
+        resolved: &ResolvedProviderChatConfig,
+    ) -> Result<bool, AgentPortError> {
+        let (request, budget) = {
+            let state = self.state.lock().await;
+            let prepared = state.prepared.as_ref().ok_or_else(|| {
+                AgentPortError::new(
+                    "ROOT_CONTEXT_NOT_PREPARED",
+                    "root Agent overflow recovery lost its prepared context",
+                    false,
+                )
+            })?;
+            (prepared.prompt_request.clone(), prepared.budget.clone())
+        };
+        let overflow = ProviderOverflowCompaction {
+            capabilities: model_context_capabilities(resolved),
+            reasoning_budget_tokens: resolved.thinking.budget_tokens,
+            provider_id: resolved.provider_id.clone(),
+            model: resolved.model.id.clone(),
+        };
+        let compacted = {
+            let state = self.state.lock().await;
+            let mut sink = self.sink.lock().await;
+            compact_after_provider_overflow(
+                &self.providers,
+                &state.conversation,
+                &self.cancellation,
+                &overflow,
+                &budget,
+                &mut *sink,
+            )
+            .await
+            .map_err(|error| root_port_error("ROOT_CONTEXT_COMPACTION_FAILED", error, false))?
+        };
+        if compacted {
+            self.prepare(request).await?;
+        }
+        Ok(compacted)
+    }
+}
+
+struct RootAgentPrompt {
+    preparer: Arc<RootAgentRequestPreparer>,
+}
+
+#[async_trait::async_trait]
+impl AgentPromptPort for RootAgentPrompt {
+    async fn compose(
+        &self,
+        request: AgentPromptRequest,
+    ) -> Result<AgentPromptSnapshot, AgentPortError> {
+        self.preparer.prepare(request).await
+    }
+}
+
+struct RootAgentLedger {
+    state: Arc<AsyncMutex<RootAgentExecutionState>>,
+}
+
+#[async_trait::async_trait]
+impl AgentLedgerPort for RootAgentLedger {
+    async fn load_messages(
+        &self,
+        _context: &AgentExecutionContext,
+    ) -> Result<Vec<ProviderChatMessage>, AgentPortError> {
+        self.state
+            .lock()
+            .await
+            .prepared
+            .as_ref()
+            .map(|prepared| prepared.messages.clone())
+            .ok_or_else(|| {
+                AgentPortError::new(
+                    "ROOT_CONTEXT_NOT_PREPARED",
+                    "root Agent ledger was queried before context preparation",
+                    false,
+                )
+            })
+    }
+
+    async fn append_assistant(
+        &self,
+        _context: &AgentExecutionContext,
+        turn: &AgentProviderTurn,
+    ) -> Result<(), AgentPortError> {
+        let mut state = self.state.lock().await;
+        let fingerprint = state
+            .prepared
+            .as_ref()
+            .map(|prepared| prepared.request_fingerprint.clone())
+            .ok_or_else(|| {
+                AgentPortError::new(
+                    "ROOT_CONTEXT_NOT_PREPARED",
+                    "root Agent assistant event lost its request fingerprint",
+                    false,
+                )
+            })?;
+        let result = if turn.tool_calls.is_empty() {
+            state
+                .conversation
+                .record_assistant(turn.content.clone(), turn.usage.clone(), fingerprint)
+                .await
+        } else {
+            state
+                .conversation
+                .record_assistant_tool_calls(
+                    turn.content.clone(),
+                    &turn.tool_calls,
+                    turn.usage.clone(),
+                    fingerprint,
+                )
+                .await
+        };
+        result.map_err(|error| root_port_error("ROOT_LEDGER_APPEND_FAILED", error, false))
+    }
+
+    async fn append_tool_result(
+        &self,
+        _context: &AgentExecutionContext,
+        result: &AgentToolResult,
+    ) -> Result<(), AgentPortError> {
+        self.state
+            .lock()
+            .await
+            .conversation
+            .record_tool_result(
+                &result.call_id,
+                &result.name,
+                result.model_content.clone(),
+                &result.status,
+            )
+            .await
+            .map_err(|error| root_port_error("ROOT_LEDGER_APPEND_FAILED", error, false))
+    }
+}
+
+struct RootAgentProvider {
+    providers: Arc<ProviderService>,
+    preparer: Arc<RootAgentRequestPreparer>,
+    state: Arc<AsyncMutex<RootAgentExecutionState>>,
+    sink: Arc<AsyncMutex<FrameSink>>,
+}
+
+#[async_trait::async_trait]
+impl AgentProviderPort for RootAgentProvider {
+    async fn run_turn(
+        &self,
+        request: AgentProviderRequest,
+        events: &dyn AgentExecutionEventSink,
+        cancellation: CancellationToken,
+    ) -> Result<AgentProviderTurn, AgentPortError> {
+        let AgentProviderRequest {
+            context,
+            messages,
+            tools,
+            ..
+        } = request;
+        let mut messages = messages;
+        let mut overflow_retried = false;
+        loop {
+            let resolved = self
+                .providers
+                .resolve_chat_config(
+                    Some(&context.attempt.provider_id),
+                    Some(&context.attempt.model_id),
+                )
+                .await
+                .map_err(|error| root_port_error("ROOT_PROVIDER_RESOLVE_FAILED", error, false))?;
+            let mut open_attempt = 1_u32;
+            let stream = loop {
+                let attempt_config = self
+                    .providers
+                    .resolve_chat_config(
+                        Some(&context.attempt.provider_id),
+                        Some(&context.attempt.model_id),
+                    )
+                    .await
+                    .map_err(|error| {
+                        root_port_error("ROOT_PROVIDER_RESOLVE_FAILED", error, false)
+                    })?;
+                match open_provider_stream(
+                    attempt_config,
+                    messages.clone(),
+                    (!tools.is_empty()).then(|| tools.clone()),
+                    cancellation.clone(),
+                )
+                .await
+                {
+                    Err(error) => {
+                        let Some(delay) = provider_open_retry_delay(
+                            &error,
+                            open_attempt,
+                            context.attempt.id.as_str(),
+                        ) else {
+                            break Err(error);
+                        };
+                        events.publish(
+                            &context,
+                            AgentExecutionEvent::ProviderRetryScheduled {
+                                attempt: open_attempt,
+                                max_attempts: MAX_PROVIDER_OPEN_ATTEMPTS,
+                                delay_ms: u64::try_from(delay.as_millis()).unwrap_or(u64::MAX),
+                                reason: provider_open_retry_reason(&error).to_string(),
+                            },
+                        );
+                        tokio::select! {
+                            biased;
+                            () = cancellation.cancelled() => {
+                                return Err(AgentPortError::new(
+                                    "ROOT_PROVIDER_CANCELLED",
+                                    "root Agent Provider request was cancelled",
+                                    false,
+                                ));
+                            }
+                            () = tokio::time::sleep(delay) => {}
+                        }
+                        open_attempt = open_attempt.saturating_add(1);
+                    }
+                    result => break result,
+                }
+            };
+            let stream = match stream {
+                Ok(stream) => stream,
+                Err(error @ ChatProviderError::ContextOverflow(_)) if !overflow_retried => {
+                    overflow_retried = true;
+                    if self.preparer.compact_after_overflow(&resolved).await? {
+                        messages = self.preparer.prepared_messages().await?;
+                        continue;
+                    }
+                    return Err(self.record_provider_failure(error, String::new()).await);
+                }
+                Err(error) => {
+                    return Err(self.record_provider_failure(error, String::new()).await);
+                }
+            };
+            let turn = {
+                let mut sink = self.sink.lock().await;
+                let mut streaming = RootProviderConversationSink {
+                    inner: &mut sink,
+                    context: &context,
+                    events,
+                };
+                consume_provider_turn(stream, cancellation.clone(), &mut streaming).await
+            };
+            match turn {
+                ProviderTurn::Completed {
+                    full_content,
+                    stop_reason,
+                    tool_calls,
+                    usage,
+                } => {
+                    let stop_reason = stop_reason.map(domain_stop_reason_from_wire);
+                    let mut state = self.state.lock().await;
+                    state.last_usage.clone_from(&usage);
+                    state.last_stop_reason.clone_from(&stop_reason);
+                    return Ok(AgentProviderTurn {
+                        content: full_content,
+                        tool_calls,
+                        usage,
+                        stop_reason,
+                    });
+                }
+                ProviderTurn::Failed {
+                    error: error @ ChatProviderError::ContextOverflow(_),
+                    partial_content,
+                } if !overflow_retried && partial_content.is_empty() => {
+                    overflow_retried = true;
+                    if self.preparer.compact_after_overflow(&resolved).await? {
+                        messages = self.preparer.prepared_messages().await?;
+                        continue;
+                    }
+                    return Err(self.record_provider_failure(error, partial_content).await);
+                }
+                ProviderTurn::Failed {
+                    error,
+                    partial_content,
+                } => return Err(self.record_provider_failure(error, partial_content).await),
+                ProviderTurn::Interrupted {
+                    reason,
+                    partial_content,
+                } => {
+                    self.state
+                        .lock()
+                        .await
+                        .conversation
+                        .record_interrupted_content(partial_content);
+                    return Err(AgentPortError::new(
+                        "ROOT_PROVIDER_INTERRUPTED",
+                        reason,
+                        false,
+                    ));
+                }
+            }
+        }
+    }
+}
+
+impl RootAgentProvider {
+    async fn record_provider_failure(
+        &self,
+        error: ChatProviderError,
+        partial_content: String,
+    ) -> AgentPortError {
+        let code = provider_error_code(&error);
+        let retryable = is_retryable_provider_open_error(&error);
+        let error = provider_app_error(error);
+        let mut state = self.state.lock().await;
+        state.provider_code = Some(code);
+        state
+            .conversation
+            .record_interrupted_content(partial_content);
+        root_port_error("ROOT_PROVIDER_FAILED", error, retryable)
+    }
+}
+
+struct RootProviderConversationSink<'a> {
+    inner: &'a mut FrameSink,
+    context: &'a AgentExecutionContext,
+    events: &'a dyn AgentExecutionEventSink,
+}
+
+#[async_trait::async_trait]
+impl ProviderConversationSink for RootProviderConversationSink<'_> {
+    async fn send_delta(
+        &mut self,
+        delta: String,
+        reasoning_delta: Option<String>,
+    ) -> Result<(), AppError> {
+        if !delta.is_empty() {
+            self.events.publish(
+                self.context,
+                AgentExecutionEvent::AssistantDelta(delta.clone()),
+            );
+        }
+        if let Some(reasoning) = reasoning_delta.as_ref().filter(|value| !value.is_empty()) {
+            self.events.publish(
+                self.context,
+                AgentExecutionEvent::ReasoningDelta(reasoning.clone()),
+            );
+        }
+        self.inner.send_delta(delta, reasoning_delta).await
+    }
+
+    async fn send_event(&mut self, event: ChatStreamFrameEvent) -> Result<(), AppError> {
+        self.inner.send_event(event).await
+    }
+
+    async fn receive_control(&mut self) -> Result<(), AppError> {
+        self.inner.receive_control().await
+    }
+
+    #[cfg(test)]
+    fn drain_controls(&mut self) {
+        self.inner.drain_controls();
+    }
+
+    #[cfg(test)]
+    fn take_next_steer(&mut self) -> Option<ChatSteerInput> {
+        self.inner.take_next_steer()
+    }
+}
+
+struct RootAgentTools {
+    tools: Arc<ChatToolRuntime>,
+    tool_run: Option<Arc<ChatToolRunContext>>,
+    sink: Arc<AsyncMutex<FrameSink>>,
+}
+
+#[async_trait::async_trait]
+impl AgentToolPort for RootAgentTools {
+    async fn definitions(
+        &self,
+        _context: &AgentExecutionContext,
+        _finalization_required: bool,
+    ) -> Result<Vec<ToolDefinition>, AgentPortError> {
+        Ok(self.tool_run.as_ref().map_or_else(Vec::new, |run| {
+            self.tools.provider_tool_surface_for_run(run).definitions
+        }))
+    }
+
+    async fn execute(
+        &self,
+        _context: &AgentExecutionContext,
+        calls: Vec<ProviderToolCall>,
+        cancellation: CancellationToken,
+    ) -> Result<AgentToolBatchResult, AgentPortError> {
+        if cancellation.is_cancelled() {
+            return Err(AgentPortError::new(
+                "ROOT_TOOL_CANCELLED",
+                "root Agent tool batch was cancelled",
+                false,
+            ));
+        }
+        let tool_run = self.tool_run.as_deref().ok_or_else(|| {
+            AgentPortError::new(
+                "ROOT_TOOL_AUTHORITY_MISSING",
+                "the Provider requested tools without a verified workspace authority",
+                false,
+            )
+        })?;
+        let runtime_calls = normalize_provider_tool_calls(&calls)
+            .map_err(|error| root_port_error("ROOT_TOOL_CALL_INVALID", error, false))?;
+        self.sink
+            .lock()
+            .await
+            .send_event(ChatStreamFrameEvent::ToolCalls {
+                calls: tool_calls_to_wire(&calls),
+            })
+            .await
+            .map_err(|error| root_port_error("ROOT_TOOL_EVENT_FAILED", error, false))?;
+        let results = self.tools.execute(runtime_calls, tool_run).await;
+        let transaction_id = tool_run.transaction_id().to_string();
+        let mut projected = Vec::with_capacity(results.len());
+        for result in results {
+            let (model_content, status) = tool_result_for_model(&result);
+            let file_changes = root_tool_file_changes(&result, &transaction_id);
+            let usage = agent_tool_usage(&result);
+            self.sink
+                .lock()
+                .await
+                .send_event(ChatStreamFrameEvent::ToolResult {
+                    call_id: result.call.call_id.clone(),
+                    result: model_content.clone(),
+                })
+                .await
+                .map_err(|error| root_port_error("ROOT_TOOL_EVENT_FAILED", error, false))?;
+            projected.push(AgentToolResult {
+                call_id: result.call.call_id,
+                name: result.canonical_name,
+                model_content,
+                status: status.to_string(),
+                file_changes,
+                usage,
+            });
+        }
+        Ok(AgentToolBatchResult {
+            results: projected,
+            submitted_result: None,
+        })
+    }
+}
+
+pub(crate) fn agent_tool_usage(result: &ToolPipelineResult) -> AgentToolUsage {
+    let ToolExecutionResult::Success { data, effects, .. } = &result.result else {
+        return AgentToolUsage::default();
+    };
+    let files_read = effects
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .filter(|effect| matches!(effect, ToolEffect::ReadFile { .. }))
+        .count();
+    let is_command = matches!(
+        result.canonical_name.as_str(),
+        "Bash" | "PowerShell" | "run_command"
+    );
+    let command_elapsed_total_ms = is_command
+        .then(|| {
+            data.as_ref()
+                .and_then(|data| data.get("elapsedMs"))
+                .and_then(serde_json::Value::as_u64)
+        })
+        .flatten();
+    let command_task_id = command_elapsed_total_ms.map(|_| {
+        data.as_ref()
+            .and_then(|data| data.get("taskId"))
+            .and_then(serde_json::Value::as_str)
+            .map_or_else(
+                || format!("{}:{}", result.canonical_name, result.call.call_id),
+                |task_id| format!("{}:{task_id}", result.canonical_name),
+            )
+    });
+    AgentToolUsage {
+        command_task_id,
+        command_elapsed_total_ms,
+        files_read: u64::try_from(files_read).unwrap_or(u64::MAX),
+    }
+}
+
+fn root_tool_file_changes(
+    result: &ToolPipelineResult,
+    transaction_id: &str,
+) -> Vec<AgentFileChange> {
+    let ToolExecutionResult::Success { effects, .. } = &result.result else {
+        return Vec::new();
+    };
+    effects
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|effect| match effect {
+            ToolEffect::WriteFile { path, mode } => Some(AgentFileChange {
+                path: path.clone(),
+                change_kind: mode.clone(),
+                transaction_id: transaction_id.to_string(),
+            }),
+            ToolEffect::DeleteFile { path } => Some(AgentFileChange {
+                path: path.clone(),
+                change_kind: "delete".to_string(),
+                transaction_id: transaction_id.to_string(),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+struct RootAgentTurnControl {
+    state: Arc<AsyncMutex<RootAgentExecutionState>>,
+    sink: Arc<AsyncMutex<FrameSink>>,
+    edit_transaction: Arc<EditTransactionService>,
+    tool_run: Option<Arc<ChatToolRunContext>>,
+}
+
+impl RootAgentTurnControl {
+    async fn finalize_transaction_if_needed(&self) -> Result<Option<String>, AgentPortError> {
+        {
+            let state = self.state.lock().await;
+            if state.transaction_finalized {
+                return Ok(state.transaction_id.clone());
+            }
+            if !state.transaction_registered {
+                return Ok(None);
+            }
+        }
+        let transaction_id = match self.tool_run.as_deref() {
+            Some(tool_run) => {
+                let statuses = self
+                    .edit_transaction
+                    .get_file_statuses(tool_run.transaction_id())
+                    .await
+                    .map_err(|error| {
+                        root_port_error("ROOT_EDIT_TRANSACTION_FAILED", error, false)
+                    })?;
+                if statuses.is_empty() {
+                    self.edit_transaction
+                        .discard_empty_transaction_for_session(
+                            tool_run.session_id().as_str(),
+                            tool_run.transaction_id(),
+                        )
+                        .await
+                        .map_err(|error| {
+                            root_port_error("ROOT_EDIT_TRANSACTION_FAILED", error, false)
+                        })?;
+                    None
+                } else {
+                    Some(tool_run.transaction_id().to_owned())
+                }
+            }
+            None => None,
+        };
+        let mut state = self.state.lock().await;
+        state.transaction_id.clone_from(&transaction_id);
+        state.transaction_finalized = true;
+        Ok(transaction_id)
+    }
+}
+
+#[async_trait::async_trait]
+impl AgentTurnControlPort for RootAgentTurnControl {
+    async fn after_assistant(
+        &self,
+        _context: &AgentExecutionContext,
+        _turn: &AgentProviderTurn,
+    ) -> Result<AgentTurnDirective, AgentPortError> {
+        let steer = {
+            let mut sink = self.sink.lock().await;
+            sink.drain_controls();
+            sink.take_next_steer()
+        };
+        let Some(steer) = steer else {
+            self.finalize_transaction_if_needed().await?;
+            return Ok(AgentTurnDirective::Finish);
+        };
+        self.state
+            .lock()
+            .await
+            .conversation
+            .record_user(steer.text.clone(), None, false, None, Vec::new())
+            .await
+            .map_err(|error| root_port_error("ROOT_STEER_LEDGER_FAILED", error, false))?;
+        self.sink
+            .lock()
+            .await
+            .send_event(ChatStreamFrameEvent::SteerConsumed { input: steer })
+            .await
+            .map_err(|error| root_port_error("ROOT_STEER_EVENT_FAILED", error, false))?;
+        Ok(AgentTurnDirective::Continue)
+    }
+}
+
+async fn root_prompt_agent_context(
+    supervisor: &AgentSupervisor,
+    context: &AgentExecutionContext,
+    mailbox_delta: Vec<AgentMessage>,
+    finalization_required: bool,
+) -> Result<PromptAgentContext, AgentPortError> {
+    let snapshot = supervisor
+        .store()
+        .load(&context.node.root_run_id)
+        .await
+        .map_err(|error| root_port_error("ROOT_AGENT_CONTROL_FAILED", error, false))?;
+    let node = snapshot.nodes.get(&context.node.id).ok_or_else(|| {
+        AgentPortError::new(
+            "ROOT_AGENT_NODE_MISSING",
+            "root Agent prompt lost its control node",
+            false,
+        )
+    })?;
+    let attempt = snapshot.attempts.get(&context.attempt.id).ok_or_else(|| {
+        AgentPortError::new(
+            "ROOT_AGENT_ATTEMPT_MISSING",
+            "root Agent prompt lost its active attempt",
+            false,
+        )
+    })?;
+    let remaining_direct_children = node
+        .policy
+        .max_direct_children
+        .saturating_sub(saturating_u16(snapshot.children_of(&node.id).len()));
+    Ok(PromptAgentContext {
+        identity: PromptAgentIdentity {
+            root_run_id: node.root_run_id.to_string(),
+            agent_id: node.id.to_string(),
+            attempt_id: attempt.id.to_string(),
+            parent_agent_id: node.parent_id.as_ref().map(ToString::to_string),
+            depth: node.depth,
+        },
+        task: node.task.clone(),
+        profile: node.profile,
+        effective_policy: node.policy.clone(),
+        workspace: node.workspace.clone(),
+        budget: node.budget,
+        usage: attempt.usage,
+        limits: PromptAgentLimits {
+            max_depth: node.policy.max_depth,
+            remaining_direct_children,
+            remaining_root_agents: node
+                .policy
+                .max_root_agents
+                .saturating_sub(saturating_u16(snapshot.nodes.len())),
+            available_parallel_slots: remaining_direct_children.min(3),
+        },
+        mailbox_delta,
+        finalization_required,
+    })
+}
+
+const fn domain_stop_reason_from_wire(value: AgentStopReason) -> DomainAgentStopReason {
+    match value {
+        AgentStopReason::Stop => DomainAgentStopReason::Stop,
+        AgentStopReason::Length => DomainAgentStopReason::Length,
+        AgentStopReason::ToolCalls => DomainAgentStopReason::ToolCalls,
+        AgentStopReason::ContentFilter => DomainAgentStopReason::ContentFilter,
+        AgentStopReason::Error => DomainAgentStopReason::Error,
+        AgentStopReason::Unknown => DomainAgentStopReason::Unknown,
+    }
+}
+
+fn root_port_error(code: &str, error: impl std::fmt::Display, retryable: bool) -> AgentPortError {
+    AgentPortError::new(code, error.to_string(), retryable)
+}
+
+async fn root_executor_outcome(
+    result: Result<codez_runtime::agent::AgentExecutionOutcome, AgentExecutionError>,
+    state: &AsyncMutex<RootAgentExecutionState>,
+) -> TerminalOutcome {
+    let state = state.lock().await;
+    match result {
+        Ok(outcome) => TerminalOutcome::Completed {
+            full_content: outcome.final_content,
+            stop_reason: state.last_stop_reason.clone().map(stop_reason_to_wire),
+            usage: state.last_usage.clone(),
+            request_fingerprint: state
+                .prepared
+                .as_ref()
+                .map_or_else(String::new, |prepared| prepared.request_fingerprint.clone()),
+        },
+        Err(AgentExecutionError::Cancelled) => TerminalOutcome::Interrupted {
+            reason: "The user stopped the chat run".to_string(),
+        },
+        Err(error) => TerminalOutcome::Failed {
+            error: AppError::from(error),
+            provider_code: state.provider_code.clone(),
+        },
+    }
+}
+
 impl ChatRuntime {
     #[must_use]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "desktop runtime dependencies remain explicit at the composition boundary"
+    )]
     pub(crate) fn new(
         cancellation: Arc<CancellationTree>,
         errors: Arc<ErrorReporter>,
@@ -1327,6 +2234,7 @@ impl ChatRuntime {
         attachment: Arc<AttachmentService>,
         tools: Arc<ChatToolRuntime>,
         edit_transaction: Arc<EditTransactionService>,
+        agent_supervisor: Arc<AgentSupervisor>,
         prompt_sources: ChatPromptSources,
     ) -> Self {
         let ChatPromptSources {
@@ -1342,6 +2250,7 @@ impl ChatRuntime {
             attachment,
             tools,
             edit_transaction,
+            agent_supervisor,
             prompt: Arc::new(ChatPromptAssembler::new(
                 data_root,
                 workspace_permissions,
@@ -1354,7 +2263,7 @@ impl ChatRuntime {
         }
     }
 
-    pub(crate) fn start_provider_run(
+    pub(crate) async fn start_provider_run(
         self: &Arc<Self>,
         app: AppHandle,
         start: ProviderRunStart,
@@ -1381,6 +2290,16 @@ impl ChatRuntime {
             entry: Arc::clone(&registered.entry),
             _activity: activity,
         };
+        let root_agent = self
+            .prepare_root_agent(
+                &registered.entry.session_id,
+                &registered.entry.run_id,
+                &request.input.text,
+                workspace_root.as_ref(),
+                &resolved.provider_id,
+                &resolved.model.id,
+            )
+            .await?;
         let permission_handler: Arc<dyn PermissionApprovalHandler> =
             Arc::new(DesktopPermissionApprovalHandler {
                 app: app.clone(),
@@ -1408,6 +2327,7 @@ impl ChatRuntime {
                     registered.entry.cancellation.token(),
                     "main".to_string(),
                     permission_ai_context,
+                    Some(root_agent.identity.clone()),
                     Some(Arc::clone(&permission_handler)),
                     Some(Arc::clone(&ask_user_handler)),
                 )
@@ -1440,6 +2360,7 @@ impl ChatRuntime {
                         input: request.input,
                         attachments,
                         resolved,
+                        root_agent,
                         tool_run,
                         events,
                     },
@@ -1447,6 +2368,78 @@ impl ChatRuntime {
                 .await;
         });
         Ok(run_id)
+    }
+
+    pub(crate) fn prompt_assembler(&self) -> Arc<ChatPromptAssembler> {
+        Arc::clone(&self.prompt)
+    }
+
+    async fn prepare_root_agent(
+        &self,
+        session_id: &SessionId,
+        run_id: &StreamId,
+        objective: &str,
+        workspace_root: Option<&WorkspaceRoot>,
+        provider_id: &str,
+        model_id: &str,
+    ) -> Result<PreparedRootAgent, AppError> {
+        let root_run_id = stable_root_run_id(session_id)?;
+        let handle = self
+            .agent_supervisor
+            .start_root_attempt_direct(
+                root_run_id.clone(),
+                root_spawn_input(
+                    session_id,
+                    run_id,
+                    objective,
+                    workspace_root,
+                    provider_id,
+                    model_id,
+                )?,
+            )
+            .await
+            .map_err(|error| agent_runtime_error("create root Agent attempt", error))?;
+        let snapshot = self
+            .agent_supervisor
+            .store()
+            .load(&root_run_id)
+            .await
+            .map_err(|error| agent_runtime_error("load root Agent attempt", error))?;
+        let node = snapshot
+            .nodes
+            .get(&handle.agent_id)
+            .cloned()
+            .ok_or_else(|| AppError::internal("root Agent registration lost its node"))?;
+        match node.state {
+            AgentState::Queued | AgentState::Starting | AgentState::Running => {}
+            state => {
+                return Err(AppError::internal(format!(
+                    "root Agent attempt cannot enter the executor from state {state:?}"
+                )));
+            }
+        }
+        let attempt = snapshot
+            .attempts
+            .get(&handle.attempt_id)
+            .cloned()
+            .ok_or_else(|| AppError::internal("root Agent registration lost its attempt"))?;
+        Ok(PreparedRootAgent {
+            identity: ChatAgentRunIdentity {
+                root_run_id,
+                agent_id: node.id.clone(),
+                attempt_id: attempt.id.clone(),
+                depth: node.depth,
+                policy: node.policy,
+                provider_id: attempt.provider_id.clone(),
+                model_id: attempt.model_id,
+            },
+            scheduled: ScheduledAgent {
+                root_run_id: node.root_run_id,
+                agent_id: node.id,
+                attempt_id: attempt.id,
+                provider_id: attempt.provider_id,
+            },
+        })
     }
 
     pub(crate) fn runtime_status(&self, session_id: &SessionId) -> ChatRuntimeStatus {
@@ -1552,6 +2545,34 @@ impl ChatRuntime {
             .resolve(request_id, permission_response_from_wire(response))
     }
 
+    pub(crate) fn agent_permission_handler(
+        &self,
+        app: AppHandle,
+        run_id: StreamId,
+        cancellation: CancellationToken,
+    ) -> Arc<dyn PermissionApprovalHandler> {
+        Arc::new(DesktopPermissionApprovalHandler {
+            app,
+            run_id,
+            cancellation,
+            registry: Arc::clone(&self.permission_responses),
+        })
+    }
+
+    pub(crate) fn agent_ask_user_handler(
+        &self,
+        app: AppHandle,
+        run_id: StreamId,
+        cancellation: CancellationToken,
+    ) -> Arc<dyn AskUserHandler> {
+        Arc::new(DesktopAskUserHandler {
+            app,
+            run_id,
+            cancellation,
+            registry: Arc::clone(&self.ask_user_responses),
+        })
+    }
+
     pub(crate) fn interrupt_tool(&self, tool_call_id: &ToolCallId) -> ChatToolInterruptResult {
         let matching = self
             .registry_lock()
@@ -1637,32 +2658,28 @@ impl ChatRuntime {
     ) {
         let entry = Arc::clone(&registered.entry);
         let tool_run = request.tool_run.clone();
-        let mut sink = FrameSink::new(Arc::clone(&entry), request.events, registered.controls);
-        let mut conversation = None;
-        let transaction_registration = if let Some(tool_run) = tool_run.as_deref() {
-            self.edit_transaction
-                .register_chat_transaction(
-                    tool_run.transaction_id(),
-                    EditTransactionRegistration {
-                        session_id: tool_run.session_id().clone(),
-                        context_scope_id: tool_run.context_scope_id().clone(),
-                        turn_id: tool_run.run_id().clone(),
-                        workspace_root: tool_run.workspace_root().clone(),
-                    },
+        let sink = Arc::new(AsyncMutex::new(FrameSink::new(
+            Arc::clone(&entry),
+            request.events,
+            registered.controls,
+        )));
+        let mut execution = None;
+        let outcome = if entry.cancellation.is_cancelled() {
+            match self
+                .agent_supervisor
+                .cancel_subtree(
+                    &request.root_agent.identity.root_run_id,
+                    &request.root_agent.identity.agent_id,
                 )
                 .await
-        } else {
-            Ok(())
-        };
-        let transaction_registered = transaction_registration.is_ok() && tool_run.is_some();
-        let outcome = if let Err(error) = transaction_registration {
-            TerminalOutcome::Failed {
-                error,
-                provider_code: None,
-            }
-        } else if entry.cancellation.is_cancelled() {
-            TerminalOutcome::Interrupted {
-                reason: "The chat run was cancelled before it started".to_string(),
+            {
+                Ok(_) => TerminalOutcome::Interrupted {
+                    reason: "The chat run was cancelled before it started".to_string(),
+                },
+                Err(error) => TerminalOutcome::Failed {
+                    error: agent_runtime_error("cancel root Agent before execution", error),
+                    provider_code: None,
+                },
             }
         } else {
             match entry.transition_to(ChatStreamState::Running) {
@@ -1672,6 +2689,8 @@ impl ChatRuntime {
                     match ConversationLedger::begin(
                         Arc::clone(&self.ledger),
                         &entry,
+                        ContextScopeId::Agent(request.root_agent.identity.agent_id.clone()),
+                        None,
                         &request.input,
                         &request.attachments,
                         self.attachment.as_ref(),
@@ -1679,22 +2698,64 @@ impl ChatRuntime {
                     )
                     .await
                     {
-                        Ok(mut prepared) => {
-                            let outcome = run_provider_conversation(
-                                ProviderConversationServices {
-                                    providers: &providers,
-                                    tools: &self.tools,
-                                    attachment_service: &self.attachment,
-                                    prompt: &self.prompt,
-                                },
-                                request.resolved,
-                                entry.cancellation.token(),
-                                &mut prepared,
-                                request.tool_run.as_deref(),
-                                &mut sink,
+                        Ok(conversation) => {
+                            let state = Arc::new(AsyncMutex::new(RootAgentExecutionState {
+                                conversation,
+                                prepared: None,
+                                provider_code: None,
+                                last_usage: None,
+                                last_stop_reason: None,
+                                transaction_registered: false,
+                                transaction_id: None,
+                                transaction_finalized: false,
+                            }));
+                            let preparer = Arc::new(RootAgentRequestPreparer {
+                                providers: Arc::clone(&providers),
+                                attachment: Arc::clone(&self.attachment),
+                                prompt: Arc::clone(&self.prompt),
+                                tools: Arc::clone(&self.tools),
+                                supervisor: Arc::clone(&self.agent_supervisor),
+                                edit_transaction: Arc::clone(&self.edit_transaction),
+                                tool_run: tool_run.clone(),
+                                state: Arc::clone(&state),
+                                sink: Arc::clone(&sink),
+                                cancellation: entry.cancellation.token(),
+                                prompt_now: Utc::now(),
+                            });
+                            let turn_control = Arc::new(RootAgentTurnControl {
+                                state: Arc::clone(&state),
+                                sink: Arc::clone(&sink),
+                                edit_transaction: Arc::clone(&self.edit_transaction),
+                                tool_run: tool_run.clone(),
+                            });
+                            let executor = AgentExecutor::new(
+                                Arc::clone(&self.agent_supervisor),
+                                Arc::new(RootAgentProvider {
+                                    providers: Arc::clone(&providers),
+                                    preparer: Arc::clone(&preparer),
+                                    state: Arc::clone(&state),
+                                    sink: Arc::clone(&sink),
+                                }),
+                                Arc::new(RootAgentTools {
+                                    tools: Arc::clone(&self.tools),
+                                    tool_run: tool_run.clone(),
+                                    sink: Arc::clone(&sink),
+                                }),
+                                Arc::new(RootAgentLedger {
+                                    state: Arc::clone(&state),
+                                }),
+                                Arc::new(RootAgentPrompt { preparer }),
+                                Arc::new(NoopAgentExecutionEventSink),
                             )
-                            .await;
-                            conversation = Some(prepared);
+                            .with_turn_control(turn_control.clone());
+                            let result = executor
+                                .execute(
+                                    request.root_agent.scheduled.clone(),
+                                    entry.cancellation.token(),
+                                )
+                                .await;
+                            let outcome = root_executor_outcome(result, &state).await;
+                            execution = Some((state, turn_control));
                             outcome
                         }
                         Err(error) => TerminalOutcome::Failed {
@@ -1710,7 +2771,7 @@ impl ChatRuntime {
             }
         };
 
-        sink.stop_accepting_steers();
+        sink.lock().await.stop_accepting_steers();
         let outcome = if entry.cancellation.is_cancelled() {
             TerminalOutcome::Interrupted {
                 reason: "The user stopped the chat run".to_string(),
@@ -1718,18 +2779,12 @@ impl ChatRuntime {
         } else {
             outcome
         };
-        let (outcome, transaction_id) = if transaction_registered {
-            let result = match tool_run.as_deref() {
-                Some(tool_run) => self.finish_tool_transaction(tool_run).await,
-                None => Err(AppError::internal(
-                    "a registered chat edit transaction lost its tool run context",
-                )),
-            };
-            match result {
+        let (outcome, transaction_id) = if let Some((_state, control)) = execution.as_ref() {
+            match control.finalize_transaction_if_needed().await {
                 Ok(transaction_id) => (outcome, transaction_id),
                 Err(error) => (
                     TerminalOutcome::Failed {
-                        error,
+                        error: AppError::internal(error.to_string()),
                         provider_code: None,
                     },
                     None,
@@ -1738,8 +2793,14 @@ impl ChatRuntime {
         } else {
             (outcome, None)
         };
-        let outcome = if let Some(conversation) = conversation.as_mut() {
-            match conversation.persist_terminal(&outcome).await {
+        let outcome = if let Some((state, _)) = execution.as_ref() {
+            match state
+                .lock()
+                .await
+                .conversation
+                .persist_executor_terminal(&outcome)
+                .await
+            {
                 Ok(()) => outcome,
                 Err(error) => TerminalOutcome::Failed {
                     error,
@@ -1761,6 +2822,7 @@ impl ChatRuntime {
                 "chat ended after file mutations; rollback transaction was retained"
             );
         }
+        let mut sink = sink.lock().await;
         self.select_and_emit_terminal(&app, &entry, &mut sink, outcome, transaction_id)
             .await;
     }
@@ -1823,27 +2885,6 @@ impl ChatRuntime {
             return;
         }
         sink.wait_for_terminal_ack().await;
-    }
-
-    async fn finish_tool_transaction(
-        &self,
-        tool_run: &ChatToolRunContext,
-    ) -> Result<Option<String>, AppError> {
-        let statuses = self
-            .edit_transaction
-            .get_file_statuses(tool_run.transaction_id())
-            .await?;
-        if statuses.is_empty() {
-            self.edit_transaction
-                .discard_empty_transaction_for_session(
-                    tool_run.session_id().as_str(),
-                    tool_run.transaction_id(),
-                )
-                .await?;
-            Ok(None)
-        } else {
-            Ok(Some(tool_run.transaction_id().to_owned()))
-        }
     }
 
     fn register(&self, request: &ChatStreamRequest) -> Result<RegisteredRun, AppError> {
@@ -2332,10 +3373,12 @@ impl ProviderConversationSink for FrameSink {
         FrameSink::receive_control(self).await
     }
 
+    #[cfg(test)]
     fn drain_controls(&mut self) {
         FrameSink::drain_controls(self);
     }
 
+    #[cfg(test)]
     fn take_next_steer(&mut self) -> Option<ChatSteerInput> {
         FrameSink::take_next_steer(self)
     }
@@ -2604,6 +3647,7 @@ async fn prepare_provider_request(
                 cancellation,
                 system_addendum: conversation.system_prompt_addendum.as_deref(),
                 todo_state,
+                agent: conversation.agent.as_ref(),
             })
             .await
             .map_err(ChatContextError::from)
@@ -2952,7 +3996,7 @@ fn context_instruction_fragments(fragments: &ContextFragments) -> Vec<String> {
     .collect()
 }
 
-fn render_compaction_summary(summary: &serde_json::Value) -> String {
+pub(crate) fn render_compaction_summary(summary: &serde_json::Value) -> String {
     let content = summary
         .get("content")
         .and_then(serde_json::Value::as_str)
@@ -3008,7 +4052,9 @@ fn request_fingerprint(
     })
 }
 
-fn model_context_capabilities(resolved: &ResolvedProviderChatConfig) -> ModelContextCapabilities {
+pub(crate) fn model_context_capabilities(
+    resolved: &ResolvedProviderChatConfig,
+) -> ModelContextCapabilities {
     ModelContextCapabilities {
         context_window_tokens: Some(resolved.model.max_context_tokens),
         max_output_tokens: resolved.model.max_output_tokens,
@@ -3183,13 +4229,76 @@ fn context_budget_to_wire(snapshot: &ContextBudgetSnapshot) -> WireContextBudget
     }
 }
 
+#[cfg(test)]
 struct ProviderConversationServices<'a> {
     providers: &'a Arc<ProviderService>,
     tools: &'a ChatToolRuntime,
     attachment_service: &'a AttachmentService,
     prompt: &'a ChatPromptAssembler,
+    agent_supervisor: Option<&'a AgentSupervisor>,
 }
 
+#[cfg(test)]
+async fn refresh_agent_prompt(
+    supervisor: Option<&AgentSupervisor>,
+    tool_run: Option<&ChatToolRunContext>,
+    prompt_agent: Option<&mut PromptAgentContext>,
+) -> Result<Vec<AgentMessage>, AppError> {
+    let (Some(supervisor), Some(tool_run), Some(prompt_agent)) =
+        (supervisor, tool_run, prompt_agent)
+    else {
+        return Ok(Vec::new());
+    };
+    let Some(identity) = tool_run.agent_identity() else {
+        prompt_agent.mailbox_delta.clear();
+        return Ok(Vec::new());
+    };
+    let snapshot = supervisor
+        .store()
+        .load(&identity.root_run_id)
+        .await
+        .map_err(|error| agent_runtime_error("refresh root Agent prompt", error))?;
+    let node = snapshot
+        .nodes
+        .get(&identity.agent_id)
+        .ok_or_else(|| AppError::internal("root Agent prompt lost its node"))?;
+    let attempt = snapshot
+        .attempts
+        .get(&identity.attempt_id)
+        .ok_or_else(|| AppError::internal("root Agent prompt lost its attempt"))?;
+    let mailbox_delta = supervisor
+        .mailbox_delta(
+            &identity.root_run_id,
+            &identity.agent_id,
+            &identity.attempt_id,
+            64,
+        )
+        .await
+        .map_err(|error| agent_runtime_error("read root Agent mailbox", error))?;
+    let remaining_direct_children = node
+        .policy
+        .max_direct_children
+        .saturating_sub(saturating_u16(snapshot.children_of(&node.id).len()));
+    prompt_agent.task.clone_from(&node.task);
+    prompt_agent.profile = node.profile;
+    prompt_agent.effective_policy.clone_from(&node.policy);
+    prompt_agent.workspace.clone_from(&node.workspace);
+    prompt_agent.budget = node.budget;
+    prompt_agent.usage = attempt.usage;
+    prompt_agent.limits = PromptAgentLimits {
+        max_depth: node.policy.max_depth,
+        remaining_direct_children,
+        remaining_root_agents: node
+            .policy
+            .max_root_agents
+            .saturating_sub(saturating_u16(snapshot.nodes.len())),
+        available_parallel_slots: remaining_direct_children.min(3),
+    };
+    prompt_agent.mailbox_delta.clone_from(&mailbox_delta);
+    Ok(mailbox_delta)
+}
+
+#[cfg(test)]
 async fn run_provider_conversation(
     services: ProviderConversationServices<'_>,
     first_config: ResolvedProviderChatConfig,
@@ -3203,6 +4312,7 @@ async fn run_provider_conversation(
         tools,
         attachment_service,
         prompt,
+        agent_supervisor,
     } = services;
     let provider_id = first_config.provider_id.clone();
     let model_id = first_config.model.id.clone();
@@ -3243,6 +4353,18 @@ async fn run_provider_conversation(
                 };
             }
         };
+        let pending_mailbox =
+            match refresh_agent_prompt(agent_supervisor, tool_run, conversation.agent.as_mut())
+                .await
+            {
+                Ok(messages) => messages,
+                Err(error) => {
+                    return TerminalOutcome::Failed {
+                        error,
+                        provider_code: None,
+                    };
+                }
+            };
         let prepared = match prepare_provider_request(
             PrepareProviderRequestInput {
                 providers,
@@ -3326,11 +4448,14 @@ async fn run_provider_conversation(
             )
             .await
             {
-                Err(error)
-                    if is_retryable_provider_open_error(&error)
-                        && open_attempt < MAX_PROVIDER_OPEN_ATTEMPTS =>
-                {
-                    let delay = provider_open_retry_delay(open_attempt);
+                Err(error) => {
+                    let Some(delay) = provider_open_retry_delay(
+                        &error,
+                        open_attempt,
+                        conversation.run_id.as_str(),
+                    ) else {
+                        break Err(error);
+                    };
                     tracing::warn!(
                         provider_id = provider_id.as_str(),
                         model = model_id.as_str(),
@@ -3431,6 +4556,22 @@ async fn run_provider_conversation(
                 return TerminalOutcome::Interrupted { reason };
             }
         };
+        if let (Some(supervisor), Some(tool_run)) = (agent_supervisor, tool_run)
+            && !pending_mailbox.is_empty()
+            && let Some(identity) = tool_run.agent_identity()
+            && let Err(error) = supervisor
+                .consume_mailbox(
+                    &identity.root_run_id,
+                    &identity.attempt_id,
+                    &pending_mailbox,
+                )
+                .await
+        {
+            return TerminalOutcome::Failed {
+                error: agent_runtime_error("acknowledge root Agent mailbox", error),
+                provider_code: None,
+            };
+        }
         if !tool_calls.is_empty() || stop_reason == Some(AgentStopReason::ToolCalls) {
             let Some(tool_run) = tool_run else {
                 return TerminalOutcome::Failed {
@@ -3640,12 +4781,27 @@ async fn consume_provider_turn(
                         stop_reason,
                         tx_id: _,
                     })) => {
+                        let full_content = if full_content.is_empty() {
+                            partial_content.clone()
+                        } else {
+                            full_content
+                        };
+                        if provider_completion_is_empty(
+                            &full_content,
+                            stop_reason.as_ref(),
+                            &completed_tool_calls,
+                            latest_usage.as_ref(),
+                        ) {
+                            return ProviderTurn::Failed {
+                                error: ChatProviderError::Parse(
+                                    "provider returned an empty completion; verify the Provider Base URL and API format"
+                                        .to_string(),
+                                ),
+                                partial_content,
+                            };
+                        }
                         return ProviderTurn::Completed {
-                            full_content: if full_content.is_empty() {
-                                partial_content
-                            } else {
-                                full_content
-                            },
+                            full_content,
                             stop_reason: stop_reason.map(stop_reason_to_wire),
                             tool_calls: completed_tool_calls,
                             usage: latest_usage,
@@ -3669,6 +4825,15 @@ async fn consume_provider_turn(
             }
         }
     }
+}
+
+fn provider_completion_is_empty(
+    full_content: &str,
+    stop_reason: Option<&DomainAgentStopReason>,
+    tool_calls: &[ProviderToolCall],
+    usage: Option<&ProviderTokenUsage>,
+) -> bool {
+    full_content.is_empty() && stop_reason.is_none() && tool_calls.is_empty() && usage.is_none()
 }
 
 fn merge_provider_usage(
@@ -3757,7 +4922,7 @@ fn tool_calls_to_wire(calls: &[ProviderToolCall]) -> Vec<ChatToolCall> {
         .collect()
 }
 
-fn tool_result_for_model(result: &ToolPipelineResult) -> (String, &'static str) {
+pub(crate) fn tool_result_for_model(result: &ToolPipelineResult) -> (String, &'static str) {
     match &result.result {
         ToolExecutionResult::Success { model_content, .. } => (model_content.clone(), "success"),
         ToolExecutionResult::Error {
@@ -4207,6 +5372,7 @@ fn bounded_text(value: &str, max_bytes: usize) -> String {
     value[..end].to_string()
 }
 
+#[cfg(test)]
 fn provider_failure(error: ChatProviderError) -> TerminalOutcome {
     let provider_code = Some(provider_error_code(&error));
     TerminalOutcome::Failed {
@@ -4215,16 +5381,46 @@ fn provider_failure(error: ChatProviderError) -> TerminalOutcome {
     }
 }
 
-const fn is_retryable_provider_open_error(error: &ChatProviderError) -> bool {
+pub(crate) const fn is_retryable_provider_open_error(error: &ChatProviderError) -> bool {
     matches!(
         error,
         ChatProviderError::RateLimit(_) | ChatProviderError::Network(_)
     )
 }
 
-fn provider_open_retry_delay(failed_attempt: u32) -> Duration {
+pub(crate) const fn provider_open_retry_reason(error: &ChatProviderError) -> &'static str {
+    match error {
+        ChatProviderError::RateLimit(_) => "rate_limit",
+        ChatProviderError::Network(_) => "network",
+        _ => "not_retryable",
+    }
+}
+
+pub(crate) fn provider_open_retry_delay(
+    error: &ChatProviderError,
+    failed_attempt: u32,
+    jitter_key: &str,
+) -> Option<Duration> {
+    if !is_retryable_provider_open_error(error) || failed_attempt >= MAX_PROVIDER_OPEN_ATTEMPTS {
+        return None;
+    }
     let exponent = failed_attempt.saturating_sub(1).min(3);
-    PROVIDER_OPEN_RETRY_BASE_DELAY.saturating_mul(1_u32 << exponent)
+    let ceiling = PROVIDER_OPEN_RETRY_BASE_DELAY.saturating_mul(1_u32 << exponent);
+    let ceiling_ms = u64::try_from(ceiling.as_millis()).unwrap_or(u64::MAX);
+    let floor_ms = ceiling_ms / 2;
+    let mut hasher = Sha256::new();
+    hasher.update(jitter_key.as_bytes());
+    hasher.update(failed_attempt.to_le_bytes());
+    let digest = hasher.finalize();
+    let jitter_sample = u64::from_le_bytes(
+        digest[..8]
+            .try_into()
+            .expect("SHA-256 digest always contains at least eight bytes"),
+    );
+    let jitter_range = ceiling_ms.saturating_sub(floor_ms).saturating_add(1);
+    Some(Duration::from_millis(
+        floor_ms.saturating_add(jitter_sample % jitter_range),
+    ))
 }
 
 fn provider_app_error(error: ChatProviderError) -> AppError {
@@ -4307,6 +5503,107 @@ fn rejected_steer(reason: ChatSteerRejection) -> ChatSteerResult {
     }
 }
 
+fn stable_root_run_id(session_id: &SessionId) -> Result<RootRunId, AppError> {
+    RootRunId::parse(stable_agent_id("root", session_id.as_str()))
+        .map_err(|error| AppError::internal(format!("derive root Agent identity: {error}")))
+}
+
+fn root_spawn_input(
+    session_id: &SessionId,
+    run_id: &StreamId,
+    objective: &str,
+    workspace_root: Option<&WorkspaceRoot>,
+    provider_id: &str,
+    model_id: &str,
+) -> Result<SpawnAgentInput, AppError> {
+    let task_id = TaskId::parse(stable_agent_id("task", run_id.as_str()))
+        .map_err(|error| AppError::internal(format!("derive root Agent task identity: {error}")))?;
+    let mut bounded_objective = objective.to_string();
+    bounded_objective = take_utf8_prefix(&mut bounded_objective, 16 * 1024);
+    let has_workspace = workspace_root.is_some();
+    let policy = AgentPolicy {
+        can_delegate: true,
+        can_write: has_workspace,
+        can_use_network: true,
+        can_delete: has_workspace,
+        can_install_dependencies: has_workspace,
+        can_git_push: has_workspace,
+        can_ask_user: true,
+        max_depth: 2,
+        max_direct_children: 3,
+        max_root_agents: 12,
+    };
+    let workspace = workspace_root.map_or_else(
+        || WorkspaceAssignment {
+            mode: WorkspaceMode::SharedReadonly,
+            root: String::new(),
+            read_scope: Vec::new(),
+            write_scope: Vec::new(),
+            baseline_revision: None,
+            baseline_manifest: None,
+            integration_policy: "none".to_string(),
+        },
+        |root| WorkspaceAssignment {
+            mode: WorkspaceMode::RootWorkspace,
+            root: root.as_path().to_string_lossy().into_owned(),
+            read_scope: vec!["**/*".to_string()],
+            write_scope: vec!["**/*".to_string()],
+            baseline_revision: None,
+            baseline_manifest: None,
+            integration_policy: "direct_serial".to_string(),
+        },
+    );
+    Ok(SpawnAgentInput {
+        root_session_id: Some(session_id.clone()),
+        task: DelegatedTask {
+            task_id,
+            title: "Root chat request".to_string(),
+            objective: bounded_objective,
+            known_facts: Vec::new(),
+            success_criteria: vec!["Return an evidence-backed response to the user.".to_string()],
+            non_goals: Vec::new(),
+            dependencies: Vec::new(),
+            context_refs: Vec::new(),
+            validation_expectations: Vec::new(),
+            expected_result_schema: ResultSchema::default(),
+        },
+        profile: AgentProfile::General,
+        workspace,
+        policy,
+        budget: root_agent_budget(),
+        provider_id: provider_id.to_string(),
+        model_id: model_id.to_string(),
+    })
+}
+
+fn root_agent_budget() -> AgentBudget {
+    let child = AgentBudget::conservative_child();
+    AgentBudget {
+        input_tokens: child.input_tokens.saturating_mul(12),
+        output_tokens: child.output_tokens.saturating_mul(12),
+        provider_cost_micros: child.provider_cost_micros.saturating_mul(12),
+        tool_calls: child.tool_calls.saturating_mul(12),
+        model_visible_tool_result_bytes: child.model_visible_tool_result_bytes.saturating_mul(12),
+        command_wall_time_ms: child.command_wall_time_ms.saturating_mul(12),
+        wall_time_ms: child.wall_time_ms.saturating_mul(12),
+        files_read: child.files_read.saturating_mul(12),
+        files_written: child.files_written.saturating_mul(12),
+        child_agents: 12,
+    }
+}
+
+fn stable_agent_id(prefix: &str, value: &str) -> String {
+    format!("{prefix}-{:x}", Sha256::digest(value.as_bytes()))
+}
+
+fn saturating_u16(value: usize) -> u16 {
+    u16::try_from(value).unwrap_or(u16::MAX)
+}
+
+fn agent_runtime_error(action: &str, error: impl std::fmt::Display) -> AppError {
+    AppError::internal(format!("{action}: {error}"))
+}
+
 fn bounded_terminal_content(content: String) -> String {
     if content.len() <= MAX_FRAME_PAYLOAD_BYTES {
         content
@@ -4365,8 +5662,9 @@ mod tests {
         PermissionResponseRegistry, TerminalOutcome, bounded_text, build_context_items,
         context_fragments, merge_provider_usage, model_context_items_to_chat_messages,
         normalize_provider_tool_calls, parse_prediction, permission_response_from_wire,
-        provider_usage_baseline, request_fingerprint, take_utf8_prefix,
-        validate_prediction_request, validate_steer_input, validate_stream_request,
+        provider_completion_is_empty, provider_usage_baseline, request_fingerprint,
+        take_utf8_prefix, validate_prediction_request, validate_steer_input,
+        validate_stream_request,
     };
     use crate::chat_interaction::AskUserResponseRegistry;
 
@@ -4389,6 +5687,11 @@ mod tests {
         let prediction = parse_prediction(&raw);
 
         assert_eq!(prediction.chars().count(), 300);
+    }
+
+    #[test]
+    fn empty_provider_completion_should_not_be_accepted_as_success() {
+        assert!(provider_completion_is_empty("", None, &[], None));
     }
 
     #[tokio::test]
@@ -4791,7 +6094,7 @@ mod tests {
     #[test]
     fn provider_tool_calls_should_preserve_the_provider_order_for_the_pipeline() {
         let calls = vec![
-            provider_tool_call("call-read", "Read", r#"{\"files\":[]}"#),
+            provider_tool_call("call-read", "Read", r#"{\"file_path\":\"src/lib.rs\"}"#),
             provider_tool_call("call-bash", "Bash", r#"{\"command\":\"pwd\"}"#),
         ];
 
@@ -4810,7 +6113,7 @@ mod tests {
     #[test]
     fn provider_tool_calls_should_reject_duplicate_call_identifiers() {
         let calls = vec![
-            provider_tool_call("call-1", "Read", r#"{\"files\":[]}"#),
+            provider_tool_call("call-1", "Read", r#"{\"file_path\":\"src/lib.rs\"}"#),
             provider_tool_call("call-1", "Bash", r#"{\"command\":\"pwd\"}"#),
         ];
 
@@ -5015,6 +6318,7 @@ mod tests {
             provider_id: "provider-1".to_string(),
             model_id: "model-1".to_string(),
             context_scope_id: codez_core::context::ContextScopeId::Main,
+            agent: None,
             system_prompt_addendum: None,
             current_input_message_id: String::new(),
             next_record: 0,
@@ -5213,6 +6517,7 @@ mod tests {
             time::{Duration, Instant},
         };
 
+        use chrono::Utc;
         use codez_contracts::chat::{
             ChatAskUserAnswer, ChatAskUserAnswerValue, ChatAskUserRequest,
             ChatPermissionApprovalRequest, ChatPermissionApprovalResponse,
@@ -5220,7 +6525,11 @@ mod tests {
         };
         use codez_core::{
             AppError, AppPaths, AtomicPersistence, CancellationToken, PortFuture, ProcessRunner,
-            SessionId, StreamId, WorkspaceRoot,
+            RootRunId, SessionId, StreamId, TaskId, WorkspaceRoot,
+            agent::{
+                AgentBudget, AgentPolicy, AgentProfile, AgentResultStatus, AgentState,
+                DelegatedTask, ResultSchema, WorkspaceAssignment, WorkspaceMode,
+            },
             context::{
                 AssistantMessagePayload, ContextScopeId, LedgerAppendRequest, LedgerEventType,
                 NormalizedModelMessage, UserMessagePayload,
@@ -5231,9 +6540,16 @@ mod tests {
                 ThinkingConfig, ThinkingMode,
             },
         };
+        use codez_platform::{SystemClock, UuidGenerator};
         use codez_providers::service::ProviderService;
         use codez_runtime::{
             CancellationTree,
+            agent::{
+                AgentBudgetManager, AgentControlStore, AgentExecutor, AgentScheduler,
+                AgentSupervisor, AgentSupervisorConfig, DurableMailbox,
+                NoopAgentExecutionEventSink, ScheduledAgent, SchedulerConfig, SpawnAgentInput,
+                SpawnAgentRequest, WaitMode,
+            },
             attachment::AttachmentService,
             chat::stream_state::ChatStreamStateMachine,
             context::ledger::ModelLedgerStore,
@@ -5254,13 +6570,16 @@ mod tests {
         use image::{ImageFormat, Rgba, RgbaImage};
         use serde_json::{Value, json};
         use tauri::ipc::{Channel, InvokeResponseBody};
-        use tokio::sync::mpsc;
+        use tokio::sync::{Mutex as TokioMutex, mpsc};
 
         use super::super::{
             CONTROL_CAPACITY, ChatPromptAssembler, ChatPromptSources, ChatRuntime,
             ConversationLedger, FrameSink, PermissionResponseRegistry,
-            ProviderConversationServices, RunControl, RunEntry, TerminalOutcome,
-            denied_permission_response, permission_request_to_wire, run_provider_conversation,
+            ProviderConversationServices, RootAgentExecutionState, RootAgentLedger,
+            RootAgentPrompt, RootAgentProvider, RootAgentRequestPreparer, RootAgentTools,
+            RootAgentTurnControl, RunControl, RunEntry, TerminalOutcome,
+            denied_permission_response, permission_request_to_wire, root_executor_outcome,
+            run_provider_conversation,
         };
         use crate::{
             attachment_boundary::session_to_wire,
@@ -5268,6 +6587,7 @@ mod tests {
             chat_tool_runtime::{
                 AskUserHandler, ChatToolRunContext, ChatToolRuntime, ChatToolRuntimeDependencies,
             },
+            child_agent_runtime::{ChildAgentRuntime, ChildAgentRuntimeDependencies},
             error::ErrorReporter,
         };
 
@@ -5279,6 +6599,7 @@ mod tests {
             tools: Arc<ChatToolRuntime>,
             ledger: Arc<ModelLedgerStore>,
             edit_transaction: Arc<EditTransactionService>,
+            agent_supervisor: Arc<AgentSupervisor>,
             permissions: Arc<WorkspacePermissionStore>,
             process_runner: Arc<dyn ProcessRunner>,
             prompt: Arc<ChatPromptAssembler>,
@@ -5296,6 +6617,24 @@ mod tests {
                     .expect("fixture resource directory must be created");
                 let storage = Arc::new(AtomicFileStore::default());
                 let persistence: Arc<dyn AtomicPersistence> = storage.clone();
+                let agent_runtime_root = paths.data_directory().join("agent-runtime");
+                let agent_control_store = Arc::new(AgentControlStore::new(
+                    &agent_runtime_root,
+                    Arc::clone(&persistence),
+                ));
+                let agent_mailbox = Arc::new(DurableMailbox::new(
+                    &agent_runtime_root,
+                    Arc::clone(&persistence),
+                ));
+                let agent_supervisor = Arc::new(AgentSupervisor::new(
+                    AgentSupervisorConfig::default(),
+                    agent_control_store,
+                    agent_mailbox,
+                    Arc::new(AgentScheduler::new(SchedulerConfig::default())),
+                    Arc::new(AgentBudgetManager::new()),
+                    Arc::new(SystemClock),
+                    Arc::new(UuidGenerator),
+                ));
                 let permissions = Arc::new(
                     WorkspacePermissionStore::new(paths.data_directory(), Arc::clone(&persistence))
                         .expect("fixture permission store must compose"),
@@ -5334,6 +6673,8 @@ mod tests {
                                 crate::notification_tool_runtime::UnsupportedNotificationPort,
                             ),
                             permission_ai_classifier: None,
+                            agent_supervisor: Arc::clone(&agent_supervisor),
+                            workspace_broker: None,
                         },
                     )
                     .expect("fixture chat tools must compose"),
@@ -5347,6 +6688,7 @@ mod tests {
                     tools,
                     ledger,
                     edit_transaction,
+                    agent_supervisor,
                     permissions,
                     process_runner,
                     prompt,
@@ -5359,6 +6701,36 @@ mod tests {
                         .expect("fixture workspace must canonicalize"),
                 )
                 .expect("fixture workspace must be a valid authority")
+            }
+        }
+
+        fn agent_task(id: &str, objective: &str) -> DelegatedTask {
+            DelegatedTask {
+                task_id: TaskId::parse(id).expect("fixture Agent task ID must parse"),
+                title: id.to_string(),
+                objective: objective.to_string(),
+                known_facts: Vec::new(),
+                success_criteria: vec!["Return evidence.".to_string()],
+                non_goals: Vec::new(),
+                dependencies: Vec::new(),
+                context_refs: Vec::new(),
+                validation_expectations: Vec::new(),
+                expected_result_schema: ResultSchema::default(),
+            }
+        }
+
+        fn root_agent_policy() -> AgentPolicy {
+            AgentPolicy {
+                can_delegate: true,
+                can_write: true,
+                can_use_network: true,
+                can_delete: true,
+                can_install_dependencies: true,
+                can_git_push: true,
+                can_ask_user: true,
+                max_depth: 2,
+                max_direct_children: 3,
+                max_root_agents: 12,
             }
         }
 
@@ -5947,6 +7319,8 @@ mod tests {
             let mut conversation = ConversationLedger::begin(
                 Arc::clone(&fixture.ledger),
                 &entry,
+                ContextScopeId::Main,
+                None,
                 &ChatStreamInput {
                     text: "Inspect the attached image.".to_string(),
                     attachments: Some(attachments.iter().cloned().map(session_to_wire).collect()),
@@ -5966,6 +7340,7 @@ mod tests {
                     tools: &fixture.tools,
                     attachment_service: &fixture.attachment,
                     prompt: &fixture.prompt,
+                    agent_supervisor: None,
                 },
                 resolved,
                 cancellation,
@@ -5994,6 +7369,8 @@ mod tests {
             let mut replay_conversation = ConversationLedger::begin(
                 Arc::clone(&fixture.ledger),
                 &replay_entry,
+                ContextScopeId::Main,
+                None,
                 &ChatStreamInput {
                     text: "Continue the image discussion.".to_string(),
                     attachments: None,
@@ -6012,6 +7389,7 @@ mod tests {
                     tools: &fixture.tools,
                     attachment_service: &fixture.attachment,
                     prompt: &fixture.prompt,
+                    agent_supervisor: None,
                 },
                 replay_resolved,
                 replay_cancellation,
@@ -6092,6 +7470,8 @@ mod tests {
             let mut conversation = ConversationLedger::begin(
                 Arc::clone(&fixture.ledger),
                 &entry,
+                ContextScopeId::Main,
+                None,
                 &ChatStreamInput {
                     text: "Retry a transient Provider failure.".to_string(),
                     attachments: None,
@@ -6111,6 +7491,7 @@ mod tests {
                     tools: &fixture.tools,
                     attachment_service: &fixture.attachment,
                     prompt: &fixture.prompt,
+                    agent_supervisor: None,
                 },
                 resolved,
                 cancellation,
@@ -6166,6 +7547,8 @@ mod tests {
             let mut conversation = ConversationLedger::begin(
                 Arc::clone(&fixture.ledger),
                 &entry,
+                ContextScopeId::Main,
+                None,
                 &ChatStreamInput {
                     text: "Continue after Provider overflow.".to_string(),
                     attachments: None,
@@ -6187,6 +7570,7 @@ mod tests {
                 PermissionAiContext::default(),
                 None,
                 None,
+                None,
             )
             .expect("overflow tool context must compose");
 
@@ -6196,6 +7580,7 @@ mod tests {
                     tools: &fixture.tools,
                     attachment_service: &fixture.attachment,
                     prompt: &fixture.prompt,
+                    agent_supervisor: None,
                 },
                 resolved,
                 cancellation,
@@ -6288,6 +7673,7 @@ mod tests {
                 Arc::clone(&fixture.attachment),
                 Arc::clone(&fixture.tools),
                 Arc::clone(&fixture.edit_transaction),
+                Arc::clone(&fixture.agent_supervisor),
                 ChatPromptSources::new(
                     fixture.data_root.clone(),
                     Arc::clone(&fixture.permissions),
@@ -6315,6 +7701,7 @@ mod tests {
                     cancellation.clone(),
                     "main".to_string(),
                     PermissionAiContext::default(),
+                    None,
                     Some(Arc::new(PermissionUiHarness {
                         registry: Arc::clone(&runtime.permission_responses),
                         run_id: entry.run_id.clone(),
@@ -6337,6 +7724,8 @@ mod tests {
             let conversation = ConversationLedger::begin(
                 Arc::clone(&fixture.ledger),
                 &entry,
+                ContextScopeId::Main,
+                None,
                 &ChatStreamInput {
                     text: "Use the approved tools.".to_string(),
                     attachments: None,
@@ -6361,6 +7750,7 @@ mod tests {
                         tools: &tools,
                         attachment_service: &attachment,
                         prompt: &prompt,
+                        agent_supervisor: None,
                     },
                     resolved,
                     cancellation,
@@ -6517,6 +7907,352 @@ mod tests {
                         .as_str()
                         .is_some_and(|content| content.contains("Yes"))
             }));
+        }
+
+        #[tokio::test]
+        async fn root_agent_runs_through_the_shared_executor_and_persists_agent_scope() {
+            let fixture = RuntimeFixture::new();
+            let server = LocalProviderServer::start(vec![completed_turn()]);
+            let (providers, provider_id) = local_provider(&server.base_url).await;
+            let session_id =
+                SessionId::parse("session-root-executor").expect("fixture session ID must parse");
+            let root_run_id =
+                RootRunId::parse("root-desktop-executor").expect("root ID must parse");
+            let run_id = StreamId::parse("run-root-executor").expect("fixture run ID must parse");
+            let cancellation_tree = Arc::new(CancellationTree::new());
+            let frames = Arc::new(Mutex::new(Vec::new()));
+            let (sink, entry, cancellation) = frame_sink(
+                cancellation_tree.as_ref(),
+                session_id.clone(),
+                run_id,
+                Arc::clone(&frames),
+            );
+            let resolved = providers
+                .resolve_chat_config(Some(&provider_id), Some("local-model"))
+                .await
+                .expect("local Provider config must resolve");
+            let root = fixture
+                .agent_supervisor
+                .start_root_attempt_direct(
+                    root_run_id.clone(),
+                    SpawnAgentInput {
+                        root_session_id: Some(session_id.clone()),
+                        task: agent_task("root-executor-task", "Complete through AgentExecutor."),
+                        profile: AgentProfile::General,
+                        workspace: WorkspaceAssignment {
+                            mode: WorkspaceMode::RootWorkspace,
+                            root: fixture
+                                .workspace_root()
+                                .as_path()
+                                .to_string_lossy()
+                                .into_owned(),
+                            read_scope: vec!["**/*".to_string()],
+                            write_scope: vec!["**/*".to_string()],
+                            baseline_revision: None,
+                            baseline_manifest: None,
+                            integration_policy: "direct_serial".to_string(),
+                        },
+                        policy: root_agent_policy(),
+                        budget: AgentBudget::conservative_child(),
+                        provider_id: provider_id.clone(),
+                        model_id: "local-model".to_string(),
+                    },
+                )
+                .await
+                .expect("root Agent must register");
+            let conversation = ConversationLedger::begin(
+                Arc::clone(&fixture.ledger),
+                &entry,
+                ContextScopeId::Agent(root.agent_id.clone()),
+                None,
+                &ChatStreamInput {
+                    text: "Run the root through the shared executor.".to_string(),
+                    attachments: None,
+                    is_system: None,
+                    command_metadata: None,
+                },
+                &[],
+                fixture.attachment.as_ref(),
+                &resolved,
+            )
+            .await
+            .expect("root Agent conversation must begin");
+            let state = Arc::new(TokioMutex::new(RootAgentExecutionState {
+                conversation,
+                prepared: None,
+                provider_code: None,
+                last_usage: None,
+                last_stop_reason: None,
+                transaction_registered: false,
+                transaction_id: None,
+                transaction_finalized: false,
+            }));
+            let sink = Arc::new(TokioMutex::new(sink));
+            let preparer = Arc::new(RootAgentRequestPreparer {
+                providers: Arc::clone(&providers),
+                attachment: Arc::clone(&fixture.attachment),
+                prompt: Arc::clone(&fixture.prompt),
+                tools: Arc::clone(&fixture.tools),
+                supervisor: Arc::clone(&fixture.agent_supervisor),
+                edit_transaction: Arc::clone(&fixture.edit_transaction),
+                tool_run: None,
+                state: Arc::clone(&state),
+                sink: Arc::clone(&sink),
+                cancellation: cancellation.clone(),
+                prompt_now: Utc::now(),
+            });
+            let turn_control = Arc::new(RootAgentTurnControl {
+                state: Arc::clone(&state),
+                sink: Arc::clone(&sink),
+                edit_transaction: Arc::clone(&fixture.edit_transaction),
+                tool_run: None,
+            });
+            let executor = AgentExecutor::new(
+                Arc::clone(&fixture.agent_supervisor),
+                Arc::new(RootAgentProvider {
+                    providers,
+                    preparer: Arc::clone(&preparer),
+                    state: Arc::clone(&state),
+                    sink: Arc::clone(&sink),
+                }),
+                Arc::new(RootAgentTools {
+                    tools: Arc::clone(&fixture.tools),
+                    tool_run: None,
+                    sink,
+                }),
+                Arc::new(RootAgentLedger {
+                    state: Arc::clone(&state),
+                }),
+                Arc::new(RootAgentPrompt { preparer }),
+                Arc::new(NoopAgentExecutionEventSink),
+            )
+            .with_turn_control(turn_control);
+            let outcome = executor
+                .execute(
+                    ScheduledAgent {
+                        root_run_id: root_run_id.clone(),
+                        agent_id: root.agent_id.clone(),
+                        attempt_id: root.attempt_id.clone(),
+                        provider_id,
+                    },
+                    cancellation,
+                )
+                .await;
+            let terminal = root_executor_outcome(outcome, state.as_ref()).await;
+            state
+                .lock()
+                .await
+                .conversation
+                .persist_executor_terminal(&terminal)
+                .await
+                .expect("root Agent terminal ledger event must persist");
+            let control = fixture
+                .agent_supervisor
+                .store()
+                .load(&root_run_id)
+                .await
+                .expect("root Agent control ledger must load");
+            let ledger = fixture
+                .ledger
+                .load(&session_id)
+                .await
+                .expect("root Agent session ledger must load")
+                .expect("root Agent session ledger must exist");
+            let scope_key = format!("agent:{}", root.agent_id);
+            let scope = ledger
+                .snapshot
+                .scopes
+                .get(&scope_key)
+                .expect("root Agent scope must persist");
+
+            assert!(matches!(terminal, TerminalOutcome::Completed { .. }));
+            assert_eq!(control.nodes[&root.agent_id].state, AgentState::Completed);
+            assert_eq!(
+                control.results[&root.attempt_id].status,
+                AgentResultStatus::Completed
+            );
+            assert_eq!(
+                scope.last_completed_turn_id.as_deref(),
+                Some(entry.run_id.as_str())
+            );
+            assert!(frames.lock().is_ok_and(|frames| {
+                frames
+                    .iter()
+                    .any(|frame| matches!(frame.event, ChatStreamFrameEvent::ContextBudget(_)))
+            }));
+            let requests = server.finish();
+            assert_eq!(requests.len(), 1);
+            assert!(provider_system_prompt(&requests[0]).contains("<agent_assignment>"));
+        }
+
+        #[tokio::test]
+        async fn queued_child_agent_runs_through_the_desktop_executor_and_persists_partial_result()
+        {
+            let fixture = RuntimeFixture::new();
+            let server = LocalProviderServer::start(vec![completed_turn()]);
+            let (providers, provider_id) = local_provider(&server.base_url).await;
+            let cancellation = CancellationToken::new();
+            let child_runtime = Arc::new(ChildAgentRuntime::new(
+                Arc::clone(&fixture.agent_supervisor),
+                ChildAgentRuntimeDependencies {
+                    providers: Arc::clone(&providers),
+                    tools: Arc::clone(&fixture.tools),
+                    ledger: Arc::clone(&fixture.ledger),
+                    prompt: Arc::clone(&fixture.prompt),
+                    events: Arc::new(NoopAgentExecutionEventSink),
+                    workspace_broker: None,
+                    cancellation: cancellation.clone(),
+                    interaction: None,
+                },
+            ));
+            child_runtime.start();
+            let root_run_id = RootRunId::parse("root-desktop-child").expect("root ID must parse");
+            let session_id =
+                SessionId::parse("session-desktop-child").expect("session ID must parse");
+            let root = fixture
+                .agent_supervisor
+                .start_root_attempt_direct(
+                    root_run_id.clone(),
+                    SpawnAgentInput {
+                        root_session_id: Some(session_id.clone()),
+                        task: agent_task("root-desktop-task", "Coordinate the child."),
+                        profile: AgentProfile::General,
+                        workspace: WorkspaceAssignment {
+                            mode: WorkspaceMode::RootWorkspace,
+                            root: fixture
+                                .workspace_root()
+                                .as_path()
+                                .to_string_lossy()
+                                .into_owned(),
+                            read_scope: vec!["**/*".to_string()],
+                            write_scope: vec!["**/*".to_string()],
+                            baseline_revision: None,
+                            baseline_manifest: None,
+                            integration_policy: "direct_serial".to_string(),
+                        },
+                        policy: root_agent_policy(),
+                        budget: AgentBudget::conservative_child(),
+                        provider_id: provider_id.clone(),
+                        model_id: "local-model".to_string(),
+                    },
+                )
+                .await
+                .expect("root Agent must register");
+            fixture
+                .agent_supervisor
+                .transition(
+                    &root_run_id,
+                    &root.agent_id,
+                    &root.attempt_id,
+                    1,
+                    AgentState::Starting,
+                )
+                .await
+                .expect("root Agent must start");
+            fixture
+                .agent_supervisor
+                .transition(
+                    &root_run_id,
+                    &root.agent_id,
+                    &root.attempt_id,
+                    2,
+                    AgentState::Running,
+                )
+                .await
+                .expect("root Agent must run");
+            let child = fixture
+                .agent_supervisor
+                .spawn_agents(SpawnAgentRequest {
+                    root_run_id: root_run_id.clone(),
+                    parent_agent_id: root.agent_id,
+                    parent_attempt_id: root.attempt_id,
+                    tool_call_id: "spawn-desktop-child".to_string(),
+                    agents: vec![SpawnAgentInput {
+                        root_session_id: None,
+                        task: agent_task(
+                            "desktop-child-task",
+                            "Inspect the workspace and report concise evidence.",
+                        ),
+                        profile: AgentProfile::Explore,
+                        workspace: WorkspaceAssignment {
+                            mode: WorkspaceMode::SharedReadonly,
+                            root: fixture
+                                .workspace_root()
+                                .as_path()
+                                .to_string_lossy()
+                                .into_owned(),
+                            read_scope: vec!["**/*".to_string()],
+                            write_scope: Vec::new(),
+                            baseline_revision: None,
+                            baseline_manifest: None,
+                            integration_policy: "none".to_string(),
+                        },
+                        policy: AgentPolicy::readonly_child(),
+                        budget: AgentBudget::conservative_child(),
+                        provider_id,
+                        model_id: "local-model".to_string(),
+                    }],
+                })
+                .await
+                .expect("child Agent must queue")
+                .remove(0);
+            let after_cursor = fixture
+                .agent_supervisor
+                .store()
+                .load(&root_run_id)
+                .await
+                .expect("spawn cursor must load")
+                .through_sequence;
+            let waited = fixture
+                .agent_supervisor
+                .wait_agents(
+                    &root_run_id,
+                    std::slice::from_ref(&child.agent_id),
+                    WaitMode::All,
+                    after_cursor,
+                    false,
+                    Duration::from_secs(5),
+                )
+                .await
+                .expect("child Agent must reach a terminal state");
+            assert!(!waited.timed_out);
+            assert_eq!(waited.agents[0].state, AgentState::Completed);
+            let snapshot = fixture
+                .agent_supervisor
+                .store()
+                .load(&root_run_id)
+                .await
+                .expect("child control ledger must load");
+            let result = snapshot
+                .results
+                .get(&child.attempt_id)
+                .expect("child result must persist");
+            assert_eq!(result.status, AgentResultStatus::Partial);
+            assert!(
+                result
+                    .unresolved
+                    .iter()
+                    .any(|item| { item.contains("without calling submit_agent_result") })
+            );
+            let ledger = fixture
+                .ledger
+                .load(&session_id)
+                .await
+                .expect("child session ledger must load")
+                .expect("child session ledger must exist");
+            let scope_key = format!("agent:{}", child.agent_id);
+            let scope = ledger
+                .snapshot
+                .scopes
+                .get(&scope_key)
+                .expect("child Agent scope must persist");
+            assert!(scope.active_messages.iter().any(|message| {
+                message.role == "assistant" && message.content.contains("approved tool result")
+            }));
+            cancellation.cancel();
+            let requests = server.finish();
+            assert_eq!(requests.len(), 1);
+            assert!(provider_system_prompt(&requests[0]).contains("<agent_assignment>"));
         }
     }
 }

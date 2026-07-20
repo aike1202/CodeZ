@@ -130,6 +130,7 @@ mod tests {
             directory_rules: None,
             git_status: None,
             now: None,
+            agent: None,
         };
 
         let prompt = SkillsModule

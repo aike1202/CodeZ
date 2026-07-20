@@ -58,6 +58,12 @@ impl ChatProvider for OpenAiProvider {
         if !response.status().is_success() {
             return Err(response_error(response, &cancellation).await);
         }
+        validate_stream_content_type(
+            response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+        )?;
 
         let mut source = response.bytes_stream().eventsource();
         let output = async_stream::stream! {
@@ -124,6 +130,21 @@ fn openai_endpoint(base_url: &str) -> Result<Url, ChatProviderError> {
         url.set_path(&path);
     }
     Ok(url)
+}
+
+fn validate_stream_content_type(content_type: Option<&str>) -> Result<(), ChatProviderError> {
+    if content_type.is_some_and(|value| {
+        value
+            .split(';')
+            .next()
+            .is_some_and(|media_type| media_type.trim().eq_ignore_ascii_case("text/html"))
+    }) {
+        return Err(ChatProviderError::Parse(
+            "OpenAI-compatible endpoint returned HTML instead of a stream; verify the Provider Base URL includes the API prefix (usually /v1)"
+                .to_string(),
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -628,7 +649,7 @@ mod tests {
 
     use super::{
         ChatRequestConfig, OpenAiStreamState, ThinkTagParser, build_request_payload,
-        openai_endpoint,
+        openai_endpoint, validate_stream_content_type,
     };
     use crate::chat::protocol_fixture;
 
@@ -660,11 +681,11 @@ mod tests {
                 r#type: "function".to_string(),
                 function: ToolDefinitionFunction {
                     name: "Read".to_string(),
-                    description: "Read files".to_string(),
+                    description: "Read one file".to_string(),
                     parameters: json!({
                         "type": "object",
-                        "properties": { "files": { "type": "array" } },
-                        "required": ["files"],
+                        "properties": { "file_path": { "type": "string" } },
+                        "required": ["file_path"],
                         "additionalProperties": false
                     }),
                 },
@@ -705,11 +726,11 @@ mod tests {
                     "type": "function",
                     "function": {
                         "name": "Read",
-                        "description": "Read files",
+                        "description": "Read one file",
                         "parameters": {
                             "type": "object",
-                            "properties": { "files": { "type": "array" } },
-                            "required": ["files"],
+                            "properties": { "file_path": { "type": "string" } },
+                            "required": ["file_path"],
                             "additionalProperties": false
                         }
                     }
@@ -718,6 +739,16 @@ mod tests {
                 "stream_options": { "include_usage": true },
                 "max_tokens": 256
             })
+        );
+    }
+
+    #[test]
+    fn html_response_should_be_rejected_as_a_misconfigured_api_endpoint() {
+        let result = validate_stream_content_type(Some("text/html; charset=utf-8"));
+
+        assert!(
+            matches!(result, Err(super::ChatProviderError::Parse(message)) if
+            message.contains("Base URL") && message.contains("/v1"))
         );
     }
 
@@ -734,7 +765,7 @@ mod tests {
                     r#type: "function".to_string(),
                     function: ToolCallFunction {
                         name: "Read".to_string(),
-                        arguments: r#"{"files":[{"file_path":"src/lib.rs"}]}"#.to_string(),
+                        arguments: r#"{"file_path":"src/lib.rs"}"#.to_string(),
                     },
                     thought_signature: Some("provider-signature".to_string()),
                 }]),
@@ -799,8 +830,8 @@ mod tests {
     #[test]
     fn stream_state_assembles_indexed_tool_call_deltas_and_terminal_reason() {
         let mut state = OpenAiStreamState::default();
-        let first = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"openai-call","function":{"name":"Read","arguments":"{\"files\":"}}]}}]}"#;
-        let second = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"[{\"file_path\":\"a.ts\"}]}"}}]},"finish_reason":"tool_calls"}]}"#;
+        let first = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"openai-call","function":{"name":"Read","arguments":"{\"file_path\":"}}]}}]}"#;
+        let second = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"a.ts\"}"}}]},"finish_reason":"tool_calls"}]}"#;
 
         assert!(
             state
@@ -825,7 +856,7 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Value>(&call.function.arguments)
                 .expect("assembled arguments are JSON"),
-            json!({ "files": [{ "file_path": "a.ts" }] })
+            json!({ "file_path": "a.ts" })
         );
 
         let done = state.handle_data("[DONE]").expect("done parses").0;

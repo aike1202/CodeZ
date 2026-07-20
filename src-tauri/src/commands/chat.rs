@@ -85,17 +85,20 @@ pub async fn chat_stream_start(
     )?;
     command_result(
         &state.errors,
-        state.chat_runtime.start_provider_run(
-            app,
-            ProviderRunStart {
-                providers: Arc::clone(&state.provider_service),
-                request,
-                resolved,
-                workspace_root,
-                events,
-                activity,
-            },
-        ),
+        state
+            .chat_runtime
+            .start_provider_run(
+                app,
+                ProviderRunStart {
+                    providers: Arc::clone(&state.provider_service),
+                    request,
+                    resolved,
+                    workspace_root,
+                    events,
+                    activity,
+                },
+            )
+            .await,
     )
 }
 

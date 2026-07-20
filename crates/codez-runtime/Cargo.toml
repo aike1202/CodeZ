@@ -33,6 +33,7 @@ tree-sitter-powershell = "=0.25.10"
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+codez-platform.workspace = true
 codez-storage.workspace = true
 
 [lints]

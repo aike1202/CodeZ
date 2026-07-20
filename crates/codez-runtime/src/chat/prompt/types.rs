@@ -1,4 +1,8 @@
 use chrono::{DateTime, Utc};
+use codez_core::agent::{
+    AgentBudget, AgentMessage, AgentPolicy, AgentProfile, AgentUsage, DelegatedTask,
+    WorkspaceAssignment,
+};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -25,6 +29,37 @@ pub struct PromptToolSummary {
 }
 
 #[derive(Debug, Clone)]
+pub struct PromptAgentIdentity {
+    pub root_run_id: String,
+    pub agent_id: String,
+    pub attempt_id: String,
+    pub parent_agent_id: Option<String>,
+    pub depth: u16,
+}
+
+#[derive(Debug, Clone)]
+pub struct PromptAgentLimits {
+    pub max_depth: u16,
+    pub remaining_direct_children: u16,
+    pub remaining_root_agents: u16,
+    pub available_parallel_slots: u16,
+}
+
+#[derive(Debug, Clone)]
+pub struct PromptAgentContext {
+    pub identity: PromptAgentIdentity,
+    pub task: DelegatedTask,
+    pub profile: AgentProfile,
+    pub effective_policy: AgentPolicy,
+    pub workspace: WorkspaceAssignment,
+    pub budget: AgentBudget,
+    pub usage: AgentUsage,
+    pub limits: PromptAgentLimits,
+    pub mailbox_delta: Vec<AgentMessage>,
+    pub finalization_required: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct PromptContext {
     pub workspace_root: Option<PathBuf>,
     pub model_id: String,
@@ -44,6 +79,7 @@ pub struct PromptContext {
     pub directory_rules: Option<String>,
     pub git_status: Option<String>,
     pub now: Option<DateTime<Utc>>,
+    pub agent: Option<PromptAgentContext>,
 }
 
 use std::future::Future;

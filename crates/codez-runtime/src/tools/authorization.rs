@@ -258,8 +258,8 @@ mod tests {
     #[test]
     fn validate_rejects_a_receipt_after_the_input_binding_changes() {
         let issuer = AuthorizationReceiptIssuer::new();
-        let first = prepared(json!({"files": [{"file_path": "a.txt"}]}));
-        let second = prepared(json!({"files": [{"file_path": "b.txt"}]}));
+        let first = prepared(json!({"file_path": "a.txt"}));
+        let second = prepared(json!({"file_path": "b.txt"}));
         let first_binding = AuthorizationBinding::for_call(&first, "C:/workspace", None, "main");
         let second_binding = AuthorizationBinding::for_call(&second, "C:/workspace", None, "main");
         let now = std::time::SystemTime::now();
@@ -275,7 +275,7 @@ mod tests {
     #[test]
     fn validate_rejects_an_expired_receipt() {
         let issuer = AuthorizationReceiptIssuer::new();
-        let call = prepared(json!({"files": [{"file_path": "a.txt"}]}));
+        let call = prepared(json!({"file_path": "a.txt"}));
         let binding = AuthorizationBinding::for_call(&call, "C:/workspace", None, "main");
         let now = std::time::SystemTime::now();
         let receipt = issuer.issue(&binding, Duration::from_millis(1), now);
@@ -290,7 +290,7 @@ mod tests {
     #[test]
     fn validate_rejects_a_tampered_receipt_signature() {
         let issuer = AuthorizationReceiptIssuer::new();
-        let call = prepared(json!({"files": [{"file_path": "a.txt"}]}));
+        let call = prepared(json!({"file_path": "a.txt"}));
         let binding = AuthorizationBinding::for_call(&call, "C:/workspace", None, "main");
         let now = std::time::SystemTime::now();
         let mut receipt = issuer.issue(&binding, Duration::from_secs(30), now);

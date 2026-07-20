@@ -13,15 +13,15 @@
         "type": "function",
         "function": {
           "name": "Read",
-          "description": "Read files",
+          "description": "Read one file",
           "parameters": {
             "type": "object",
             "properties": {
-              "files": {
-                "type": "array"
+              "file_path": {
+                "type": "string"
               }
             },
-            "required": ["files"],
+            "required": ["file_path"],
             "additionalProperties": false
           }
         }
@@ -43,11 +43,11 @@
               "type": "function",
               "function": {
                 "name": "Read",
-                "description": "Read files",
+                "description": "Read one file",
                 "parameters": {
                   "type": "object",
-                  "properties": { "files": { "type": "array" } },
-                  "required": ["files"],
+                  "properties": { "file_path": { "type": "string" } },
+                  "required": ["file_path"],
                   "additionalProperties": false
                 }
               }
@@ -59,14 +59,14 @@
         }
       },
       "streamLines": [
-        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"openai-call\",\"function\":{\"name\":\"Read\",\"arguments\":\"{\\\"files\\\":\"}}]}}]}",
-        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"[{\\\"file_path\\\":\\\"a.ts\\\"}]}\"}}]},\"finish_reason\":\"tool_calls\"}]}",
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"openai-call\",\"function\":{\"name\":\"Read\",\"arguments\":\"{\\\"file_path\\\":\"}}]}}]}",
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"a.ts\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}",
         "data: [DONE]",
         ""
       ],
       "expectedCanonicalCall": {
         "name": "Read",
-        "input": { "files": [{ "file_path": "a.ts" }] }
+        "input": { "file_path": "a.ts" }
       },
       "expectedStopReason": "tool_calls"
     },

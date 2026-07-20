@@ -12,6 +12,7 @@ import IconSkills from '../../../icons/IconSkills'
 import { CircleAlert, CircleCheck, Loader2, Minimize2, Square } from 'lucide-react'
 import { FileIcon, FolderIcon } from '@react-symbols/icons/utils'
 import { desktopApi } from '../../../../shared/desktop'
+import { useChatStore } from '../../../../stores/chatStore'
 import './LogItemRow.css'
 
 const VERB_TRANSLATIONS: Record<string, string> = {
@@ -131,6 +132,10 @@ export function LogItemRow({
     item.toolName === 'PowerShell' ||
     item.toolName === 'run_command'
   )
+  const isTodoAction = item.type === 'tool' && (
+    item.toolName === 'TodoCreate' || item.toolName === 'TodoUpdate'
+  )
+  const isInteractive = isTodoAction || hasItemDetail
 
   useEffect(() => {
     if (item.status !== 'running') setIsStopping(false)
@@ -160,6 +165,26 @@ export function LogItemRow({
     }
   }
 
+  const toggleTodoCapsule = (event: React.SyntheticEvent) => {
+    event.stopPropagation()
+    const { expandedCapsule, setExpandedCapsule } = useChatStore.getState()
+    setExpandedCapsule(expandedCapsule === 'todo' ? null : 'todo')
+  }
+
+  const handleRowClick = (event: React.MouseEvent) => {
+    if (isTodoAction) {
+      toggleTodoCapsule(event)
+    } else if (hasItemDetail) {
+      toggleItemExpand(item.id, event)
+    }
+  }
+
+  const handleRowKeyDown = (event: React.KeyboardEvent) => {
+    if (!isTodoAction || (event.key !== 'Enter' && event.key !== ' ')) return
+    event.preventDefault()
+    toggleTodoCapsule(event)
+  }
+
   return (
     <div className="timeline-item-wrapper" style={{ display: 'flex', flexDirection: 'column', minWidth: 0, width: '100%' }}>
       {!isLast && <div className="timeline-line-indicator" />}
@@ -174,16 +199,25 @@ export function LogItemRow({
           <Flex
             align="center"
             justify="between"
-            className={`timeline-item-row ${hasItemDetail ? 'interactive' : ''}`}
+            className={`timeline-item-row ${isInteractive ? 'interactive' : ''}${isTodoAction ? ' timeline-item-todo-action' : ''}`}
             style={{ minWidth: 0, width: '100%' }}
-            onClick={(e) => hasItemDetail && toggleItemExpand(item.id, e)}
+            role={isTodoAction ? 'button' : undefined}
+            tabIndex={isTodoAction ? 0 : undefined}
+            aria-label={isTodoAction ? `${item.target}，展开或收起右上角 Todo 列表` : undefined}
+            onMouseDown={isTodoAction ? (event) => event.stopPropagation() : undefined}
+            onClick={handleRowClick}
+            onKeyDown={handleRowKeyDown}
           >
             <Flex align="center" gap={2} className="relative" style={{ flex: 1, minWidth: 0 }}>
               <span className={`timeline-icon-box${item.status === 'running' ? ' timeline-icon-running' : isTaskSummarySkill ? ' timeline-icon-completed' : isSkillItem ? ' timeline-icon-skill' : item.type === 'compaction' ? ` timeline-icon-compaction is-${item.status}` : ''}`}>
                 {getItemIcon(item)}
               </span>
               <span className="timeline-target-truncate-box pr-4">
-                {item.type === 'compaction' ? (
+                {isTodoAction ? (
+                  <span className="timeline-target-text timeline-target-todo-action">
+                    {item.target}
+                  </span>
+                ) : item.type === 'compaction' ? (
                   <span className="timeline-target-text" title={item.target}>{item.target}</span>
                 ) : (
                   <span
@@ -193,7 +227,7 @@ export function LogItemRow({
                     {isTaskSummarySkill ? '任务已完成' : VERB_TRANSLATIONS[item.verb] || item.verb}
                   </span>
                 )}
-                {item.type === 'compaction' || isTaskSummarySkill || hideRunningReasoningTarget ? null : item.verb === 'Searched' || item.verb === 'Searching' ? (
+                {isTodoAction || item.type === 'compaction' || isTaskSummarySkill || hideRunningReasoningTarget ? null : item.verb === 'Searched' || item.verb === 'Searching' ? (
                   <span className="timeline-target-link" style={{ textDecoration: 'none', cursor: 'default' }}>
                     查找 {item.target}
                   </span>

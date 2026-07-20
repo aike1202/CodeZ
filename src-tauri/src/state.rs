@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
 use crate::{
-    chat_runtime::ChatRuntime, error::ErrorReporter, logging::LoggingGuard,
+    agent_ui_runtime::{AgentUiEventStore, AgentUiProjector},
+    chat_runtime::ChatRuntime,
+    child_agent_runtime::ChildAgentRuntime,
+    error::ErrorReporter,
+    logging::LoggingGuard,
     mcp_runtime::McpRuntimeManager,
 };
 use codez_core::{AppPaths, AtomicPersistence};
@@ -9,6 +13,9 @@ use codez_mcp::{McpProjectConfigService, McpSecretService, McpUserConfigService}
 use codez_platform::ResourceLocator;
 use codez_platform::{NativeProcessRunner, PtyManager};
 use codez_providers::service::ProviderService;
+use codez_runtime::agent::{
+    AgentArtifactStore, AgentControlStore, AgentSupervisor, DurableMailbox, WorkspaceBroker,
+};
 use codez_runtime::attachment::AttachmentService;
 use codez_runtime::context::ledger::ModelLedgerStore;
 use codez_runtime::edit_transaction::EditTransactionService;
@@ -53,5 +60,13 @@ pub(crate) struct AppState {
     pub(crate) mcp_secrets: Arc<McpSecretService>,
     pub(crate) mcp_runtime: Arc<McpRuntimeManager>,
     pub(crate) model_ledger: Arc<ModelLedgerStore>,
+    pub(crate) agent_control_store: Arc<AgentControlStore>,
+    pub(crate) agent_mailbox: Arc<DurableMailbox>,
+    pub(crate) agent_artifacts: Arc<AgentArtifactStore>,
+    pub(crate) agent_supervisor: Arc<AgentSupervisor>,
+    pub(crate) agent_workspace_broker: Option<Arc<WorkspaceBroker>>,
+    pub(crate) agent_ui_events: Arc<AgentUiEventStore>,
+    pub(crate) _agent_ui_projector: Arc<AgentUiProjector>,
+    pub(crate) _child_agent_runtime: Arc<ChildAgentRuntime>,
     pub(crate) chat_runtime: Arc<ChatRuntime>,
 }

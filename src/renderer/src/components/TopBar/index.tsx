@@ -12,6 +12,7 @@ import IconMaximize from '../icons/IconMaximize'
 import IconWindowRestore from '../icons/IconWindowRestore'
 import IconClose from '../icons/IconClose'
 import { desktopApi } from '../../shared/desktop'
+import { UsersRound } from 'lucide-react'
 
 import './TopBar.css'
 import type { TopBarProps } from './types'
@@ -20,6 +21,8 @@ import ProjectSelector from './components/ProjectSelector'
 export default function TopBar({
   terminalOpen = false,
   onToggleTerminal,
+  subagentsOpen = false,
+  onToggleSubagents,
   onOpenTasks,
   hasWorkspace = false
 }: TopBarProps): React.ReactElement {
@@ -155,6 +158,23 @@ export default function TopBar({
           {themeSource === 'system' && <IconMonitor />}
           {themeSource === 'light' && <IconSun />}
           {themeSource === 'dark' && <IconMoon />}
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="none"
+          className={`user-menu-btn ${
+            !hasWorkspace
+              ? 'topbar-action-btn-disabled'
+              : subagentsOpen
+                ? 'topbar-action-btn-active'
+                : 'topbar-action-btn-normal'
+          }`}
+          title={hasWorkspace ? '切换显示子智能体' : '请先打开一个项目'}
+          onClick={hasWorkspace ? onToggleSubagents : undefined}
+          disabled={!hasWorkspace}
+        >
+          <UsersRound size={17} aria-hidden="true" />
         </Button>
 
         <Button

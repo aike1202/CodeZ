@@ -25,6 +25,8 @@ interface ChatMessageListProps {
       codeContent?: string
     }
   ) => void
+  sessionId: string | null
+  onOpenSubAgent?: (agentId: string) => void
 }
 
 interface ChatMessageRowProps extends Omit<ChatMessageListProps, 'messages'> {
@@ -39,6 +41,8 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
   lastStreamingMsgId,
   handleFileClick,
   handleDiffClick,
+  sessionId,
+  onOpenSubAgent,
   onOpenImages,
   onPreviewRevert,
   revertDisabled
@@ -105,6 +109,8 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
         lastStreamingMsgId={lastStreamingMsgId}
         handleFileClick={handleFileClick}
         handleDiffClick={handleDiffClick}
+        sessionId={sessionId}
+        onOpenSubAgent={onOpenSubAgent}
       />
     </Flex>
   )
@@ -114,7 +120,9 @@ export function ChatMessageList({
   messages,
   lastStreamingMsgId,
   handleFileClick,
-  handleDiffClick
+  handleDiffClick,
+  sessionId,
+  onOpenSubAgent
 }: ChatMessageListProps): React.ReactElement {
   const [previewData, setPreviewData] = React.useState<{ msgId: string, toDelete: string[], toRestore: string[], unknownStatus?: boolean } | null>(null)
   const [imagePreview, setImagePreview] = React.useState<{
@@ -141,6 +149,8 @@ export function ChatMessageList({
             lastStreamingMsgId={lastStreamingMsgId}
             handleFileClick={handleFileClick}
             handleDiffClick={handleDiffClick}
+            sessionId={sessionId}
+            onOpenSubAgent={onOpenSubAgent}
             onOpenImages={handleOpenImages}
             onPreviewRevert={handlePreviewRevert}
             revertDisabled={Boolean(lastStreamingMsgId)}

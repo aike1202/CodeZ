@@ -73,6 +73,8 @@ pub enum CommandTaskError {
     NotFound(String),
     #[error("the command task belongs to another session")]
     WrongSession,
+    #[error("the command task belongs to another Agent run")]
+    WrongOwner,
     #[error("the command task was started by another shell")]
     WrongShell,
     #[error("the command task was cancelled")]
@@ -91,7 +93,7 @@ impl CommandTaskError {
         match self {
             Self::EmptyCommand | Self::InvalidHost(_) => "TOOL_INPUT_INVALID",
             Self::NotFound(_) => "COMMAND_TASK_NOT_FOUND",
-            Self::WrongSession => "COMMAND_TASK_ACCESS_DENIED",
+            Self::WrongSession | Self::WrongOwner => "COMMAND_TASK_ACCESS_DENIED",
             Self::WrongShell => "COMMAND_TASK_SHELL_MISMATCH",
             Self::Cancelled => "TOOL_CANCELLED",
             Self::TerminationNotConfirmed => "COMMAND_INTERRUPT_UNCONFIRMED",
@@ -125,7 +127,9 @@ impl From<CommandTaskError> for AppError {
                 AppError::validation(public_message)
             }
             CommandTaskError::NotFound(_) => AppError::not_found(public_message),
-            CommandTaskError::WrongSession => AppError::permission_denied(public_message),
+            CommandTaskError::WrongSession | CommandTaskError::WrongOwner => {
+                AppError::permission_denied(public_message)
+            }
             CommandTaskError::WrongShell => AppError::validation(public_message),
             CommandTaskError::Cancelled => AppError::cancelled(public_message),
             CommandTaskError::TerminationNotConfirmed => AppError::external(
@@ -154,6 +158,7 @@ impl From<CommandTaskError> for AppError {
 pub struct CommandRequest {
     pub command: String,
     pub session_id: String,
+    pub owner_id: String,
     pub shell: ShellKind,
     pub executable: PathBuf,
     pub current_directory: PathBuf,
@@ -165,6 +170,7 @@ pub struct CommandRequest {
 #[derive(Debug, Clone, Copy)]
 pub struct CommandTaskAccess<'a> {
     pub session_id: &'a str,
+    pub owner_id: &'a str,
     pub shell: ShellKind,
 }
 
@@ -181,6 +187,7 @@ struct ManagedCommandTask {
     task_id: String,
     command: String,
     session_id: String,
+    owner_id: String,
     shell: ShellKind,
     started_at: SystemTime,
     started: Instant,
@@ -320,6 +327,7 @@ impl CommandTaskRegistry {
             task_id: task_id.clone(),
             command: request.command,
             session_id: request.session_id,
+            owner_id: request.owner_id,
             shell: request.shell,
             started_at: SystemTime::now(),
             started: Instant::now(),
@@ -341,6 +349,7 @@ impl CommandTaskRegistry {
 
         let access = CommandTaskAccess {
             session_id: &task.session_id,
+            owner_id: &task.owner_id,
             shell: task.shell,
         };
         if request.background {
@@ -493,6 +502,9 @@ impl CommandTaskRegistry {
             .ok_or_else(|| CommandTaskError::NotFound(task_id.to_string()))?;
         if task.session_id != access.session_id {
             return Err(CommandTaskError::WrongSession);
+        }
+        if task.owner_id != access.owner_id {
+            return Err(CommandTaskError::WrongOwner);
         }
         if task.shell != access.shell {
             return Err(CommandTaskError::WrongShell);
@@ -863,6 +875,7 @@ mod tests {
             CommandRequest {
                 command: "fixture command".to_string(),
                 session_id: session_id.to_string(),
+                owner_id: session_id.to_string(),
                 shell: ShellKind::Bash,
                 executable: self.executable.clone(),
                 current_directory: self._root.path().to_path_buf(),
@@ -901,6 +914,7 @@ mod tests {
             .wait(
                 CommandTaskAccess {
                     session_id: "session-b",
+                    owner_id: "session-b",
                     shell: ShellKind::Bash,
                 },
                 &result.task_id,
@@ -910,6 +924,34 @@ mod tests {
             .expect_err("another session must not observe the task");
 
         assert!(matches!(error, CommandTaskError::WrongSession));
+    }
+
+    #[tokio::test]
+    async fn wait_should_reject_another_agent_run_in_the_same_session() {
+        let harness = Harness::pending();
+        let mut request = harness.request("session-a", false);
+        request.owner_id = "attempt-a".to_string();
+        let result = harness
+            .registry
+            .run(request, &CancellationToken::new())
+            .await
+            .expect("first Agent wait should return a running task");
+
+        let error = harness
+            .registry
+            .wait(
+                CommandTaskAccess {
+                    session_id: "session-a",
+                    owner_id: "attempt-b",
+                    shell: ShellKind::Bash,
+                },
+                &result.task_id,
+                Duration::ZERO,
+            )
+            .await
+            .expect_err("another Agent run must not observe the task");
+
+        assert!(matches!(error, CommandTaskError::WrongOwner));
     }
 
     #[tokio::test]
@@ -929,6 +971,7 @@ mod tests {
             .wait(
                 CommandTaskAccess {
                     session_id: "session-a",
+                    owner_id: "session-a",
                     shell: ShellKind::PowerShell,
                 },
                 &result.task_id,
@@ -949,6 +992,7 @@ mod tests {
             .wait(
                 CommandTaskAccess {
                     session_id: "session-a",
+                    owner_id: "session-a",
                     shell: ShellKind::Bash,
                 },
                 "cmd-missing",
@@ -977,6 +1021,7 @@ mod tests {
             .interrupt(
                 CommandTaskAccess {
                     session_id: "session-a",
+                    owner_id: "session-a",
                     shell: ShellKind::Bash,
                 },
                 &running.task_id,
@@ -1033,6 +1078,7 @@ mod tests {
             .wait(
                 CommandTaskAccess {
                     session_id: "session-a",
+                    owner_id: "session-a",
                     shell: ShellKind::Bash,
                 },
                 &running.task_id,
@@ -1090,6 +1136,7 @@ mod tests {
             .interrupt(
                 CommandTaskAccess {
                     session_id: "session-a",
+                    owner_id: "session-a",
                     shell: ShellKind::Bash,
                 },
                 &running.task_id,
@@ -1196,6 +1243,7 @@ mod tests {
             .expect("background stderr artifact must be returned");
         let access = CommandTaskAccess {
             session_id: "session-a",
+            owner_id: "session-a",
             shell: ShellKind::Bash,
         };
         harness

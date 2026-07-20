@@ -265,8 +265,10 @@ impl ToolHandler for PowerShellTool {
                     false,
                 );
             };
+            let owner_id = context.turn_id.as_deref().unwrap_or(session_id);
             let access = CommandTaskAccess {
                 session_id,
+                owner_id,
                 shell: ShellKind::PowerShell,
             };
 
@@ -377,6 +379,7 @@ impl ToolHandler for PowerShellTool {
                                 CommandRequest {
                                     command: executed_command,
                                     session_id: session_id.to_string(),
+                                    owner_id: owner_id.to_string(),
                                     shell: ShellKind::PowerShell,
                                     executable: host.executable.clone(),
                                     current_directory: current_directory.clone(),
@@ -1290,6 +1293,7 @@ mod tests {
                 CommandRequest {
                     command: "printf test".to_string(),
                     session_id: "session-a".to_string(),
+                    owner_id: "turn-1".to_string(),
                     shell: ShellKind::Bash,
                     executable: harness.executable.clone(),
                     current_directory: workspace.path().to_path_buf(),

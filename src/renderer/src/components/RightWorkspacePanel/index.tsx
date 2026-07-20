@@ -3,8 +3,8 @@ import {
   FileCode2,
   FileDiff,
   PanelRightClose,
-  Plus,
   SquareTerminal,
+  UsersRound,
   X
 } from 'lucide-react'
 import type { WorkspaceInfo } from '@shared/types/workspace'
@@ -12,20 +12,28 @@ import type { ChatMessage } from '../../stores/chatStore'
 import type { PreviewTab } from '../../App/hooks/useAppPreview'
 import FilePreviewPanel from '../FilePreviewPanel'
 import TerminalPanel from '../chat/TerminalPanel'
+import SubAgentPanel, { type SelectedSubAgent } from './SubAgentPanel'
 import './RightWorkspacePanel.css'
 
 export const TERMINAL_TAB_ID = 'tool:terminal'
+export const SUBAGENTS_TAB_ID = 'tool:subagents'
+export type { SelectedSubAgent } from './SubAgentPanel'
 
 interface RightWorkspacePanelProps {
   previewTabs: PreviewTab[]
   activeTabId: string | null
   terminalOpen: boolean
+  subagentsOpen: boolean
+  activeSessionId: string | null
+  selectedSubAgent: SelectedSubAgent | null
   messages: ChatMessage[]
   workspace: WorkspaceInfo
   panelWidth: number
   onSelectTab: (tabId: string) => void
   onCloseTab: (tabId: string) => void
   onOpenTerminal: () => void
+  onOpenSubagents: () => void
+  onSelectSubAgent: (agent: SelectedSubAgent | null) => void
   onClosePanel: () => void
   onFileClick: (filePath: string, virtualContent?: string) => void
   onDiffClick: (
@@ -43,7 +51,7 @@ interface WorkspaceTab {
   id: string
   title: string
   titleDetail: string
-  kind: 'file' | 'diff' | 'terminal'
+  kind: 'file' | 'diff' | 'terminal' | 'subagents'
   closable: boolean
 }
 
@@ -51,12 +59,17 @@ export default function RightWorkspacePanel({
   previewTabs,
   activeTabId,
   terminalOpen,
+  subagentsOpen,
+  activeSessionId,
+  selectedSubAgent,
   messages,
   workspace,
   panelWidth,
   onSelectTab,
   onCloseTab,
   onOpenTerminal,
+  onOpenSubagents,
+  onSelectSubAgent,
   onClosePanel,
   onFileClick,
   onDiffClick
@@ -78,8 +91,17 @@ export default function RightWorkspacePanel({
         closable: true
       })
     }
+    if (subagentsOpen) {
+      fileTabs.push({
+        id: SUBAGENTS_TAB_ID,
+        title: '子智能体',
+        titleDetail: '全部分身与执行记录',
+        kind: 'subagents',
+        closable: true
+      })
+    }
     return fileTabs
-  }, [previewTabs, terminalOpen, workspace.rootPath])
+  }, [previewTabs, terminalOpen, subagentsOpen, workspace.rootPath])
 
   const resolvedActiveTabId = tabs.some((tab) => tab.id === activeTabId)
     ? activeTabId
@@ -103,6 +125,7 @@ export default function RightWorkspacePanel({
 
   const renderTabIcon = (kind: WorkspaceTab['kind']) => {
     if (kind === 'terminal') return <SquareTerminal size={14} aria-hidden="true" />
+    if (kind === 'subagents') return <UsersRound size={14} aria-hidden="true" />
     if (kind === 'diff') return <FileDiff size={14} aria-hidden="true" />
     return <FileCode2 size={14} aria-hidden="true" />
   }
@@ -155,11 +178,20 @@ export default function RightWorkspacePanel({
           <button
             type="button"
             className="right-workspace-icon-button"
+            title="打开子智能体页"
+            aria-label="打开子智能体页"
+            onClick={onOpenSubagents}
+          >
+            <UsersRound size={16} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="right-workspace-icon-button"
             title="打开终端页"
             aria-label="打开终端页"
             onClick={onOpenTerminal}
           >
-            <Plus size={16} aria-hidden="true" />
+            <SquareTerminal size={16} aria-hidden="true" />
           </button>
           <button
             type="button"
@@ -201,6 +233,19 @@ export default function RightWorkspacePanel({
               previewPanelWidth={panelWidth}
               layout="side"
               visible={resolvedActiveTabId === TERMINAL_TAB_ID}
+            />
+          </div>
+        )}
+
+        {subagentsOpen && (
+          <div
+            className={`right-workspace-pane ${resolvedActiveTabId === SUBAGENTS_TAB_ID ? '' : 'right-workspace-pane--hidden'}`}
+            role="tabpanel"
+          >
+            <SubAgentPanel
+              sessionId={activeSessionId}
+              selectedAgent={selectedSubAgent}
+              onSelectAgent={onSelectSubAgent}
             />
           </div>
         )}

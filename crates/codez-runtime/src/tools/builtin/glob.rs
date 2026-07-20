@@ -3,7 +3,8 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use crate::search::{
-    MAX_GLOB_LIMIT, MAX_SEARCH_PATH_BYTES, MAX_SEARCH_PATTERN_BYTES, SearchService,
+    DEFAULT_GLOB_LIMIT, MAX_GLOB_LIMIT, MAX_SEARCH_PATH_BYTES, MAX_SEARCH_PATTERN_BYTES,
+    SearchService,
 };
 use crate::tools::builtin::search_support::{
     access_error, authorized_services, input_error, read_effect_plan, read_resource_keys,
@@ -30,11 +31,11 @@ impl GlobTool {
         Self {
             descriptor: DefaultToolDescriptor {
                 name: "Glob",
-                version: "1.0.0",
+                version: "1.1.0",
                 source: ToolSource::Builtin,
                 source_id: "builtin:glob".to_string(),
                 summary: "Find files matching a glob pattern.".to_string(),
-                description: "Fast bounded file pattern matching inside the current workspace. Supports patterns such as **/*.js and src/**/*.ts. Use path to scope the search to a subdirectory.".to_string(),
+                description: "Finds files by name or path pattern inside the current workspace. Use this to discover an exact path before Read; use Grep instead for file contents. Scope broad patterns with path and narrow them when results truncate.".to_string(),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "additionalProperties": false,
@@ -55,7 +56,7 @@ impl GlobTool {
                             "type": "integer",
                             "minimum": 1,
                             "maximum": MAX_GLOB_LIMIT,
-                            "default": 1000,
+                            "default": DEFAULT_GLOB_LIMIT,
                             "description": "Maximum matching paths to return."
                         }
                     },
@@ -72,7 +73,7 @@ impl GlobTool {
                 behavior: ToolBehavior {
                     concurrency: ToolConcurrency::Safe,
                     interrupt: ToolInterruptBehavior::Cancel,
-                    max_result_chars: 100_000,
+                    max_result_chars: 20_000,
                     timeout_ms: Some(35_000),
                 },
             },
@@ -196,6 +197,8 @@ mod tests {
                     == serde_json::json!(MAX_SEARCH_PATTERN_BYTES)
                 && schema["properties"]["head_limit"]["maximum"]
                     == serde_json::json!(MAX_GLOB_LIMIT)
+                && schema["properties"]["head_limit"]["default"]
+                    == serde_json::json!(DEFAULT_GLOB_LIMIT)
                 && schema["additionalProperties"] == serde_json::json!(false)
         );
     }

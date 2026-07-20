@@ -231,8 +231,10 @@ impl ToolHandler for BashTool {
                     false,
                 );
             };
+            let owner_id = context.turn_id.as_deref().unwrap_or(session_id);
             let access = CommandTaskAccess {
                 session_id,
+                owner_id,
                 shell: ShellKind::Bash,
             };
 
@@ -328,6 +330,7 @@ impl ToolHandler for BashTool {
                                 CommandRequest {
                                     command: command.to_string(),
                                     session_id: session_id.to_string(),
+                                    owner_id: owner_id.to_string(),
                                     shell: ShellKind::Bash,
                                     executable: host.executable.clone(),
                                     current_directory: current_directory.clone(),

@@ -5,7 +5,7 @@
   "identifier": "com.codez.desktop",
   "build": {
     "beforeDevCommand": "npm run dev:renderer:tauri",
-    "devUrl": "http://localhost:1420/tauri.html",
+    "devUrl": "http://localhost:27183/tauri.html",
     "beforeBuildCommand": "npm run build:renderer:tauri",
     "frontendDist": "../out/tauri-renderer"
   },

@@ -47,6 +47,82 @@ export type ComposerImageAttachment = SessionImageAttachment | DraftImageAttachm
 
 export type AttachmentPreviewBytes = { mimeType: string, bytes: Array<number>, };
 
+export type AgentProfile = "general" | "explore" | "review" | "integration";
+
+export type AgentState = "created" | "queued" | "starting" | "running" | "waiting_message" | "waiting_children" | "awaiting_approval" | "needs_replan" | "needs_resolution" | "completed" | "blocked" | "failed" | "cancelled" | "interrupted";
+
+export type WorkspaceMode = "root_workspace" | "shared_readonly" | "isolated_worktree" | "isolated_snapshot_patch";
+
+export type AgentMessageKind = "instruction" | "question" | "answer" | "progress" | "finding" | "result" | "cancel_request" | "contract_change" | "system_notice";
+
+export type AgentResultStatus = "completed" | "partial" | "blocked" | "failed";
+
+export type AgentReviewVerdict = "approved" | "changes_requested" | "blocked";
+
+export type AgentConfidence = "low" | "medium" | "high";
+
+export type AgentWaitMode = "any" | "all";
+
+export type AgentCompletionPolicy = "collect_all" | "fail_fast" | "best_effort";
+
+export type AgentResultSchema = { version: number, requiredFields: Array<string>, };
+
+export type DelegatedTask = { taskId: string, title: string, objective: string, knownFacts: Array<string>, successCriteria: Array<string>, nonGoals: Array<string>, dependencies: Array<string>, contextRefs: Array<string>, validationExpectations: Array<string>, expectedResultSchema: AgentResultSchema, };
+
+export type AgentPolicy = { canDelegate: boolean, canWrite: boolean, canUseNetwork: boolean, canDelete: boolean, canInstallDependencies: boolean, canGitPush: boolean, canAskUser: boolean, maxDepth: number, maxDirectChildren: number, maxRootAgents: number, };
+
+export type AgentBudget = { inputTokens: number, outputTokens: number, providerCostMicros: number, toolCalls: number, modelVisibleToolResultBytes: number, commandWallTimeMs: number, wallTimeMs: number, filesRead: number, filesWritten: number, childAgents: number, };
+
+export type AgentUsage = { inputTokens: number, outputTokens: number, providerCostMicros: number, toolCalls: number, modelVisibleToolResultBytes: number, commandWallTimeMs: number, wallTimeMs: number, filesRead: number, filesWritten: number, childAgents: number, };
+
+export type WorkspaceAssignment = { mode: WorkspaceMode, root: string, readScope: Array<string>, writeScope: Array<string>, baselineRevision?: string, baselineManifest?: string, integrationPolicy: string, };
+
+export type AgentNode = { schemaVersion: number, id: string, rootRunId: string, rootSessionId: string, parentId?: string, depth: number, profile: AgentProfile, task: DelegatedTask, policy: AgentPolicy, budget: AgentBudget, workspace: WorkspaceAssignment, state: AgentState, stateRevision: number, createdByToolCallId?: string, createdAt: string, updatedAt: string, };
+
+export type AgentAttempt = { id: string, agentId: string, ordinal: number, state: AgentState, stateRevision: number, mailboxCursor: number, promptSchemaVersion: number, promptModuleHashes: Array<string>, dynamicSnapshotHash: string, toolCatalogFingerprint: string, providerId: string, modelId: string, resultContractVersion: number, usage: AgentUsage, startedAt?: string, finishedAt?: string, };
+
+export type AgentMessage = { id: string, rootRunId: string, from: string, to: string, kind: AgentMessageKind, correlationId?: string, replyTo?: string, idempotencyKey?: string, sequence: number, summary: string, artifactRefs: Array<string>, createdAt: string, };
+
+export type AgentChangedArtifact = { path: string, kind: string, purpose: string, };
+
+export type AgentValidationResult = { commandOrCheck: string, status: string, toolCallId?: string, evidenceRef?: string, };
+
+export type AgentFinding = { severity: string, claim: string, evidenceRefs: Array<string>, };
+
+export type AgentResult = { status: AgentResultStatus, summary: string, conclusion?: string, changes: Array<AgentChangedArtifact>, validations: Array<AgentValidationResult>, findings: Array<AgentFinding>, blockers: Array<string>, unresolved: Array<string>, recommendedNextActions: Array<string>, confidence?: AgentConfidence, reviewVerdict?: AgentReviewVerdict, artifactRefs: Array<string>, usage: AgentUsage, };
+
+export type SpawnAgentSpec = { task: DelegatedTask, profile: AgentProfile, workspace: WorkspaceAssignment, policy: AgentPolicy, budget: AgentBudget, };
+
+export type SpawnAgentRequest = { rootRunId: string, parentAgentId: string, parentAttemptId: string, toolCallId: string, agent: SpawnAgentSpec, };
+
+export type SpawnAgentsRequest = { rootRunId: string, parentAgentId: string, parentAttemptId: string, toolCallId: string, agents: Array<SpawnAgentSpec>, completionPolicy: AgentCompletionPolicy, };
+
+export type SpawnAgentHandle = { agentId: string, attemptId: string, state: AgentState, created: boolean, };
+
+export type WaitAgentsRequest = { mode: AgentWaitMode, agentIds: Array<string>, afterCursor: number, timeoutMs: number, includeProgress: boolean, };
+
+export type AgentSummary = { agentId: string, attemptId: string, rootRunId: string, parentAgentId: string | null, title: string, profile: AgentProfile, depth: number, state: AgentState, stateRevision: number, latestSummary: string, unreadEventCount: number, updatedAt: string, finishedAt: string | null, };
+
+export type AgentListPage = { agents: Array<AgentSummary>, nextCursor: number, hasMore: boolean, };
+
+export type AgentDetail = { node: AgentNode, attempts: Array<AgentAttempt>, result?: AgentResult, };
+
+export type AgentArtifact = { artifactId: string, name: string, kind: string, path: string, sha256: string, sizeBytes: number, preview?: string, previewTruncated: boolean, };
+
+export type AgentWorkspaceRecoveryDisposition = "clean" | "preserved" | "manual_intervention";
+
+export type AgentWorkspaceRecoveryRecord = { manifestPath: string, rootRunId?: string, agentId?: string, attemptId?: string, status: string, disposition: AgentWorkspaceRecoveryDisposition, detail: string, workspacePaths: Array<string>, };
+
+export type WaitAgentsResponse = { cursor: number, timedOut: boolean, agents: Array<AgentSummary>, };
+
+export type SendAgentMessageRequest = { fromAgentId: string, toAgentId: string, kind: AgentMessageKind, summary: string, correlationId: string | null, replyTo: string | null, idempotencyKey: string | null, artifactRefs: Array<string>, };
+
+export type AgentUiEvent = { "kind": "assistantDelta", "payload": { delta: string, } } | { "kind": "reasoningDelta", "payload": { delta: string, } } | { "kind": "toolStarted", "payload": { tool_call_id: string, name: string, summary: string, } } | { "kind": "toolUpdated", "payload": { tool_call_id: string, summary: string, } } | { "kind": "toolCompleted", "payload": { tool_call_id: string, name: string, status: string, summary: string, } } | { "kind": "fileChanged", "payload": { path: string, change_kind: string, transaction_id: string, } } | { "kind": "agentMessageSent", "payload": AgentMessage } | { "kind": "agentMessageReceived", "payload": AgentMessage } | { "kind": "permissionRequested", "payload": { request_id: string, summary: string, } } | { "kind": "permissionResolved", "payload": { request_id: string, approved: boolean, } } | { "kind": "providerRetryScheduled", "payload": { attempt: number, max_attempts: number, delay_ms: number, reason: string, } } | { "kind": "contextCompactionStarted", "payload": { trigger: string, history_version: number, } } | { "kind": "contextCompactionCompleted", "payload": { trigger: string, tokens_before: number | null, tokens_after: number | null, history_version: number | null, } } | { "kind": "contextCompactionFailed", "payload": { trigger: string, code: string, message: string, retryable: boolean, history_version: number | null, } } | { "kind": "budgetUpdated", "payload": { usage: AgentUsage, remaining: AgentBudget, } } | { "kind": "stateChanged", "payload": { previous: AgentState, next: AgentState, } } | { "kind": "resultSubmitted", "payload": AgentResult } | { "kind": "errorRaised", "payload": { code: string, message: string, } };
+
+export type AgentUiEventEnvelope = { rootRunId: string, agentId: string, attemptId: string, sequence: number, stateRevision: number, occurredAt: string, } & ({ "kind": "assistantDelta", "payload": { delta: string, } } | { "kind": "reasoningDelta", "payload": { delta: string, } } | { "kind": "toolStarted", "payload": { tool_call_id: string, name: string, summary: string, } } | { "kind": "toolUpdated", "payload": { tool_call_id: string, summary: string, } } | { "kind": "toolCompleted", "payload": { tool_call_id: string, name: string, status: string, summary: string, } } | { "kind": "fileChanged", "payload": { path: string, change_kind: string, transaction_id: string, } } | { "kind": "agentMessageSent", "payload": AgentMessage } | { "kind": "agentMessageReceived", "payload": AgentMessage } | { "kind": "permissionRequested", "payload": { request_id: string, summary: string, } } | { "kind": "permissionResolved", "payload": { request_id: string, approved: boolean, } } | { "kind": "providerRetryScheduled", "payload": { attempt: number, max_attempts: number, delay_ms: number, reason: string, } } | { "kind": "contextCompactionStarted", "payload": { trigger: string, history_version: number, } } | { "kind": "contextCompactionCompleted", "payload": { trigger: string, tokens_before: number | null, tokens_after: number | null, history_version: number | null, } } | { "kind": "contextCompactionFailed", "payload": { trigger: string, code: string, message: string, retryable: boolean, history_version: number | null, } } | { "kind": "budgetUpdated", "payload": { usage: AgentUsage, remaining: AgentBudget, } } | { "kind": "stateChanged", "payload": { previous: AgentState, next: AgentState, } } | { "kind": "resultSubmitted", "payload": AgentResult } | { "kind": "errorRaised", "payload": { code: string, message: string, } });
+
+export type AgentEventPage = { events: Array<AgentUiEventEnvelope>, nextCursor: number, hasMore: boolean, };
+
 export type PermissionMode = "auto" | "full-access";
 
 export type ThinkingMode = "auto" | "none" | "openai" | "deepseek" | "qwen" | "anthropic" | "gemini" | "grok" | "openrouter";

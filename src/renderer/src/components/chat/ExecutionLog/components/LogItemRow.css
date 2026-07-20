@@ -173,6 +173,15 @@
 
 .timeline-target-text { color: var(--text-main); }
 
+.timeline-item-todo-action:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 1px;
+}
+
+.timeline-target-todo-action {
+  font-weight: 600;
+}
+
 .timeline-target-skill {
   color: #6847dc;
   font-family: var(--font-mono, monospace);

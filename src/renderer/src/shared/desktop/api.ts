@@ -43,6 +43,13 @@ import type {
   ChatRuntimeStatusChanged,
   TodoItem as WireTodoItem,
   TodoListSnapshot,
+  AgentDetail,
+  AgentArtifact,
+  AgentWorkspaceRecoveryRecord,
+  AgentEventPage,
+  AgentListPage,
+  AgentUiEventEnvelope,
+  SpawnAgentHandle,
 } from './generated/contracts'
 import type {
   ContextBudgetSnapshot,
@@ -100,6 +107,19 @@ async function command<T>(name: string, args?: Record<string, unknown>): Promise
 
 async function rendererLogCommand(level: RendererLogLevel, message: string): Promise<void> {
   await command<void>('renderer_log', { level, message })
+}
+
+const agentUiEventSubscribers = new Set<(event: AgentUiEventEnvelope) => void>()
+let agentUiEventBridge: Promise<() => void> | null = null
+
+function subscribeAgentUiEvent(callback: (event: AgentUiEventEnvelope) => void): () => void {
+  agentUiEventSubscribers.add(callback)
+  agentUiEventBridge ??= listen<AgentUiEventEnvelope>('agent:ui-event', (event) => {
+    for (const subscriber of agentUiEventSubscribers) subscriber(event.payload)
+  })
+  return () => {
+    agentUiEventSubscribers.delete(callback)
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -579,6 +599,24 @@ export interface DesktopApi {
     respondToApproval(requestId: string, response: PermissionApprovalResponse): Promise<void>
     respondAskUser(requestId: string, answers: ChatAskUserAnswer[]): Promise<void>
   }
+  agent: {
+    list(sessionId: string, cursor: number, limit: number): Promise<AgentListPage>
+    inspect(rootRunId: string, agentId: string): Promise<AgentDetail>
+    getArtifacts(rootRunId: string, agentId: string): Promise<AgentArtifact[]>
+    listWorkspaceRecovery(): Promise<AgentWorkspaceRecoveryRecord[]>
+    getEvents(
+      rootRunId: string,
+      agentId: string,
+      attemptId: string,
+      afterCursor: number,
+      limit: number
+    ): Promise<AgentEventPage>
+    sendMessage(rootRunId: string, agentId: string, message: string): Promise<void>
+    cancel(rootRunId: string, agentId: string): Promise<void>
+    resume(rootRunId: string, agentId: string): Promise<SpawnAgentHandle>
+    followup(rootRunId: string, agentId: string, message: string): Promise<SpawnAgentHandle>
+    onUiEvent(callback: (event: AgentUiEventEnvelope) => void): () => void
+  }
   session: {
     list(): Promise<SessionData[]>
     get(sessionId: string): Promise<SessionData | null>
@@ -1013,6 +1051,28 @@ export const desktopApi: DesktopApi = {
       command('chat_respond_to_approval', { requestId, response }),
     respondAskUser: (requestId, answers) =>
       command('chat_respond_ask_user', { requestId, answers })
+  },
+  agent: {
+    list: (sessionId, cursor, limit) => command('agent_list', { sessionId, cursor, limit }),
+    inspect: (rootRunId, agentId) => command('agent_inspect', { rootRunId, agentId }),
+    getArtifacts: (rootRunId, agentId) =>
+      command('agent_get_artifacts', { rootRunId, agentId }),
+    listWorkspaceRecovery: () => command('agent_workspace_recovery_list'),
+    getEvents: (rootRunId, agentId, attemptId, afterCursor, limit) =>
+      command('agent_get_events', {
+        rootRunId,
+        agentId,
+        attemptId,
+        afterCursor,
+        limit
+      }),
+    sendMessage: (rootRunId, agentId, message) =>
+      command('agent_send_user_message', { rootRunId, agentId, message }),
+    cancel: (rootRunId, agentId) => command('agent_cancel', { rootRunId, agentId }),
+    resume: (rootRunId, agentId) => command('agent_resume', { rootRunId, agentId }),
+    followup: (rootRunId, agentId, message) =>
+      command('agent_followup', { rootRunId, agentId, message }),
+    onUiEvent: subscribeAgentUiEvent
   },
   session: {
     list: async () => {

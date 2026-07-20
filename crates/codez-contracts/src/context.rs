@@ -127,6 +127,7 @@ impl<'de> Deserialize<'de> for ContextScopeId {
 #[serde(rename_all = "snake_case")]
 #[ts(rename_all = "snake_case")]
 pub enum LedgerEventType {
+    ContextForked,
     UserMessage,
     AssistantMessage,
     ToolResult,
@@ -147,7 +148,8 @@ impl LedgerEventType {
     pub const fn changes_history(self) -> bool {
         matches!(
             self,
-            Self::UserMessage
+            Self::ContextForked
+                | Self::UserMessage
                 | Self::AssistantMessage
                 | Self::ToolResult
                 | Self::SkillStateUpdated

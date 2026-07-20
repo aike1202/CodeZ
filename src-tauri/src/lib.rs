@@ -1,10 +1,14 @@
-﻿#![forbid(unsafe_code)]
+#![forbid(unsafe_code)]
 
+mod agent_boundary;
+mod agent_tool_runtime;
+mod agent_ui_runtime;
 mod attachment_boundary;
 mod chat_compaction;
 mod chat_interaction;
 mod chat_runtime;
 mod chat_tool_runtime;
+mod child_agent_runtime;
 mod commands;
 mod composition;
 mod context_boundary;
@@ -201,6 +205,15 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::chat::chat_revert_history,
             commands::chat::chat_respond_to_approval,
             commands::chat::chat_respond_ask_user,
+            commands::agent::agent_list,
+            commands::agent::agent_inspect,
+            commands::agent::agent_get_events,
+            commands::agent::agent_get_artifacts,
+            commands::agent::agent_workspace_recovery_list,
+            commands::agent::agent_send_user_message,
+            commands::agent::agent_cancel,
+            commands::agent::agent_resume,
+            commands::agent::agent_followup,
         ])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::ThemeChanged(_)) {

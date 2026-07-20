@@ -16,7 +16,7 @@ use crate::tools::types::{
 
 const MAX_DIRECTORY_PATHS: usize = 32;
 const MAX_ENTRIES_PER_DIRECTORY: usize = 2_000;
-const MAX_LIST_MODEL_CHARS: usize = 80_000;
+const MAX_LIST_MODEL_CHARS: usize = 10_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ListInputError {
@@ -48,7 +48,7 @@ impl ListFilesTool {
                 source: ToolSource::Builtin,
                 source_id: "builtin:list-files".to_string(),
                 summary: "List files in a directory.".to_string(),
-                description: "Lists direct files and directories within one or multiple workspace-relative directory paths. It does not follow links or recurse.".to_string(),
+                description: "Lists direct children of bounded workspace directories without following links or recursing. Use Glob when you know a filename or path pattern.".to_string(),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "additionalProperties": false,
@@ -80,7 +80,7 @@ impl ListFilesTool {
                 behavior: ToolBehavior {
                     concurrency: ToolConcurrency::Safe,
                     interrupt: ToolInterruptBehavior::Cancel,
-                    max_result_chars: 100_000,
+                    max_result_chars: MAX_LIST_MODEL_CHARS as u32,
                     timeout_ms: Some(30_000),
                 },
             },

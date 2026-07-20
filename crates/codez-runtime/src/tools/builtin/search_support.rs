@@ -64,8 +64,14 @@ pub(super) fn search_error(error: SearchError) -> ToolExecutionResult {
             Some("Reinstall the application so its bundled search executable is restored.")
         }
         SearchError::InvalidInput(_) => Some("Correct the search arguments and retry."),
-        SearchError::PathNotAuthorized | SearchError::PathNotDirectory => {
+        SearchError::PathNotAuthorized => {
+            Some("Choose an existing path inside the current workspace.")
+        }
+        SearchError::PathNotDirectory => {
             Some("Choose an existing directory inside the current workspace.")
+        }
+        SearchError::PathNotSearchable => {
+            Some("Choose an existing regular file or directory inside the current workspace.")
         }
         SearchError::TimedOut => Some("Narrow the pattern or search path and retry."),
         _ => None,

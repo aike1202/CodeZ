@@ -10,8 +10,9 @@ use std::{
 
 use codez_contracts::chat::{ChatAskUserAnswer, ChatAskUserQuestion, ChatAskUserRequest};
 use codez_core::{
-    AppError, AppPaths, AtomicPersistence, CancellationToken, FileSystem, ProcessRunner, SessionId,
-    StreamId, WorkspaceRoot,
+    AgentAttemptId, AgentId, AppError, AppPaths, AtomicPersistence, CancellationToken, FileSystem,
+    ProcessRunner, RootRunId, SessionId, StreamId, WorkspaceRoot,
+    agent::AgentPolicy,
     context::ContextScopeId,
     provider::{ToolDefinition, ToolDefinitionFunction},
 };
@@ -21,6 +22,7 @@ use codez_platform::{
 };
 use codez_runtime::{
     SearchService,
+    agent::{AgentSupervisor, WorkspaceBroker},
     context::ledger::ModelLedgerStore,
     edit_transaction::EditTransactionService,
     fingerprint::ReadFingerprintStore,
@@ -28,7 +30,11 @@ use codez_runtime::{
     permission::{
         ai_classifier::{PermissionAiClassifier, PermissionAiContext},
         audit::{PermissionAuditError, PermissionAuditLog},
-        service::{PermissionApprovalHandler, PermissionService},
+        contract::PermissionCapability,
+        service::{
+            EvaluatedPermissionCheck, PermissionApprovalHandler, PermissionCheckConstraint,
+            PermissionService,
+        },
         store::{PermissionRuleStore, PermissionStoreError, WorkspacePermissionStore},
     },
     todo::TodoStore,
@@ -73,6 +79,7 @@ use serde::Deserialize;
 use thiserror::Error;
 
 use crate::{
+    agent_tool_runtime,
     commands::skills::SkillsService,
     notification_tool_runtime::{NotificationPort, PushNotificationTool},
     skill_tool_runtime::SkillTool,
@@ -133,6 +140,18 @@ pub(crate) struct ChatToolRunContext {
     context_scope_id: ContextScopeId,
     transaction_id: String,
     permission_ai_context: PermissionAiContext,
+    agent_identity: Option<ChatAgentRunIdentity>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ChatAgentRunIdentity {
+    pub(crate) root_run_id: RootRunId,
+    pub(crate) agent_id: AgentId,
+    pub(crate) attempt_id: AgentAttemptId,
+    pub(crate) depth: u16,
+    pub(crate) policy: AgentPolicy,
+    pub(crate) provider_id: String,
+    pub(crate) model_id: String,
 }
 
 #[derive(Default)]
@@ -158,6 +177,7 @@ impl ChatToolRunContext {
         cancellation: CancellationToken,
         agent_role: AgentRole,
         permission_ai_context: PermissionAiContext,
+        agent_identity: Option<ChatAgentRunIdentity>,
         approval_handler: Option<Arc<dyn PermissionApprovalHandler>>,
         ask_user_handler: Option<Arc<dyn AskUserHandler>>,
     ) -> Result<Self, ChatToolRunContextError> {
@@ -171,9 +191,14 @@ impl ChatToolRunContext {
             approval_handler,
             ask_user_handler,
             active_tools: Arc::new(ToolCancellationRegistry::default()),
-            context_scope_id: ContextScopeId::Main,
+            context_scope_id: agent_identity
+                .as_ref()
+                .map_or(ContextScopeId::Main, |identity| {
+                    ContextScopeId::Agent(identity.agent_id.clone())
+                }),
             transaction_id: format!("tx_{}", uuid::Uuid::new_v4()),
             permission_ai_context,
+            agent_identity,
         })
     }
 
@@ -209,6 +234,11 @@ impl ChatToolRunContext {
     #[must_use]
     pub(crate) fn workspace_root(&self) -> &WorkspaceRoot {
         &self.workspace_root
+    }
+
+    #[must_use]
+    pub(crate) fn agent_identity(&self) -> Option<&ChatAgentRunIdentity> {
+        self.agent_identity.as_ref()
     }
 
     fn register_tool(&self, call_id: &str) -> CancellationToken {
@@ -272,6 +302,8 @@ pub(crate) struct ChatToolRuntime {
     todo_store: Arc<TodoStore>,
     bash: Option<Arc<BashTool>>,
     powershell: Option<Arc<PowerShellTool>>,
+    agent_supervisor: Arc<AgentSupervisor>,
+    workspace_broker: Option<Arc<WorkspaceBroker>>,
 }
 
 pub(crate) struct ProviderToolSurface {
@@ -291,6 +323,8 @@ pub(crate) struct ChatToolRuntimeDependencies {
     pub(crate) process_runner: Arc<NativeProcessRunner>,
     pub(crate) notification_port: Arc<dyn NotificationPort>,
     pub(crate) permission_ai_classifier: Option<Arc<dyn PermissionAiClassifier>>,
+    pub(crate) agent_supervisor: Arc<AgentSupervisor>,
+    pub(crate) workspace_broker: Option<Arc<WorkspaceBroker>>,
 }
 
 impl ChatToolRuntime {
@@ -319,6 +353,8 @@ impl ChatToolRuntime {
             process_runner,
             notification_port,
             permission_ai_classifier,
+            agent_supervisor,
+            workspace_broker,
         } = dependencies;
         let data_root = paths.data_directory();
         let rules = Arc::new(PermissionRuleStore::new(
@@ -406,6 +442,8 @@ impl ChatToolRuntime {
             todo_store,
             bash,
             powershell,
+            agent_supervisor,
+            workspace_broker,
         })
     }
 
@@ -422,10 +460,23 @@ impl ChatToolRuntime {
     ) -> ProviderToolSurface {
         let exposure = self.exposure_for_run(run);
         let mut definitions = provider_definitions(exposure.eager_tools.iter());
-        definitions.push(ask_user_tool_definition());
+        if let Some(identity) = run.agent_identity() {
+            definitions
+                .retain(|definition| agent_policy_allows_tool(identity, &definition.function.name));
+        }
+        if ask_user_allowed(run) {
+            definitions.push(ask_user_tool_definition());
+        }
+        if let Some(identity) = run.agent_identity() {
+            definitions.extend(agent_tool_runtime::definitions(identity));
+        }
+        let mut deferred_tools = exposure.deferred_tools;
+        if let Some(identity) = run.agent_identity() {
+            deferred_tools.retain(|tool| agent_policy_allows_tool(identity, &tool.name));
+        }
         ProviderToolSurface {
             definitions,
-            deferred_tools: exposure.deferred_tools,
+            deferred_tools,
         }
     }
 
@@ -477,11 +528,48 @@ impl ChatToolRuntime {
                 .collect();
         }
 
-        if calls.iter().any(|call| call.name == ASK_USER_TOOL_NAME) {
+        if calls.iter().any(|call| {
+            call.name == ASK_USER_TOOL_NAME
+                || agent_tool_runtime::is_agent_tool(&call.name)
+                || agent_policy_denial(run, &call.name).is_some()
+        }) {
             let mut results = Vec::with_capacity(calls.len());
             for call in calls {
-                if call.name == ASK_USER_TOOL_NAME {
-                    results.push(self.execute_ask_user(call, run).await);
+                if let Some(message) = agent_policy_denial(run, &call.name) {
+                    results.push(special_tool_error_result(
+                        call,
+                        "AGENT_TOOL_POLICY_DENIED",
+                        message,
+                    ));
+                } else if call.name == ASK_USER_TOOL_NAME {
+                    if ask_user_allowed(run) {
+                        results.push(self.execute_ask_user(call, run).await);
+                    } else {
+                        results.push(ask_user_error_result(
+                            call,
+                            "ASK_USER_POLICY_DENIED",
+                            "This Agent is not allowed to ask the user directly.".to_string(),
+                        ));
+                    }
+                } else if agent_tool_runtime::is_agent_tool(&call.name) {
+                    if let Some(identity) = run.agent_identity() {
+                        results.push(
+                            agent_tool_runtime::execute(
+                                &self.agent_supervisor,
+                                self.workspace_broker.as_ref(),
+                                call,
+                                identity,
+                                run.workspace_root().as_path(),
+                            )
+                            .await,
+                        );
+                    } else {
+                        results.push(special_tool_error_result(
+                            call,
+                            "AGENT_IDENTITY_REQUIRED",
+                            "Agent collaboration tools require a supervised Agent identity.",
+                        ));
+                    }
                 } else {
                     results.extend(self.execute_pipeline(vec![call], run).await);
                 }
@@ -640,6 +728,42 @@ struct AskUserArguments {
     questions: Vec<ChatAskUserQuestion>,
 }
 
+fn ask_user_allowed(run: &ChatToolRunContext) -> bool {
+    agent_policy_allows_ask_user(run.agent_identity())
+}
+
+fn agent_policy_allows_ask_user(identity: Option<&ChatAgentRunIdentity>) -> bool {
+    identity.is_none_or(|identity| identity.policy.can_ask_user)
+}
+
+fn agent_policy_allows_tool(identity: &ChatAgentRunIdentity, name: &str) -> bool {
+    if !identity.policy.can_write
+        && matches!(
+            name,
+            "Write"
+                | "Edit"
+                | "NotebookEdit"
+                | "Bash"
+                | "PowerShell"
+                | "TodoCreate"
+                | "TodoUpdate"
+                | "TodoArchive"
+        )
+    {
+        return false;
+    }
+    if !identity.policy.can_use_network && matches!(name, "WebSearch" | "WebFetch") {
+        return false;
+    }
+    true
+}
+
+fn agent_policy_denial(run: &ChatToolRunContext, name: &str) -> Option<&'static str> {
+    run.agent_identity()
+        .filter(|identity| !agent_policy_allows_tool(identity, name))
+        .map(|_| "The Agent's effective policy does not allow this tool.")
+}
+
 fn ask_user_tool_definition() -> ToolDefinition {
     ToolDefinition {
         r#type: "function".to_string(),
@@ -704,6 +828,24 @@ fn ask_user_error_result(
             effects: Some(vec![ToolEffect::UserInteraction {
                 channel: "chat-ui".to_string(),
             }]),
+        },
+        max_result_chars: Some(16 * 1024),
+    }
+}
+
+fn special_tool_error_result(
+    call: NormalizedToolCall,
+    code: &str,
+    message: &str,
+) -> ToolPipelineResult {
+    ToolPipelineResult {
+        canonical_name: call.name.clone(),
+        call,
+        result: ToolExecutionResult::Error {
+            error: tool_error(code, message, false),
+            model_content: Some(format!("Error: {message}")),
+            ui_content: None,
+            effects: None,
         },
         max_result_chars: Some(16 * 1024),
     }
@@ -911,10 +1053,14 @@ impl ToolExecutionPipelineContext for PipelineContext<'_> {
         Self: 'async_trait,
     {
         Box::pin(async move {
+            let constraint = self
+                .run
+                .agent_identity()
+                .map(|identity| AgentPermissionConstraint { identity });
             match self
                 .runtime
                 .permission
-                .authorize(
+                .authorize_with_constraint(
                     prepared,
                     self.run.workspace_root.as_path(),
                     Some(self.run.session_id.as_str()),
@@ -922,6 +1068,9 @@ impl ToolExecutionPipelineContext for PipelineContext<'_> {
                     None,
                     Some(&self.run.permission_ai_context),
                     self.run.approval_handler.as_deref(),
+                    constraint
+                        .as_ref()
+                        .map(|constraint| constraint as &dyn PermissionCheckConstraint),
                 )
                 .await
             {
@@ -939,23 +1088,114 @@ impl ToolExecutionPipelineContext for PipelineContext<'_> {
     }
 }
 
+struct AgentPermissionConstraint<'a> {
+    identity: &'a ChatAgentRunIdentity,
+}
+
+impl PermissionCheckConstraint for AgentPermissionConstraint<'_> {
+    fn denial_reason(&self, check: &EvaluatedPermissionCheck) -> Option<String> {
+        let policy = &self.identity.policy;
+        let denied = match check.permission {
+            PermissionCapability::Delete => !policy.can_delete,
+            PermissionCapability::Network if is_git_push_pattern(&check.pattern) => {
+                !policy.can_git_push
+            }
+            PermissionCapability::Network if is_dependency_install_pattern(&check.pattern) => {
+                !policy.can_install_dependencies
+            }
+            PermissionCapability::Network => !policy.can_use_network,
+            PermissionCapability::ExternalEffect
+            | PermissionCapability::ExternalDirectory
+            | PermissionCapability::Hardline
+            | PermissionCapability::ShellUnparsed
+            | PermissionCapability::Unknown => false,
+            PermissionCapability::Read
+            | PermissionCapability::Edit
+            | PermissionCapability::Shell
+            | PermissionCapability::Rollback => false,
+        };
+        denied.then(|| {
+            format!(
+                "Agent {} effective policy denies permission capability {:?}",
+                self.identity.agent_id, check.permission
+            )
+        })
+    }
+}
+
+fn is_git_push_pattern(pattern: &str) -> bool {
+    pattern.starts_with("known.git.push.") || pattern == "critical.git.force-push"
+}
+
+fn is_dependency_install_pattern(pattern: &str) -> bool {
+    const PACKAGE_MUTATIONS: &[&str] = &[
+        ".add",
+        ".ci",
+        ".create",
+        ".dlx",
+        ".exec",
+        ".init",
+        ".install",
+        ".remove",
+        ".uninstall",
+        ".update",
+        ".x",
+    ];
+    pattern == "known.python.module-install"
+        || pattern.starts_with("known.go.get")
+        || pattern.starts_with("known.go.install")
+        || pattern.starts_with("known.go.mod")
+        || pattern.starts_with("known.java.")
+            && (pattern.ends_with(".dependency") || pattern.ends_with(".refresh-dependencies"))
+        || pattern.starts_with("known.dotnet.") && pattern.ends_with(".download")
+        || pattern.starts_with("known.python.")
+            && PACKAGE_MUTATIONS
+                .iter()
+                .any(|suffix| pattern.ends_with(suffix))
+        || pattern.starts_with("known.rust.cargo.")
+            && [".add", ".install", ".update"]
+                .iter()
+                .any(|suffix| pattern.ends_with(suffix))
+        || pattern.starts_with("known.package.")
+            && (pattern.ends_with(".npx.execute")
+                || pattern.ends_with(".pnpx.execute")
+                || PACKAGE_MUTATIONS
+                    .iter()
+                    .any(|suffix| pattern.ends_with(suffix)))
+}
+
 #[cfg(test)]
 mod tests {
     use std::{collections::HashSet, fs, path::Path, sync::Arc};
 
     use codez_contracts::chat::{ChatAskUserAnswer, ChatAskUserAnswerValue, ChatAskUserRequest};
     use codez_core::{
-        AppPaths, AtomicPersistence, CancellationToken, SessionId, StreamId, WorkspaceRoot,
+        AgentAttemptId, AgentId, AppPaths, AtomicPersistence, CancellationToken, RootRunId,
+        SessionId, StreamId, WorkspaceRoot, agent::AgentPolicy,
     };
+    use codez_platform::{SystemClock, UuidGenerator};
     use codez_runtime::{
+        agent::{
+            AgentBudgetManager, AgentControlStore, AgentScheduler, AgentSupervisor,
+            AgentSupervisorConfig, DurableMailbox, SchedulerConfig,
+        },
         context::{budget::ContextBudgetService, ledger::ModelLedgerStore},
-        permission::{ai_classifier::PermissionAiContext, store::WorkspacePermissionStore},
+        permission::{
+            ai_classifier::PermissionAiContext,
+            contract::{PermissionAction, PermissionCapability},
+            service::{EvaluatedPermissionCheck, PermissionCheckConstraint},
+            store::WorkspacePermissionStore,
+        },
         tools::large_result::LargeToolResultStore,
         tools::types::{NormalizedToolCall, ToolExecutionResult},
     };
     use codez_storage::AtomicFileStore;
 
-    use super::{AskUserHandler, ChatToolRunContext, ChatToolRuntime, ChatToolRuntimeDependencies};
+    use super::{
+        AgentPermissionConstraint, AskUserHandler, ChatAgentRunIdentity, ChatToolRunContext,
+        ChatToolRuntime, ChatToolRuntimeDependencies, agent_policy_allows_ask_user,
+        agent_policy_allows_tool,
+    };
     use crate::notification_tool_runtime::UnsupportedNotificationPort;
 
     struct Fixture {
@@ -965,6 +1205,82 @@ mod tests {
         runtime: ChatToolRuntime,
         model_ledger: Arc<ModelLedgerStore>,
         edit_transaction: Arc<codez_runtime::edit_transaction::EditTransactionService>,
+    }
+
+    fn constrained_child() -> ChatAgentRunIdentity {
+        let mut policy = AgentPolicy::readonly_child();
+        policy.can_write = true;
+        policy.can_use_network = true;
+        ChatAgentRunIdentity {
+            root_run_id: RootRunId::parse("root-policy").expect("root ID must parse"),
+            agent_id: AgentId::parse("agent-policy").expect("Agent ID must parse"),
+            attempt_id: AgentAttemptId::parse("attempt-policy").expect("attempt ID must parse"),
+            depth: 1,
+            policy,
+            provider_id: "provider".to_string(),
+            model_id: "model".to_string(),
+        }
+    }
+
+    fn permission_check(
+        permission: PermissionCapability,
+        pattern: &str,
+    ) -> EvaluatedPermissionCheck {
+        EvaluatedPermissionCheck {
+            permission,
+            pattern: pattern.to_string(),
+            action: PermissionAction::Ask,
+            reason: "fixture".to_string(),
+            absolute_redline: false,
+        }
+    }
+
+    #[test]
+    fn child_policy_constraint_should_deny_install_and_git_push_despite_network_access() {
+        let identity = constrained_child();
+        let constraint = AgentPermissionConstraint {
+            identity: &identity,
+        };
+        let denied = [
+            permission_check(PermissionCapability::Network, "known.package.npm.install"),
+            permission_check(PermissionCapability::Network, "known.git.push.network"),
+        ]
+        .map(|check| constraint.denial_reason(&check).is_some());
+
+        assert_eq!(denied, [true, true]);
+    }
+
+    #[test]
+    fn child_policy_constraint_should_allow_local_build_commands() {
+        let identity = constrained_child();
+        let constraint = AgentPermissionConstraint {
+            identity: &identity,
+        };
+        let check = permission_check(PermissionCapability::Shell, "known.rust.cargo.test");
+
+        assert!(constraint.denial_reason(&check).is_none());
+    }
+
+    #[test]
+    fn inherited_full_policy_should_not_remove_depth_gated_tools_or_permissions() {
+        let mut identity = constrained_child();
+        identity.policy.can_delete = true;
+        identity.policy.can_install_dependencies = true;
+        identity.policy.can_git_push = true;
+        identity.policy.can_ask_user = true;
+        let constraint = AgentPermissionConstraint {
+            identity: &identity,
+        };
+
+        assert!(
+            ["Write", "WebFetch", "PushNotification"]
+                .into_iter()
+                .all(|name| agent_policy_allows_tool(&identity, name))
+                && agent_policy_allows_ask_user(Some(&identity))
+                && constraint
+                    .denial_reason(&permission_check(PermissionCapability::Unknown, "unknown"))
+                    .is_none()
+        );
     }
 
     impl Fixture {
@@ -979,6 +1295,22 @@ mod tests {
                 .expect("fixture builtin skills directory must be created");
             let storage = Arc::new(AtomicFileStore::default());
             let persistence: Arc<dyn AtomicPersistence> = storage.clone();
+            let agent_runtime_root = paths.data_directory().join("agent-runtime");
+            let agent_supervisor = Arc::new(AgentSupervisor::new(
+                AgentSupervisorConfig::default(),
+                Arc::new(AgentControlStore::new(
+                    &agent_runtime_root,
+                    Arc::clone(&persistence),
+                )),
+                Arc::new(DurableMailbox::new(
+                    &agent_runtime_root,
+                    Arc::clone(&persistence),
+                )),
+                Arc::new(AgentScheduler::new(SchedulerConfig::default())),
+                Arc::new(AgentBudgetManager::new()),
+                Arc::new(SystemClock),
+                Arc::new(UuidGenerator),
+            ));
             let model_ledger = Arc::new(ModelLedgerStore::new(
                 paths.data_directory().join("session-runtime"),
                 Arc::clone(&persistence),
@@ -1012,6 +1344,8 @@ mod tests {
                     process_runner: Arc::new(codez_platform::NativeProcessRunner::new()),
                     notification_port: Arc::new(UnsupportedNotificationPort),
                     permission_ai_classifier: None,
+                    agent_supervisor,
+                    workspace_broker: None,
                 },
             )
             .expect("fixture tool runtime must compose");
@@ -1082,6 +1416,7 @@ mod tests {
                 CancellationToken::new(),
                 "main".to_string(),
                 PermissionAiContext::default(),
+                None,
                 None,
                 ask_user_handler,
             )
@@ -1479,7 +1814,7 @@ mod tests {
                 vec![call(
                     0,
                     "Read",
-                    serde_json::json!({"files": [{"file_path": "read.txt"}]}),
+                    serde_json::json!({"file_path": "read.txt"}),
                 )],
                 &fixture.run_context(),
             )
@@ -1743,7 +2078,7 @@ mod tests {
                 vec![call(
                     0,
                     "Read",
-                    serde_json::json!({"files": [{"file_path": "changed-after-read.txt"}]}),
+                    serde_json::json!({"file_path": "changed-after-read.txt"}),
                 )],
                 &context,
             )
@@ -1791,7 +2126,7 @@ mod tests {
                 vec![call(
                     0,
                     "Read",
-                    serde_json::json!({"files": [{"file_path": "unchanged.txt"}]}),
+                    serde_json::json!({"file_path": "unchanged.txt"}),
                 )],
                 &context,
             )
@@ -1870,6 +2205,7 @@ mod tests {
             PermissionAiContext::default(),
             None,
             None,
+            None,
         )
         .expect("fixture run context must be valid");
 
@@ -1879,7 +2215,7 @@ mod tests {
                 vec![call(
                     0,
                     "Read",
-                    serde_json::json!({"files": [{"file_path": "read.txt"}]}),
+                    serde_json::json!({"file_path": "read.txt"}),
                 )],
                 &context,
             )

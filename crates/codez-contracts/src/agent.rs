@@ -27,6 +27,7 @@ pub enum AgentState {
     NeedsReplan,
     NeedsResolution,
     Completed,
+    Blocked,
     Failed,
     Cancelled,
     Interrupted,
@@ -37,7 +38,7 @@ impl AgentState {
     pub const fn is_terminal(self) -> bool {
         matches!(
             self,
-            Self::Completed | Self::Failed | Self::Cancelled | Self::Interrupted
+            Self::Completed | Self::Blocked | Self::Failed | Self::Cancelled | Self::Interrupted
         )
     }
 }
@@ -46,6 +47,7 @@ impl AgentState {
 #[serde(rename_all = "snake_case")]
 #[ts(rename_all = "snake_case")]
 pub enum WorkspaceMode {
+    RootWorkspace,
     SharedReadonly,
     IsolatedWorktree,
     IsolatedSnapshotPatch,
@@ -74,6 +76,15 @@ pub enum AgentResultStatus {
     Partial,
     Blocked,
     Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum AgentReviewVerdict {
+    Approved,
+    ChangesRequested,
+    Blocked,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -216,6 +227,7 @@ pub struct AgentNode {
     pub schema_version: u16,
     pub id: String,
     pub root_run_id: String,
+    pub root_session_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
     pub depth: u16,
@@ -297,6 +309,8 @@ pub struct AgentValidationResult {
     pub command_or_check: String,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence_ref: Option<String>,
 }
 
@@ -325,6 +339,8 @@ pub struct AgentResult {
     pub recommended_next_actions: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<AgentConfidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review_verdict: Option<AgentReviewVerdict>,
     pub artifact_refs: Vec<String>,
     pub usage: AgentUsage,
 }
@@ -409,6 +425,68 @@ pub struct AgentSummary {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
+pub struct AgentListPage {
+    pub agents: Vec<AgentSummary>,
+    #[ts(type = "number")]
+    pub next_cursor: u64,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", optional_fields)]
+pub struct AgentDetail {
+    pub node: AgentNode,
+    pub attempts: Vec<AgentAttempt>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<AgentResult>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", optional_fields)]
+pub struct AgentArtifact {
+    pub artifact_id: String,
+    pub name: String,
+    pub kind: String,
+    pub path: String,
+    pub sha256: String,
+    #[ts(type = "number")]
+    pub size_bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+    pub preview_truncated: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum AgentWorkspaceRecoveryDisposition {
+    Clean,
+    Preserved,
+    ManualIntervention,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", optional_fields)]
+pub struct AgentWorkspaceRecoveryRecord {
+    pub manifest_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root_run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attempt_id: Option<String>,
+    pub status: String,
+    pub disposition: AgentWorkspaceRecoveryDisposition,
+    pub detail: String,
+    pub workspace_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct WaitAgentsResponse {
     #[ts(type = "number")]
     pub cursor: u64,
@@ -451,6 +529,7 @@ pub enum AgentUiEvent {
     },
     ToolCompleted {
         tool_call_id: String,
+        name: String,
         status: String,
         summary: String,
     },
@@ -468,6 +547,30 @@ pub enum AgentUiEvent {
     PermissionResolved {
         request_id: String,
         approved: bool,
+    },
+    ProviderRetryScheduled {
+        attempt: u32,
+        max_attempts: u32,
+        #[ts(type = "number")]
+        delay_ms: u64,
+        reason: String,
+    },
+    ContextCompactionStarted {
+        trigger: String,
+        history_version: u32,
+    },
+    ContextCompactionCompleted {
+        trigger: String,
+        tokens_before: Option<u32>,
+        tokens_after: Option<u32>,
+        history_version: Option<u32>,
+    },
+    ContextCompactionFailed {
+        trigger: String,
+        code: String,
+        message: String,
+        retryable: bool,
+        history_version: Option<u32>,
     },
     BudgetUpdated {
         usage: AgentUsage,

@@ -17,6 +17,8 @@ export interface AgentMessageContentProps {
       codeContent?: string
     }
   ) => void
+  sessionId?: string | null
+  onOpenSubAgent?: (agentId: string) => void
 }
 
 type TimelineChunk = 
@@ -27,7 +29,9 @@ export function AgentMessageContent({
   msg,
   lastStreamingMsgId,
   handleFileClick,
-  handleDiffClick
+  handleDiffClick,
+  sessionId,
+  onOpenSubAgent
 }: AgentMessageContentProps): React.ReactElement {
   
   const isStreaming = Boolean(msg.streaming && msg.id === lastStreamingMsgId)
@@ -127,6 +131,8 @@ export function AgentMessageContent({
             onDiffClick={handleDiffClick}
             streaming={isStreaming && !msg.content}
             interrupted={msg.interrupted}
+            sessionId={sessionId}
+            onOpenSubAgent={onOpenSubAgent}
           />
         </div>
       )}
@@ -159,6 +165,8 @@ export function AgentMessageContent({
                 onDiffClick={handleDiffClick}
                 streaming={chunk.streaming}
                 interrupted={msg.interrupted}
+                sessionId={sessionId}
+                onOpenSubAgent={onOpenSubAgent}
               />
             </div>
           )

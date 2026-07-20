@@ -272,55 +272,6 @@ describe('execution log parallel batch builder', () => {
     expect((batch as ParallelToolBatchItem).batchSize).toBe(3)
   })
 
-  it('expands a multi-file Read into a read batch', () => {
-    const timeline: ExecutionTimelineItem[] = [{
-      id: 'tool_read-1',
-      type: 'tool',
-      toolCall: {
-        id: 'read-1',
-        name: 'Read',
-        args: JSON.stringify({
-          files: [
-            { file_path: 'src/App.tsx' },
-            { file_path: 'src/db.ts', offset: 10, limit: 20 }
-          ]
-        }),
-        status: 'success',
-        result: [
-          '<file path="src/App.tsx">',
-          '1\tcontent',
-          '</file>',
-          '',
-          '<file path="src/db.ts">',
-          'Error: File not found.',
-          '</file>'
-        ].join('\n'),
-        startedAt: 100,
-        completedAt: 250,
-        sequence: 0
-      },
-      startedAt: 100,
-      updatedAt: 250,
-      sequence: 0
-    }]
-
-    const unified = buildUnifiedTimeline(timeline, [], [], undefined, false)
-    const [batch] = groupParallelToolBatches(unified)
-
-    expect(batch.type).toBe('parallel-batch')
-    expect((batch as ParallelToolBatchItem).batchKind).toBe('read')
-    expect((batch as ParallelToolBatchItem).items.map((item) => item.realPath)).toEqual([
-      'src/App.tsx',
-      'src/db.ts'
-    ])
-    expect((batch as ParallelToolBatchItem).items.map((item) => item.target)).toEqual([
-      'App.tsx',
-      'db.ts #L10-29'
-    ])
-    expect((batch as ParallelToolBatchItem).items[1].status).toBe('error')
-    expect((batch as ParallelToolBatchItem).status).toBe('error')
-  })
-
   it('shows only the file name for a single Read while preserving its full path', () => {
     const filePath = 'F:\\Project\\src\\timelineBuilder.ts'
     const timeline: ExecutionTimelineItem[] = [{
@@ -329,7 +280,7 @@ describe('execution log parallel batch builder', () => {
       toolCall: {
         id: 'read-single',
         name: 'Read',
-        args: JSON.stringify({ files: [{ file_path: filePath, offset: 10, limit: 20 }] }),
+        args: JSON.stringify({ file_path: filePath, offset: 10, limit: 20 }),
         status: 'success',
         result: `<file path="${filePath}">\n10\tcontent\n</file>`,
         startedAt: 100,
@@ -348,7 +299,7 @@ describe('execution log parallel batch builder', () => {
     }])
   })
 
-  it('counts a multi-file Read as one item inside an outer tool batch', () => {
+  it('counts a single-file Read as one item inside an outer tool batch', () => {
     const timeline: ExecutionTimelineItem[] = [
       {
         id: 'tool_read-outer',
@@ -356,12 +307,7 @@ describe('execution log parallel batch builder', () => {
         toolCall: {
           id: 'read-outer',
           name: 'Read',
-          args: JSON.stringify({
-            files: [
-              { file_path: 'src/a.ts' },
-              { file_path: 'src/b.ts' }
-            ]
-          }),
+          args: JSON.stringify({ file_path: 'src/a.ts' }),
           status: 'success',
           result: '',
           startedAt: 100,
@@ -405,7 +351,7 @@ describe('execution log parallel batch builder', () => {
     expect((batch as ParallelToolBatchItem).batchKind).toBe('tools')
     expect((batch as ParallelToolBatchItem).batchSize).toBe(2)
     expect((batch as ParallelToolBatchItem).items.map((item) => item.target)).toEqual([
-      '2 个文件',
+      'a.ts',
       '更新待办状态'
     ])
   })

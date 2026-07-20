@@ -1,0 +1,93 @@
+.subagent-run-markers {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-color);
+}
+
+.subagent-run-marker {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto 14px;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 48px;
+  padding: 7px 10px 7px 6px;
+  border: 0;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-main);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.subagent-run-marker:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.subagent-run-marker:disabled {
+  cursor: default;
+}
+
+.subagent-run-marker:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: -2px;
+}
+
+.subagent-run-marker-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-left: 2px solid #3c8b8b;
+  color: #347c7c;
+}
+
+.subagent-run-marker-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.subagent-run-marker-copy > span,
+.subagent-run-marker-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-run-marker-copy > span {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.subagent-run-marker-copy small {
+  color: var(--text-muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+}
+
+.subagent-run-marker-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.subagent-run-marker-state--active { color: var(--primary-color); }
+.subagent-run-marker-state--success { color: var(--success-color, #2d8d5a); }
+.subagent-run-marker-state--danger { color: var(--danger-color, #c74e4e); }
+
+.subagent-run-marker-spin {
+  animation: subagent-run-marker-spin 900ms linear infinite;
+}
+
+@keyframes subagent-run-marker-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .subagent-run-marker-spin { animation: none; }
+}

@@ -71,6 +71,7 @@ fn scope_to_wire(value: domain::ContextScopeId) -> wire::ContextScopeId {
 
 fn event_type_from_wire(value: wire::LedgerEventType) -> domain::LedgerEventType {
     match value {
+        wire::LedgerEventType::ContextForked => domain::LedgerEventType::ContextForked,
         wire::LedgerEventType::UserMessage => domain::LedgerEventType::UserMessage,
         wire::LedgerEventType::AssistantMessage => domain::LedgerEventType::AssistantMessage,
         wire::LedgerEventType::ToolResult => domain::LedgerEventType::ToolResult,
@@ -90,6 +91,7 @@ fn event_type_from_wire(value: wire::LedgerEventType) -> domain::LedgerEventType
 
 fn event_type_to_wire(value: domain::LedgerEventType) -> wire::LedgerEventType {
     match value {
+        domain::LedgerEventType::ContextForked => wire::LedgerEventType::ContextForked,
         domain::LedgerEventType::UserMessage => wire::LedgerEventType::UserMessage,
         domain::LedgerEventType::AssistantMessage => wire::LedgerEventType::AssistantMessage,
         domain::LedgerEventType::ToolResult => wire::LedgerEventType::ToolResult,

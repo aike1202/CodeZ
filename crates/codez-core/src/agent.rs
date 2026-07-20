@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{AgentAttemptId, AgentId, ArtifactId, MessageId, RootRunId, TaskId};
+use crate::{AgentAttemptId, AgentId, ArtifactId, MessageId, RootRunId, SessionId, TaskId};
 
 pub const AGENT_SCHEMA_VERSION: u16 = 1;
 
@@ -27,6 +27,7 @@ pub enum AgentState {
     NeedsReplan,
     NeedsResolution,
     Completed,
+    Blocked,
     Failed,
     Cancelled,
     Interrupted,
@@ -37,7 +38,7 @@ impl AgentState {
     pub const fn is_terminal(self) -> bool {
         matches!(
             self,
-            Self::Completed | Self::Failed | Self::Cancelled | Self::Interrupted
+            Self::Completed | Self::Blocked | Self::Failed | Self::Cancelled | Self::Interrupted
         )
     }
 
@@ -53,6 +54,7 @@ impl AgentState {
                 | Self::NeedsReplan
                 | Self::NeedsResolution
                 | Self::Completed
+                | Self::Blocked
                 | Self::Failed
                 | Self::Cancelled
                 | Self::Interrupted
@@ -62,8 +64,11 @@ impl AgentState {
     #[must_use]
     pub const fn can_transition_to(self, next: Self) -> bool {
         match self {
-            Self::Created => matches!(next, Self::Queued | Self::Cancelled),
-            Self::Queued => matches!(next, Self::Starting | Self::Cancelled),
+            Self::Created => matches!(
+                next,
+                Self::Queued | Self::Blocked | Self::Cancelled | Self::Interrupted
+            ),
+            Self::Queued => matches!(next, Self::Starting | Self::Cancelled | Self::Interrupted),
             Self::Starting => matches!(
                 next,
                 Self::Running | Self::Failed | Self::Cancelled | Self::Interrupted
@@ -76,6 +81,7 @@ impl AgentState {
                     | Self::NeedsReplan
                     | Self::NeedsResolution
                     | Self::Completed
+                    | Self::Blocked
                     | Self::Failed
                     | Self::Cancelled
                     | Self::Interrupted
@@ -88,7 +94,11 @@ impl AgentState {
                 next,
                 Self::Queued | Self::Failed | Self::Cancelled | Self::Interrupted
             ),
-            Self::Completed | Self::Failed | Self::Cancelled | Self::Interrupted => false,
+            Self::Completed
+            | Self::Blocked
+            | Self::Failed
+            | Self::Cancelled
+            | Self::Interrupted => false,
         }
     }
 }
@@ -184,6 +194,7 @@ pub struct DelegatedTask {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkspaceMode {
+    RootWorkspace,
     SharedReadonly,
     IsolatedWorktree,
     IsolatedSnapshotPatch,
@@ -368,6 +379,7 @@ pub struct AgentNode {
     pub schema_version: u16,
     pub id: AgentId,
     pub root_run_id: RootRunId,
+    pub root_session_id: SessionId,
     pub parent_id: Option<AgentId>,
     pub depth: u16,
     pub profile: AgentProfile,
@@ -443,6 +455,23 @@ pub enum AgentResultStatus {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentCompletionPolicy {
+    #[default]
+    CollectAll,
+    FailFast,
+    BestEffort,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentReviewVerdict {
+    Approved,
+    ChangesRequested,
+    Blocked,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Confidence {
@@ -464,6 +493,8 @@ pub struct ChangedArtifact {
 pub struct AgentValidationResult {
     pub command_or_check: String,
     pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
     pub evidence_ref: Option<ArtifactId>,
 }
 
@@ -488,6 +519,8 @@ pub struct AgentResult {
     pub unresolved: Vec<String>,
     pub recommended_next_actions: Vec<String>,
     pub confidence: Option<Confidence>,
+    #[serde(default)]
+    pub review_verdict: Option<AgentReviewVerdict>,
     pub artifact_refs: Vec<ArtifactId>,
     pub usage: AgentUsage,
 }

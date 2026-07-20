@@ -11,7 +11,9 @@ import ExecutionHistoryModal from '../components/modals/ExecutionHistoryModal'
 import PlanListModal from '../components/chat/PlanListModal'
 import ChatArea from '../components/chat/ChatArea'
 import RightWorkspacePanel, {
-  TERMINAL_TAB_ID
+  SUBAGENTS_TAB_ID,
+  TERMINAL_TAB_ID,
+  type SelectedSubAgent
 } from '../components/RightWorkspacePanel'
 import '../styles.css'
 import '../App.css'
@@ -73,16 +75,19 @@ function ActiveApp(): React.ReactElement {
   const [sidebarWidth, setSidebarWidth] = useState(260)
   const [previewPanelWidth, setPreviewPanelWidth] = useState(480)
   const [terminalOpen, setTerminalOpen] = useState(false)
+  const [subagentsOpen, setSubagentsOpen] = useState(false)
+  const [selectedSubAgent, setSelectedSubAgent] = useState<SelectedSubAgent | null>(null)
   const [rightPanelVisible, setRightPanelVisible] = useState(false)
   const [activeRightTabId, setActiveRightTabId] = useState<string | null>(null)
   const [taskModalOpen, setTaskModalOpen] = useState(false)
 
-  const hasRightTabs = previewTabs.length > 0 || terminalOpen
+  const hasRightTabs = previewTabs.length > 0 || terminalOpen || subagentsOpen
   const panelOpen = rightPanelVisible && hasRightTabs
   const rightTabIds = useMemo(() => [
     ...previewTabs.map((tab) => tab.id),
-    ...(terminalOpen ? [TERMINAL_TAB_ID] : [])
-  ], [previewTabs, terminalOpen])
+    ...(terminalOpen ? [TERMINAL_TAB_ID] : []),
+    ...(subagentsOpen ? [SUBAGENTS_TAB_ID] : [])
+  ], [previewTabs, terminalOpen, subagentsOpen])
   const resolvedActiveRightTabId = rightTabIds.includes(activeRightTabId ?? '')
     ? activeRightTabId
     : rightTabIds[0] ?? null
@@ -120,6 +125,8 @@ function ActiveApp(): React.ReactElement {
   useEffect(() => {
     if (!workspace) {
       setTerminalOpen(false)
+      setSubagentsOpen(false)
+      setSelectedSubAgent(null)
       setRightPanelVisible(false)
     }
   }, [workspace])
@@ -129,6 +136,10 @@ function ActiveApp(): React.ReactElement {
     setActiveRightTabId(activePreviewTabId)
     setRightPanelVisible(true)
   }, [activePreviewTabId])
+
+  useEffect(() => {
+    setSelectedSubAgent(null)
+  }, [activeSessionId])
 
   const maxSidebarWidth = useMemo(() => {
     const totalWidth = typeof window !== 'undefined' ? window.innerWidth : 1200
@@ -164,6 +175,31 @@ function ActiveApp(): React.ReactElement {
     setActiveRightTabId(TERMINAL_TAB_ID)
   }, [workspace])
 
+  const openSubagentsTab = useCallback((agent?: SelectedSubAgent) => {
+    if (!workspace || !activeSessionId) return
+    if (agent) setSelectedSubAgent(agent)
+    setSubagentsOpen(true)
+    setRightPanelVisible(true)
+    setActiveRightTabId(SUBAGENTS_TAB_ID)
+  }, [activeSessionId, workspace])
+
+  const openSubagentById = useCallback((agentId: string) => {
+    if (!activeSessionId) return
+    void (async () => {
+      let cursor = 0
+      for (;;) {
+        const page = await desktopApi.agent.list(activeSessionId, cursor, 100)
+        const agent = page.agents.find((item) => item.agentId === agentId)
+        if (agent) {
+          openSubagentsTab({ rootRunId: agent.rootRunId, agentId })
+          return
+        }
+        if (!page.hasMore || page.nextCursor === cursor) return
+        cursor = page.nextCursor
+      }
+    })().catch(() => undefined)
+  }, [activeSessionId, openSubagentsTab])
+
   const handleSelectRightTab = useCallback((tabId: string) => {
     setActiveRightTabId(tabId)
     if (tabId.startsWith('file:') || tabId.startsWith('diff:')) selectPreviewTab(tabId)
@@ -171,6 +207,10 @@ function ActiveApp(): React.ReactElement {
 
   const handleCloseRightTab = useCallback((tabId: string) => {
     if (tabId === TERMINAL_TAB_ID) setTerminalOpen(false)
+    else if (tabId === SUBAGENTS_TAB_ID) {
+      setSubagentsOpen(false)
+      setSelectedSubAgent(null)
+    }
     else closePreview(tabId)
     setActiveRightTabId((current) => (current === tabId ? null : current))
   }, [closePreview])
@@ -249,11 +289,19 @@ function ActiveApp(): React.ReactElement {
           <TopBar
             onOpenProject={handleOpenProject}
             terminalOpen={panelOpen && resolvedActiveRightTabId === TERMINAL_TAB_ID}
+            subagentsOpen={panelOpen && resolvedActiveRightTabId === SUBAGENTS_TAB_ID}
             onToggleTerminal={() => {
               if (panelOpen && resolvedActiveRightTabId === TERMINAL_TAB_ID) {
                 handleCloseRightTab(TERMINAL_TAB_ID)
               } else {
                 openTerminalTab()
+              }
+            }}
+            onToggleSubagents={() => {
+              if (panelOpen && resolvedActiveRightTabId === SUBAGENTS_TAB_ID) {
+                handleCloseRightTab(SUBAGENTS_TAB_ID)
+              } else {
+                openSubagentsTab()
               }
             }}
             onOpenTasks={() => setTaskModalOpen(true)}
@@ -266,12 +314,17 @@ function ActiveApp(): React.ReactElement {
               previewTabs={previewTabs}
               activeTabId={resolvedActiveRightTabId}
               terminalOpen={terminalOpen}
+              subagentsOpen={subagentsOpen}
+              activeSessionId={activeSessionId}
+              selectedSubAgent={selectedSubAgent}
               messages={messages}
               workspace={workspace}
               panelWidth={previewPanelWidth}
               onSelectTab={handleSelectRightTab}
               onCloseTab={handleCloseRightTab}
               onOpenTerminal={openTerminalTab}
+              onOpenSubagents={() => openSubagentsTab()}
+              onSelectSubAgent={setSelectedSubAgent}
               onClosePanel={() => setRightPanelVisible(false)}
               onFileClick={handleFileClick}
               onDiffClick={handleDiffClick}
@@ -291,6 +344,7 @@ function ActiveApp(): React.ReactElement {
               if (tab) setSettingsTab(tab)
               setCurrentView('settings')
             }}
+            onOpenSubAgent={openSubagentById}
           />
         }
       />

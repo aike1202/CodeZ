@@ -17,4 +17,6 @@ export interface ExecutionLogProps {
   ) => void
   streaming?: boolean
   interrupted?: boolean
+  sessionId?: string | null
+  onOpenSubAgent?: (agentId: string) => void
 }

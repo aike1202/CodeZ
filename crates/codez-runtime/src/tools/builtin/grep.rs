@@ -31,11 +31,11 @@ impl GrepTool {
         Self {
             descriptor: DefaultToolDescriptor {
                 name: "Grep",
-                version: "1.0.0",
+                version: "1.1.0",
                 source: ToolSource::Builtin,
                 source_id: "builtin:grep".to_string(),
                 summary: "Search file contents with regex patterns.".to_string(),
-                description: "Bounded workspace content search built on bundled ripgrep. Supports regex, path scoping, glob or type filters, content/count/file modes, context lines, and pagination.".to_string(),
+                description: "Searches file contents with regex using bundled ripgrep. Path may be one existing file or directory. Prefer files_with_matches for discovery, then narrow with content mode, a path or glob, and pagination.".to_string(),
                 input_schema: grep_schema(),
                 approval: ToolApprovalMetadata {
                     model_preference: ModelPreference::NotApplicable,
@@ -48,7 +48,7 @@ impl GrepTool {
                 behavior: ToolBehavior {
                     concurrency: ToolConcurrency::Safe,
                     interrupt: ToolInterruptBehavior::Cancel,
-                    max_result_chars: 100_000,
+                    max_result_chars: 20_000,
                     timeout_ms: Some(35_000),
                 },
             },
@@ -136,8 +136,8 @@ fn grep_schema() -> Value {
         "additionalProperties": false,
         "properties": {
             "pattern": { "type": "string", "minLength": 1, "maxLength": MAX_SEARCH_PATTERN_BYTES, "description": "Regular expression to search for." },
-            "path": { "type": "string", "minLength": 1, "maxLength": MAX_SEARCH_PATH_BYTES, "description": "Optional workspace subdirectory." },
-            "output_mode": { "type": "string", "enum": ["files_with_matches", "content", "count"], "default": "files_with_matches" },
+            "path": { "type": "string", "minLength": 1, "maxLength": MAX_SEARCH_PATH_BYTES, "description": "Optional existing workspace file or directory. Defaults to the workspace root." },
+            "output_mode": { "type": "string", "enum": ["files_with_matches", "content", "count"], "default": "files_with_matches", "description": "Use files_with_matches for the smallest discovery result, content for matching lines, or count for per-file totals." },
             "glob": { "type": "string", "minLength": 1, "maxLength": MAX_SEARCH_FILTER_BYTES, "description": "Glob filter, e.g. **/*.tsx." },
             "type": { "type": "string", "minLength": 1, "maxLength": MAX_SEARCH_FILTER_BYTES, "description": "Ripgrep file type, e.g. rust or js." },
             "-A": { "type": "integer", "minimum": 0, "maximum": 1000, "description": "Context lines after a match." },
@@ -147,7 +147,7 @@ fn grep_schema() -> Value {
             "-i": { "type": "boolean", "description": "Case-insensitive search." },
             "-o": { "type": "boolean", "description": "Print only matched parts." },
             "multiline": { "type": "boolean", "description": "Enable multiline matching." },
-            "head_limit": { "type": "integer", "minimum": 1, "maximum": MAX_GREP_LIMIT, "default": 1000 },
+            "head_limit": { "type": "integer", "minimum": 1, "maximum": MAX_GREP_LIMIT, "description": "Maximum returned lines or items. Defaults to 200 for content and 500 for files/count." },
             "offset": { "type": "integer", "minimum": 0, "maximum": 100000, "default": 0 }
         },
         "required": ["pattern"]
