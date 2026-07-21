@@ -13,8 +13,6 @@ interface ProjectItemProps {
   setExpandedProjects: React.Dispatch<React.SetStateAction<Record<string, boolean>>>
   showArchivedFor: Record<string, boolean>
   setShowArchivedFor: React.Dispatch<React.SetStateAction<Record<string, boolean>>>
-  showDeletedFor: Record<string, boolean>
-  setShowDeletedFor: React.Dispatch<React.SetStateAction<Record<string, boolean>>>
   confirmState: { sessionId: string; action: 'archive' | 'unarchive' | 'delete' | 'restore' | 'forceDelete' } | null
   setConfirmState: (state: any) => void
   onSelectProject: (project: SidebarProject) => void
@@ -33,8 +31,6 @@ export default function ProjectItem({
   setExpandedProjects,
   showArchivedFor,
   setShowArchivedFor,
-  showDeletedFor,
-  setShowDeletedFor,
   confirmState,
   setConfirmState,
   onSelectProject,
@@ -44,12 +40,11 @@ export default function ProjectItem({
   buttonRefs,
   handleOpenMenu
 }: ProjectItemProps): React.ReactElement {
-  const hasSessions = proj.sessions.length > 0
   const isExpanded = expandedProjects[proj.id] !== false
 
   const activeSessions = proj.sessions.filter((s) => !s.isArchived && !s.isDeleted)
   const archivedSessions = proj.sessions.filter((s) => s.isArchived && !s.isDeleted)
-  const deletedSessions = proj.sessions.filter((s) => s.isDeleted)
+  const hasVisibleSessions = activeSessions.length > 0 || archivedSessions.length > 0
 
   return (
     <div>
@@ -104,7 +99,7 @@ export default function ProjectItem({
       </Flex>
 
       {/* Session 子列表 */}
-      {hasSessions && isExpanded && (
+      {hasVisibleSessions && isExpanded && (
         <div className="sidebar-sessions-container">
           {activeSessions.map((session) => (
             <SessionItem
@@ -133,35 +128,6 @@ export default function ProjectItem({
               </div>
               {showArchivedFor[proj.id] &&
                 archivedSessions.map((session) => (
-                  <SessionItem
-                    key={session.id}
-                    session={session}
-                    isActiveSession={activeSessionId === session.id}
-                    confirmState={confirmState}
-                    setConfirmState={setConfirmState}
-                    onSelectSession={onSelectSession}
-                    onArchiveSession={onArchiveSession}
-                    onDeleteSession={onDeleteSession}
-                    isArchivedOrDeleted
-                  />
-                ))}
-            </div>
-          )}
-
-          {/* 回收站对话组 */}
-          {deletedSessions.length > 0 && (
-            <div className="mt-1">
-              <div
-                className="sidebar-sub-toggle"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setShowDeletedFor((prev) => ({ ...prev, [proj.id]: !prev[proj.id] }))
-                }}
-              >
-                <span>回收站 ({deletedSessions.length})</span>
-              </div>
-              {showDeletedFor[proj.id] &&
-                deletedSessions.map((session) => (
                   <SessionItem
                     key={session.id}
                     session={session}

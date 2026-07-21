@@ -40,7 +40,6 @@ export default function Sidebar({
   } | null>(null)
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({})
   const [showArchivedFor, setShowArchivedFor] = useState<Record<string, boolean>>({})
-  const [showDeletedFor, setShowDeletedFor] = useState<Record<string, boolean>>({})
 
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 })
   const buttonRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -189,8 +188,6 @@ export default function Sidebar({
                   setExpandedProjects={setExpandedProjects}
                   showArchivedFor={showArchivedFor}
                   setShowArchivedFor={setShowArchivedFor}
-                  showDeletedFor={showDeletedFor}
-                  setShowDeletedFor={setShowDeletedFor}
                   confirmState={confirmState}
                   setConfirmState={setConfirmState}
                   onSelectProject={onSelectProject}
